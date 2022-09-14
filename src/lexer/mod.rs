@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use self::token::{Token, Keyword, OPMAP};
+use self::token::{Token, Keyword, OPMAP, Delimiter};
 pub mod token;
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
@@ -12,11 +12,14 @@ pub enum LexErr {
     UnrecognizedChar(char),       // Char isn't used in Poligon code
     UnexpectedEOF,                // Reached end of file, when expecting a token
     UnrecognizedOperator(String), // This operator cannot be resolved
+    MismatchedDelimiter,          // A bracket was closed with the wrong type
+    UnclosedDelimiter,            // A bracket wasn't closed
 }
 
 struct Lexer {
     input: VecDeque<CharData>,
-    tokens: Vec<Token>
+    tokens: Vec<Token>,
+    delimiters: Vec<Delimiter>
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -65,7 +68,8 @@ impl Lexer {
 
         Ok(Self {
             input: cd, 
-            tokens: vec![]
+            tokens: vec![],
+            delimiters: vec![]
         })
     }
 
@@ -118,6 +122,10 @@ impl Lexer {
             }
         }
         
+        if !self.delimiters.is_empty() {
+            Err(LexErr::UnclosedDelimiter)?
+        }
+
         Ok(self.tokens)
     }
 
@@ -214,16 +222,41 @@ impl Lexer {
             let left = &buf[..1];
             let right = &buf[..];
     
+            // Find the largest length operator that matches the start of the operator buffer.
             let (op, token) = OPMAP.range(left..=right)
                 .next_back()
                 .ok_or_else(|| LexErr::UnrecognizedOperator(buf.clone()))?;
             
+            // Keep track of the delimiters.
+            // If left delimiter, add to delimiter stack.
+            // If right delimiter, verify the top of the stack is the matching left delimiter 
+            //      (or error if mismatch).
+            if let Token::Delimiter(d) = token {
+                if !d.is_right() {
+                    self.delimiters.push(*d);
+                } else {
+                    match self.delimiters.last() {
+                        Some(left) if left == &d.reversed() => { self.delimiters.pop(); },
+                        Some(_) => Err(LexErr::MismatchedDelimiter)?,
+                        None => Err(LexErr::MismatchedDelimiter)?,
+                    }
+                }
+            }
+
             self.tokens.push(token.clone());
             
             let len = op.len();
             buf.drain(..len);
         }
         Ok(())
+    }
+
+    fn push_line_comment(&mut self, mut buf: String) {
+        
+    }
+
+    fn push_multi_comment(&mut self, mut buf: String) {
+        
     }
 }
 
@@ -234,14 +267,20 @@ mod test {
     use super::*;
 
     macro_rules! assert_lex {
-        ($e1:literal == $e2:expr) => {
+        ($e1:literal => $e2:expr) => {
             assert_eq!(tokenize($e1), Ok($e2))
+        }
+    }
+
+    macro_rules! assert_lex_fail {
+        ($e1:literal => $e2:expr) => {
+            assert_eq!(tokenize($e1), Err($e2))
         }
     }
 
     #[test]
     fn basic_lex() {
-        assert_lex!("123 + abc * def" == vec![
+        assert_lex!("123 + abc * def" => vec![
             Token::Numeric("123".to_string()),
             Token::Operator(Operator::Plus),
             Token::Ident("abc".to_string()),
@@ -256,7 +295,7 @@ mod test {
         let x = 1;
         const y = abc;
         const mut z = 5;
-        " == vec![
+        " => vec![
             Token::Keyword(Keyword::Let),
             Token::Ident("x".to_string()),
             Token::Operator(Operator::Equal),
@@ -279,21 +318,33 @@ mod test {
     }
 
     #[test]
+    fn delimiter_lex() {
+        assert_lex!("(1)" => vec![
+            Token::Delimiter(Delimiter::LParen),
+            Token::Numeric("1".to_string()),
+            Token::Delimiter(Delimiter::RParen)
+        ]);
+        assert_lex_fail!("(1" => LexErr::UnclosedDelimiter);
+        assert_lex_fail!("1)" => LexErr::MismatchedDelimiter);
+        assert_lex_fail!("(1]" => LexErr::MismatchedDelimiter);
+    }
+
+    #[test]
     fn numeric_lex() {
-        assert_lex!("123.444"    == vec![
+        assert_lex!("123.444"    => vec![
             Token::Numeric("123.444".to_string())
         ]);
-        assert_lex!("123.ident"  == vec![
+        assert_lex!("123.ident"  => vec![
             Token::Numeric("123".to_string()), 
             Token::Operator(Operator::Dot), 
             Token::Ident("ident".to_string())
         ]);
-        assert_lex!("123..444"   == vec![
+        assert_lex!("123..444"   => vec![
             Token::Numeric("123".to_string()),
             Token::Operator(Operator::DDot),
             Token::Numeric("444".to_string())
         ]);
-        assert_lex!("123. + 444" == vec![
+        assert_lex!("123. + 444" => vec![
             Token::Numeric("123.".to_string()),
             Token::Operator(Operator::Plus),
             Token::Numeric("444".to_string())
