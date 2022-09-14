@@ -1,47 +1,16 @@
 use std::fmt::Debug;
+use std::collections::BTreeMap;
+use lazy_static::lazy_static;
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Token {
     Ident(String),
     Numeric(String),
     Str(String),
     Comment(String),
     Keyword(Keyword),
-
-    // operators
-    Plus,        // +
-    Minus,       // -
-    Star,        // *
-    Slash,       // /
-    Perc,        // %
-    
-    Dot,   // .
-    DDot,  // ..
-    Or,    // |
-    And,   // &
-    Tilde, // ~
-    Caret, // ^
-
-    DAnd,  // &&
-    DOr,   // ||
-    Exc,   // !
-
-    Lt,     // <
-    Le,     // <=
-    Gt,     // >
-    Ge,     // >=
-    Equal,  // =
-    DEqual, // ==
-    Ne, // !=
-
-    Shl, // <<
-    Shr, // >>
-
-    Semi,   // ;
-    Comma,  // ,
-    DSlash, // //
-
-    Hash,   // #
+    Operator(Operator),
+    LineSep,
 
     // delimiters
     LParen,   RParen,   // ()
@@ -51,12 +20,12 @@ pub enum Token {
 }
 
 macro_rules! keywords {
-    ($($id:ident: $ex:expr),*) => {
-        #[derive(PartialEq, Eq, Debug)]
+    ($($id:ident: $ex:literal),*) => {
+        #[derive(PartialEq, Eq, Debug, Clone)]
         pub enum Keyword {
             $(
                 $id
-            ),+
+            ),*
         }
 
         impl Keyword {
@@ -68,6 +37,28 @@ macro_rules! keywords {
                     _ => None
                 }
             }
+        }
+    };
+}
+
+macro_rules! operators {
+    ($($id:ident: $ex:literal),*) => {
+        #[derive(PartialEq, Eq, Debug, Clone)]
+        pub enum Operator {
+            $(
+                $id
+            ),*
+        }
+
+        lazy_static! {
+            pub(super) static ref OPMAP: BTreeMap<&'static str, Token> = {
+                let mut m = BTreeMap::new();
+
+                $(m.insert($ex, Token::Operator(Operator::$id));)*
+                m.insert(";", Token::LineSep);
+                
+                m
+            };
         }
     };
 }
@@ -91,4 +82,39 @@ keywords! {
     Unit:    "unit",    // units and measures (nominal primitives)
     Measure: "measure", // units and measures (nominal primitives)
     Of:      "of"       // units and measures (nominal primitives)
+}
+
+operators! {
+    Plus:    "+",
+    Minus:   "-",
+    Star:    "*",
+    Slash:   "/",
+    Percent: "%",
+    
+    Dot:   ".",
+    DDot:  "..",
+    Or:    "|",
+    And:   "&",
+    Tilde: "~",
+    Caret: "^",
+
+    DAnd: "&&",
+    DOr:  "||",
+    Excl: "!",
+
+    Lt:     "<",
+    Le:     "<=",
+    Gt:     ">",
+    Ge:     ">=",
+    Equal:  "=",
+    DEqual: "==",
+    Ne:     "!=",
+
+    Shl: "<<",
+    Shr: ">>",
+
+    Comma:  ",",
+    DSlash: "//",
+
+    Hash: "#"
 }

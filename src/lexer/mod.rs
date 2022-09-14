@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use self::token::{Token, Keyword};
+use self::token::{Token, Keyword, OPMAP};
 pub mod token;
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
@@ -9,8 +9,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum LexErr {
-    UnrecognizedChar(char), // Char isn't used in Poligon code
-    UnexpectedEOF,          // Lexing ended unexpectedly
+    UnrecognizedChar(char),       // Char isn't used in Poligon code
+    UnexpectedEOF,                // Reached end of file, when expecting a token
+    UnrecognizedOperator(String), // This operator cannot be resolved
 }
 
 struct Lexer {
@@ -18,18 +19,18 @@ struct Lexer {
     tokens: Vec<Token>
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 enum CharClass {
     Alpha,
     Numeric,
     Underscore,
     Quote,
     Punct,
-    NewLine,
+    // NewLine,
     Whitespace
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 struct CharData {
     chr: char,
     cls: CharClass
@@ -42,7 +43,7 @@ impl CharClass {
         else if c == '_'                 { Some(Self::Underscore) }
         else if c == '"' || c == '\''    { Some(Self::Quote) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
-        else if c == '\n'                { Some(Self::NewLine) }
+        // else if c == '\n'                { Some(Self::NewLine) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
     }
@@ -112,8 +113,7 @@ impl Lexer {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident(),
                 CharClass::Numeric    => self.push_numeric(),
                 CharClass::Quote      => self.push_str()?,
-                CharClass::Punct      => todo!(),
-                CharClass::NewLine    => todo!(),
+                CharClass::Punct      => self.push_punct()?,
                 CharClass::Whitespace => { self.next(); },
             }
         }
@@ -122,9 +122,7 @@ impl Lexer {
     }
 
     fn push_ident(&mut self) {
-        let cd = self.next()
-            .expect("String was validated to have a character, but failed to pop identifier");
-        let mut buf = String::from(cd.chr);
+        let mut buf = String::new();
 
         while let Some(CharData { chr, cls }) = self.peek() {
             match cls {
@@ -143,9 +141,7 @@ impl Lexer {
     }
 
     fn push_numeric(&mut self) {
-        let cd = self.next()
-            .expect("String was validated to have a character, but failed to pop numeric");
-        let mut buf = String::from(cd.chr);
+        let mut buf = String::new();
 
         while let Some(c) = self.match_cls(CharClass::Numeric) {
             buf.push(c);
@@ -158,20 +154,25 @@ impl Lexer {
         
         // peek next character. check if it's .
         if matches!(self.peek(), Some(CharData { chr: '.', .. })) {
-            // determine if this "." is part of the number or if it's part of a spread/call or such
+            // whether the "." is part of the numeric or if it's a part of a spread/call operator
+            // depends on the character after the "."
+            
+            // the "." is part of the numeric UNLESS
+            // - the next character is a "."
+            // - the next character is alpha/underscore
+
+            // then scan for any further numerics after that "."
             match self.input.get(1) {
                 Some(CharData { chr: '.', ..}) => {},
+                Some(CharData { cls: CharClass::Alpha | CharClass::Underscore, .. }) => {}
 
-                // only consider if it is an operator or numeric after the .
-                Some(CharData { cls: CharClass::Numeric | CharClass::Punct, .. }) => {
+                _ => {
                     buf.push(self.next().unwrap().chr); // "."
 
                     while let Some(c) = self.match_cls(CharClass::Numeric) {
                         buf.push(c);
                     }
                 }
-
-                _ => {}
             }
         }
         self.tokens.push(Token::Numeric(buf));
@@ -201,6 +202,29 @@ impl Lexer {
         self.tokens.push(Token::Str(buf));
         Ok(())
     }
+
+    fn push_punct(&mut self) -> Result<(), LexErr> {
+        let mut buf = String::new();
+
+        while let Some(c) = self.match_cls(CharClass::Punct) {
+            buf.push(c);
+        }
+
+        while buf.len() > 0 {
+            let left = &buf[..1];
+            let right = &buf[..];
+    
+            let (op, token) = OPMAP.range(left..=right)
+                .next_back()
+                .ok_or_else(|| LexErr::UnrecognizedOperator(buf.clone()))?;
+            
+            self.tokens.push(token.clone());
+            
+            let len = op.len();
+            buf.drain(..len);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -220,17 +244,17 @@ mod test {
         ]);
         assert_lex!("123.ident"  == vec![
             Token::Numeric("123".to_string()), 
-            Token::Dot, 
+            Token::Operator(Operator::Dot), 
             Token::Ident("ident".to_string())
         ]);
         assert_lex!("123..444"   == vec![
             Token::Numeric("123".to_string()),
-            Token::DDot,
+            Token::Operator(Operator::DDot),
             Token::Numeric("444".to_string())
         ]);
         assert_lex!("123. + 444" == vec![
             Token::Numeric("123.".to_string()),
-            Token::Plus,
+            Token::Operator(Operator::Plus),
             Token::Numeric("444".to_string())
         ]);
     }
