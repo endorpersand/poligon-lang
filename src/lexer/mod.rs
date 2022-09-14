@@ -7,6 +7,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
     Lexer::new(input)?.lex()
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub enum LexErr {
     UnrecognizedChar(char), // Char isn't used in Poligon code
     UnexpectedEOF,          // Lexing ended unexpectedly
@@ -199,5 +200,38 @@ impl Lexer {
         
         self.tokens.push(Token::Str(buf));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    macro_rules! assert_lex {
+        ($e1:literal == $e2:expr) => {
+            assert_eq!(tokenize($e1), Ok($e2))
+        }
+    }
+
+    #[test]
+    fn numeric_lex() {
+        assert_lex!("123.444"    == vec![
+            Token::Numeric("123.444".to_string())
+        ]);
+        assert_lex!("123.ident"  == vec![
+            Token::Numeric("123".to_string()), 
+            Token::Dot, 
+            Token::Ident("ident".to_string())
+        ]);
+        assert_lex!("123..444"   == vec![
+            Token::Numeric("123".to_string()),
+            Token::DDot,
+            Token::Numeric("444".to_string())
+        ]);
+        assert_lex!("123. + 444" == vec![
+            Token::Numeric("123.".to_string()),
+            Token::Plus,
+            Token::Numeric("444".to_string())
+        ]);
     }
 }

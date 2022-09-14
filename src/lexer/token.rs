@@ -1,3 +1,6 @@
+use std::fmt::Debug;
+
+#[derive(PartialEq, Eq, Debug)]
 pub enum Token {
     Ident(String),
     Numeric(String),
@@ -49,6 +52,7 @@ pub enum Token {
 
 macro_rules! keywords {
     ($($id:ident: $ex:expr),*) => {
+        #[derive(PartialEq, Eq, Debug)]
         pub enum Keyword {
             $(
                 $id
