@@ -229,12 +229,53 @@ impl Lexer {
 
 #[cfg(test)]
 mod test {
+    use crate::lexer::token::Operator;
+
     use super::*;
 
     macro_rules! assert_lex {
         ($e1:literal == $e2:expr) => {
             assert_eq!(tokenize($e1), Ok($e2))
         }
+    }
+
+    #[test]
+    fn basic_lex() {
+        assert_lex!("123 + abc * def" == vec![
+            Token::Numeric("123".to_string()),
+            Token::Operator(Operator::Plus),
+            Token::Ident("abc".to_string()),
+            Token::Operator(Operator::Star),
+            Token::Ident("def".to_string())
+        ])
+    }
+
+    #[test]
+    fn multiline_lex() {
+        assert_lex!("
+        let x = 1;
+        const y = abc;
+        const mut z = 5;
+        " == vec![
+            Token::Keyword(Keyword::Let),
+            Token::Ident("x".to_string()),
+            Token::Operator(Operator::Equal),
+            Token::Numeric("1".to_string()),
+            Token::LineSep,
+
+            Token::Keyword(Keyword::Const),
+            Token::Ident("y".to_string()),
+            Token::Operator(Operator::Equal),
+            Token::Ident("abc".to_string()),
+            Token::LineSep,
+
+            Token::Keyword(Keyword::Const),
+            Token::Keyword(Keyword::Mut),
+            Token::Ident("z".to_string()),
+            Token::Operator(Operator::Equal),
+            Token::Numeric("5".to_string()),
+            Token::LineSep,
+        ])
     }
 
     #[test]
