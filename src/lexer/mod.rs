@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use self::token::{Token, Keyword, OPMAP, Delimiter};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+use self::token::{Token, Keyword, OPMAP, Delimiter, Operator};
 pub mod token;
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
@@ -14,6 +17,7 @@ pub enum LexErr {
     UnrecognizedOperator(String), // This operator cannot be resolved
     MismatchedDelimiter,          // A bracket was closed with the wrong type
     UnclosedDelimiter,            // A bracket wasn't closed
+    UnclosedComment,              // Hit EOF on /* */
 }
 
 struct Lexer {
@@ -92,19 +96,6 @@ impl Lexer {
     fn match_cls(&mut self, match_cls: CharClass) -> Option<char> {
         match self.peek() {
             Some(CharData { cls, .. }) if cls == &match_cls => {
-                self.next().map(|cd| cd.chr)
-            }
-            _ => None
-        }
-    }
-
-    /// Check if the character matches. 
-    /// 
-    /// If yes, pop it and return the char.
-    /// If not, return None.
-    fn match_chr(&mut self, match_chr: char) -> Option<char> {
-        match self.peek() {
-            Some(CharData { chr, .. }) if chr == &match_chr => {
                 self.next().map(|cd| cd.chr)
             }
             _ => None
@@ -235,14 +226,19 @@ impl Lexer {
                 if !d.is_right() {
                     self.delimiters.push(*d);
                 } else {
-                    match self.delimiters.last() {
-                        Some(left) if left == &d.reversed() => { self.delimiters.pop(); },
-                        Some(_) => Err(LexErr::MismatchedDelimiter)?,
-                        None => Err(LexErr::MismatchedDelimiter)?,
-                    }
+                    self.match_delimiter(*d)?;
                 }
             }
 
+            // Stop tokenizing when we're dealing with comments:
+            if token == &Token::Operator(Operator::Comment) {
+                buf.drain(..2);
+                return self.push_line_comment(buf);
+            } else if token == &Token::Delimiter(Delimiter::LComment) {
+                buf.drain(..2);
+                return self.push_multi_comment(buf);
+            }
+            
             self.tokens.push(token.clone());
             
             let len = op.len();
@@ -251,19 +247,80 @@ impl Lexer {
         Ok(())
     }
 
-    fn push_line_comment(&mut self, mut buf: String) {
-        
+    fn push_line_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
+        while let Some(CharData {chr, ..}) = self.next() {
+            if chr == '\n' { break; }
+            buf.push(chr);
+        }
+
+        let buf = String::from(buf.trim()); // lame allocation.
+        self.tokens.push(Token::Comment(buf, true));
+        Ok(())
     }
 
-    fn push_multi_comment(&mut self, mut buf: String) {
+    fn push_multi_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
+        lazy_static! {
+            static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
+        }
+
+        // check recursive comments:
+        /* /* */ */
+        for m in RE.find_iter(&buf) {
+            match m.as_str() {
+                "/*" => self.delimiters.push(Delimiter::LComment),
+                "*/" => self.match_delimiter(Delimiter::RComment)?,
+                _ => {}
+            }
+        }
+
+        'com: while self.delimiters.last() == Some(&Delimiter::LComment) {
+            while let Some(CharData {chr, ..}) = self.next() {
+                buf.push(chr);
+
+                if buf.ends_with("/*") {
+                    self.delimiters.push(Delimiter::LComment);
+                } else if buf.ends_with("*/") {
+                    self.match_delimiter(Delimiter::RComment)?;
+                    continue 'com;
+                }
+            }
+
+            // if we got here, the entire string got consumed... 
+            // and the comment is still open.
+            return Err(LexErr::UnclosedComment);
+        }
+
+        // there is a */ remaining:
+        let (com, nbuf) = buf.rsplit_once("*/").expect("Expected closing */");
         
+        self.tokens.push(Token::Comment(String::from(com.trim()), false));
+
+        // reinsert any remaining characters into the input
+        let len = nbuf.len();
+        let chrs: Vec<CharData> = nbuf
+            .chars()
+            .map(CharData::new)
+            .collect::<Result<_, _>>()?;
+
+        self.input.extend(chrs);
+        self.input.rotate_left(len);
+
+        Ok(())
+    }
+
+    fn match_delimiter(&mut self, d: Delimiter) -> Result<(), LexErr> {
+        let left = if d.is_right() { d.reversed() } else { d };
+        
+        match self.delimiters.last() {
+            Some(l) if l == &left => Ok({ self.delimiters.pop(); }),
+            Some(_) => Err(LexErr::MismatchedDelimiter),
+            None => Err(LexErr::MismatchedDelimiter),
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::token::Operator;
-
     use super::*;
 
     macro_rules! assert_lex {
@@ -348,6 +405,50 @@ mod test {
             Token::Numeric("123.".to_string()),
             Token::Operator(Operator::Plus),
             Token::Numeric("444".to_string())
+        ]);
+    }
+
+    #[test]
+    fn comment_lex() {
+        // assert_lex!("
+        // // abc 123! :)               
+        // 1;" => vec![
+        //     Token::Comment("abc 123! :)".to_string(), true),
+        //     Token::Numeric("1".to_string()),
+        //     Token::LineSep
+        // ]);
+
+        // assert_lex!("
+        // /* multiline :O */
+        // 2;" => vec![
+        //     Token::Comment("multiline :O".to_string(), false),
+        //     Token::Numeric("2".to_string()),
+        //     Token::LineSep
+        // ]);
+
+
+        // assert_lex!("
+        // /*
+        //     line!
+        // */
+        // 3;
+        // " => vec![
+        //     Token::Comment("line!".to_string(), false),
+        //     Token::Numeric("3".to_string()),
+        //     Token::LineSep
+        // ]);
+
+        assert_lex!("
+        /* /* 
+            comments in comments :)
+        */ */
+        recursive;
+        " => vec![
+            Token::Comment("/* 
+            comments in comments :)
+        */".to_string(), false),
+            Token::Ident("recursive".to_string()),
+            Token::LineSep,
         ]);
     }
 }
