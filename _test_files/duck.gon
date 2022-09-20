@@ -1,0 +1,49 @@
+shape Duck {
+    fun quack();
+    fun sit();
+    fun duck();
+}
+
+unit m from float {}
+unit cm from float {
+    1 m = 100 cm;
+}
+
+unit db from float {}
+unit s from float {}
+
+fun wait(t: s) {
+    // ...
+}
+
+class Drake {
+    height: cm;
+    volume: db;
+}
+
+fit Drake to Duck {
+    fun quack(mut self) {
+        self.volume = 50db;
+        wait(5s);
+        self.volume = 0db;
+    }
+
+    fun sit(mut self) {
+        if self.height < 50cm {
+            self.height = 50cm;
+        } else {
+            self.height = 25cm;
+        }
+    }
+
+    fun duck(mut self) {
+        self.height = 25cm;
+        wait(5s);
+        self.height = 50cm;
+    }
+}
+
+let mut d: Duck = Drake {
+    height: 50cm,
+    volume: 0db
+};

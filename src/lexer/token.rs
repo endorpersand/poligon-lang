@@ -140,6 +140,7 @@ define_operators_and_delimiters! {
     
         Comma:  ",",
         Comment: "//",
+        Colon: ":",
     
         Hash: "#"
     },
