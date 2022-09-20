@@ -7,6 +7,7 @@ pub enum Token {
     Ident(String),
     Numeric(String),
     Str(String),
+    Char(char),
     Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
     Keyword(Keyword),
     Operator(Operator),

@@ -14,6 +14,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
 pub enum LexErr {
     UnrecognizedChar(char),       // Char isn't used in Poligon code
     UnexpectedEOF,                // Reached end of file, when expecting a token
+    ExpectedChar(char),           // Expected a specific character, f.e. '
+    EmptyChar,                    // ''
     UnrecognizedOperator(String), // This operator cannot be resolved
     MismatchedDelimiter,          // A bracket was closed with the wrong type
     UnclosedDelimiter,            // A bracket wasn't closed
@@ -31,7 +33,8 @@ enum CharClass {
     Alpha,
     Numeric,
     Underscore,
-    Quote,
+    CharQuote,
+    StrQuote,
     Punct,
     // NewLine,
     Whitespace
@@ -48,7 +51,8 @@ impl CharClass {
         if c.is_alphabetic()             { Some(Self::Alpha) }
         else if c.is_numeric()           { Some(Self::Numeric) }
         else if c == '_'                 { Some(Self::Underscore) }
-        else if c == '"' || c == '\''    { Some(Self::Quote) }
+        else if c == '\''                { Some(Self::CharQuote) }
+        else if c == '"'                 { Some(Self::StrQuote) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
         // else if c == '\n'                { Some(Self::NewLine) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
@@ -107,7 +111,8 @@ impl Lexer {
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident(),
                 CharClass::Numeric    => self.push_numeric(),
-                CharClass::Quote      => self.push_str()?,
+                CharClass::CharQuote  => self.push_char()?,
+                CharClass::StrQuote   => self.push_str()?,
                 CharClass::Punct      => self.push_punct()?,
                 CharClass::Whitespace => { self.next(); },
             }
@@ -184,22 +189,38 @@ impl Lexer {
 
         let mut buf = String::new();
         loop {
-            let c = self.next().map(|cd| cd.chr);
+            let c = self.next()
+                .ok_or(LexErr::UnexpectedEOF)? // no more chars, hit EOF
+                .chr;
 
-            match c {
-                // hit quote? stop parsing string.
-                Some(c) if c == qt => break,
-
-                // hit any other character (incl \n)? add to string.
-                Some(c)            => buf.push(c),
-
-                // hit EOF? error. string ended without closing.
-                None               => Err(LexErr::UnexpectedEOF)?
-            }
+            if c == qt { break; }
+            buf.push(c);
         }
         
         self.tokens.push(Token::Str(buf));
         Ok(())
+    }
+
+    fn push_char(&mut self) -> Result<(), LexErr> {
+        let qt = self.next()
+            .expect("String was validated to have a character, but failed to pop quotation mark")
+            .chr;
+
+        // Get the next character:
+        let c = self.next().ok_or(LexErr::UnexpectedEOF)?.chr;
+        if c == qt {
+            Err(LexErr::EmptyChar)?;
+        }
+
+        // Assert next char matches:
+        match self.next() {
+            Some(CharData { chr, .. }) if chr == qt => {
+                self.tokens.push(Token::Char(c));
+                Ok(())
+            },
+            Some(_) => Err(LexErr::ExpectedChar(qt)),
+            None => Err(LexErr::UnexpectedEOF)
+        }
     }
 
     fn push_punct(&mut self) -> Result<(), LexErr> {
@@ -450,5 +471,12 @@ mod test {
             Token::Ident("recursive".to_string()),
             Token::LineSep,
         ]);
+    }
+
+    #[test]
+    fn char_lex() {
+        assert_lex!("'a'" => vec![Token::Char('a')]);
+        assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\''));
+        assert_lex_fail!("''" => LexErr::EmptyChar);
     }
 }
