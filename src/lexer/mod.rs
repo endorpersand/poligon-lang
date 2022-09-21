@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use self::token::{Token, Keyword, OPMAP, Delimiter, Operator};
+use self::token::{Token, Keyword, OPMAP, Delimiter, token};
 pub mod token;
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
@@ -252,10 +252,10 @@ impl Lexer {
             }
 
             // Stop tokenizing when we're dealing with comments:
-            if token == &Token::Operator(Operator::Comment) {
+            if token == &token!["//"] {
                 buf.drain(..2);
                 return self.push_line_comment(buf);
-            } else if token == &Token::Delimiter(Delimiter::LComment) {
+            } else if token == &token!["/*"] {
                 buf.drain(..2);
                 return self.push_multi_comment(buf);
             }
@@ -360,9 +360,9 @@ mod test {
     fn basic_lex() {
         assert_lex!("123 + abc * def" => vec![
             Token::Numeric("123".to_string()),
-            Token::Operator(Operator::Plus),
+            token![+],
             Token::Ident("abc".to_string()),
-            Token::Operator(Operator::Star),
+            token![*],
             Token::Ident("def".to_string())
         ])
     }
@@ -374,33 +374,33 @@ mod test {
         const y = abc;
         const mut z = 5;
         " => vec![
-            Token::Keyword(Keyword::Let),
+            token![let],
             Token::Ident("x".to_string()),
-            Token::Operator(Operator::Equal),
+            token![=],
             Token::Numeric("1".to_string()),
-            Token::LineSep,
+            token![;],
 
-            Token::Keyword(Keyword::Const),
+            token![const],
             Token::Ident("y".to_string()),
-            Token::Operator(Operator::Equal),
+            token![=],
             Token::Ident("abc".to_string()),
-            Token::LineSep,
+            token![;],
 
-            Token::Keyword(Keyword::Const),
-            Token::Keyword(Keyword::Mut),
+            token![const],
+            token![mut],
             Token::Ident("z".to_string()),
-            Token::Operator(Operator::Equal),
+            token![=],
             Token::Numeric("5".to_string()),
-            Token::LineSep,
+            token![;],
         ])
     }
 
     #[test]
     fn delimiter_lex() {
         assert_lex!("(1)" => vec![
-            Token::Delimiter(Delimiter::LParen),
+            token!["("],
             Token::Numeric("1".to_string()),
-            Token::Delimiter(Delimiter::RParen)
+            token![")"]
         ]);
         assert_lex_fail!("(1" => LexErr::UnclosedDelimiter);
         assert_lex_fail!("1)" => LexErr::MismatchedDelimiter);
@@ -414,17 +414,17 @@ mod test {
         ]);
         assert_lex!("123.ident"  => vec![
             Token::Numeric("123".to_string()), 
-            Token::Operator(Operator::Dot), 
+            token![.], 
             Token::Ident("ident".to_string())
         ]);
         assert_lex!("123..444"   => vec![
             Token::Numeric("123".to_string()),
-            Token::Operator(Operator::DDot),
+            token![..],
             Token::Numeric("444".to_string())
         ]);
         assert_lex!("123. + 444" => vec![
             Token::Numeric("123.".to_string()),
-            Token::Operator(Operator::Plus),
+            token![+],
             Token::Numeric("444".to_string())
         ]);
     }
@@ -436,7 +436,7 @@ mod test {
         // 1;" => vec![
         //     Token::Comment("abc 123! :)".to_string(), true),
         //     Token::Numeric("1".to_string()),
-        //     Token::LineSep
+        //     token![;]
         // ]);
 
         // assert_lex!("
@@ -444,7 +444,7 @@ mod test {
         // 2;" => vec![
         //     Token::Comment("multiline :O".to_string(), false),
         //     Token::Numeric("2".to_string()),
-        //     Token::LineSep
+        //     token![;]
         // ]);
 
 
@@ -456,7 +456,7 @@ mod test {
         // " => vec![
         //     Token::Comment("line!".to_string(), false),
         //     Token::Numeric("3".to_string()),
-        //     Token::LineSep
+        //     token![;]
         // ]);
 
         assert_lex!("
@@ -469,7 +469,7 @@ mod test {
             comments in comments :)
         */".to_string(), false),
             Token::Ident("recursive".to_string()),
-            Token::LineSep,
+            token![;],
         ]);
     }
 

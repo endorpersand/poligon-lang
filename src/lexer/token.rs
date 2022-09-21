@@ -217,6 +217,8 @@ macro_rules! token {
     ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RCurly)   };
     ("/*") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LComment) };
     ("*/") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RComment) };
+
+    (;) => { $crate::lexer::token::Token::LineSep };
 }
 
 #[allow(unused_imports)]
