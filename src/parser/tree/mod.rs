@@ -17,20 +17,21 @@ pub enum Stmt {
 }
 
 pub struct Decl {
-    reasn: ReasnType,
-    mutability: MutType,
-    ty: GonType,
-    val: Expr
+    pub rt: ReasnType,
+    pub mt: MutType,
+    pub var: String,
+    pub ty: Option<Type>,
+    pub val: Expr
 }
 
 pub enum ReasnType { Let, Const }
 pub enum MutType { Mut, Immut }
 
-pub struct GonType;
+pub struct Type;
 
 pub struct FunDecl {
     params: Vec<Decl>,
-    ret: GonType
+    ret: Option<Type>
 }
 
 pub enum Expr {
