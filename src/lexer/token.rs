@@ -108,7 +108,9 @@ define_keywords! {
     Of:       "of",      // units and measures (nominal primitives)
     Return:   "return",
     Break:    "break",
-    Continue: "continue"
+    Continue: "continue",
+    Step:     "step",    // 1..2 step 4
+    In:       "in"       // for x in y
 }
 
 define_operators_and_delimiters! {
@@ -144,6 +146,7 @@ define_operators_and_delimiters! {
         Comma:  ",",
         Comment: "//",
         Colon: ":",
+        DColon: "::",
     
         Hash: "#",
         Arrow: "->"
@@ -179,6 +182,8 @@ macro_rules! token {
     (return)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Return)   };
     (break)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Break)    };
     (continue) => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Continue) };
+    (step)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Step)     };
+    (in)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::In)       };
 
     (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
     (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
@@ -206,6 +211,7 @@ macro_rules! token {
     (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)   };
     ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment) };
     (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)   };
+    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)  };
     (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)    };
     (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)   };
 

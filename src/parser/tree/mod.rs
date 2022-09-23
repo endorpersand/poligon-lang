@@ -42,10 +42,31 @@ pub enum Expr {
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
     
-    Accessor(Accessor), // a.b.c.d
-    StaticAccessor(Accessor), // a::b::c::d
+    Assignment(String, Box<Expr>),
+    Attr(Attr), // a.b.c.d
+    StaticAttr(Attr), // a::b::c::d
     UnaryOp(UnaryOp),
-    BinaryOp(BinaryOp)
+    BinaryOp(BinaryOp),
+    Comparison {
+        left: Box<Expr>,
+        right: (Token, Box<Expr>),
+        extra: Option<(Token, Box<Expr>)>
+    },
+    Range {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        step: Option<Box<Expr>>
+    },
+    If(If),
+    While {
+        condition: Box<Expr>,
+        block: Program
+    },
+    For {
+        ident: String,
+        iterator: Box<Expr>,
+        block: Program
+    }
 }
 
 pub enum Literal {
@@ -55,18 +76,41 @@ pub enum Literal {
     Str(String)
 }
 
-pub struct Accessor {
-    obj: Box<Expr>,
-    attr: String
+impl Literal {
+    pub fn from_numeric(s: &str) -> Option<Self> {
+        s.parse::<isize>()
+            .map(Literal::Int)
+            .ok()
+            .or_else(|| s.parse::<f64>()
+                .map(Literal::Float)
+                .ok()
+            )
+        
+    }
+}
+
+pub struct Attr {
+    pub obj: Box<Expr>,
+    pub attr: String
 }
 
 pub struct UnaryOp {
-    op: Token,
-    expr: Box<Expr>
+    pub op: Token,
+    pub expr: Box<Expr>
 }
 
 pub struct BinaryOp {
-    op: Token,
-    left: Box<Expr>,
-    right: Box<Expr>
+    pub op: Token,
+    pub left: Box<Expr>,
+    pub right: Box<Expr>
+}
+
+pub struct If {
+    pub condition: Box<Expr>,
+    pub if_true: Program,
+    pub if_false: Option<Box<Else>>
+}
+pub enum Else {
+    If(If),
+    Block(Program)
 }
