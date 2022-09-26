@@ -5,7 +5,7 @@ use crate::lexer::token::{Token, token};
 pub mod tree;
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> Result<tree::Program, ParseErr> {
-    Parser::new(tokens.into_iter().collect()).parse()
+    Parser::new(tokens).parse()
 }
 
 struct Parser {
@@ -61,19 +61,23 @@ macro_rules! left_assoc_rules {
 }
 
 impl Parser {
-    fn new(tokens: VecDeque<Token>) -> Self {
+    fn new(tokens: impl IntoIterator<Item=Token>) -> Self {
+        let tokens = tokens.into_iter()
+            .filter(|t| !matches!(t, Token::Comment(_, _)))
+            .collect();
+        
         Self { tokens }
     }
 
-    fn expect(&mut self, one_of: &[Token]) -> ParseResult<Token> {
-        if let Some(t) = self.tokens.pop_front() {
-            if one_of.contains(&t) {
-                return Ok(t)
-            }
-        }
+    // fn expect(&mut self, one_of: &[Token]) -> ParseResult<Token> {
+    //     if let Some(t) = self.tokens.pop_front() {
+    //         if one_of.contains(&t) {
+    //             return Ok(t)
+    //         }
+    //     }
     
-        Err(ParseErr::ExpectedTokens(one_of.into()))
-    }
+    //     Err(ParseErr::ExpectedTokens(one_of.into()))
+    // }
 
     fn expect1(&mut self, u: Token) -> ParseResult<()> {
         if let Some(t) = self.tokens.pop_front() {
@@ -100,23 +104,44 @@ impl Parser {
     }
 
     fn parse(mut self) -> ParseResult<tree::Program> {
+        let program = self.expect_program()?;
+
+        if self.tokens.is_empty() {
+            Ok(program)
+        } else {
+            // there are more tokens left that couldn't be parsed as a program.
+            // we have an issue.
+            Err(ParseErr::ExpectedTokens(vec![token![;]]))
+        }
+    }
+
+    fn expect_program(&mut self) -> ParseResult<tree::Program> {
         let mut program = vec![];
 
-        // this consumes the entire token list
-        while !self.tokens.is_empty() {
-            // if statement exists, add it to program
-            // if statement is nothing, ignore it
+        loop {
             let mst = self.match_stmt()?;
-            if let Some(st) = mst { program.push(st); }
+            let has_semi = self.match1(token![;]);
+            // if statement exists, add it to program
+            if let Some(st) = mst {
+                program.push(st);
+            } else {
+                // if statement is nothing, but ended with semi, 
+                // then ignore and keep reading
 
-            self.expect1(Token::LineSep)?;
+                // if statement is nothing, and didn't end with semi,
+                // we know we're at the end
+                if !has_semi { break; }
+            }
+    
         }
         
         Ok(program)
     }
-
     fn expect_block(&mut self) -> ParseResult<tree::Program> {
-        todo!()
+        self.expect1(token!["{"])?;
+        let p = self.expect_program()?;
+        self.expect1(token!["}"])?;
+        Ok(p)
     }
 
     fn match_stmt(&mut self) -> ParseResult<Option<tree::Stmt>> {
@@ -160,11 +185,49 @@ impl Parser {
         Ok(tree::Decl {
             rt,
             mt,
-            var: ident,
+            ident,
             ty,
             val: expr
         })
     }
+
+    fn match_param(&mut self) -> ParseResult<Option<tree::Param>> {
+        let mrt_token = self.match_n(&[token![let], token![const]]);
+        let mut empty = mrt_token.is_none(); // if mrt is not empty, ensure empty is false
+        
+        let rt = match mrt_token {
+            Some(token![let]) | None  => tree::ReasnType::Let,
+            Some(token![const]) => tree::ReasnType::Const,
+            _ => unreachable!()
+        };
+        
+        let mt = if self.match1(token![mut]) {
+            empty = false;
+            tree::MutType::Mut
+        } else {
+            tree::MutType::Immut
+        };
+
+        // the param checked so far is fully empty and probably not an actual param:
+        if empty && !matches!(self.tokens.get(0), Some(Token::Ident(_))) {
+            return Ok(None);
+        }
+
+        let ident = self.expect_ident()?;
+        let ty = if self.match1(token![:]) {
+            Some(self.expect_type()?)
+        } else {
+            None
+        };
+
+        Ok(Some(tree::Param {
+            rt,
+            mt,
+            ident,
+            ty
+        }))
+    }
+
     fn expect_return(&mut self) -> ParseResult<tree::Stmt> {
         self.expect1(token![return])?;
         let e = self.expect_expr()?;
@@ -184,10 +247,10 @@ impl Parser {
     fn expect_fun(&mut self) -> ParseResult<tree::FunDecl> {
         self.expect1(token![fun])?;
 
-        let ident = self.expect_ident();
+        let ident = self.expect_ident()?;
 
         self.expect1(token!["("])?;
-        todo!("(param),*");
+        let params = self.expect_tuple_of(Parser::match_param)?;
         self.expect1(token![")"])?;
 
         let ret = if self.match1(token![->]) {
@@ -196,16 +259,20 @@ impl Parser {
             None
         };
 
-        todo!()
+        Ok(tree::FunDecl {
+            ident,
+            params,
+            ret,
+        })
     }
 
     fn expect_ident(&mut self) -> ParseResult<String> {
-        if let Some(Token::Ident(s)) = self.tokens.pop_front() {
-            Ok(s)
-        } else {
-            Err(ParseErr::ExpectedIdent)
+        match self.tokens.pop_front() {
+            Some(Token::Ident(s)) => Ok(s),
+            _ => Err(ParseErr::ExpectedIdent)
         }
     }
+
     fn expect_type(&mut self) -> ParseResult<tree::Type> {
         todo!()
     }
@@ -365,19 +432,25 @@ impl Parser {
             ops.push(t);
         }
 
-        let mut e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
-        e = ops.into_iter()
-            .rfold(e, |expr, op| tree::Expr::UnaryOp(tree::UnaryOp {
-                op, expr: Box::new(expr)
-            }));
+        let me = if ops.is_empty() {
+            self.match_call()?
+        } else {
+            let mut e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
+            e = ops.into_iter()
+                .rfold(e, |expr, op| tree::Expr::UnaryOp(tree::UnaryOp {
+                    op, expr: Box::new(expr)
+                }));
 
-        Ok(Some(e))
+            Some(e)
+        };
+
+        Ok(me)
     }
 
     fn match_call(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(e) = self.match_path()? {
             if self.match1(token!["("]) {
-                todo!("(expr),*");
+                self.expect_tuple()?;
                 self.expect1(token![")"])?;
             }
 
@@ -438,6 +511,25 @@ impl Parser {
         }
     }
 
+    fn expect_tuple_of<T, F>(&mut self, f: F) -> ParseResult<Vec<T>> 
+        where F: Fn(&mut Self) -> ParseResult<Option<T>>
+    {
+        let mut exprs = vec![];
+        // terminate when there's no more expression or when there's no more ,
+        while let Some(e) = f(self)? {
+            exprs.push(e);
+            if !self.match1(token![,]) {
+                break;
+            }
+        }
+
+        Ok(exprs)
+    }
+    fn expect_tuple(&mut self) -> ParseResult<Vec<tree::Expr>> 
+    {
+        self.expect_tuple_of(Parser::match_expr)
+    }
+
     fn expect_literal(&mut self) -> ParseResult<tree::Expr> {
         let lit = match self.tokens.pop_front() {
             Some(Token::Numeric(s)) => tree::Literal::from_numeric(&s)
@@ -451,15 +543,39 @@ impl Parser {
     }
     fn expect_list(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token!["["])?;
-        todo!("(expr),*");
+        let exprs = self.expect_tuple()?;
         self.expect1(token!["]"])?;
+        
+        Ok(tree::Expr::ListLiteral(exprs))
     }
     fn expect_set(&mut self) -> ParseResult<tree::Expr> {
         todo!();
+
+        self.expect1(token!["{"])?;
+        let exprs = self.expect_tuple()?;
+        self.expect1(token!["}"])?;
+        
+        Ok(tree::Expr::SetLiteral(exprs))
     }
     fn expect_dict(&mut self) -> ParseResult<tree::Expr> {
         todo!();
+
+        self.expect1(token!["{"])?;
+        let entries = self.expect_tuple_of(Parser::match_entry)?;
+        self.expect1(token!["}"])?;
+        
+        Ok(tree::Expr::DictLiteral(entries))
     }
+    fn match_entry(&mut self) -> ParseResult<Option<(tree::Expr, tree::Expr)>> {
+        if let Some(k) = self.match_expr()? {
+            self.expect1(token![:])?;
+            let v = self.expect_expr()?;
+            Ok(Some((k, v)))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn expect_if(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token![if])?;
 
@@ -559,13 +675,17 @@ mod tests {
                 }))
             }))
         ]);
+
+        assert_parse!("{};" => vec![
+            tree::Stmt::Expr(tree::Expr::Block(vec![]))
+        ])
     }
 
     #[test]
     fn if_else_test() {
         assert_parse!("if true {
             // :)
-        }" => vec![
+        };" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -577,7 +697,7 @@ mod tests {
             // :)
         } else {
             // :(
-        }" => vec![
+        };" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -591,7 +711,7 @@ mod tests {
             // :|
         } else {
             // :(
-        }" => vec![
+        };" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -615,7 +735,7 @@ mod tests {
             // :|
         } else {
             // :(
-        }" => vec![
+        };" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 

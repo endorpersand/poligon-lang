@@ -16,9 +16,16 @@ pub enum Stmt {
 pub struct Decl {
     pub rt: ReasnType,
     pub mt: MutType,
-    pub var: String,
+    pub ident: String,
     pub ty: Option<Type>,
     pub val: Expr
+}
+#[derive(Debug, PartialEq)]
+pub struct Param {
+    pub rt: ReasnType,
+    pub mt: MutType,
+    pub ident: String,
+    pub ty: Option<Type>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -31,8 +38,9 @@ pub struct Type;
 
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
-    params: Vec<Decl>,
-    ret: Option<Type>
+    pub ident: String,
+    pub params: Vec<Param>,
+    pub ret: Option<Type>
 }
 
 #[derive(Debug, PartialEq)]
