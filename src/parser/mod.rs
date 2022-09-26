@@ -441,14 +441,14 @@ impl Parser {
                     .ok_or(ParseErr::ExpectedExpr)?;
                 let right = (t, Box::new(rexpr));
 
-                // check if there's a second comparison here
-                let extra = if let Some(t) = self.match_n(&cmp_ops) {
-                    let eexpr = self.match_spread()?
-                    .ok_or(ParseErr::ExpectedExpr)?;
-                    Some((t, Box::new(eexpr)))
-                } else {
-                    None
-                };
+                
+                // check for any other comparisons:
+                // e.g. 2 < 3 < 4 < 5 < 6 < 7 < 8
+                let mut extra = vec![];
+                while let Some(t) = self.match_n(&cmp_ops) {
+                    let e = self.match_spread()?.ok_or(ParseErr::ExpectedExpr)?;
+                    extra.push((t, Box::new(e)))
+                }
 
                 e = tree::Expr::Comparison { 
                     left: Box::new(e), 

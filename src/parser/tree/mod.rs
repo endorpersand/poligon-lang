@@ -60,7 +60,7 @@ pub enum Expr {
     Comparison {
         left: Box<Expr>,
         right: (Token, Box<Expr>),
-        extra: Option<(Token, Box<Expr>)>
+        extra: Vec<(Token, Box<Expr>)>
     },
     Range {
         left: Box<Expr>,
