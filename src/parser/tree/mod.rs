@@ -2,11 +2,7 @@ use crate::lexer::token::Token;
 
 pub type Program = Vec<Stmt>;
 
-pub enum Node {
-    Program(Program),
-    Stmt(Stmt)
-}
-
+#[derive(Debug, PartialEq)]
 pub enum Stmt {
     Decl(Decl),       // declaration
     Return(Expr),     // return x;
@@ -16,6 +12,7 @@ pub enum Stmt {
     Expr(Expr)        // any expression
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Decl {
     pub rt: ReasnType,
     pub mt: MutType,
@@ -24,16 +21,21 @@ pub struct Decl {
     pub val: Expr
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ReasnType { Let, Const }
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MutType { Mut, Immut }
 
+#[derive(Debug, PartialEq)]
 pub struct Type;
 
+#[derive(Debug, PartialEq)]
 pub struct FunDecl {
     params: Vec<Decl>,
     ret: Option<Type>
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Ident(String), // a variable
     Block(Program), // a block
@@ -69,6 +71,7 @@ pub enum Expr {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Literal {
     Int(isize),
     Float(f64),
@@ -89,27 +92,33 @@ impl Literal {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Attr {
     pub obj: Box<Expr>,
     pub attr: String
 }
 
+#[derive(Debug, PartialEq)]
 pub struct UnaryOp {
     pub op: Token,
     pub expr: Box<Expr>
 }
 
+#[derive(Debug, PartialEq)]
 pub struct BinaryOp {
     pub op: Token,
     pub left: Box<Expr>,
     pub right: Box<Expr>
 }
 
+#[derive(Debug, PartialEq)]
 pub struct If {
     pub condition: Box<Expr>,
     pub if_true: Program,
     pub if_false: Option<Box<Else>>
 }
+
+#[derive(Debug, PartialEq)]
 pub enum Else {
     If(If),
     Block(Program)

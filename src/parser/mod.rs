@@ -12,7 +12,7 @@ struct Parser {
     tokens: VecDeque<Token>
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseErr {
     ExpectedTokens(Vec<Token>),
     ExpectedIdent,
@@ -451,7 +451,7 @@ impl Parser {
     }
     fn expect_list(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token!["["])?;
-        todo!();
+        todo!("(expr),*");
         self.expect1(token!["]"])?;
     }
     fn expect_set(&mut self) -> ParseResult<tree::Expr> {
@@ -518,5 +518,125 @@ impl Parser {
         Ok(tree::Expr::For {
             ident, iterator: Box::new(iterator), block
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::lexer::token::token;
+    use crate::lexer::tokenize;
+
+    use super::{tree, parse, ParseErr};
+
+    macro_rules! assert_parse {
+        ($s:expr => $r:expr) => {
+            assert_eq!(parse_str(&$s), Ok($r))
+        }
+    }
+
+    fn parse_str(s: &str) -> Result<tree::Program, ParseErr> {
+        parse(tokenize(s).unwrap())
+    }
+
+    #[test]
+    fn expression_test() {
+        assert_parse!("2 + 3;" => vec![
+            tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
+                op: token![+], 
+                left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
+                right: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+            }))
+        ]);
+
+        assert_parse!("2 + 3 * 4;" => vec![
+            tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
+                op: token![+], 
+                left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
+                right: Box::new(tree::Expr::BinaryOp(tree::BinaryOp {
+                    op: token![*], 
+                    left: Box::new(tree::Expr::Literal(tree::Literal::Int(3))), 
+                    right: Box::new(tree::Expr::Literal(tree::Literal::Int(4)))
+                }))
+            }))
+        ]);
+    }
+
+    #[test]
+    fn if_else_test() {
+        assert_parse!("if true {
+            // :)
+        }" => vec![
+            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                if_true: vec![], 
+                if_false: None
+            }))
+        ]);
+
+        assert_parse!("if true {
+            // :)
+        } else {
+            // :(
+        }" => vec![
+            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                if_true: vec![], 
+                if_false: Some(Box::new(tree::Else::Block(vec![])))
+            }))
+        ]);
+
+        assert_parse!("if true {
+            // :)
+        } else if condition {
+            // :|
+        } else {
+            // :(
+        }" => vec![
+            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                if_true: vec![], 
+                if_false: Some(Box::new(tree::Else::If(tree::If { 
+                    condition: Box::new(tree::Expr::Ident("condition".to_string())), 
+                    if_true: vec![], 
+                    if_false: Some(Box::new(tree::Else::Block(vec![])))
+                })))
+            }))
+        ]);
+
+        assert_parse!("if true {
+            // :)
+        } else if condition {
+            // :|
+        } else if condition {
+            // :|
+        } else if condition {
+            // :|
+        } else if condition {
+            // :|
+        } else {
+            // :(
+        }" => vec![
+            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                if_true: vec![], 
+                if_false: Some(Box::new(tree::Else::If(tree::If { 
+                    condition: Box::new(tree::Expr::Ident("condition".to_string())), 
+                    if_true: vec![], 
+                    if_false: Some(Box::new(tree::Else::If(tree::If { 
+                        condition: Box::new(tree::Expr::Ident("condition".to_string())), 
+                        if_true: vec![], 
+                        if_false: Some(Box::new(tree::Else::If(tree::If { 
+                            condition: Box::new(tree::Expr::Ident("condition".to_string())), 
+                            if_true: vec![], 
+                            if_false: Some(Box::new(tree::Else::If(tree::If { 
+                                condition: Box::new(tree::Expr::Ident("condition".to_string())), 
+                                if_true: vec![], 
+                                if_false: Some(Box::new(tree::Else::Block(vec![])))
+                            })))
+                        })))
+                    })))
+                })))
+            }))
+        ]);
     }
 }
