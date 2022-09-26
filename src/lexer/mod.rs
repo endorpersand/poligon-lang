@@ -81,22 +81,22 @@ impl Lexer {
         })
     }
 
-    /// Return the first non-consumed character in the input.
+    /// Look at the next character in the input.
     /// 
-    /// If there is no more characters in the input, return None.
+    /// If there are no more characters in the input, return None.
     fn peek(&self) -> Option<&CharData> {
         self.input.get(0)
     }
 
-    /// Return the next character and consume it.
+    /// Consume the next character in the input and return it.
     fn next(&mut self) -> Option<CharData> {
         self.input.pop_front()
     }
 
-    /// Check if the character class matches. 
+    /// Check if the next character in the input matches the given character class.
     /// 
-    /// If yes, pop it and return the char.
-    /// If not, return None.
+    /// If it does, consume it and return the character.
+    /// If it does not, return None.
     fn match_cls(&mut self, match_cls: CharClass) -> Option<char> {
         match self.peek() {
             Some(CharData { cls, .. }) if cls == &match_cls => {
@@ -106,6 +106,9 @@ impl Lexer {
         }
     }
 
+    /// Perform the actual lexing. 
+    /// 
+    /// Takes a string and converts it into a list of tokens.
     fn lex(mut self) -> Result<Vec<Token>, LexErr> {
         while let Some(CharData { cls, .. }) = self.peek() {
             match cls {
@@ -125,6 +128,9 @@ impl Lexer {
         Ok(self.tokens)
     }
 
+    /// Analyzes the next characters in the input as an identifier (e.g. abc, ade, aVariable, a123, a_).
+    /// 
+    /// This function consumes characters from the input and adds an identifier token in the output.
     fn push_ident(&mut self) {
         let mut buf = String::new();
 
@@ -144,6 +150,9 @@ impl Lexer {
         self.tokens.push(token);
     }
 
+    /// Analyzes the next characters in the input as a numeric value (e.g. 123, 123., 123.4).
+    /// 
+    /// This function consumes characters from the input and adds a numeric literal token in the output.
     fn push_numeric(&mut self) {
         let mut buf = String::new();
 
@@ -182,6 +191,9 @@ impl Lexer {
         self.tokens.push(Token::Numeric(buf));
     }
 
+    /// Analyzes the next characters in the input as a str (e.g. "hello").
+    /// 
+    /// This function consumes characters from the input and adds a str literal token in the output.
     fn push_str(&mut self) -> Result<(), LexErr> {
         let qt = self.next()
             .expect("String was validated to have a character, but failed to pop quotation mark")
@@ -201,6 +213,9 @@ impl Lexer {
         Ok(())
     }
 
+    /// Analyzes the next characters in the input as a char (e.g. 'h').
+    /// 
+    /// This function consumes characters from the input and adds a char literal token in the output.
     fn push_char(&mut self) -> Result<(), LexErr> {
         let qt = self.next()
             .expect("String was validated to have a character, but failed to pop quotation mark")
@@ -223,6 +238,10 @@ impl Lexer {
         }
     }
 
+    /// Analyzes the next characters in the input as a set of punctuation marks.
+    /// 
+    /// This function consumes characters from the input and can add 
+    /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> Result<(), LexErr> {
         let mut buf = String::new();
 
@@ -268,6 +287,11 @@ impl Lexer {
         Ok(())
     }
 
+    /// In `push_punct`, this is called to create a line comment from 
+    /// `push_punct`'s leftover string buffer and characters in the input.
+    /// 
+    /// This function consumes characters from the input and adds a line comment 
+    /// (a comment that goes to the end of a line) to the output.
     fn push_line_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
         while let Some(CharData {chr, ..}) = self.next() {
             if chr == '\n' { break; }
@@ -279,6 +303,11 @@ impl Lexer {
         Ok(())
     }
 
+    /// In `push_punct`, this is called to create a multi-line comment from 
+    /// `push_punct`'s leftover string buffer and characters in the input.
+    /// 
+    /// This function consumes characters from the input and adds a multi-line comment 
+    /// (/* this kind of comment */) to the output.
     fn push_multi_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
         lazy_static! {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
@@ -329,6 +358,8 @@ impl Lexer {
         Ok(())
     }
 
+    /// Verify that the top delimiter in the delimiter stack is the same as the argument's 
+    /// delimiter type (Paren, Square, Curly, Comment) and pop it if they are the same.
     fn match_delimiter(&mut self, d: Delimiter) -> Result<(), LexErr> {
         let left = if d.is_right() { d.reversed() } else { d };
         

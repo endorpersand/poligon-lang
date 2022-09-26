@@ -69,6 +69,15 @@ impl Parser {
         Self { tokens }
     }
 
+    // General terminology:
+    // "expect X": The next set of tokens must represent X, otherwise error.
+    // "match X": If the next set of tokens represent X, consume those tokens. 
+    //     Otherwise, do & return nothing.
+
+    /// Expect that the next token is in the specified list of tokens.
+    /// 
+    /// Return the next token if it is a token in the list, 
+    /// or error if the next token is not a token in the list.
     // fn expect(&mut self, one_of: &[Token]) -> ParseResult<Token> {
     //     if let Some(t) = self.tokens.pop_front() {
     //         if one_of.contains(&t) {
@@ -79,6 +88,9 @@ impl Parser {
     //     Err(ParseErr::ExpectedTokens(one_of.into()))
     // }
 
+    /// Expect that the next token is in the specified token.
+    /// 
+    /// Error if the next token is not the specified token.
     fn expect1(&mut self, u: Token) -> ParseResult<()> {
         if let Some(t) = self.tokens.pop_front() {
             if t == u {
@@ -89,6 +101,10 @@ impl Parser {
         Err(ParseErr::ExpectedTokens(vec![u]))
     }
 
+    /// If the next token is in the specified list of tokens, 
+    /// consume the token from input and return it.
+    /// 
+    /// Return None if it is not in the specified list of tokens.
     fn match_n(&mut self, one_of: &[Token]) -> Option<Token> {
         match self.tokens.get(0) {
             Some(t) if one_of.contains(t) => self.tokens.pop_front(),
@@ -96,6 +112,8 @@ impl Parser {
         }
     }
 
+    /// Return whether the next token matches the specified token, 
+    /// and consume the token from input if it does.
     fn match1(&mut self, u: Token) -> bool {
         match self.tokens.get(0) {
             Some(t) if t == &u => self.tokens.pop_front(),
@@ -103,6 +121,8 @@ impl Parser {
         }.is_some()
     }
 
+    /// The parsing function.
+    /// Takes a list of tokens and converts it into a parse tree.
     fn parse(mut self) -> ParseResult<tree::Program> {
         let program = self.expect_program()?;
 
@@ -115,6 +135,10 @@ impl Parser {
         }
     }
 
+    /// Expect that the next tokens represent a program.
+    /// 
+    /// Return the program,
+    /// or error if the tokens do not represent a program.
     fn expect_program(&mut self) -> ParseResult<tree::Program> {
         let mut program = vec![];
 
@@ -137,6 +161,11 @@ impl Parser {
         
         Ok(program)
     }
+
+    /// Expect that the next tokens represent a block.
+    /// 
+    /// Return the program encompassed by the block,
+    /// or error if the tokens do not represent a block.
     fn expect_block(&mut self) -> ParseResult<tree::Program> {
         self.expect1(token!["{"])?;
         let p = self.expect_program()?;
@@ -144,6 +173,10 @@ impl Parser {
         Ok(p)
     }
 
+    /// Expect that the next tokens represent a statement.
+    /// 
+    /// Return the statement,
+    /// or error if the tokens do not represent a statement.
     fn match_stmt(&mut self) -> ParseResult<Option<tree::Stmt>> {
         let st = match self.tokens.get(0) {
             Some(token![let]) | Some(token![const]) => Some(self.expect_decl()?).map(tree::Stmt::Decl),
@@ -158,6 +191,10 @@ impl Parser {
         Ok(st)
     }
 
+    /// Expect that the next tokens represent a variable declaration.
+    /// 
+    /// Return the variable declaration,
+    /// or error if the tokens do not represent a variable declaration.
     fn expect_decl(&mut self) -> ParseResult<tree::Decl> {
         let rt = match self.tokens.pop_front() {
             Some(token![let])   => tree::ReasnType::Let,
@@ -191,6 +228,10 @@ impl Parser {
         })
     }
 
+    /// If the next tokens match a function parameter, 
+    /// consume the tokens and return the parameter.
+    /// 
+    /// In the construction of a parameter, syntax errors are propagated.
     fn match_param(&mut self) -> ParseResult<Option<tree::Param>> {
         let mrt_token = self.match_n(&[token![let], token![const]]);
         let mut empty = mrt_token.is_none(); // if mrt is not empty, ensure empty is false
@@ -228,22 +269,38 @@ impl Parser {
         }))
     }
 
+    /// Expect that the next tokens represent a return statement.
+    /// 
+    /// Return the statement,
+    /// or error if the tokens do not represent a return statement.
     fn expect_return(&mut self) -> ParseResult<tree::Stmt> {
         self.expect1(token![return])?;
         let e = self.expect_expr()?;
 
         Ok(tree::Stmt::Return(e))
     }
+    /// Expect that the next tokens represent a break statement.
+    /// 
+    /// Return the statement,
+    /// or error if the tokens do not represent a break statement.
     fn expect_break(&mut self) -> ParseResult<tree::Stmt> {
         self.expect1(token![break])?;
 
         Ok(tree::Stmt::Break)
     }
+    /// Expect that the next tokens represent a continue statement.
+    /// 
+    /// Return the statement,
+    /// or error if the tokens do not represent a continue statement.
     fn expect_cont(&mut self) -> ParseResult<tree::Stmt> {
         self.expect1(token![continue])?;
 
         Ok(tree::Stmt::Continue)
     }
+    /// Expect that the next tokens represent a function declaration.
+    /// 
+    /// Return the function declaration,
+    /// or error if the tokens do not represent a function declaration.
     fn expect_fun(&mut self) -> ParseResult<tree::FunDecl> {
         self.expect1(token![fun])?;
 
@@ -266,24 +323,48 @@ impl Parser {
         })
     }
 
+    /// Expect that the next token is an identifier token.
+    /// 
+    /// Return the identifier's String,
+    /// or error if the token is not an identifier token.
     fn expect_ident(&mut self) -> ParseResult<String> {
         match self.tokens.pop_front() {
             Some(Token::Ident(s)) => Ok(s),
             _ => Err(ParseErr::ExpectedIdent)
         }
     }
-
+    
+    /// Expect that the next tokens represent a type expression.
+    /// 
+    /// Return the type expression,
+    /// or error if the tokens do not represent a type expression.
     fn expect_type(&mut self) -> ParseResult<tree::Type> {
         todo!()
     }
 
+    ///// EXPRESSION MATCHING
+    /// Note that for expression matching,
+    /// the labeled functions actually try to match an operation 
+    /// OR any operation with a lower precedence.
+    /// 
+    /// f.e. match_addsub matches (+, -) but ALSO (*, /, %), and unary operations, etc.
+
+    /// If the next tokens represent an expression, return the expression
+    /// or return none if the tokens do not represent an expression.
+    /// 
+    /// Note that syntax errors are propagated through this function.
     fn match_expr(&mut self) -> ParseResult<Option<tree::Expr>> {
         self.match_asg()
     }
+    /// Expect that the next tokens represent an expression
+    /// 
+    /// Return the expression,
+    /// or error if the tokens do not represent a expression.
     fn expect_expr(&mut self) -> ParseResult<tree::Expr> {
         self.match_expr()?.ok_or(ParseErr::ExpectedExpr)
     }
 
+    /// Match an assignment operation. (a = b)
     fn match_asg(&mut self) -> ParseResult<Option<tree::Expr>> {
         // a = b = c = d = e = [expr]
 
@@ -329,6 +410,10 @@ impl Parser {
     //     }
     // }
 
+    // This creates the matching function for:
+    // logical OR, logical AND
+    // bitwise OR, bitwise XOR, bitwise AND
+    // These have a similar structure and don't need to be repeated several times.
     left_assoc_rules! { 
         match_lor  = match_land  ( || match_land )*;
         match_land = match_cmp   ( && match_cmp  )*;
@@ -340,6 +425,7 @@ impl Parser {
         match_band = match_shift ( & match_shift )* ;
     }
 
+    /// Match a comparison operation. (2 < 3, 2 < 3 < 4)
     fn match_cmp(&mut self) -> ParseResult<Option<tree::Expr>> {
         let me = self.match_spread()?;
 
@@ -377,6 +463,7 @@ impl Parser {
         }
     }
 
+    // Match a spread operation. (..[1,2,3,4])
     fn match_spread(&mut self) -> ParseResult<Option<tree::Expr>> {
         let is_spread = self.match1(token![..]);
         
@@ -393,6 +480,7 @@ impl Parser {
         }
     }
 
+    // Match a range operation. (1..5)
     fn match_range(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(mut e) = self.match_bor()? {
             if self.match1(token![..]) {
@@ -418,12 +506,17 @@ impl Parser {
         }
     }
 
+    // This creates the matching function for:
+    // shifting (<<, >>)
+    // addition/subtraction (+, -)
+    // multiplication, division, modulo (+, -, %)
     left_assoc_rules! {
         match_shift  = match_addsub ( ( << , >> ) match_addsub )* ;
         match_addsub = match_muldiv ( ( + , - ) match_muldiv )* ;
         match_muldiv = match_unary ( ( * , / , % ) match_unary )* ;
     }
 
+    /// Match a unary operation. (!expr, ~expr, -expr, +expr)
     fn match_unary(&mut self) -> ParseResult<Option<tree::Expr>> {
         let unary_ops = [token![!], token![~], token![-], token![+]];
 
@@ -447,6 +540,7 @@ impl Parser {
         Ok(me)
     }
 
+    /// Match a function call. (f(1, 2, 3, 4))
     fn match_call(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(e) = self.match_path()? {
             if self.match1(token!["("]) {
@@ -460,6 +554,7 @@ impl Parser {
         }
     }
 
+    /// Match a path. (a.b.c::d::e::f.g.h.i)
     fn match_path(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(mut e) = self.match_unit()? {
             let mut segments = vec![];
@@ -485,6 +580,7 @@ impl Parser {
         }
     }
 
+    /// Match something with lower precedence than a path.
     fn match_unit(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(t) = self.tokens.get(0) {
             let unit = match t {
@@ -511,6 +607,10 @@ impl Parser {
         }
     }
 
+    /// Expect that the next tokens represent values of type T separated by commas 
+    /// (optionally with a terminating comma)
+    /// 
+    /// This function requires a function that represents the match function for type T
     fn expect_tuple_of<T, F>(&mut self, f: F) -> ParseResult<Vec<T>> 
         where F: Fn(&mut Self) -> ParseResult<Option<T>>
     {
@@ -525,11 +625,14 @@ impl Parser {
 
         Ok(exprs)
     }
+
+    /// Expect that the next tokens represent expressions separated by commas
     fn expect_tuple(&mut self) -> ParseResult<Vec<tree::Expr>> 
     {
         self.expect_tuple_of(Parser::match_expr)
     }
 
+    /// Expect a literal (numeric, str, char)
     fn expect_literal(&mut self) -> ParseResult<tree::Expr> {
         let lit = match self.tokens.pop_front() {
             Some(Token::Numeric(s)) => tree::Literal::from_numeric(&s)
@@ -541,6 +644,8 @@ impl Parser {
 
         Ok(tree::Expr::Literal(lit))
     }
+
+    /// Expect a list ([1, 2, 3, 4, 5])
     fn expect_list(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token!["["])?;
         let exprs = self.expect_tuple()?;
@@ -548,6 +653,8 @@ impl Parser {
         
         Ok(tree::Expr::ListLiteral(exprs))
     }
+
+    /// Expect a set (set {1, 2, 3, 4})
     fn expect_set(&mut self) -> ParseResult<tree::Expr> {
         todo!();
 
@@ -557,6 +664,7 @@ impl Parser {
         
         Ok(tree::Expr::SetLiteral(exprs))
     }
+    /// Expect a dict (dict {1: 2, 3: 4})
     fn expect_dict(&mut self) -> ParseResult<tree::Expr> {
         todo!();
 
@@ -566,6 +674,7 @@ impl Parser {
         
         Ok(tree::Expr::DictLiteral(entries))
     }
+    /// Match a dict entry (1: 2)
     fn match_entry(&mut self) -> ParseResult<Option<(tree::Expr, tree::Expr)>> {
         if let Some(k) = self.match_expr()? {
             self.expect1(token![:])?;
@@ -576,6 +685,7 @@ impl Parser {
         }
     }
 
+    /// Expect an if expression (if cond {}, if cond {} else cond {}, etc.)
     fn expect_if(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token![if])?;
 
@@ -615,6 +725,8 @@ impl Parser {
         
         Ok(tree::Expr::If(expr))
     }
+
+    // Expect a while loop.
     fn expect_while(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token![while])?;
         let condition = self.expect_expr()?;
@@ -624,6 +736,8 @@ impl Parser {
             condition: Box::new(condition), block
         })
     }
+
+    // Expect a for loop.
     fn expect_for(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token![for])?;
         let ident = self.expect_ident()?;
