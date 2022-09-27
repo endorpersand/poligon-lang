@@ -584,6 +584,8 @@ impl Parser {
     fn match_unit(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(t) = self.tokens.get(0) {
             let unit = match t {
+                Token::Ident(id) if id == "set" => self.expect_set()?,
+                Token::Ident(id) if id == "dict" => self.expect_dict()?,
                 Token::Ident(_)   => self.expect_ident().map(tree::Expr::Ident)?,
                 Token::Numeric(_) | Token::Str(_) | Token::Char(_) => self.expect_literal()? ,
                 token!["["]       => self.expect_list()?,
@@ -597,7 +599,7 @@ impl Parser {
                     self.expect1(token![")"])?;
             
                     e
-                }
+                },
                 _ => return Ok(None)
             };
 
@@ -656,23 +658,33 @@ impl Parser {
 
     /// Expect a set (set {1, 2, 3, 4})
     fn expect_set(&mut self) -> ParseResult<tree::Expr> {
-        todo!();
+        self.expect1(Token::Ident("set".to_string()))?;
 
-        self.expect1(token!["{"])?;
-        let exprs = self.expect_tuple()?;
-        self.expect1(token!["}"])?;
-        
-        Ok(tree::Expr::SetLiteral(exprs))
+        let e = if self.match1(token!["{"]) {
+            let exprs = self.expect_tuple()?;
+            self.expect1(token!["}"])?;
+            
+            tree::Expr::SetLiteral(exprs)
+        } else {
+            tree::Expr::Ident("set".to_string())
+        };
+
+        Ok(e)
     }
     /// Expect a dict (dict {1: 2, 3: 4})
     fn expect_dict(&mut self) -> ParseResult<tree::Expr> {
-        todo!();
+        self.expect1(Token::Ident("dict".to_string()))?;
 
-        self.expect1(token!["{"])?;
-        let entries = self.expect_tuple_of(Parser::match_entry)?;
-        self.expect1(token!["}"])?;
-        
-        Ok(tree::Expr::DictLiteral(entries))
+        let e = if self.match1(token!["{"]) {
+            let entries = self.expect_tuple_of(Parser::match_entry)?;
+            self.expect1(token!["}"])?;
+            
+            tree::Expr::DictLiteral(entries)
+        } else {
+            tree::Expr::Ident("dict".to_string())
+        };
+
+        Ok(e)
     }
     /// Match a dict entry (1: 2)
     fn match_entry(&mut self) -> ParseResult<Option<(tree::Expr, tree::Expr)>> {
