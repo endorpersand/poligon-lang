@@ -255,7 +255,9 @@ impl Lexer {
     
             // Find the largest length operator that matches the start of the operator buffer.
             let (op, token) = OPMAP.range(left..=right)
-                .next_back()
+                .rev()
+                .filter(|(&op, _)| buf.starts_with(op))
+                .next()
                 .ok_or_else(|| LexErr::UnrecognizedOperator(buf.clone()))?;
             
             // Keep track of the delimiters.

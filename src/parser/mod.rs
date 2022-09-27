@@ -18,7 +18,8 @@ pub enum ParseErr {
     ExpectedIdent,
     ExpectedExpr,
     CannotParseNumeric,
-    ExpectedBlock
+    ExpectedBlock,
+    ExpectedType
 }
 type ParseResult<T> = Result<T, ParseErr>;
 
@@ -142,23 +143,42 @@ impl Parser {
     fn expect_program(&mut self) -> ParseResult<tree::Program> {
         let mut program = vec![];
 
+        /*
+            SAMPLE:
+            let a = 1;
+            if a == 1 {}
+            let b = 2;
+            
+            [let a = 1][;]
+            [if a == 1 {}][no semi]
+            [let b = 2][;]
+            [NONE][no semi] <-- terminate
+        */
+        
         loop {
             let mst = self.match_stmt()?;
-            let has_semi = self.match1(token![;]);
-            // if statement exists, add it to program
+
+            // if statement exists, check if statement needs a semicolon and add to program list
             if let Some(st) = mst {
+                match &st {
+                    // it does not need a semi if it is a block, if, while, for
+                    tree::Stmt::Expr(e) if matches!(e,
+                        | tree::Expr::Block(_)
+                        | tree::Expr::If(_)
+                        | tree::Expr::While { condition: _, block: _ }
+                        | tree::Expr::For { ident: _, iterator: _, block: _ }
+                    ) => { self.match1(token![;]); },
+
+                    // otherwise, it does
+                    _ => self.expect1(token![;])?
+                }
+
                 program.push(st);
             } else {
-                // if statement is nothing, but ended with semi, 
-                // then ignore and keep reading
-
-                // if statement is nothing, and didn't end with semi,
-                // we know we're at the end
-                if !has_semi { break; }
+                if !self.match1(token![;]) { break; }
             }
-    
         }
-        
+
         Ok(program)
     }
 
@@ -334,12 +354,36 @@ impl Parser {
         }
     }
     
+    fn match_type(&mut self) -> ParseResult<Option<tree::Type>> {
+        if matches!(self.tokens.get(0), Some(Token::Ident(_))) {
+            let ident = self.expect_ident()?;
+
+            let params = if self.match1(token![<]) {
+                let tpl = self.expect_tuple_of(Parser::match_type)?;
+                self.expect1(token![>])?;
+
+                if !tpl.is_empty() {
+                    tpl
+                } else {
+                    // list<>
+                    Err(ParseErr::ExpectedType)?
+                }
+            } else {
+                vec![]
+            };
+
+            Ok(Some(tree::Type(ident, params)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Expect that the next tokens represent a type expression.
     /// 
     /// Return the type expression,
     /// or error if the tokens do not represent a type expression.
     fn expect_type(&mut self) -> ParseResult<tree::Type> {
-        todo!()
+        self.match_type()?.ok_or(ParseErr::ExpectedType)
     }
 
     ///// EXPRESSION MATCHING
@@ -768,11 +812,16 @@ mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
 
-    use super::{tree, parse, ParseErr};
+    use super::{tree, parse, ParseErr, Parser};
 
     macro_rules! assert_parse {
         ($s:expr => $r:expr) => {
             assert_eq!(parse_str(&$s), Ok($r))
+        }
+    }
+    macro_rules! assert_parse_fail {
+        ($s:expr => $r:expr) => {
+            assert_eq!(parse_str(&$s), Err($r))
         }
     }
 
@@ -802,7 +851,7 @@ mod tests {
             }))
         ]);
 
-        assert_parse!("{};" => vec![
+        assert_parse!("{}" => vec![
             tree::Stmt::Expr(tree::Expr::Block(vec![]))
         ])
     }
@@ -811,7 +860,7 @@ mod tests {
     fn if_else_test() {
         assert_parse!("if true {
             // :)
-        };" => vec![
+        }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -823,7 +872,7 @@ mod tests {
             // :)
         } else {
             // :(
-        };" => vec![
+        }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -837,7 +886,7 @@ mod tests {
             // :|
         } else {
             // :(
-        };" => vec![
+        }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -861,7 +910,7 @@ mod tests {
             // :|
         } else {
             // :(
-        };" => vec![
+        }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Ident("true".to_string())), 
                 if_true: vec![], 
@@ -884,5 +933,95 @@ mod tests {
                 })))
             }))
         ]);
+    }
+
+    #[test]
+    fn semicolon_test() {
+        assert_parse_fail!("2 2" => ParseErr::ExpectedTokens(vec![token![;]]));
+
+        assert_parse!("if cond {}" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
+            condition: Box::new(tree::Expr::Ident("cond".to_string())),
+            if_true: vec![],
+            if_false: None
+        }))]);
+        assert_parse!("if cond {};" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
+            condition: Box::new(tree::Expr::Ident("cond".to_string())),
+            if_true: vec![],
+            if_false: None
+        }))]);
+
+        assert_parse!("
+        let a = 0;
+        let b = 1;
+        let c = 2;
+        if cond {
+            let d = 3;
+        }
+        " => vec![
+            tree::Stmt::Decl(tree::Decl { 
+                rt: tree::ReasnType::Let, 
+                mt: tree::MutType::Immut, 
+                ident: String::from("a"), 
+                ty: None, 
+                val: tree::Expr::Literal(tree::Literal::Int(0))
+            }),
+            tree::Stmt::Decl(tree::Decl { 
+                rt: tree::ReasnType::Let, 
+                mt: tree::MutType::Immut, 
+                ident: String::from("b"), 
+                ty: None, 
+                val: tree::Expr::Literal(tree::Literal::Int(1))
+            }),
+            tree::Stmt::Decl(tree::Decl { 
+                rt: tree::ReasnType::Let, 
+                mt: tree::MutType::Immut, 
+                ident: String::from("c"), 
+                ty: None, 
+                val: tree::Expr::Literal(tree::Literal::Int(2))
+            }),
+            tree::Stmt::Expr(tree::Expr::If(tree::If {
+                condition: Box::new(tree::Expr::Ident("cond".to_string())),
+                if_true: vec![
+                    tree::Stmt::Decl(tree::Decl { 
+                        rt: tree::ReasnType::Let, 
+                        mt: tree::MutType::Immut, 
+                        ident: String::from("d"), 
+                        ty: None, 
+                        val: tree::Expr::Literal(tree::Literal::Int(3))
+                    })
+                ],
+                if_false: None
+            }))
+        ])
+    }
+
+    #[test]
+    fn type_test() {
+        
+        let tokens = tokenize("int").unwrap();
+        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+            tree::Type("int".to_string(), vec![])
+        ));
+
+        let tokens = tokenize("dict<a, b>").unwrap();
+
+        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+            tree::Type("dict".to_string(), vec![
+                tree::Type("a".to_string(), vec![]),
+                tree::Type("b".to_string(), vec![])
+            ])
+        ));
+
+        let tokens = tokenize("dict<list<list<int>>, str>").unwrap();
+        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+            tree::Type("dict".to_string(), vec![
+                tree::Type("list".to_string(), vec![
+                    tree::Type("list".to_string(), vec![
+                        tree::Type("int".to_string(), vec![])
+                    ])
+                ]),
+                tree::Type("str".to_string(), vec![])
+            ])
+        ));
     }
 }

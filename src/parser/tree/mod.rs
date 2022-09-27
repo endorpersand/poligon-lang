@@ -34,7 +34,7 @@ pub enum ReasnType { Let, Const }
 pub enum MutType { Mut, Immut }
 
 #[derive(Debug, PartialEq)]
-pub struct Type;
+pub struct Type(pub String, pub Vec<Type>);
 
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
