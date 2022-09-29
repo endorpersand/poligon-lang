@@ -1,6 +1,5 @@
-use crate::lexer::token::Token;
-
 pub type Program = Vec<Stmt>;
+pub mod op;
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
@@ -59,8 +58,8 @@ pub enum Expr {
     BinaryOp(BinaryOp),
     Comparison {
         left: Box<Expr>,
-        right: (Token, Box<Expr>),
-        extra: Vec<(Token, Box<Expr>)>
+        right: (op::Cmp, Box<Expr>),
+        extra: Vec<(op::Cmp, Box<Expr>)>
     },
     Range {
         left: Box<Expr>,
@@ -108,13 +107,13 @@ pub struct Attr {
 
 #[derive(Debug, PartialEq)]
 pub struct UnaryOp {
-    pub op: Token,
+    pub op: op::Unary,
     pub expr: Box<Expr>
 }
 
 #[derive(Debug, PartialEq)]
 pub struct BinaryOp {
-    pub op: Token,
+    pub op: op::Binary,
     pub left: Box<Expr>,
     pub right: Box<Expr>
 }

@@ -28,7 +28,7 @@ macro_rules! left_assoc_op {
             if let Some(mut e) = self.$ds()? {
                 while let Some(op) = self.match_n(&[$(token![$op]),+]) {
                     e = tree::Expr::BinaryOp(tree::BinaryOp {
-                        op,
+                        op: op.into(),
                         left: Box::new(e),
                         right: self.$ds()?
                             .map(Box::new)
@@ -482,7 +482,7 @@ impl Parser {
             if let Some(t) = self.match_n(&cmp_ops) {
                 let rexpr = self.match_spread()?
                     .ok_or(ParseErr::ExpectedExpr)?;
-                let right = (t, Box::new(rexpr));
+                let right = (t.into(), Box::new(rexpr));
 
                 
                 // check for any other comparisons:
@@ -490,7 +490,7 @@ impl Parser {
                 let mut extra = vec![];
                 while let Some(t) = self.match_n(&cmp_ops) {
                     let e = self.match_spread()?.ok_or(ParseErr::ExpectedExpr)?;
-                    extra.push((t, Box::new(e)))
+                    extra.push((t.into(), Box::new(e)))
                 }
 
                 e = tree::Expr::Comparison { 
@@ -513,7 +513,7 @@ impl Parser {
         if let Some(mut e) = self.match_range()? {
             if is_spread {
                 e = tree::Expr::UnaryOp(tree::UnaryOp { 
-                    op: token![..], expr: Box::new(e)
+                    op: token![..].into(), expr: Box::new(e)
                 });
             }
 
@@ -573,8 +573,8 @@ impl Parser {
         } else {
             let mut e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
             e = ops.into_iter()
-                .rfold(e, |expr, op| tree::Expr::UnaryOp(tree::UnaryOp {
-                    op, expr: Box::new(expr)
+                .rfold(e, |expr, t| tree::Expr::UnaryOp(tree::UnaryOp {
+                    op: t.into(), expr: Box::new(expr)
                 }));
 
             Some(e)
@@ -810,6 +810,7 @@ impl Parser {
 mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
+    use crate::program::tree::op;
 
     use super::{tree, parse, ParseErr, Parser};
 
@@ -832,7 +833,7 @@ mod tests {
     fn expression_test() {
         assert_parse!("2 + 3;" => vec![
             tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
-                op: token![+], 
+                op: op::Binary::Add, 
                 left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
                 right: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
             }))
@@ -840,10 +841,10 @@ mod tests {
 
         assert_parse!("2 + 3 * 4;" => vec![
             tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
-                op: token![+], 
+                op: op::Binary::Add, 
                 left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
                 right: Box::new(tree::Expr::BinaryOp(tree::BinaryOp {
-                    op: token![*], 
+                    op: op::Binary::Mul, 
                     left: Box::new(tree::Expr::Literal(tree::Literal::Int(3))), 
                     right: Box::new(tree::Expr::Literal(tree::Literal::Int(4)))
                 }))
