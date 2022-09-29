@@ -14,7 +14,7 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq)]
 pub struct Decl {
-    pub rt: ReasnType,
+    pub rt: ReasgType,
     pub mt: MutType,
     pub ident: String,
     pub ty: Option<Type>,
@@ -22,14 +22,14 @@ pub struct Decl {
 }
 #[derive(Debug, PartialEq)]
 pub struct Param {
-    pub rt: ReasnType,
+    pub rt: ReasgType,
     pub mt: MutType,
     pub ident: String,
     pub ty: Option<Type>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ReasnType { Let, Const }
+pub enum ReasgType { Let, Const }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MutType { Mut, Immut }
 

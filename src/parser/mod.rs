@@ -217,8 +217,8 @@ impl Parser {
     /// or error if the tokens do not represent a variable declaration.
     fn expect_decl(&mut self) -> ParseResult<tree::Decl> {
         let rt = match self.tokens.pop_front() {
-            Some(token![let])   => tree::ReasnType::Let,
-            Some(token![const]) => tree::ReasnType::Const,
+            Some(token![let])   => tree::ReasgType::Let,
+            Some(token![const]) => tree::ReasgType::Const,
             _ => unreachable!()
         };
         
@@ -257,8 +257,8 @@ impl Parser {
         let mut empty = mrt_token.is_none(); // if mrt is not empty, ensure empty is false
         
         let rt = match mrt_token {
-            Some(token![let]) | None  => tree::ReasnType::Let,
-            Some(token![const]) => tree::ReasnType::Const,
+            Some(token![let]) | None  => tree::ReasgType::Let,
+            Some(token![const]) => tree::ReasgType::Const,
             _ => unreachable!()
         };
         
@@ -959,21 +959,21 @@ mod tests {
         }
         " => vec![
             tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasnType::Let, 
+                rt: tree::ReasgType::Let, 
                 mt: tree::MutType::Immut, 
                 ident: String::from("a"), 
                 ty: None, 
                 val: tree::Expr::Literal(tree::Literal::Int(0))
             }),
             tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasnType::Let, 
+                rt: tree::ReasgType::Let, 
                 mt: tree::MutType::Immut, 
                 ident: String::from("b"), 
                 ty: None, 
                 val: tree::Expr::Literal(tree::Literal::Int(1))
             }),
             tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasnType::Let, 
+                rt: tree::ReasgType::Let, 
                 mt: tree::MutType::Immut, 
                 ident: String::from("c"), 
                 ty: None, 
@@ -983,7 +983,7 @@ mod tests {
                 condition: Box::new(tree::Expr::Ident("cond".to_string())),
                 if_true: vec![
                     tree::Stmt::Decl(tree::Decl { 
-                        rt: tree::ReasnType::Let, 
+                        rt: tree::ReasgType::Let, 
                         mt: tree::MutType::Immut, 
                         ident: String::from("d"), 
                         ty: None, 
