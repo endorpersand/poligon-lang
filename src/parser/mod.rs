@@ -1,8 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::lexer::token::{Token, token};
-
-pub mod tree;
+use crate::program::tree;
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> Result<tree::Program, ParseErr> {
     Parser::new(tokens).parse()

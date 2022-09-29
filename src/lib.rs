@@ -2,6 +2,7 @@ use std::{fs, io};
 use std::path::Path;
 mod lexer;
 mod parser;
+mod program;
 
 pub fn lex_from_file(fp: impl AsRef<Path>) -> io::Result<Vec<lexer::token::Token>> {
     let source = fs::read_to_string(fp)?;
