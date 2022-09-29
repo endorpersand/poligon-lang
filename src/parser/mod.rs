@@ -512,9 +512,7 @@ impl Parser {
         
         if let Some(mut e) = self.match_range()? {
             if is_spread {
-                e = tree::Expr::UnaryOp(tree::UnaryOp { 
-                    op: token![..].into(), expr: Box::new(e)
-                });
+                e = Parser::wrap_unary_op(vec![token![..].into()], e);
             }
 
             Ok(Some(e))
@@ -565,22 +563,43 @@ impl Parser {
 
         let mut ops = vec![];
         while let Some(t) = self.match_n(&unary_ops) {
-            ops.push(t);
+            ops.push(t.into());
         }
 
         let me = if ops.is_empty() {
             self.match_call()?
         } else {
-            let mut e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
-            e = ops.into_iter()
-                .rfold(e, |expr, t| tree::Expr::UnaryOp(tree::UnaryOp {
-                    op: t.into(), expr: Box::new(expr)
-                }));
+            let e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
 
-            Some(e)
+            Some(Parser::wrap_unary_op(ops, e))
         };
 
         Ok(me)
+    }
+
+    /// Helper function that constructs a "Unary Ops" node.
+    /// 
+    /// It takes the inner expression and acts as though the unary operators were applied to it.
+    /// If the inner expression is a uops node, this also flattens the operators 
+    /// (so that we don't have a unary operators node wrapping another one)
+    fn wrap_unary_op(mut ops: Vec<tree::op::Unary>, inner: tree::Expr) -> tree::Expr {
+        // flatten if unary ops inside
+        let uops = if let tree::Expr::UnaryOps(uops) = inner {
+            let tree::UnaryOps { ops: ops2, expr } = uops;
+
+            ops.extend(ops2);
+            tree::UnaryOps {
+                ops, expr
+            }
+        } else {
+            // wrap otherwise
+            tree::UnaryOps {
+                ops,
+                expr: Box::new(inner)
+            }
+        };
+
+        tree::Expr::UnaryOps(uops)
     }
 
     /// Match a function call. (f(1, 2, 3, 4))
@@ -1023,5 +1042,60 @@ mod tests {
                 tree::Type("str".to_string(), vec![])
             ])
         ));
+    }
+
+    #[test]
+    fn unary_ops_test() {
+        assert_parse!("
+        +3;
+        " => vec![
+            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+                ops: vec![token![+].into()],
+                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+            }))
+        ]);
+
+        assert_parse!("
+        +++++++3;
+        " => vec![
+            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+                ops: vec![token![+].into()].repeat(7),
+                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+            }))
+        ]);
+
+        assert_parse!("
+        +-+-+-+-3;
+        " => vec![
+            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+                ops: vec![token![+].into(), token![-].into()].repeat(4),
+                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+            }))
+        ]);
+
+        assert_parse!("
+        ..+-+-+-+-3;
+        " => vec![
+            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+                ops: vec![
+                    token![..].into(), 
+                    token![+].into(), 
+                    token![-].into(), 
+                    token![+].into(), 
+                    token![-].into(), 
+                    token![+].into(), 
+                    token![-].into(), 
+                    token![+].into(), 
+                    token![-].into()],
+                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+            }))
+        ]);
+
+        assert_parse!("+(+2);" => vec![
+            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+                ops: vec![token![+].into()].repeat(2),
+                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(2)))
+            }))
+        ])
     }
 }

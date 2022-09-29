@@ -27,7 +27,7 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Assignment(_, _) => todo!(),
             tree::Expr::Attr(_) => todo!(),
             tree::Expr::StaticAttr(_) => todo!(),
-            tree::Expr::UnaryOp(o) => o.traverse_rt(),
+            tree::Expr::UnaryOps(o) => o.traverse_rt(),
             tree::Expr::BinaryOp(o) => o.traverse_rt(),
             tree::Expr::Comparison { left, right, extra } => todo!(),
             tree::Expr::Range { left, right, step } => todo!(),
@@ -51,9 +51,9 @@ impl TraverseRt for tree::Literal {
     }
 }
 
-impl TraverseRt for tree::UnaryOp {
+impl TraverseRt for tree::UnaryOps {
     fn traverse_rt(&self) -> Result<Value, RuntimeErr> {
-        let tree::UnaryOp {op, expr} = self;
+        let tree::UnaryOps {ops, expr} = self;
 
         let e = expr.traverse_rt()?;
         todo!();

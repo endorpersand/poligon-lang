@@ -54,7 +54,7 @@ pub enum Expr {
     Assignment(String, Box<Expr>),
     Attr(Attr), // a.b.c.d
     StaticAttr(Attr), // a::b::c::d
-    UnaryOp(UnaryOp),
+    UnaryOps(UnaryOps),
     BinaryOp(BinaryOp),
     Comparison {
         left: Box<Expr>,
@@ -106,8 +106,8 @@ pub struct Attr {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct UnaryOp {
-    pub op: op::Unary,
+pub struct UnaryOps {
+    pub ops: Vec<op::Unary>,
     pub expr: Box<Expr>
 }
 
