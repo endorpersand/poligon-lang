@@ -1,40 +1,8 @@
+use self::value::Value;
+
 pub(crate) mod tree;
+pub(crate) mod value;
 
-pub enum Value {
-    Int(isize),
-    Float(f64),
-    Char(char),
-    Str(String),
-    Bool(bool)
-}
-
-impl Value {
-    /// Truthiness of a value: when it is cast to bool, what truth value should it have?
-    /// 
-    /// Numerics: Non-zero => true
-    /// Collections: Non-empty => true
-    fn truth(&self) -> bool {
-        match self {
-            Value::Int(v) => v != &0,
-            Value::Float(v) => v != &0.0,
-            Value::Char(_) => true,
-            Value::Str(v) => !v.is_empty(),
-            Value::Bool(v) => *v
-        }
-    }
-}
-
-impl From<tree::Literal> for Value {
-    fn from(literal: tree::Literal) -> Self {
-        match literal {
-            tree::Literal::Int(v)   => Value::Int(v),
-            tree::Literal::Float(v) => Value::Float(v),
-            tree::Literal::Char(v)  => Value::Char(v),
-            tree::Literal::Str(v)   => Value::Str(v),
-            tree::Literal::Bool(v)  => Value::Bool(v),
-        }
-    }
-}
 pub enum RuntimeErr {
 
 }
@@ -58,7 +26,25 @@ impl TraverseRt for tree::Expr {
             tree::Expr::StaticAttr(_) => todo!(),
             tree::Expr::UnaryOps(o) => o.traverse_rt(),
             tree::Expr::BinaryOp(o) => o.traverse_rt(),
-            tree::Expr::Comparison { left, right, extra } => todo!(),
+            tree::Expr::Comparison { left, right, extra } => {
+                let mut cmps = vec![right];
+                cmps.extend(extra);
+
+                let mut lval = left.traverse_rt()?;
+                for (cmp, rexpr) in cmps {
+                    let rval = rexpr.traverse_rt()?;
+                    // TODO, actually attach cmp
+                    let result = false;
+
+                    if result {
+                        lval = rval;
+                    } else {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+
+                Ok(Value::Bool(true))
+            },
             tree::Expr::Range { left, right, step } => todo!(),
             tree::Expr::If(e) => e.traverse_rt(),
             tree::Expr::While { condition, block } => todo!(),

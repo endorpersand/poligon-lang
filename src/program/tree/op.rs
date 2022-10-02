@@ -28,6 +28,14 @@ pub enum Cmp {
     Lt, Gt, Le, Ge, Eq, Ne
 }
 
+pub trait Applicable {
+    type Return;
+
+    fn apply_unary(&self, o: Unary) -> Self::Return;
+    fn apply_binary(&self, o: Binary, right: &Self) -> Self::Return;
+    fn apply_cmp(&self, o: Cmp, right: &Self) -> Self::Return;
+}
+
 impl From<Token> for Unary {
     fn from(t: Token) -> Self {
         match t {
