@@ -1,10 +1,11 @@
+use self::tree::op::CmpApplicable;
 use self::value::Value;
 
 pub(crate) mod tree;
 pub(crate) mod value;
 
 pub enum RuntimeErr {
-
+    CannotCompare(String, String)
 }
 
 type TRReturn = Result<Value, RuntimeErr>;
@@ -31,11 +32,14 @@ impl TraverseRt for tree::Expr {
                 cmps.extend(extra);
 
                 let mut lval = left.traverse_rt()?;
+                // for cmp a < b < c < d < e,
+                // break it up into a < b && b < c && c < d && d < e
+                // do each comparison. if any ever returns false, short circuit and return
                 for (cmp, rexpr) in cmps {
                     let rval = rexpr.traverse_rt()?;
-                    // TODO, actually attach cmp
-                    let result = false;
 
+                    let result = lval.apply_cmp(cmp, &rval)
+                        .ok_or_else(|| RuntimeErr::CannotCompare(lval.ty(), rval.ty()))?;
                     if result {
                         lval = rval;
                     } else {

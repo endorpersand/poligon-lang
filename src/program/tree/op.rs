@@ -28,12 +28,38 @@ pub enum Cmp {
     Lt, Gt, Le, Ge, Eq, Ne
 }
 
-pub trait Applicable {
+impl Cmp {
+    pub fn cmp<E>(&self, l: E, r: E) -> bool
+        where E: PartialOrd + PartialEq
+    {
+        match self {
+            Cmp::Lt => l < r,
+            Cmp::Gt => l > r,
+            Cmp::Le => l >= r,
+            Cmp::Ge => l >= r,
+            Cmp::Eq => l == r,
+            Cmp::Ne => l != r,
+        }
+    }
+
+    pub fn is_ord_cmp(&self) -> bool {
+        matches!(self, Cmp::Lt | Cmp::Gt | Cmp::Le | Cmp::Ge)
+    }
+}
+pub trait UnaryApplicable {
     type Return;
 
-    fn apply_unary(&self, o: Unary) -> Self::Return;
-    fn apply_binary(&self, o: Binary, right: &Self) -> Self::Return;
-    fn apply_cmp(&self, o: Cmp, right: &Self) -> Self::Return;
+    fn apply_unary(&self, o: &Unary) -> Self::Return;
+}
+pub trait BinaryApplicable {
+    type Return;
+
+    fn apply_binary(&self, o: &Binary, right: &Self) -> Self::Return;
+}
+pub trait CmpApplicable {
+    type Return;
+
+    fn apply_cmp(&self, o: &Cmp, right: &Self) -> Self::Return;
 }
 
 impl From<Token> for Unary {
