@@ -649,7 +649,7 @@ impl Parser {
                 Token::Ident(id) if id == "set" => self.expect_set()?,
                 Token::Ident(id) if id == "dict" => self.expect_dict()?,
                 Token::Ident(_)   => self.expect_ident().map(tree::Expr::Ident)?,
-                Token::Numeric(_) | Token::Str(_) | Token::Char(_) => self.expect_literal()? ,
+                Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
                 token!["["]       => self.expect_list()?,
                 token!["{"]       => self.expect_block().map(tree::Expr::Block)?,
                 token![if]        => self.expect_if()?,
@@ -698,11 +698,13 @@ impl Parser {
 
     /// Expect a literal (numeric, str, char)
     fn expect_literal(&mut self) -> ParseResult<tree::Expr> {
-        let lit = match self.tokens.pop_front() {
-            Some(Token::Numeric(s)) => tree::Literal::from_numeric(&s)
+        let lit = match self.tokens.pop_front().expect("unreachable") {
+            Token::Numeric(s) => tree::Literal::from_numeric(&s)
                 .ok_or(ParseErr::CannotParseNumeric)?,
-            Some(Token::Str(s)) => tree::Literal::Str(s),
-            Some(Token::Char(c)) => tree::Literal::Char(c),
+            Token::Str(s) => tree::Literal::Str(s),
+            Token::Char(c) => tree::Literal::Char(c),
+            token![true] => tree::Literal::Bool(true),
+            token![false] => tree::Literal::Bool(false),
             _ => unreachable!()
         };
 

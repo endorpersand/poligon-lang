@@ -78,12 +78,13 @@ pub enum Expr {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Literal {
     Int(isize),
     Float(f64),
     Char(char),
-    Str(String)
+    Str(String),
+    Bool(bool)
 }
 
 impl Literal {

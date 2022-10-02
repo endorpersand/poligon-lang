@@ -6,8 +6,8 @@ use lazy_static::lazy_static;
 pub enum Token {
     Ident(String),
     Numeric(String),
-    Str(String),
-    Char(char),
+    Str(String), // "abcd"
+    Char(char), // 'a'
     Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
     Keyword(Keyword),
     Operator(Operator),
@@ -110,7 +110,9 @@ define_keywords! {
     Break:    "break",
     Continue: "continue",
     Step:     "step",    // 1..2 step 4
-    In:       "in"       // for x in y
+    In:       "in",      // for x in y
+    True:     "true",
+    False:    "false"
 }
 
 define_operators_and_delimiters! {
@@ -184,6 +186,8 @@ macro_rules! token {
     (continue) => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Continue) };
     (step)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Step)     };
     (in)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::In)       };
+    (true)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::True)     };
+    (false)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::False)    };
 
     (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
     (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
