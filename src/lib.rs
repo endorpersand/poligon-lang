@@ -11,10 +11,10 @@ pub fn lex_from_file(fp: impl AsRef<Path>) -> io::Result<Vec<lexer::token::Token
     Ok(tokens)
 }
 
-pub fn parse_from_file(fp: impl AsRef<Path>) -> io::Result<()> {
+pub fn parse_from_file(fp: impl AsRef<Path>) -> io::Result<program::tree::Program> {
     let p = parser::parse(lex_from_file(fp).unwrap()).unwrap();
 
-    Ok(())
+    Ok(p)
 }
 
 #[cfg(test)]
