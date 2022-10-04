@@ -19,9 +19,9 @@ fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<
     }
 }
 
-fn numeric_binary<FF, FI>(a: &Value, o: &op::Binary, b: &Value, ff: FF, fi: FI) -> Result<Value, super::RuntimeErr> 
-    where FF: FnOnce(f64, f64) -> Result<Value, super::RuntimeErr>,
-          FI: FnOnce(isize, isize) -> Result<Value, super::RuntimeErr>
+fn numeric_binary<FF, FI>(a: &Value, o: &op::Binary, b: &Value, ff: FF, fi: FI) -> super::RtResult<Value> 
+    where FF: FnOnce(f64, f64) -> super::RtResult<Value>,
+          FI: FnOnce(isize, isize) -> super::RtResult<Value>
 {
     match (a, b) {
         (Value::Float(a), Value::Float(b)) => ff(*a, *b),
@@ -100,7 +100,7 @@ impl From<tree::Literal> for Value {
 }
 
 impl op::UnaryApplicable for Value {
-    type Return = Result<Value, super::RuntimeErr>;
+    type Return = super::RtResult<Value>;
 
     fn apply_unary(&self, o: &op::Unary) -> Self::Return {
         match o {
@@ -118,7 +118,7 @@ impl op::UnaryApplicable for Value {
 }
 
 impl op::BinaryApplicable for Value {
-    type Return = Result<Value, super::RuntimeErr>;
+    type Return = super::RtResult<Value>;
 
     fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
         match o {
@@ -153,7 +153,7 @@ impl op::BinaryApplicable for Value {
 }
 
 impl op::CmpApplicable for Value {
-    type Return = Result<bool, super::RuntimeErr>;
+    type Return = super::RtResult<bool>;
 
     fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> Self::Return {
         match o {

@@ -14,13 +14,13 @@ pub enum RuntimeErr {
     DivisionByZero
 }
 
-type TRReturn = Result<Value, RuntimeErr>;
+type RtResult<T> = Result<T, RuntimeErr>;
 pub trait TraverseRt {
-    fn traverse_rt(&self) -> TRReturn;
+    fn traverse_rt(&self) -> RtResult<Value>;
 }
 
 impl TraverseRt for tree::Expr {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         match self {
             tree::Expr::Ident(_) => todo!(),
             tree::Expr::Block(e) => e.traverse_rt(),
@@ -68,13 +68,13 @@ impl TraverseRt for tree::Expr {
 }
 
 impl TraverseRt for tree::Literal {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         Ok(self.clone().into())
     }
 }
 
 impl TraverseRt for tree::UnaryOps {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         let tree::UnaryOps {ops, expr} = self;
 
         let mut ops_iter = ops.iter().rev();
@@ -97,7 +97,7 @@ impl TraverseRt for tree::UnaryOps {
 }
 
 impl TraverseRt for tree::BinaryOp {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         let tree::BinaryOp { op, left, right } = self;
 
         left.apply_binary(op, right)
@@ -105,13 +105,13 @@ impl TraverseRt for tree::BinaryOp {
 }
 
 impl TraverseRt for tree::Program {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         todo!()
     }
 }
 
 impl TraverseRt for tree::If {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         let tree::If { condition, if_true, if_false } = self;
 
         if condition.traverse_rt()?.truth() {
@@ -125,7 +125,7 @@ impl TraverseRt for tree::If {
 }
 
 impl TraverseRt for tree::Else {
-    fn traverse_rt(&self) -> TRReturn {
+    fn traverse_rt(&self) -> RtResult<Value> {
         match self {
             tree::Else::If(e) => e.traverse_rt(),
             tree::Else::Block(e) => e.traverse_rt(),
