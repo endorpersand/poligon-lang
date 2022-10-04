@@ -1,11 +1,16 @@
-use self::tree::op::CmpApplicable;
+use crate::program::tree::op::UnaryApplicable;
+
+use self::tree::op::{self, CmpApplicable, BinaryApplicable};
 use self::value::Value;
 
 pub(crate) mod tree;
 pub(crate) mod value;
 
+#[derive(Debug)]
 pub enum RuntimeErr {
-    CannotCompare(String, String)
+    CannotCompare(op::Cmp, String, String),
+    CannotApplyUnary(op::Unary, String),
+    CannotApplyBinary(op::Binary, String, String),
 }
 
 type TRReturn = Result<Value, RuntimeErr>;
@@ -19,7 +24,13 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Ident(_) => todo!(),
             tree::Expr::Block(e) => e.traverse_rt(),
             tree::Expr::Literal(e) => e.traverse_rt(),
-            tree::Expr::ListLiteral(_) => todo!(),
+            tree::Expr::ListLiteral(e) => {
+                let vec = e.iter()
+                    .map(TraverseRt::traverse_rt)
+                    .collect::<Result<_, _>>()?;
+
+                Ok(Value::List(vec))
+            },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
             tree::Expr::Assignment(_, _) => todo!(),
@@ -38,9 +49,7 @@ impl TraverseRt for tree::Expr {
                 for (cmp, rexpr) in cmps {
                     let rval = rexpr.traverse_rt()?;
 
-                    let result = lval.apply_cmp(cmp, &rval)
-                        .ok_or_else(|| RuntimeErr::CannotCompare(lval.ty(), rval.ty()))?;
-                    if result {
+                    if lval.apply_cmp(cmp, &rval)? {
                         lval = rval;
                     } else {
                         return Ok(Value::Bool(false));
@@ -67,8 +76,22 @@ impl TraverseRt for tree::UnaryOps {
     fn traverse_rt(&self) -> TRReturn {
         let tree::UnaryOps {ops, expr} = self;
 
-        let e = expr.traverse_rt()?;
-        todo!();
+        let mut ops_iter = ops.iter().rev();
+        
+        // ops should always have at least 1 unary op, so this should always be true
+        let mut e = if let Some(op) = ops_iter.next() {
+            expr.apply_unary(op)
+        } else {
+            // should never happen, but in case it does
+            expr.traverse_rt()
+        }?;
+
+        // apply the rest:
+        for op in ops_iter {
+            e = e.apply_unary(op)?;
+        }
+
+        Ok(e)
     }
 }
 
@@ -76,9 +99,7 @@ impl TraverseRt for tree::BinaryOp {
     fn traverse_rt(&self) -> TRReturn {
         let tree::BinaryOp { op, left, right } = self;
 
-        let l = left.traverse_rt()?;
-        let r = right.traverse_rt()?;
-        todo!();
+        left.apply_binary(op, right)
     }
 }
 

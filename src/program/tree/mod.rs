@@ -1,3 +1,5 @@
+use super::TraverseRt;
+
 pub type Program = Vec<Stmt>;
 pub mod op;
 
@@ -130,4 +132,33 @@ pub struct If {
 pub enum Else {
     If(If),
     Block(Program)
+}
+
+
+impl op::UnaryApplicable for Expr {
+    type Return = <super::Value as op::UnaryApplicable>::Return;
+
+    fn apply_unary(&self, o: &op::Unary) -> Self::Return {
+        self.traverse_rt().and_then(|v| v.apply_unary(o))
+    }
+}
+impl op::BinaryApplicable for Expr {
+    type Return = <super::Value as op::BinaryApplicable>::Return;
+
+    fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
+        match o {
+            // &&, || have special short circuiting that needs to be dealt with
+            op::Binary::LogAnd => {
+                let left = self.traverse_rt()?;
+                Ok(if left.truth() { right.traverse_rt()? } else { left })
+            },
+            op::Binary::LogOr => {
+                let left = self.traverse_rt()?;
+                Ok(if left.truth() { left } else { right.traverse_rt()? })
+            },
+
+            // fallback to eager value binary
+            _ => self.traverse_rt().and_then(|v| v.apply_binary(o, &right.traverse_rt()?))
+        }
+    }
 }

@@ -6,7 +6,8 @@ pub enum Value {
     Float(f64),
     Char(char),
     Str(String),
-    Bool(bool)
+    Bool(bool),
+    List(Vec<Value>)
 }
 
 impl Value {
@@ -20,7 +21,8 @@ impl Value {
             Value::Float(v) => v != &0.0,
             Value::Char(_) => true,
             Value::Str(v) => !v.is_empty(),
-            Value::Bool(v) => *v
+            Value::Bool(v) => *v,
+            Value::List(v) => !v.is_empty(),
         }
     }
 
@@ -43,6 +45,7 @@ impl Value {
             Value::Char(_) => "char",
             Value::Str(_) => "string",
             Value::Bool(_) => "bool",
+            Value::List(_) => "list",
         }.into()
     }
 }
@@ -60,7 +63,7 @@ impl From<tree::Literal> for Value {
 }
 
 impl op::UnaryApplicable for Value {
-    type Return = Option<Value>;
+    type Return = Result<Value, super::RuntimeErr>;
 
     fn apply_unary(&self, o: &op::Unary) -> Self::Return {
         match o {
@@ -73,12 +76,12 @@ impl op::UnaryApplicable for Value {
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
             op::Unary::Spread => if let Value::Str(_e) = self { todo!() } else { None },
-        }
+        }.ok_or_else(|| super::RuntimeErr::CannotApplyUnary(*o, self.ty()))
     }
 }
 
 impl op::BinaryApplicable for Value {
-    type Return = Option<Value>;
+    type Return = Result<Value, super::RuntimeErr>;
 
     fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
         match o {
@@ -97,7 +100,7 @@ impl op::BinaryApplicable for Value {
 }
 
 impl op::CmpApplicable for Value {
-    type Return = Option<bool>;
+    type Return = Result<bool, super::RuntimeErr>;
 
     fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> Self::Return {
         match o {
@@ -135,6 +138,6 @@ impl op::CmpApplicable for Value {
                     _ => None
                 }
             },
-        }
+        }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
     }
 }
