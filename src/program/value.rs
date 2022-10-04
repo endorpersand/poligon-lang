@@ -130,10 +130,18 @@ impl op::BinaryApplicable for Value {
                 |a, b| Ok(Value::Float(a - b)), 
                 |a, b| Ok(Value::Int(a - b))),
         
-            op::Binary::Mul => numeric_binary(self, o, right, 
-                |a, b| Ok(Value::Float(a * b)), 
-                |a, b| Ok(Value::Int(a * b))),
+            op::Binary::Mul => match (self, right) {
+                // numeric multiplication
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+                (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a * (*b as f64))),
+                (Value::Int(a), Value::Float(b))   => Ok(Value::Float((*a as f64) * b)),
+                (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a * b)),
         
+                // 2 * "a" == "aa"
+                (Value::Str(a), Value::Int(b)) => Ok(Value::Str(a.repeat(*b as usize))),
+                (Value::Int(a), Value::Str(b)) => Ok(Value::Str(b.repeat(*a as usize))),
+                _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
+            },
             op::Binary::Div => numeric_binary(self, o, right, 
                 |a, b| Ok(Value::Float(a / b)), // IEEE 754
                 |a, b| Ok(Value::Float((a as f64) / (b as f64)))),
