@@ -11,6 +11,7 @@ pub enum RuntimeErr {
     CannotCompare(op::Cmp, String, String),
     CannotApplyUnary(op::Unary, String),
     CannotApplyBinary(op::Binary, String, String),
+    DivisionByZero
 }
 
 type TRReturn = Result<Value, RuntimeErr>;

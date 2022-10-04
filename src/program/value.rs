@@ -10,6 +10,39 @@ pub enum Value {
     List(Vec<Value>)
 }
 
+/// Utility to cast values onto float and compare them
+fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<bool> {
+    if let (Ok(af), Ok(bf)) =  (a.try_into(), b.try_into()) {
+        Some(o.cmp(af, bf))
+    } else {
+        None
+    }
+}
+
+fn numeric_binary<FF, FI>(a: &Value, o: &op::Binary, b: &Value, ff: FF, fi: FI) -> Result<Value, super::RuntimeErr> 
+    where FF: FnOnce(f64, f64) -> Result<Value, super::RuntimeErr>,
+          FI: FnOnce(isize, isize) -> Result<Value, super::RuntimeErr>
+{
+    match (a, b) {
+        (Value::Float(a), Value::Float(b)) => ff(*a, *b),
+        (Value::Float(a), Value::Int(b))   => ff(*a, *b as _),
+        (Value::Int(a), Value::Float(b))   => ff(*a as _, *b),
+        (Value::Int(a), Value::Int(b))     => fi(*a, *b),
+
+        _ => Err(super::RuntimeErr::CannotApplyBinary(*o, a.ty(), b.ty()))
+    }
+}
+
+macro_rules! int_only_op {
+    ($oenum:expr => $a:ident $o:tt $b:ident) => {
+        if let (Value::Int(a), Value::Int(b)) = ($a, $b) {
+            Ok(Value::Int(a $o b))
+        } else {
+            Err(super::RuntimeErr::CannotApplyBinary(*$oenum, $a.ty(), $b.ty()))
+        }
+    }
+}
+
 impl Value {
     /// Truthiness of a value: when it is cast to bool, what truth value should it have?
     /// 
@@ -26,14 +59,6 @@ impl Value {
         }
     }
 
-    pub fn as_float(&self) -> Option<f64> {
-        match self {
-            Value::Int(i) => Some(*i as _),
-            Value::Float(f) => Some(*f),
-            _ => None,
-        }
-    }
-
     pub fn is_numeric(&self) -> bool {
         matches!(self, Value::Int(_) | Value::Float(_))
     }
@@ -47,6 +72,18 @@ impl Value {
             Value::Bool(_) => "bool",
             Value::List(_) => "list",
         }.into()
+    }
+}
+
+impl TryFrom<&Value> for f64 {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Int(i) => Ok(*i as _),
+            Value::Float(f) => Ok(*f),
+            _ => Err(()),
+        }
     }
 }
 
@@ -85,16 +122,32 @@ impl op::BinaryApplicable for Value {
 
     fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
         match o {
-            op::Binary::Add => todo!(),
-            op::Binary::Sub => todo!(),
-            op::Binary::Mul => todo!(),
-            op::Binary::Div => todo!(),
-            op::Binary::Mod => todo!(),
-            op::Binary::BitOr => todo!(),
-            op::Binary::BitAnd => todo!(),
-            op::Binary::BitXor => todo!(),
-            op::Binary::LogAnd => todo!(),
-            op::Binary::LogOr => todo!(),
+            op::Binary::Add => numeric_binary(self, o, right, 
+                |a, b| Ok(Value::Float(a + b)), 
+                |a, b| Ok(Value::Int(a + b))),
+            
+            op::Binary::Sub => numeric_binary(self, o, right, 
+                |a, b| Ok(Value::Float(a - b)), 
+                |a, b| Ok(Value::Int(a - b))),
+        
+            op::Binary::Mul => numeric_binary(self, o, right, 
+                |a, b| Ok(Value::Float(a * b)), 
+                |a, b| Ok(Value::Int(a * b))),
+        
+            op::Binary::Div => numeric_binary(self, o, right, 
+                |a, b| Ok(Value::Float(a / b)), // IEEE 754
+                |a, b| Ok(Value::Float((a as f64) / (b as f64)))),
+        
+            op::Binary::Mod => numeric_binary(self, o, right, 
+                |a, b| Ok(Value::Float(a % b)), 
+                |a, b| a.checked_rem(b).map(Value::Int).ok_or(super::RuntimeErr::DivisionByZero)),
+        
+                op::Binary::BitOr  => int_only_op!(o => self | right),
+                op::Binary::BitAnd => int_only_op!(o => self & right),
+                op::Binary::BitXor => int_only_op!(o => self ^ right),
+            
+            op::Binary::LogAnd => Ok(Value::Bool(self.truth() && right.truth())),
+            op::Binary::LogOr =>  Ok(Value::Bool(self.truth() || right.truth())),
         }
     }
 }
@@ -107,8 +160,8 @@ impl op::CmpApplicable for Value {
             op::Cmp::Lt | op::Cmp::Gt | op::Cmp::Le | op::Cmp::Ge => {
                 match (self, right) {
                     // integer/float cmp
-                    (Value::Float(af), b) => b.as_float().map(|bf| o.cmp(*af, bf)),
-                    (a, Value::Float(bf)) => a.as_float().map(|af| o.cmp(af, *bf)),
+                    (Value::Float(af), b) => float_cmp(*af, b, o),
+                    (a, Value::Float(bf)) => float_cmp(a, *bf, o),
                     (Value::Int(a), Value::Int(b)) => Some(o.cmp(a, b)),
     
                     // str, char can be compared against each other but not anything else
@@ -123,8 +176,8 @@ impl op::CmpApplicable for Value {
             op::Cmp::Eq | op::Cmp::Ne => {
                 match (self, right) {
                     // integer/float cmp
-                    (Value::Float(af), b) => b.as_float().map(|bf| o.cmp(*af, bf)),
-                    (a, Value::Float(bf)) => a.as_float().map(|af| o.cmp(af, *bf)),
+                    (Value::Float(af), b) => float_cmp(*af, b, o),
+                    (a, Value::Float(bf)) => float_cmp(a, *bf, o),
                     (Value::Int(a), Value::Int(b)) => Some(o.cmp(a, b)),
     
                     // str, char can be compared against each other but not anything else
