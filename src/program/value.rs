@@ -7,7 +7,8 @@ pub enum Value {
     Char(char),
     Str(String),
     Bool(bool),
-    List(Vec<Value>)
+    List(Vec<Value>),
+    Unit
 }
 
 /// Utility to cast values onto float and compare them
@@ -50,12 +51,13 @@ impl Value {
     /// Collections: Non-empty => true
     pub(super) fn truth(&self) -> bool {
         match self {
-            Value::Int(v) => v != &0,
+            Value::Int(v)   => v != &0,
             Value::Float(v) => v != &0.0,
-            Value::Char(_) => true,
-            Value::Str(v) => !v.is_empty(),
-            Value::Bool(v) => *v,
-            Value::List(v) => !v.is_empty(),
+            Value::Char(_)  => true,
+            Value::Str(v)   => !v.is_empty(),
+            Value::Bool(v)  => *v,
+            Value::List(v)  => !v.is_empty(),
+            Value::Unit     => false
         }
     }
 
@@ -65,12 +67,13 @@ impl Value {
 
     pub fn ty(&self) -> String {
         match self {
-            Value::Int(_) => "int",
+            Value::Int(_)   => "int",
             Value::Float(_) => "float",
-            Value::Char(_) => "char",
-            Value::Str(_) => "string",
-            Value::Bool(_) => "bool",
-            Value::List(_) => "list",
+            Value::Char(_)  => "char",
+            Value::Str(_)   => "string",
+            Value::Bool(_)  => "bool",
+            Value::List(_)  => "list",
+            Value::Unit     => "void"
         }.into()
     }
 }

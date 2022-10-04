@@ -117,9 +117,9 @@ impl TraverseRt for tree::If {
         if condition.traverse_rt()?.truth() {
             if_true.traverse_rt()
         } else {
-            // if this is none, what should this return?
-            // a Value::Unit? None?
-            todo!()
+            if_false.as_ref()
+                .map(|e| e.traverse_rt())
+                .unwrap_or(Ok(Value::Unit))
         }
     }
 }
