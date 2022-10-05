@@ -52,8 +52,8 @@ impl VarContext<'_> {
             _ghost: PhantomData 
         }
     }
-    pub fn new_scope(&mut self) -> VarContext {
-        Self { 
+    pub fn child(&mut self) -> VarContext {
+        VarContext { 
             scope: HashMap::new(), 
             parent: NonNull::new(self),
             _ghost: PhantomData
@@ -97,10 +97,10 @@ mod tests {
         let mut a = VarContext::new();
         a.set(String::from("a"), Value::Int(1));
         
-        let mut b = a.new_scope();
+        let mut b = a.child();
         b.set(String::from("b"), Value::Int(2));
         
-        let mut c = b.new_scope();
+        let mut c = b.child();
         c.set(String::from("c"), Value::Int(3));
         
         // err, b/c mutable borrow

@@ -46,21 +46,6 @@ impl Cmp {
         matches!(self, Cmp::Lt | Cmp::Gt | Cmp::Le | Cmp::Ge)
     }
 }
-pub trait UnaryApplicable {
-    type Return;
-
-    fn apply_unary(&self, o: &Unary) -> Self::Return;
-}
-pub trait BinaryApplicable {
-    type Return;
-
-    fn apply_binary(&self, o: &Binary, right: &Self) -> Self::Return;
-}
-pub trait CmpApplicable {
-    type Return;
-
-    fn apply_cmp(&self, o: &Cmp, right: &Self) -> Self::Return;
-}
 
 impl From<Token> for Unary {
     fn from(t: Token) -> Self {

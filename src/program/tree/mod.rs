@@ -134,31 +134,25 @@ pub enum Else {
     Block(Program)
 }
 
-
-impl op::UnaryApplicable for Expr {
-    type Return = <super::Value as op::UnaryApplicable>::Return;
-
-    fn apply_unary(&self, o: &op::Unary) -> Self::Return {
-        self.traverse_rt().and_then(|v| v.apply_unary(o))
+impl Expr {
+    pub fn apply_unary(&self, o: &op::Unary, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
+        self.traverse_rt(ctx).and_then(|v| v.apply_unary(o))
     }
-}
-impl op::BinaryApplicable for Expr {
-    type Return = <super::Value as op::BinaryApplicable>::Return;
 
-    fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
+    pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
-                let left = self.traverse_rt()?;
-                Ok(if left.truth() { right.traverse_rt()? } else { left })
+                let left = self.traverse_rt(ctx)?;
+                Ok(if left.truth() { right.traverse_rt(ctx)? } else { left })
             },
             op::Binary::LogOr => {
-                let left = self.traverse_rt()?;
-                Ok(if left.truth() { left } else { right.traverse_rt()? })
+                let left = self.traverse_rt(ctx)?;
+                Ok(if left.truth() { left } else { right.traverse_rt(ctx)? })
             },
-
+    
             // fallback to eager value binary
-            _ => self.traverse_rt().and_then(|v| v.apply_binary(o, &right.traverse_rt()?))
+            _ => self.traverse_rt(ctx).and_then(|v| v.apply_binary(o, &right.traverse_rt(ctx)?))
         }
     }
 }

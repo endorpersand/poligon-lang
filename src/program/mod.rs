@@ -1,11 +1,28 @@
-use crate::program::tree::op::UnaryApplicable;
-
-use self::tree::op::{self, CmpApplicable, BinaryApplicable};
+use self::tree::op;
 use self::value::Value;
+use self::vars::VarContext;
 
 pub(crate) mod tree;
 pub(crate) mod value;
 mod vars;
+
+pub struct BlockContext<'ctx> {
+    vars: VarContext<'ctx>,
+}
+
+impl BlockContext<'_> {
+    pub fn new() -> Self {
+        Self {
+            vars: VarContext::new()
+        }
+    }
+
+    pub fn child(&mut self) -> BlockContext {
+        BlockContext {
+            vars: self.vars.child()
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum RuntimeErr {
@@ -21,18 +38,18 @@ pub enum RuntimeErr {
 
 type RtResult<T> = Result<T, RuntimeErr>;
 pub trait TraverseRt {
-    fn traverse_rt(&self) -> RtResult<Value>;
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value>;
 }
 
 impl TraverseRt for tree::Expr {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         match self {
             tree::Expr::Ident(_) => todo!(),
-            tree::Expr::Block(e) => e.traverse_rt(),
-            tree::Expr::Literal(e) => e.traverse_rt(),
-            tree::Expr::ListLiteral(e) => {
-                let vec = e.iter()
-                    .map(TraverseRt::traverse_rt)
+            tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
+            tree::Expr::Literal(e) => e.traverse_rt(ctx),
+            tree::Expr::ListLiteral(exprs) => {
+                let vec = exprs.iter()
+                    .map(|expr| expr.traverse_rt(ctx))
                     .collect::<Result<_, _>>()?;
 
                 Ok(Value::List(vec))
@@ -42,18 +59,18 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Assignment(_, _) => todo!(),
             tree::Expr::Attr(_) => todo!(),
             tree::Expr::StaticAttr(_) => todo!(),
-            tree::Expr::UnaryOps(o) => o.traverse_rt(),
-            tree::Expr::BinaryOp(o) => o.traverse_rt(),
+            tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
+            tree::Expr::BinaryOp(o) => o.traverse_rt(ctx),
             tree::Expr::Comparison { left, right, extra } => {
                 let mut cmps = vec![right];
                 cmps.extend(extra);
 
-                let mut lval = left.traverse_rt()?;
+                let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
                 // break it up into a < b && b < c && c < d && d < e
                 // do each comparison. if any ever returns false, short circuit and return
                 for (cmp, rexpr) in cmps {
-                    let rval = rexpr.traverse_rt()?;
+                    let rval = rexpr.traverse_rt(ctx)?;
 
                     if lval.apply_cmp(cmp, &rval)? {
                         lval = rval;
@@ -66,8 +83,8 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::Range { left, right, step } => {
                 // TODO: be lazy
-                let (l, r) = (left.traverse_rt()?, right.traverse_rt()?);
-                let step_value = step.as_ref().map(|e| e.traverse_rt()).unwrap_or(Ok(Value::Int(1)))?;
+                let (l, r) = (left.traverse_rt(ctx)?, right.traverse_rt(ctx)?);
+                let step_value = step.as_ref().map(|e| e.traverse_rt(ctx)).unwrap_or(Ok(Value::Int(1)))?;
 
                 match (&l, &r) {
                     (Value::Int(a), Value::Int(b)) => if let Value::Int(s) = step_value {
@@ -100,11 +117,11 @@ impl TraverseRt for tree::Expr {
                     _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
                 }
             },
-            tree::Expr::If(e) => e.traverse_rt(),
+            tree::Expr::If(e) => e.traverse_rt(ctx),
             tree::Expr::While { condition, block } => {
                 let mut values = vec![];
-                while condition.traverse_rt()?.truth() {
-                    values.push(block.traverse_rt()?);
+                while condition.traverse_rt(ctx)?.truth() {
+                    values.push(block.traverse_rt(&mut ctx.child())?);
                 }
 
                 Ok(Value::List(values))
@@ -183,23 +200,23 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 // }
 
 impl TraverseRt for tree::Literal {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         Ok(self.clone().into())
     }
 }
 
 impl TraverseRt for tree::UnaryOps {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         let tree::UnaryOps {ops, expr} = self;
 
         let mut ops_iter = ops.iter().rev();
         
         // ops should always have at least 1 unary op, so this should always be true
         let mut e = if let Some(op) = ops_iter.next() {
-            expr.apply_unary(op)
+            expr.apply_unary(op, ctx)
         } else {
             // should never happen, but in case it does
-            expr.traverse_rt()
+            expr.traverse_rt(ctx)
         }?;
 
         // apply the rest:
@@ -212,38 +229,38 @@ impl TraverseRt for tree::UnaryOps {
 }
 
 impl TraverseRt for tree::BinaryOp {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         let tree::BinaryOp { op, left, right } = self;
 
-        left.apply_binary(op, right)
+        left.apply_binary(op, right, ctx)
     }
 }
 
 impl TraverseRt for tree::Program {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         todo!()
     }
 }
 
 impl TraverseRt for tree::If {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         let tree::If { condition, if_true, if_false } = self;
 
-        if condition.traverse_rt()?.truth() {
-            if_true.traverse_rt()
+        if condition.traverse_rt(ctx)?.truth() {
+            if_true.traverse_rt(&mut ctx.child())
         } else {
             if_false.as_ref()
-                .map(|e| e.traverse_rt())
+                .map(|e| e.traverse_rt(ctx))
                 .unwrap_or(Ok(Value::Unit))
         }
     }
 }
 
 impl TraverseRt for tree::Else {
-    fn traverse_rt(&self) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         match self {
-            tree::Else::If(e) => e.traverse_rt(),
-            tree::Else::Block(e) => e.traverse_rt(),
+            tree::Else::If(e) => e.traverse_rt(ctx),
+            tree::Else::Block(e) => e.traverse_rt(&mut ctx.child()),
         }
     }
 }

@@ -96,32 +96,8 @@ impl Value {
             _ => None,
         }
     }
-}
 
-impl TryFrom<&Value> for f64 {
-    type Error = ();
-
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        value.as_float().ok_or(())
-    }
-}
-
-impl From<tree::Literal> for Value {
-    fn from(literal: tree::Literal) -> Self {
-        match literal {
-            tree::Literal::Int(v)   => Value::Int(v),
-            tree::Literal::Float(v) => Value::Float(v),
-            tree::Literal::Char(v)  => Value::Char(v),
-            tree::Literal::Str(v)   => Value::Str(v),
-            tree::Literal::Bool(v)  => Value::Bool(v),
-        }
-    }
-}
-
-impl op::UnaryApplicable for Value {
-    type Return = super::RtResult<Value>;
-
-    fn apply_unary(&self, o: &op::Unary) -> Self::Return {
+    pub fn apply_unary(&self, o: &op::Unary) -> super::RtResult<Value> {
         match o {
             op::Unary::Plus   => if self.is_numeric() { Some(self.clone()) } else { None },
             op::Unary::Minus  => match self {
@@ -134,12 +110,8 @@ impl op::UnaryApplicable for Value {
             op::Unary::Spread => if let Value::Str(_e) = self { todo!() } else { None },
         }.ok_or_else(|| super::RuntimeErr::CannotApplyUnary(*o, self.ty()))
     }
-}
-
-impl op::BinaryApplicable for Value {
-    type Return = super::RtResult<Value>;
-
-    fn apply_binary(&self, o: &op::Binary, right: &Self) -> Self::Return {
+    
+    pub fn apply_binary(&self, o: &op::Binary, right: &Self) -> super::RtResult<Value> {
         match o {
             op::Binary::Add => numeric_binary(self, o, right, 
                 |a, b| Ok(Value::Float(a + b)), 
@@ -177,12 +149,8 @@ impl op::BinaryApplicable for Value {
             op::Binary::LogOr =>  Ok(Value::Bool(self.truth() || right.truth())),
         }
     }
-}
-
-impl op::CmpApplicable for Value {
-    type Return = super::RtResult<bool>;
-
-    fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> Self::Return {
+    
+    pub fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> super::RtResult<bool> {
         match o {
             op::Cmp::Lt | op::Cmp::Gt | op::Cmp::Le | op::Cmp::Ge => {
                 match (self, right) {
@@ -219,5 +187,25 @@ impl op::CmpApplicable for Value {
                 }
             },
         }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
+    }
+}
+
+impl TryFrom<&Value> for f64 {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        value.as_float().ok_or(())
+    }
+}
+
+impl From<tree::Literal> for Value {
+    fn from(literal: tree::Literal) -> Self {
+        match literal {
+            tree::Literal::Int(v)   => Value::Int(v),
+            tree::Literal::Float(v) => Value::Float(v),
+            tree::Literal::Char(v)  => Value::Char(v),
+            tree::Literal::Str(v)   => Value::Str(v),
+            tree::Literal::Bool(v)  => Value::Bool(v),
+        }
     }
 }
