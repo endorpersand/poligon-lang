@@ -13,7 +13,7 @@ pub enum Value {
 
 /// Utility to cast values onto float and compare them
 fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<bool> {
-    if let (Ok(af), Ok(bf)) =  (a.try_into(), b.try_into()) {
+    if let (Ok(af), Ok(bf)) = (a.try_into(), b.try_into()) {
         Some(o.cmp(af, bf))
     } else {
         None
@@ -76,17 +76,33 @@ impl Value {
             Value::Unit     => "void"
         }.into()
     }
+
+    pub(super) fn as_iterator<'a>(&'a self) -> Option<Box<dyn Iterator<Item=Value> + 'a>> {
+        match self {
+            Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
+            Value::List(l)  => Some(Box::new(l.iter().cloned())),
+            Value::Int(_)   => None,
+            Value::Float(_) => None,
+            Value::Char(_)  => None,
+            Value::Bool(_)  => None,
+            Value::Unit     => None,
+        }
+    }
+
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Value::Int(i) => Some(*i as _),
+            Value::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
 }
 
 impl TryFrom<&Value> for f64 {
     type Error = ();
 
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Int(i) => Ok(*i as _),
-            Value::Float(f) => Ok(*f),
-            _ => Err(()),
-        }
+        value.as_float().ok_or(())
     }
 }
 

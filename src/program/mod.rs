@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::program::tree::op::UnaryApplicable;
 
 use self::tree::op::{self, CmpApplicable, BinaryApplicable};
@@ -11,7 +13,11 @@ pub enum RuntimeErr {
     CannotCompare(op::Cmp, String, String),
     CannotApplyUnary(op::Unary, String),
     CannotApplyBinary(op::Binary, String, String),
-    DivisionByZero
+    CannotApplySpread(String, String),
+    DivisionByZero,
+    ExpectedType(String),
+    RangeIsInfinite, // TODO: remove
+    CannotIterateOver(String)
 }
 
 type RtResult<T> = Result<T, RuntimeErr>;
@@ -59,13 +65,123 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::Bool(true))
             },
-            tree::Expr::Range { left, right, step } => todo!(),
+            tree::Expr::Range { left, right, step } => {
+                // TODO: be lazy
+                let (l, r) = (left.traverse_rt()?, right.traverse_rt()?);
+                let step_value = step.as_ref().map(|e| e.traverse_rt()).unwrap_or(Ok(Value::Int(1)))?;
+
+                match (&l, &r) {
+                    (Value::Int(a), Value::Int(b)) => if let Value::Int(s) = step_value {
+                        let values = compute_int_range(*a, *b, s)?
+                            .into_iter()
+                            .map(|i| Value::Int(i))
+                            .collect();
+
+                        Ok(Value::List(values))
+                    } else {
+                        Err(RuntimeErr::ExpectedType(Value::Int(0).ty()))
+                    },
+                    // (a, b @ Value::Float(_)) => compute_float_range(a, b, &step_value),
+                    // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
+                    (Value::Char(a), Value::Char(b)) => if let Value::Int(s) = step_value {
+                        let (a, b) = (*a as u32, *b as u32);
+                        let values = compute_uint_range(a, b, s)?
+                            .into_iter()
+                            .map(|i| {
+                                char::from_u32(i)
+                                    .expect(&format!("u32 '{:x}' could not be parsed as char", i))
+                            })
+                            .map(Value::Char)
+                            .collect();
+
+                        Ok(Value::List(values))
+                    } else {
+                        Err(RuntimeErr::ExpectedType(Value::Int(0).ty()))
+                    },
+                    _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
+                }
+            },
             tree::Expr::If(e) => e.traverse_rt(),
-            tree::Expr::While { condition, block } => todo!(),
+            tree::Expr::While { condition, block } => {
+                let mut values = vec![];
+                while condition.traverse_rt()?.truth() {
+                    values.push(block.traverse_rt()?);
+                }
+
+                Ok(Value::List(values))
+            },
             tree::Expr::For { ident, iterator, block } => todo!(),
         }
     }
 }
+
+fn compute_int_range(left: isize, right: isize, step: isize) -> RtResult<Vec<isize>>
+{
+    if step == 0 { return Err(RuntimeErr::RangeIsInfinite); }
+    let mut values = vec![];
+    let mut n = left;
+
+    if step > 0 {
+        while n < right {
+            values.push(n);
+            n += step;
+        }
+    } else {
+        while n > right {
+            values.push(n);
+            n += step;
+        }
+    }
+    Ok(values)
+}
+fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
+{
+    if step == 0 { return Err(RuntimeErr::RangeIsInfinite); }
+    let mut values = vec![];
+
+    let positive = step > 0;
+    if let Ok(step) = u32::try_from(step.abs()) {
+        let mut n = left;
+    
+        if positive {
+            while n < right {
+                values.push(n);
+                n += step;
+            }
+        } else {
+            while n > right {
+                values.push(n);
+                n -= step;
+            }
+        }
+    }
+
+    Ok(values)
+}
+
+// fn compute_float_range(left: &Value, right: &Value, step: &Value) -> RtResult<Value> {
+//     if let (Some(a), Some(b)) = (left.as_float(), right.as_float()) {
+//         let s = step.as_float()
+//             .ok_or(RuntimeErr::ExpectedType(Value::Float(0.).ty()))?;
+        
+//         let n_steps_f = (b - a) / s;
+
+//         if n_steps_f.is_finite() && n_steps_f.is_sign_positive() {
+//             let n_steps = n_steps_f.floor() as isize;
+
+//             let values = (0..n_steps)
+//                 .map(|i| a + (i as f64) * s)
+//                 .map(Value::Float)
+//                 .collect();
+
+//             Ok(Value::List(values))
+//         } else {
+//             Err(RuntimeErr::RangeIsInfinite)
+//         }
+//     } else {
+//         Err(RuntimeErr::CannotApplySpread(left.ty(), right.ty()))
+//     }
+// }
 
 impl TraverseRt for tree::Literal {
     fn traverse_rt(&self) -> RtResult<Value> {
