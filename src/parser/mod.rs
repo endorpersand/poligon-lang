@@ -883,7 +883,7 @@ mod tests {
             // :)
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
-                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
                 if_true: vec![], 
                 if_false: None
             }))
@@ -895,7 +895,7 @@ mod tests {
             // :(
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
-                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
                 if_true: vec![], 
                 if_false: Some(Box::new(tree::Else::Block(vec![])))
             }))
@@ -909,7 +909,7 @@ mod tests {
             // :(
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
-                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
                 if_true: vec![], 
                 if_false: Some(Box::new(tree::Else::If(tree::If { 
                     condition: Box::new(tree::Expr::Ident("condition".to_string())), 
@@ -933,7 +933,7 @@ mod tests {
             // :(
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
-                condition: Box::new(tree::Expr::Ident("true".to_string())), 
+                condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
                 if_true: vec![], 
                 if_false: Some(Box::new(tree::Else::If(tree::If { 
                     condition: Box::new(tree::Expr::Ident("condition".to_string())), 
