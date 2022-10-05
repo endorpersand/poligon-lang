@@ -1,5 +1,5 @@
 use self::tree::op;
-use self::value::Value;
+use self::value::{Value, ValueType};
 use self::vars::VarContext;
 
 pub(crate) mod tree;
@@ -26,16 +26,16 @@ impl BlockContext<'_> {
 
 #[derive(Debug)]
 pub enum RuntimeErr {
-    CannotCompare(op::Cmp, String, String),
-    CannotApplyUnary(op::Unary, String),
-    CannotApplyBinary(op::Binary, String, String),
-    CannotApplySpread(String, String),
+    CannotCompare(op::Cmp, ValueType, ValueType),
+    CannotApplyUnary(op::Unary, ValueType),
+    CannotApplyBinary(op::Binary, ValueType, ValueType),
+    CannotApplySpread(ValueType, ValueType),
     DivisionByZero,
-    ExpectedType(String),
+    ExpectedType(ValueType),
     RangeIsInfinite, // TODO: remove
-    CannotIterateOver(String),
-    CannotIndex(String),
-    CannotIndexWith(String, String),
+    CannotIterateOver(ValueType),
+    CannotIndex(ValueType),
+    CannotIndexWith(ValueType, ValueType),
     IndexOutOfBounds
 }
 
@@ -102,7 +102,7 @@ impl TraverseRt for tree::Expr {
 
                         Ok(Value::List(values))
                     } else {
-                        Err(RuntimeErr::ExpectedType(Value::Int(0).ty()))
+                        Err(RuntimeErr::ExpectedType(ValueType::Int))
                     },
                     // (a, b @ Value::Float(_)) => compute_float_range(a, b, &step_value),
                     // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
@@ -119,7 +119,7 @@ impl TraverseRt for tree::Expr {
 
                         Ok(Value::List(values))
                     } else {
-                        Err(RuntimeErr::ExpectedType(Value::Int(0).ty()))
+                        Err(RuntimeErr::ExpectedType(ValueType::Int))
                     },
                     _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
                 }
@@ -249,7 +249,7 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 // fn compute_float_range(left: &Value, right: &Value, step: &Value) -> RtResult<Value> {
 //     if let (Some(a), Some(b)) = (left.as_float(), right.as_float()) {
 //         let s = step.as_float()
-//             .ok_or(RuntimeErr::ExpectedType(Value::Float(0.).ty()))?;
+//             .ok_or(RuntimeErr::ExpectedType(ValueType::Float)?;
         
 //         let n_steps_f = (b - a) / s;
 

@@ -11,6 +11,22 @@ pub enum Value {
     Unit
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit }
+impl ToString for ValueType {
+    fn to_string(&self) -> String {
+        String::from(match self {
+            ValueType::Int   => "int",
+            ValueType::Float => "float",
+            ValueType::Char  => "char",
+            ValueType::Str   => "string",
+            ValueType::Bool  => "bool",
+            ValueType::List  => "list",
+            ValueType::Unit  => "void"
+        })
+    }
+}
+
 /// Utility to cast values onto float and compare them
 fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<bool> {
     if let (Ok(af), Ok(bf)) = (a.try_into(), b.try_into()) {
@@ -65,15 +81,15 @@ impl Value {
         matches!(self, Value::Int(_) | Value::Float(_))
     }
 
-    pub fn ty(&self) -> String {
+    pub fn ty(&self) -> ValueType {
         match self {
-            Value::Int(_)   => "int",
-            Value::Float(_) => "float",
-            Value::Char(_)  => "char",
-            Value::Str(_)   => "string",
-            Value::Bool(_)  => "bool",
-            Value::List(_)  => "list",
-            Value::Unit     => "void"
+            Value::Int(_)   => ValueType::Int,
+            Value::Float(_) => ValueType::Float,
+            Value::Char(_)  => ValueType::Char,
+            Value::Str(_)   => ValueType::Str,
+            Value::Bool(_)  => ValueType::Bool,
+            Value::List(_)  => ValueType::List,
+            Value::Unit     => ValueType::Unit
         }.into()
     }
 
