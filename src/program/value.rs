@@ -1,6 +1,6 @@
 use super::tree::{self, op};
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Value {
     Int(isize),
     Float(f64),

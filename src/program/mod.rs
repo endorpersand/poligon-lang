@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::program::tree::op::UnaryApplicable;
 
 use self::tree::op::{self, CmpApplicable, BinaryApplicable};
@@ -7,6 +5,7 @@ use self::value::Value;
 
 pub(crate) mod tree;
 pub(crate) mod value;
+mod vars;
 
 #[derive(Debug)]
 pub enum RuntimeErr {
