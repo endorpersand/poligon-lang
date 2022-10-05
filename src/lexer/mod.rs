@@ -374,7 +374,7 @@ impl Lexer {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     macro_rules! assert_lex {
