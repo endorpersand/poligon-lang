@@ -77,6 +77,14 @@ pub enum Expr {
         ident: String,
         iterator: Box<Expr>,
         block: Program
+    },
+    Call {
+        funct: Box<Expr>,
+        params: Vec<Expr>
+    },
+    Index {
+        expr: Box<Expr>,
+        index: Box<Expr>
     }
 }
 

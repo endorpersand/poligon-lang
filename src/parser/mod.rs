@@ -567,9 +567,9 @@ impl Parser {
         }
 
         let me = if ops.is_empty() {
-            self.match_call()?
+            self.match_call_index()?
         } else {
-            let e = self.match_call()?.ok_or(ParseErr::ExpectedExpr)?;
+            let e = self.match_call_index()?.ok_or(ParseErr::ExpectedExpr)?;
 
             Some(Parser::wrap_unary_op(ops, e))
         };
@@ -602,14 +602,33 @@ impl Parser {
         tree::Expr::UnaryOps(uops)
     }
 
-    /// Match a function call. (f(1, 2, 3, 4))
-    fn match_call(&mut self) -> ParseResult<Option<tree::Expr>> {
-        if let Some(e) = self.match_path()? {
-            if self.match1(token!["("]) {
-                self.expect_tuple()?;
-                self.expect1(token![")"])?;
-            }
+    /// Match a function call OR index. (f(1, 2, 3, 4), a[1])
+    fn match_call_index(&mut self) -> ParseResult<Option<tree::Expr>> {
+        if let Some(mut e) = self.match_path()? {
+            while let Some(delim) = self.match_n(&[token!["("], token!["["]]) {
+                match delim {
+                    token!["("] => {
+                        let params = self.expect_tuple()?;
+                        self.expect1(token![")"])?;
 
+                        e = tree::Expr::Call {
+                            funct: Box::new(e), 
+                            params
+                        };
+                    },
+                    token!["["] => {
+                        let index = self.expect_expr()?;
+                        self.expect1(token!["]"])?;
+
+                        e = tree::Expr::Index {
+                            expr: Box::new(e), 
+                            index: Box::new(index)
+                        };
+                    },
+                    _ => unreachable!()
+                }
+            }
+            
             Ok(Some(e))
         } else {
             Ok(None)

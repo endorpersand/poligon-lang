@@ -33,7 +33,10 @@ pub enum RuntimeErr {
     DivisionByZero,
     ExpectedType(String),
     RangeIsInfinite, // TODO: remove
-    CannotIterateOver(String)
+    CannotIterateOver(String),
+    CannotIndex(String),
+    CannotIndexWith(String, String),
+    IndexOutOfBounds
 }
 
 type RtResult<T> = Result<T, RuntimeErr>;
@@ -56,7 +59,11 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
-            tree::Expr::Assignment(_, _) => todo!(),
+            tree::Expr::Assignment(ident, expr) => {
+                let result = expr.traverse_rt(ctx)?;
+                ctx.vars.set(ident.clone(), result);
+                todo!();
+            },
             tree::Expr::Attr(_) => todo!(),
             tree::Expr::StaticAttr(_) => todo!(),
             tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
@@ -126,7 +133,71 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::List(values))
             },
-            tree::Expr::For { ident, iterator, block } => todo!(),
+            tree::Expr::For { ident, iterator, block } => {
+                let it_val = iterator.traverse_rt(ctx)?;
+                let it = it_val.as_iterator()
+                    .ok_or(RuntimeErr::CannotIterateOver(it_val.ty()))?;
+
+                let mut result = vec![];
+                for val in it {
+                    let mut scope = ctx.child();
+                    scope.vars.set(ident.clone(), val);
+
+                    let iteration = block.traverse_rt(&mut scope)?;
+                    result.push(iteration);
+                }
+
+                Ok(Value::List(result))
+            },
+            tree::Expr::Call { funct, params } => {
+                todo!()
+            }
+            tree::Expr::Index { expr, index } => {
+                let val = expr.traverse_rt(ctx)?;
+                let index_val = index.traverse_rt(ctx)?;
+
+                match val {
+                    e @ Value::List(_) => {
+                        if let Value::Int(i) = index_val {
+                            let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                            
+                            if let Value::List(l) = e {
+                                l.into_iter().nth(i) // TODO: don't consume the entire list to index 1 thing
+                                    .ok_or(RuntimeErr::IndexOutOfBounds)
+                            } else {
+                                unreachable!();
+                            }
+                        } else {
+                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
+                        }
+                    },
+                    e @ Value::Str(_) => {
+                        if let Value::Int(i) = index_val {
+                            let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                            
+                            if let Value::Str(s) = e {
+                                s.chars().nth(i)
+                                    .map(Value::Char)
+                                    .ok_or(RuntimeErr::IndexOutOfBounds)
+                            } else { unreachable!() }
+                        } else {
+                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
+                        }
+                    },
+                    e => {
+                        if let Some(mut it) = e.as_iterator() {
+                            if let Value::Int(i) = index_val {
+                                let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                                it.nth(i).ok_or(RuntimeErr::IndexOutOfBounds)
+                            } else {
+                                Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
+                            }
+                        } else {
+                            Err(RuntimeErr::CannotIndex(e.ty()))
+                        }
+                    }
+                }
+            },
         }
     }
 }
