@@ -36,6 +36,7 @@ fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<
     }
 }
 
+/// If a binary operator is solely numeric, this can be used to define the float & int versions of the operator.
 fn numeric_binary<FF, FI>(a: &Value, o: &op::Binary, b: &Value, ff: FF, fi: FI) -> super::RtResult<Value> 
     where FF: FnOnce(f64, f64) -> super::RtResult<Value>,
           FI: FnOnce(isize, isize) -> super::RtResult<Value>
@@ -77,10 +78,12 @@ impl Value {
         }
     }
 
+    /// Check if the current value is an int/float (numeric) or not
     pub fn is_numeric(&self) -> bool {
         matches!(self, Value::Int(_) | Value::Float(_))
     }
 
+    /// Get the type of the current value
     pub fn ty(&self) -> ValueType {
         match self {
             Value::Int(_)   => ValueType::Int,
@@ -93,6 +96,8 @@ impl Value {
         }.into()
     }
 
+    /// If the current value can be interpreted as an iterator of values, convert it into an iterator.
+    /// Otherwise, return `None`.
     pub(super) fn as_iterator<'a>(&'a self) -> Option<Box<dyn Iterator<Item=Value> + 'a>> {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
@@ -105,6 +110,8 @@ impl Value {
         }
     }
 
+    /// If the current value can be interpreted as a float, convert it into a float.
+    /// Otherwise, return `None`.
     pub fn as_float(&self) -> Option<f64> {
         match self {
             Value::Int(i) => Some(*i as _),
@@ -113,6 +120,7 @@ impl Value {
         }
     }
 
+    /// Apply a unary operator to a computed value.
     pub fn apply_unary(&self, o: &op::Unary) -> super::RtResult<Value> {
         match o {
             op::Unary::Plus   => if self.is_numeric() { Some(self.clone()) } else { None },
@@ -127,6 +135,7 @@ impl Value {
         }.ok_or_else(|| super::RuntimeErr::CannotApplyUnary(*o, self.ty()))
     }
     
+    /// Apply a binary operator to two computed values.
     pub fn apply_binary(&self, o: &op::Binary, right: &Self) -> super::RtResult<Value> {
         match o {
             op::Binary::Add => numeric_binary(self, o, right, 
@@ -161,11 +170,12 @@ impl Value {
                 op::Binary::BitAnd => int_only_op!(o => self & right),
                 op::Binary::BitXor => int_only_op!(o => self ^ right),
             
-            op::Binary::LogAnd => Ok(Value::Bool(self.truth() && right.truth())),
-            op::Binary::LogOr =>  Ok(Value::Bool(self.truth() || right.truth())),
+            op::Binary::LogAnd => Ok(if self.truth() { right.new_ref() } else { self.new_ref() }),
+            op::Binary::LogOr  => Ok(if self.truth() { self.new_ref() } else { right.new_ref() }),
         }
     }
     
+    /// Apply a comparison operator between two computed values.
     pub fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> super::RtResult<bool> {
         match o {
             op::Cmp::Lt | op::Cmp::Gt | op::Cmp::Le | op::Cmp::Ge => {
@@ -205,7 +215,8 @@ impl Value {
         }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
     }
 
-    // Note that this differs from clone, because it does not clone internal values.
+    /// Create a clone of a value (if it is copy-by-value) or create a new reference (if it copy-by-ref). 
+    /// Note that `.clone` is a full copy-by-value.
     pub fn new_ref(&self) -> Value {
         match self {
             Value::List(_) => todo!(),

@@ -143,20 +143,24 @@ pub enum Else {
 }
 
 impl Expr {
+    /// Evaluate an expression and then apply the unary operator for it.
     pub fn apply_unary(&self, o: &op::Unary, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
         self.traverse_rt(ctx).and_then(|v| v.apply_unary(o))
     }
 
+    /// Evaluate the two arguments to the binary operator and then apply the operator to it.
+    /// 
+    /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
     pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
                 let left = self.traverse_rt(ctx)?;
-                Ok(if left.truth() { right.traverse_rt(ctx)? } else { left })
+                if left.truth() { right.traverse_rt(ctx) } else { Ok(left) }
             },
             op::Binary::LogOr => {
                 let left = self.traverse_rt(ctx)?;
-                Ok(if left.truth() { left } else { right.traverse_rt(ctx)? })
+                if left.truth() { Ok(left) } else { right.traverse_rt(ctx) }
             },
     
             // fallback to eager value binary

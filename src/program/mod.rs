@@ -6,17 +6,23 @@ pub(crate) mod tree;
 pub(crate) mod value;
 mod vars;
 
+/// Struct that holds all of the state information 
+/// of the current scope (variables, functions, etc).
 pub struct BlockContext<'ctx> {
     vars: VarContext<'ctx>,
 }
 
 impl BlockContext<'_> {
+    /// Create a new context.
     pub fn new() -> Self {
         Self {
             vars: VarContext::new()
         }
     }
 
+    /// Create a new scope. 
+    /// 
+    /// As long as the child scope is in use, this scope cannot be used.
     pub fn child(&mut self) -> BlockContext {
         BlockContext {
             vars: self.vars.child()
@@ -41,7 +47,10 @@ pub enum RuntimeErr {
 }
 
 type RtResult<T> = Result<T, RuntimeErr>;
+
+/// This trait enables the traversal of a program tree.
 pub trait TraverseRt {
+    /// Apply the effects of this node, and evaluate any of the children nodes to do so.
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value>;
 }
 
@@ -96,24 +105,30 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Range { left, right, step } => {
                 // TODO: be lazy
                 let (l, r) = (left.traverse_rt(ctx)?, right.traverse_rt(ctx)?);
-                let step_value = step.as_ref().map(|e| e.traverse_rt(ctx)).unwrap_or(Ok(Value::Int(1)))?;
+                let step_value = step.as_ref()
+                    .map(|e| e.traverse_rt(ctx))
+                    .unwrap_or(Ok(Value::Int(1)))?;
+
+                // for now, step can only be int:
+                let step = match step_value { 
+                    Value::Int(s) => s,
+                    _ => Err(RuntimeErr::ExpectedType(ValueType::Int))?
+                };
 
                 match (&l, &r) {
-                    (Value::Int(a), Value::Int(b)) => if let Value::Int(s) = step_value {
-                        let values = compute_int_range(*a, *b, s)?
+                    (Value::Int(a), Value::Int(b)) => {
+                        let values = compute_int_range(*a, *b, step)?
                             .into_iter()
-                            .map(|i| Value::Int(i))
+                            .map(Value::Int)
                             .collect();
 
                         Ok(Value::List(values))
-                    } else {
-                        Err(RuntimeErr::ExpectedType(ValueType::Int))
                     },
                     // (a, b @ Value::Float(_)) => compute_float_range(a, b, &step_value),
                     // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
-                    (Value::Char(a), Value::Char(b)) => if let Value::Int(s) = step_value {
+                    (Value::Char(a), Value::Char(b)) => {
                         let (a, b) = (*a as u32, *b as u32);
-                        let values = compute_uint_range(a, b, s)?
+                        let values = compute_uint_range(a, b, step)?
                             .into_iter()
                             .map(|i| {
                                 char::from_u32(i)
@@ -123,8 +138,6 @@ impl TraverseRt for tree::Expr {
                             .collect();
 
                         Ok(Value::List(values))
-                    } else {
-                        Err(RuntimeErr::ExpectedType(ValueType::Int))
                     },
                     _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
                 }
@@ -162,12 +175,14 @@ impl TraverseRt for tree::Expr {
                 let index_val = index.traverse_rt(ctx)?;
 
                 match val {
+                    // There is a more efficient method of indexing lists 
+                    // than just "conv to iter => get nth item":
                     e @ Value::List(_) => {
-                        if let Value::Int(i) = index_val {
-                            let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                        if let Value::Int(signed_index) = index_val {
+                            let mi = usize::try_from(signed_index).ok();
                             
                             if let Value::List(l) = e {
-                                l.into_iter().nth(i) // TODO: don't consume the entire list to index 1 thing
+                                mi.and_then(|i| l.get(i).map(Value::new_ref))
                                     .ok_or(RuntimeErr::IndexOutOfBounds)
                             } else {
                                 unreachable!();
@@ -176,23 +191,12 @@ impl TraverseRt for tree::Expr {
                             Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
                         }
                     },
-                    e @ Value::Str(_) => {
-                        if let Value::Int(i) = index_val {
-                            let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
-                            
-                            if let Value::Str(s) = e {
-                                s.chars().nth(i)
-                                    .map(Value::Char)
-                                    .ok_or(RuntimeErr::IndexOutOfBounds)
-                            } else { unreachable!() }
-                        } else {
-                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
-                        }
-                    },
+
+                    // Convert to iter => get nth item
                     e => {
                         if let Some(mut it) = e.as_iterator() {
-                            if let Value::Int(i) = index_val {
-                                let i = usize::try_from(i).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                            if let Value::Int(signed_index) = index_val {
+                                let i = usize::try_from(signed_index).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
                                 it.nth(i).ok_or(RuntimeErr::IndexOutOfBounds)
                             } else {
                                 Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))

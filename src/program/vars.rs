@@ -4,6 +4,9 @@ use std::ptr::NonNull;
 
 use super::value::Value;
 
+/// Stores the variables in the current scope.
+/// 
+/// This also provides read/write access to variables in parent scopes.
 #[derive(Debug)]
 pub struct VarContext<'a> {
     scope: HashMap<String, Value>,
@@ -11,6 +14,7 @@ pub struct VarContext<'a> {
     _ghost: PhantomData<&'a ()>
 }
 
+/// Iterates through a VarContext and its parents to provide all accessible HashMaps
 struct VCtxIter<'a> {
     next: Option<&'a VarContext<'a>>
 }
@@ -21,12 +25,15 @@ impl<'a> Iterator for VCtxIter<'a> {
         self.next.map(|current| {
             let m_next_ptr = current.parent;
 
-            // this unsafe is OK, because we know this pointer is pointing to a parent
+            // SAFETY: Since we're here, this context must be a child context,
+            // so there must be a pointer to a parent context here.
             self.next = m_next_ptr.map(|next_ptr| unsafe { next_ptr.as_ref() });
             &current.scope
         })
     }
 }
+
+/// Mutable version of `VCtxIter`
 struct VCtxIterMut<'a> {
     next: Option<NonNull<VarContext<'a>>>
 }
@@ -35,7 +42,8 @@ impl<'a> Iterator for VCtxIterMut<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.take().map(|mut c_ptr| {
-            // this unsafe is OK, because we know this pointer is pointing to a parent
+            // SAFETY: Pointer can only come from the parent chains,
+            // so, there must be a pointer to some context here.
             let current = unsafe { c_ptr.as_mut() };
 
             self.next = current.parent;
@@ -45,6 +53,7 @@ impl<'a> Iterator for VCtxIterMut<'a> {
 }
 
 impl VarContext<'_> {
+    /// Create a new VarContext.
     pub fn new() -> Self {
         Self { 
             scope: HashMap::new(), 
@@ -52,6 +61,9 @@ impl VarContext<'_> {
             _ghost: PhantomData 
         }
     }
+
+    /// Create a child scope. 
+    /// While this child scope is in use, this scope cannot be used.
     pub fn child(&mut self) -> VarContext {
         VarContext { 
             scope: HashMap::new(), 
@@ -60,19 +72,21 @@ impl VarContext<'_> {
         }
     }
 
+    /// Iterator providing an immutable reference to all HashMaps of variables
     fn hash_maps(&self) -> VCtxIter {
         VCtxIter { next: Some(self) }
     }
+    /// Iterator providing a mutable reference to all HashMaps of variables
     fn hash_maps_mut(&mut self) -> VCtxIterMut {
         VCtxIterMut { next: NonNull::new(self) }
     }
-
+    /// Query a variable (or return `None` if it does not exist)
     pub fn get(&self, ident: &str) -> Option<&Value> {
         self.hash_maps()
             .flat_map(|m| m.get(ident))
             .next()
     }
-
+    /// Set a variable (and declare it if it does not exist)
     pub fn set(&mut self, ident: String, v: Value) {
         let maybe_map = self.hash_maps_mut()
             .filter(|m| m.contains_key(&ident))
