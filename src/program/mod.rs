@@ -36,7 +36,8 @@ pub enum RuntimeErr {
     CannotIterateOver(ValueType),
     CannotIndex(ValueType),
     CannotIndexWith(ValueType, ValueType),
-    IndexOutOfBounds
+    IndexOutOfBounds,
+    UndefinedVar(String)
 }
 
 type RtResult<T> = Result<T, RuntimeErr>;
@@ -47,7 +48,11 @@ pub trait TraverseRt {
 impl TraverseRt for tree::Expr {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         match self {
-            tree::Expr::Ident(_) => todo!(),
+            tree::Expr::Ident(ident) => {
+                ctx.vars.get(ident)
+                    .ok_or(RuntimeErr::UndefinedVar(ident.clone()))
+                    .map(|v| v.new_ref())
+            },
             tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
             tree::Expr::Literal(e) => e.traverse_rt(ctx),
             tree::Expr::ListLiteral(exprs) => {
@@ -271,7 +276,7 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 // }
 
 impl TraverseRt for tree::Literal {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtResult<Value> {
         Ok(self.clone().into())
     }
 }

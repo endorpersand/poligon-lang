@@ -628,7 +628,7 @@ impl Parser {
                     _ => unreachable!()
                 }
             }
-            
+
             Ok(Some(e))
         } else {
             Ok(None)

@@ -204,6 +204,21 @@ impl Value {
             },
         }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
     }
+
+    // Note that this differs from clone, because it does not clone internal values.
+    pub fn new_ref(&self) -> Value {
+        match self {
+            Value::List(_) => todo!(),
+            e @ (
+                | Value::Int(_) 
+                | Value::Float(_) 
+                | Value::Char(_) 
+                | Value::Str(_) 
+                | Value::Bool(_) 
+                | Value::Unit
+            ) => e.clone(),
+        }
+    }
 }
 
 impl TryFrom<&Value> for f64 {
