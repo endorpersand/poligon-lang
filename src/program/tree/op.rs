@@ -47,45 +47,55 @@ impl Cmp {
     }
 }
 
-impl From<Token> for Unary {
-    fn from(t: Token) -> Self {
-        match t {
-            token![+] => Unary::Plus,
-            token![-] => Unary::Minus,
-            token![!] => Unary::LogNot,
-            token![~] => Unary::BitNot,
-            token![..] => Unary::Spread,
-            _ => panic!("Token cannot be converted into a unary operator")
+#[derive(Debug)]
+pub struct TokenOpCastErr(&'static str);
+
+impl TryFrom<Token> for Unary {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![+]  => Ok(Unary::Plus),
+            token![-]  => Ok(Unary::Minus),
+            token![!]  => Ok(Unary::LogNot),
+            token![~]  => Ok(Unary::BitNot),
+            token![..] => Ok(Unary::Spread),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a unary operator"))
+        }
+        
+    }
+}
+impl TryFrom<Token> for Binary {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![+]  => Ok(Binary::Add),
+            token![-]  => Ok(Binary::Sub),
+            token![*]  => Ok(Binary::Mul),
+            token![/]  => Ok(Binary::Div),
+            token![%]  => Ok(Binary::Mod),
+            token![|]  => Ok(Binary::BitOr),
+            token![&]  => Ok(Binary::BitAnd),
+            token![^]  => Ok(Binary::BitXor),
+            token![&&] => Ok(Binary::LogAnd),
+            token![||] => Ok(Binary::LogOr),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a binary operator"))
         }
     }
 }
-impl From<Token> for Binary {
-    fn from(t: Token) -> Self {
-        match t {
-            token![+] => Binary::Add,
-            token![-] => Binary::Sub,
-            token![*] => Binary::Mul,
-            token![/] => Binary::Div,
-            token![%] => Binary::Mod,
-            token![|] => Binary::BitOr,
-            token![&] => Binary::BitAnd,
-            token![^] => Binary::BitXor,
-            token![&&] => Binary::LogAnd,
-            token![||] => Binary::LogOr,
-            _ => panic!("Token cannot be converted into a binary operator")
-        }
-    }
-}
-impl From<Token> for Cmp {
-    fn from(t: Token) -> Self {
-        match t {
-            token![<] => Cmp::Lt,
-            token![<=] => Cmp::Le,
-            token![>] => Cmp::Gt,
-            token![>=] => Cmp::Ge,
-            token![==] => Cmp::Eq,
-            token![!=] => Cmp::Ne,
-            _ => panic!("Token cannot be converted into a comparison operator")
+impl TryFrom<Token> for Cmp {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![<]  => Ok(Cmp::Lt),
+            token![<=] => Ok(Cmp::Le),
+            token![>]  => Ok(Cmp::Gt),
+            token![>=] => Ok(Cmp::Ge),
+            token![==] => Ok(Cmp::Eq),
+            token![!=] => Ok(Cmp::Ne),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a comparison operator"))
         }
     }
 }

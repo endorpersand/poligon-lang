@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::lexer::token::{Token, token};
-use crate::program::tree;
+use crate::program::tree::{self, op};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> Result<tree::Program, ParseErr> {
     Parser::new(tokens).parse()
@@ -28,7 +28,7 @@ macro_rules! left_assoc_op {
             if let Some(mut e) = self.$ds()? {
                 while let Some(op) = self.match_n(&[$(token![$op]),+]) {
                     e = tree::Expr::BinaryOp(tree::BinaryOp {
-                        op: op.into(),
+                        op: op.try_into().unwrap(),
                         left: Box::new(e),
                         right: self.$ds()?
                             .map(Box::new)
@@ -482,7 +482,7 @@ impl Parser {
             if let Some(t) = self.match_n(&cmp_ops) {
                 let rexpr = self.match_spread()?
                     .ok_or(ParseErr::ExpectedExpr)?;
-                let right = (t.into(), Box::new(rexpr));
+                let right = (t.try_into().unwrap(), Box::new(rexpr));
 
                 
                 // check for any other comparisons:
@@ -490,7 +490,7 @@ impl Parser {
                 let mut extra = vec![];
                 while let Some(t) = self.match_n(&cmp_ops) {
                     let e = self.match_spread()?.ok_or(ParseErr::ExpectedExpr)?;
-                    extra.push((t.into(), Box::new(e)))
+                    extra.push((t.try_into().unwrap(), Box::new(e)))
                 }
 
                 e = tree::Expr::Comparison { 
@@ -512,7 +512,7 @@ impl Parser {
         
         if let Some(mut e) = self.match_range()? {
             if is_spread {
-                e = Parser::wrap_unary_op(vec![token![..].into()], e);
+                e = Parser::wrap_unary_op(vec![op::Unary::Spread], e);
             }
 
             Ok(Some(e))
@@ -563,7 +563,7 @@ impl Parser {
 
         let mut ops = vec![];
         while let Some(t) = self.match_n(&unary_ops) {
-            ops.push(t.into());
+            ops.push(t.try_into().unwrap());
         }
 
         let me = if ops.is_empty() {
@@ -1071,7 +1071,7 @@ mod tests {
         +3;
         " => vec![
             tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
-                ops: vec![token![+].into()],
+                ops: vec![token![+].try_into().unwrap()],
                 expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
             }))
         ]);
@@ -1080,7 +1080,7 @@ mod tests {
         +++++++3;
         " => vec![
             tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
-                ops: vec![token![+].into()].repeat(7),
+                ops: vec![token![+].try_into().unwrap()].repeat(7),
                 expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
             }))
         ]);
@@ -1089,7 +1089,7 @@ mod tests {
         +-+-+-+-3;
         " => vec![
             tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
-                ops: vec![token![+].into(), token![-].into()].repeat(4),
+                ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
                 expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
             }))
         ]);
@@ -1099,22 +1099,22 @@ mod tests {
         " => vec![
             tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
                 ops: vec![
-                    token![..].into(), 
-                    token![+].into(), 
-                    token![-].into(), 
-                    token![+].into(), 
-                    token![-].into(), 
-                    token![+].into(), 
-                    token![-].into(), 
-                    token![+].into(), 
-                    token![-].into()],
+                    token![..].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap()],
                 expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("+(+2);" => vec![
             tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
-                ops: vec![token![+].into()].repeat(2),
+                ops: vec![token![+].try_into().unwrap()].repeat(2),
                 expr: Box::new(tree::Expr::Literal(tree::Literal::Int(2)))
             }))
         ])
