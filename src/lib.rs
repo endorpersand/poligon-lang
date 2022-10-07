@@ -1,5 +1,8 @@
 use std::{fs, io};
 use std::path::Path;
+pub use lexer::{tokenize as lex, Lexer};
+pub use parser::{parse, parse_repl};
+pub use program::{BlockContext, TraverseRt};
 mod lexer;
 mod parser;
 mod program;

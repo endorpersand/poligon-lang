@@ -6,7 +6,12 @@ use crate::program::tree::{self, op};
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> Result<tree::Program, ParseErr> {
     Parser::new(tokens).parse()
 }
-
+pub fn parse_repl<T>(mut tokens: T) -> Result<tree::Program, ParseErr> 
+    where T: IntoIterator<Item=Token> + Extend<Token>
+{
+    tokens.extend(std::iter::once(token![;]));
+    Parser::new(tokens).parse()
+}
 struct Parser {
     tokens: VecDeque<Token>
 }
@@ -335,10 +340,13 @@ impl Parser {
             None
         };
 
+        let block = self.expect_block()?;
+
         Ok(tree::FunDecl {
             ident,
             params,
             ret,
+            block
         })
     }
 

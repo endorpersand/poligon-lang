@@ -41,7 +41,8 @@ pub struct Type(pub String, pub Vec<Type>);
 pub struct FunDecl {
     pub ident: String,
     pub params: Vec<Param>,
-    pub ret: Option<Type>
+    pub ret: Option<Type>,
+    pub block: Program
 }
 
 #[derive(Debug, PartialEq)]

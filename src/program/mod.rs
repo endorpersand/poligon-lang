@@ -75,8 +75,9 @@ impl TraverseRt for tree::Expr {
             tree::Expr::DictLiteral(_) => todo!(),
             tree::Expr::Assignment(ident, expr) => {
                 let result = expr.traverse_rt(ctx)?;
-                ctx.vars.set(ident.clone(), result);
-                todo!();
+                
+                let val = ctx.vars.set(ident.clone(), result);
+                Ok(val.new_ref())
             },
             tree::Expr::Attr(_) => todo!(),
             tree::Expr::StaticAttr(_) => todo!(),
@@ -316,12 +317,6 @@ impl TraverseRt for tree::BinaryOp {
     }
 }
 
-impl TraverseRt for tree::Program {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
-        todo!()
-    }
-}
-
 impl TraverseRt for tree::If {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         let tree::If { condition, if_true, if_false } = self;
@@ -341,6 +336,35 @@ impl TraverseRt for tree::Else {
         match self {
             tree::Else::If(e) => e.traverse_rt(ctx),
             tree::Else::Block(e) => e.traverse_rt(&mut ctx.child()),
+        }
+    }
+}
+
+impl TraverseRt for tree::Program {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+        let mut stmts = self.iter();
+        let maybe_last = stmts.next_back();
+
+        if let Some(last) = maybe_last {
+            for stmt in stmts {
+                stmt.traverse_rt(ctx)?;
+            }
+            last.traverse_rt(ctx)
+        } else {
+            Ok(Value::Unit)
+        }
+    }
+}
+
+impl TraverseRt for tree::Stmt {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+        match self {
+            tree::Stmt::Decl(_) => todo!(),
+            tree::Stmt::Return(_) => todo!(),
+            tree::Stmt::Break => todo!(),
+            tree::Stmt::Continue => todo!(),
+            tree::Stmt::FunDecl(_) => todo!(),
+            tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
     }
 }

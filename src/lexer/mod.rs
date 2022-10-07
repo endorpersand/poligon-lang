@@ -22,7 +22,7 @@ pub enum LexErr {
     UnclosedComment,              // Hit EOF on /* */
 }
 
-struct Lexer {
+pub struct Lexer {
     input: VecDeque<CharData>,
     tokens: Vec<Token>,
     delimiters: Vec<Delimiter>
@@ -69,16 +69,62 @@ impl CharData {
 }
 
 impl Lexer {
-    fn new(input: &str) -> Result<Self, LexErr> {
-        let cd = input.chars()
-            .map(CharData::new)
-            .collect::<Result<_, _>>()?;
-
-        Ok(Self {
-            input: cd, 
+    pub fn new(input: &str) -> Result<Self, LexErr> {
+        let mut lexer = Self {
+            input: VecDeque::new(), 
             tokens: vec![],
             delimiters: vec![]
-        })
+        };
+        lexer.append_input(input)?;
+
+        Ok(lexer)
+    }
+
+    /// Perform the actual lexing. 
+    /// 
+    /// Takes a string and converts it into a list of tokens.
+    pub fn lex(mut self) -> Result<Vec<Token>, LexErr> {
+        self.partial_lex()?;
+        self.close()
+    }
+
+    /// Lex whatever is currently in the input, but do not consume the lexer.
+    pub fn partial_lex(&mut self) -> Result<(), LexErr> {
+        while let Some(CharData { cls, .. }) = self.peek() {
+            match cls {
+                CharClass::Alpha | CharClass::Underscore => self.push_ident(),
+                CharClass::Numeric    => self.push_numeric(),
+                CharClass::CharQuote  => self.push_char()?,
+                CharClass::StrQuote   => self.push_str()?,
+                CharClass::Punct      => self.push_punct()?,
+                CharClass::Whitespace => { self.next(); },
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add characters to the back of the input.
+    /// This will output a lex error if a character is not recognized.
+    pub fn append_input(&mut self, input: &str) -> Result<(), LexErr> {
+        for cd in input.chars().map(CharData::new) {
+            self.input.push_back(cd?);
+        }
+
+        Ok(())
+    }
+
+    pub fn try_close(&self) -> Result<(), LexErr> {
+        if !self.delimiters.is_empty() {
+            Err(LexErr::UnclosedDelimiter)?
+        }
+
+        Ok(())
+    }
+    /// Consume the lexer and return the tokens in it.
+    pub fn close(self) -> Result<Vec<Token>, LexErr> {
+        self.try_close()?;
+        Ok(self.tokens)
     }
 
     /// Look at the next character in the input.
@@ -104,28 +150,6 @@ impl Lexer {
             }
             _ => None
         }
-    }
-
-    /// Perform the actual lexing. 
-    /// 
-    /// Takes a string and converts it into a list of tokens.
-    fn lex(mut self) -> Result<Vec<Token>, LexErr> {
-        while let Some(CharData { cls, .. }) = self.peek() {
-            match cls {
-                CharClass::Alpha | CharClass::Underscore => self.push_ident(),
-                CharClass::Numeric    => self.push_numeric(),
-                CharClass::CharQuote  => self.push_char()?,
-                CharClass::StrQuote   => self.push_str()?,
-                CharClass::Punct      => self.push_punct()?,
-                CharClass::Whitespace => { self.next(); },
-            }
-        }
-        
-        if !self.delimiters.is_empty() {
-            Err(LexErr::UnclosedDelimiter)?
-        }
-
-        Ok(self.tokens)
     }
 
     /// Analyzes the next characters in the input as an identifier (e.g. abc, ade, aVariable, a123, a_).
