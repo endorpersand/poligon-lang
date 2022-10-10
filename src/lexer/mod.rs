@@ -12,14 +12,14 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum LexErr {
-    UnrecognizedChar(char),       // Char isn't used in Poligon code
-    UnexpectedEOF,                // Reached end of file, when expecting a token
-    ExpectedChar(char),           // Expected a specific character, f.e. '
-    EmptyChar,                    // ''
-    UnrecognizedOperator(String), // This operator cannot be resolved
-    MismatchedDelimiter,          // A bracket was closed with the wrong type
-    UnclosedDelimiter,            // A bracket wasn't closed
-    UnclosedComment,              // Hit EOF on /* */
+    UnknownChar(char),   // Char isn't used in Poligon code
+    UnclosedQuote,       // Hit EOF instead of closing quote
+    ExpectedChar(char),  // Expected a specific character, f.e. '
+    EmptyChar,           // ''
+    UnknownOp(String),   // This operator cannot be resolved
+    MismatchedDelimiter, // A bracket was closed with the wrong type
+    UnclosedDelimiter,   // A bracket wasn't closed
+    UnclosedComment,     // Hit EOF on /* */
 }
 
 pub struct Lexer {
@@ -63,7 +63,7 @@ impl CharClass {
 impl CharData {
     fn new(c: char) -> Result<Self, LexErr> {
         CharClass::of(c)
-            .ok_or(LexErr::UnrecognizedChar(c))
+            .ok_or(LexErr::UnknownChar(c))
             .map(|cls| Self { chr: c, cls })
     }
 }
@@ -226,7 +226,7 @@ impl Lexer {
         let mut buf = String::new();
         loop {
             let c = self.next()
-                .ok_or(LexErr::UnexpectedEOF)? // no more chars, hit EOF
+                .ok_or(LexErr::UnclosedQuote)? // no more chars, hit EOF
                 .chr;
 
             if c == qt { break; }
@@ -246,19 +246,19 @@ impl Lexer {
             .chr;
 
         // Get the next character:
-        let c = self.next().ok_or(LexErr::UnexpectedEOF)?.chr;
+        let c = self.next().ok_or(LexErr::UnclosedQuote)?.chr;
         if c == qt {
             Err(LexErr::EmptyChar)?;
         }
 
-        // Assert next char matches:
+        // Assert next char matches quote:
         match self.next() {
             Some(CharData { chr, .. }) if chr == qt => {
                 self.tokens.push(Token::Char(c));
                 Ok(())
             },
             Some(_) => Err(LexErr::ExpectedChar(qt)),
-            None => Err(LexErr::UnexpectedEOF)
+            None => Err(LexErr::UnclosedQuote)
         }
     }
 
@@ -282,7 +282,7 @@ impl Lexer {
                 .rev()
                 .filter(|(&op, _)| buf.starts_with(op))
                 .next()
-                .ok_or_else(|| LexErr::UnrecognizedOperator(buf.clone()))?;
+                .ok_or_else(|| LexErr::UnknownOp(buf.clone()))?;
             
             // Keep track of the delimiters.
             // If left delimiter, add to delimiter stack.
