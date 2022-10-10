@@ -4,10 +4,10 @@ use crate::err::GonErr;
 use crate::lexer::token::{Token, token};
 use crate::program::tree::{self, op};
 
-pub fn parse(tokens: impl IntoIterator<Item=Token>) -> Result<tree::Program, ParseErr> {
+pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
 }
-pub fn parse_repl<T>(mut tokens: T) -> Result<tree::Program, ParseErr> 
+pub fn parse_repl<T>(mut tokens: T) -> ParseResult<tree::Program> 
     where T: IntoIterator<Item=Token> + Extend<Token>
 {
     tokens.extend(std::iter::once(token![;]));

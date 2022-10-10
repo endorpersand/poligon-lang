@@ -55,8 +55,7 @@ fn wrapq(c: char) -> String {
 pub struct Lexer {
     input: VecDeque<CharData>,
     tokens: Vec<Token>,
-    delimiters: Vec<Delimiter>,
-    pub string: String
+    delimiters: Vec<Delimiter>
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -104,8 +103,7 @@ impl Lexer {
         let mut lexer = Self {
             input: VecDeque::new(), 
             tokens: vec![],
-            delimiters: vec![],
-            string: String::new()
+            delimiters: vec![]
         };
         lexer.append_input(input)?;
 
@@ -139,8 +137,6 @@ impl Lexer {
     /// Add characters to the back of the input.
     /// This will output a lex error if a character is not recognized.
     pub fn append_input(&mut self, input: &str) -> LexResult<()> {
-        self.string.push_str(input);
-        
         for cd in input.chars().map(CharData::new) {
             self.input.push_back(cd?);
         }

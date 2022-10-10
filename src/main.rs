@@ -8,65 +8,87 @@ fn wrap_err<E: std::fmt::Debug>(r: E) -> FullGonErr<impl GonErr> {
     r.into()
 }
 
-fn print(txt: &str) -> io::Result<()> {
+fn print_out(txt: &str) -> io::Result<()> {
     print!("{}", txt);
     io::stdout().flush()
 }
 
-// If there's a FullGonErr, then print its msg, and continue the line reading loop.
-// Otherwise, unwrap the value and return it.
-macro_rules! continue_if_err {
-    ($e:expr, $t:expr) => {
-        match $e {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("{}", wrap_err(e).full_msg($t));
-                print("> ")?;
-                continue;
-            }
-        }
-    }
-}
-
 fn main() -> io::Result<()> {
-    let mut ctx = BlockContext::new();
-    print("> ")?;
-
-    let mut lexer: Option<Lexer> = None;
+    print_out("> ")?;
+    let mut repl = Repl::new();
 
     for line in io::stdin().lock().lines() {
-        // If lexer exists, then the previous line is continuing onto this line:
-        let mut lx = if let Some(mut lx) = lexer.take() {
-            let mut input = String::from("\n");
-            input.push_str(&line?);
-
-            continue_if_err!(lx.append_input(&input), &lx.string);
-            lx
-        } else {
-            let input = &line?;
-            continue_if_err!(Lexer::new(input), input)
-        };
-        
-        let txt = lx.string.clone();
-        // Lex and make sure no failure:
-        continue_if_err!(lx.partial_lex(), &txt);
-
-        // We can't finish lexing, implying there's an open delimiter:
-        if let Err(_) = lx.try_close() {
-            print("... ")?;
-
-            lexer = Some(lx);
-            continue;
-        }
-
-        // if we got here, we should be able to close:
-        let tokens = continue_if_err!(lx.close(),                 &txt);
-        let tree   = continue_if_err!(parse_repl(tokens),         &txt);
-        let result = continue_if_err!(tree.traverse_rt(&mut ctx), &txt);
-
-        println!("{}", result.repr());
-        print("> ")?;
+        repl.process_line(&line?);
+        print_out(if repl.line_continues() { "... " } else { "> " })?;
     }
 
     Ok(())
+}
+
+struct Repl<'ctx> {
+    lexer: Option<Lexer>,
+    ctx: BlockContext<'ctx>,
+    code: String
+}
+
+impl Repl<'_> {
+    fn new() -> Self {
+        Self { lexer: None, ctx: BlockContext::new(), code: String::new() }
+    }
+
+    fn line_continues(&self) -> bool {
+        self.lexer.is_some()
+    }
+
+    fn process_line(&mut self, line: &str) {
+        // If lexer exists, then the previous line is continues onto this line:
+
+        // add code to stored repl:
+        self.code.push_str(line);
+        self.code.push('\n');
+
+        /// If there's a FullGonErr, then print its msg, and stop processing this line.
+        /// 
+        /// Otherwise, unwrap the value and provide the value.
+        macro_rules! consume_err {
+            ($e:expr) => {
+                match $e {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("{}", wrap_err(e).full_msg(&self.code));
+                        return;
+                    }
+                }
+            }
+        }
+
+        let mut lx = if let Some(mut lx) = self.lexer.take() {
+            let mut input = String::from("\n");
+            input.push_str(line);
+
+            consume_err! { lx.append_input(&input) };
+            lx
+        } else {
+            consume_err! { Lexer::new(line) }
+        };
+
+        // Lex the current data in lexer, and check to make sure there's no syntax errors:
+        consume_err! { lx.partial_lex() };
+
+        // We can't finish lexing, implying there's an open delimiter:
+        if let Err(_) = lx.try_close() {
+            self.lexer = Some(lx);
+            return;
+        }
+
+        // if we got here, we should be able to close:
+        let tokens = consume_err! { lx.close() };
+        let tree   = consume_err! { parse_repl(tokens) };
+        let result = consume_err! { tree.traverse_rt(&mut self.ctx) };
+
+        // success!
+        self.code.clear();
+        println!("{}", result.repr());
+
+    }
 }
