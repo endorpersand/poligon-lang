@@ -22,6 +22,12 @@ pub fn parse_from_file(fp: impl AsRef<Path>) -> io::Result<program::tree::Progra
     Ok(p)
 }
 
+pub trait Printable {
+    fn repr(&self) -> String;
+    fn str(&self) -> String;
+}
+
+
 #[cfg(test)]
 mod tests {
     #[test]

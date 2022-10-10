@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::Printable;
 use crate::err::GonErr;
 
 use self::tree::op;
@@ -190,7 +191,7 @@ impl TraverseRt for tree::Expr {
                                 .collect::<Result<_, _>>()?;
                             
                             let strs = exprs.into_iter()
-                                .map(|v| format!("{:?}", v))
+                                .map(|v| v.str())
                                 .collect::<Vec<_>>()
                                 .join(" ");
 

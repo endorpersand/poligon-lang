@@ -64,7 +64,7 @@ fn main() -> io::Result<()> {
         let tree   = continue_if_err!(parse_repl(tokens),         &txt);
         let result = continue_if_err!(tree.traverse_rt(&mut ctx), &txt);
 
-        println!("{:?}", result);
+        println!("{}", result.repr());
         print("> ")?;
     }
 

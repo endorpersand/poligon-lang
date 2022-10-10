@@ -1,7 +1,9 @@
 use std::cell::Ref;
+use std::fmt::Display;
 use std::rc::Rc;
 use std::ops::Deref;
 
+use crate::Printable;
 use crate::util::{RefValue, RefValueUtil};
 
 use super::tree::{self, op};
@@ -19,9 +21,10 @@ pub enum Value {
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit }
-impl ToString for ValueType {
-    fn to_string(&self) -> String {
-        String::from(match self {
+
+impl Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
             ValueType::Int   => "int",
             ValueType::Float => "float",
             ValueType::Char  => "char",
@@ -30,6 +33,45 @@ impl ToString for ValueType {
             ValueType::List  => "list",
             ValueType::Unit  => "void"
         })
+    }
+}
+
+fn list_repr(l: &RefValue<Vec<Value>>) -> String {
+    format!("[{}]", {
+        // TODO: deal with recursion
+        let strs = l.borrow().iter()
+            .map(Printable::repr)
+            .collect::<Vec<_>>();
+
+        strs.join(", ")
+    })
+}
+
+impl Printable for Value {
+    fn repr(&self) -> String {
+        match self {
+            Value::Int(i)   => i.to_string(),
+            Value::Float(f) => f.to_string(),
+            Value::Char(c)  => format!("{:?}", c), // TODO: link these to language representations
+            Value::Str(s)   => format!("{:?}", s), // TODO: link these to language representations
+            Value::Bool(b)  => b.to_string(),
+            Value::List(l)  => list_repr(l),
+            Value::Unit     => ValueType::Unit.to_string(),
+        }
+    }
+
+    fn str(&self) -> String {
+        match self {
+            Value::Char(c)  => format!("{}", c),
+            Value::Str(s)   => format!("{}", s),
+            v @ (
+                | Value::Int(_) 
+                | Value::Float(_) 
+                | Value::Bool(_) 
+                | Value::List(_) 
+                | Value::Unit
+            ) => v.repr(),
+        }
     }
 }
 
