@@ -1,4 +1,4 @@
-use std::cell::{RefMut, Ref};
+use std::cell::Ref;
 use std::rc::Rc;
 use std::ops::Deref;
 
@@ -209,7 +209,34 @@ impl Value {
                 |a, b| Ok(Value::Float(a % b)), 
                 |a, b| a.checked_rem(b).map(Value::Int).ok_or(super::RuntimeErr::DivisionByZero)),
         
-                op::Binary::BitOr  => int_only_op!(o => self | right),
+                op::Binary::BitOr  => match (self, right) {
+                    (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a | b)),
+                    (Value::Str(a), Value::Str(b)) => {
+                        let mut buf = a.clone();
+                        buf.push_str(b);
+
+                        Ok(Value::Str(buf))
+                    },
+                    (Value::Char(a), Value::Str(b)) => {
+                        let mut buf = a.to_string();
+                        buf.push_str(b);
+
+                        Ok(Value::Str(buf))
+                    },
+                    (Value::Str(a), Value::Char(b)) => {
+                        let mut buf = a.clone();
+                        buf.push(*b);
+
+                        Ok(Value::Str(buf))
+                    },
+                    (Value::List(a), Value::List(b)) => {
+                        let mut buf = a.borrow().clone();
+                        buf.extend(b.borrow().iter().map(Value::new_ref));
+
+                        Ok(Value::list(buf))
+                    }
+                    _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
+                },
                 op::Binary::BitAnd => int_only_op!(o => self & right),
                 op::Binary::BitXor => int_only_op!(o => self ^ right),
             
