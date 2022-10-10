@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use self::tree::op;
 use self::value::{Value, ValueType};
 use self::vars::VarContext;
@@ -43,7 +45,8 @@ pub enum RuntimeErr {
     CannotIndex(ValueType),
     CannotIndexWith(ValueType, ValueType),
     IndexOutOfBounds,
-    UndefinedVar(String)
+    UndefinedVar(String),
+    ExpectedNArgs(usize)
 }
 
 type RtResult<T> = Result<T, RuntimeErr>;
@@ -169,7 +172,38 @@ impl TraverseRt for tree::Expr {
                 Ok(Value::list(result))
             },
             tree::Expr::Call { funct, params } => {
-                todo!()
+                match &**funct {
+                    tree::Expr::Ident(s) => {
+                        if s == "print" {
+                            let exprs: Vec<_> = params.iter()
+                                .map(|e| e.traverse_rt(ctx))
+                                .collect::<Result<_, _>>()?;
+                            
+                            let strs = exprs.into_iter()
+                                .map(|v| format!("{:?}", v))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+
+                            println!("{}", strs);
+                            
+                            Ok(Value::Unit)
+                        } else if s == "is" {
+                            if let [a, b] = &params[..2] {
+                                let eval = match (a.traverse_rt(ctx)?, b.traverse_rt(ctx)?) {
+                                    (Value::List(al), Value::List(bl)) => Rc::ptr_eq(&al, &bl),
+                                    (av, bv) => av == bv
+                                };
+
+                                Ok(Value::Bool(eval))
+                            } else {
+                                Err(RuntimeErr::ExpectedNArgs(2))
+                            }
+                        } else {
+                            todo!()
+                        }
+                    },
+                    _ => todo!(),
+                }
             }
             tree::Expr::Index { expr, index } => {
                 let val = expr.traverse_rt(ctx)?;
