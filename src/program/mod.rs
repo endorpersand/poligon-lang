@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use crate::err::GonErr;
+
 use self::tree::op;
 use self::value::{Value, ValueType};
 use self::vars::VarContext;
@@ -48,7 +50,15 @@ pub enum RuntimeErr {
     UndefinedVar(String),
     ExpectedNArgs(usize)
 }
+impl GonErr for RuntimeErr {
+    fn err_name(&self) -> &'static str {
+        "runtime error"
+    }
 
+    fn message(&self) -> String {
+        todo!()
+    }
+}
 type RtResult<T> = Result<T, RuntimeErr>;
 
 /// This trait enables the traversal of a program tree.

@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+use crate::err::GonErr;
+
 use self::token::{Token, Keyword, OPMAP, Delimiter, token};
 pub mod token;
 
@@ -22,11 +24,39 @@ pub enum LexErr {
     UnclosedComment,     // Hit EOF on /* */
 }
 type LexResult<T> = Result<T, LexErr>;
+impl GonErr for LexErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            LexErr::UnknownChar(c)      => format!("invalid character {}", wrapq(*c)),
+            LexErr::UnclosedQuote       => format!("quote was never terminated"),
+            LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
+            LexErr::EmptyChar           => format!("char literal cannot be empty"),
+            LexErr::UnknownOp(_op)      => format!("unexpected operator"),
+            LexErr::MismatchedDelimiter => format!("mismatched delimiter"),
+            LexErr::UnclosedDelimiter   => format!("delimiter was never terminated"),
+            LexErr::UnclosedComment     => format!("comment was never terminated"),
+        }
+    }
+}
+
+/// Enclose quotes around a character
+/// 
+/// For most characters, it will appear as: `'a', 'b', '"', '@'`, etc.
+/// 
+/// For ', it appears as `"'"`.
+fn wrapq(c: char) -> String {
+    if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
+}
 
 pub struct Lexer {
     input: VecDeque<CharData>,
     tokens: Vec<Token>,
-    delimiters: Vec<Delimiter>
+    delimiters: Vec<Delimiter>,
+    pub string: String
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -74,7 +104,8 @@ impl Lexer {
         let mut lexer = Self {
             input: VecDeque::new(), 
             tokens: vec![],
-            delimiters: vec![]
+            delimiters: vec![],
+            string: String::new()
         };
         lexer.append_input(input)?;
 
@@ -108,6 +139,8 @@ impl Lexer {
     /// Add characters to the back of the input.
     /// This will output a lex error if a character is not recognized.
     pub fn append_input(&mut self, input: &str) -> LexResult<()> {
+        self.string.push_str(input);
+        
         for cd in input.chars().map(CharData::new) {
             self.input.push_back(cd?);
         }

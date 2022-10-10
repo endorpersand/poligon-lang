@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
-use crate::lexer::LexErr;
-use crate::parser::ParseErr;
-use crate::program::RuntimeErr;
-
 pub trait GonErr {
     fn err_name(&self) -> &'static str;
     fn message(&self) -> String;
@@ -42,51 +38,21 @@ pub trait GonErr {
 
 }
 
-/// Enclose quotes around a character
-/// 
-/// For most characters, it will appear as: `'a', 'b', '"', '@'`, etc.
-/// 
-/// For ', it appears as `"'"`.
-fn wrapq(c: char) -> String {
-    if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
-}
-
-impl GonErr for LexErr {
+// TODO: this impl is only here to be used for debug purposes.
+// it should be deleted once everything has been implemented.
+pub struct DebugErr<E: std::fmt::Debug>(E);
+impl<E: std::fmt::Debug> GonErr for DebugErr<E> {
     fn err_name(&self) -> &'static str {
-        "syntax error"
+        "error"
     }
 
     fn message(&self) -> String {
-        match self {
-            LexErr::UnknownChar(c)      => format!("invalid character {}", wrapq(*c)),
-            LexErr::UnclosedQuote       => format!("quote was never terminated"),
-            LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
-            LexErr::EmptyChar           => format!("char literal cannot be empty"),
-            LexErr::UnknownOp(_op)      => format!("unexpected operator"),
-            LexErr::MismatchedDelimiter => format!("mismatched delimiter"),
-            LexErr::UnclosedDelimiter   => format!("delimiter was never terminated"),
-            LexErr::UnclosedComment     => format!("comment was never terminated"),
-        }
+        format!("{:?}", self.0)
     }
 }
-
-impl GonErr for ParseErr {
-    fn err_name(&self) -> &'static str {
-        "syntax error"
-    }
-
-    fn message(&self) -> String {
-        todo!()
-    }
-}
-
-impl GonErr for RuntimeErr {
-    fn err_name(&self) -> &'static str {
-        "runtime error"
-    }
-
-    fn message(&self) -> String {
-        todo!()
+impl<E: std::fmt::Debug> From<E> for FullGonErr<DebugErr<E>> {
+    fn from(err: E) -> Self {
+        DebugErr(err).at((0, 0))
     }
 }
 
@@ -181,7 +147,7 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
 }
 
 impl<E: GonErr> FullGonErr<E> {
-    pub fn full_msg(&self, orig_txt: &str) -> String {
+    pub fn short_msg(&self) -> String {
         let (lno, cno) = *match &self.position {
             ErrPos::Point(p) => p,
             ErrPos::Points(pts) => pts.get(0).unwrap_or(&(0, 0)),
@@ -189,9 +155,11 @@ impl<E: GonErr> FullGonErr<E> {
             ErrPos::RangeFrom(RangeFrom { start }) => start,
         };
 
-        let mut lines = vec![
-            format!("{}:{} :: {}: {}", lno, cno, self.err.err_name(), self.err.message())
-        ];
+        format!("{}:{} :: {}: {}", lno, cno, self.err.err_name(), self.err.message())
+    }
+
+    pub fn full_msg(&self, orig_txt: &str) -> String {
+        let mut lines = vec![self.short_msg()];
         
         match &self.position {
             ErrPos::Point(p) => {

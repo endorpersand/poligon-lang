@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use crate::err::GonErr;
 use crate::lexer::token::{Token, token};
 use crate::program::tree::{self, op};
 
@@ -24,6 +25,15 @@ pub enum ParseErr {
     CannotParseNumeric,
     ExpectedBlock,
     ExpectedType
+}
+impl GonErr for ParseErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+
+    fn message(&self) -> String {
+        todo!()
+    }
 }
 type ParseResult<T> = Result<T, ParseErr>;
 
