@@ -6,7 +6,7 @@ use regex::Regex;
 use self::token::{Token, Keyword, OPMAP, Delimiter, token};
 pub mod token;
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, LexErr> {
+pub fn tokenize(input: &str) -> LexResult<Vec<Token>> {
     Lexer::new(input)?.lex()
 }
 
@@ -21,6 +21,7 @@ pub enum LexErr {
     UnclosedDelimiter,   // A bracket wasn't closed
     UnclosedComment,     // Hit EOF on /* */
 }
+type LexResult<T> = Result<T, LexErr>;
 
 pub struct Lexer {
     input: VecDeque<CharData>,
@@ -61,7 +62,7 @@ impl CharClass {
 }
 
 impl CharData {
-    fn new(c: char) -> Result<Self, LexErr> {
+    fn new(c: char) -> LexResult<Self> {
         CharClass::of(c)
             .ok_or(LexErr::UnknownChar(c))
             .map(|cls| Self { chr: c, cls })
@@ -69,7 +70,7 @@ impl CharData {
 }
 
 impl Lexer {
-    pub fn new(input: &str) -> Result<Self, LexErr> {
+    pub fn new(input: &str) -> LexResult<Self> {
         let mut lexer = Self {
             input: VecDeque::new(), 
             tokens: vec![],
@@ -83,13 +84,13 @@ impl Lexer {
     /// Perform the actual lexing. 
     /// 
     /// Takes a string and converts it into a list of tokens.
-    pub fn lex(mut self) -> Result<Vec<Token>, LexErr> {
+    pub fn lex(mut self) -> LexResult<Vec<Token>> {
         self.partial_lex()?;
         self.close()
     }
 
     /// Lex whatever is currently in the input, but do not consume the lexer.
-    pub fn partial_lex(&mut self) -> Result<(), LexErr> {
+    pub fn partial_lex(&mut self) -> LexResult<()> {
         while let Some(CharData { cls, .. }) = self.peek() {
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident(),
@@ -106,7 +107,7 @@ impl Lexer {
 
     /// Add characters to the back of the input.
     /// This will output a lex error if a character is not recognized.
-    pub fn append_input(&mut self, input: &str) -> Result<(), LexErr> {
+    pub fn append_input(&mut self, input: &str) -> LexResult<()> {
         for cd in input.chars().map(CharData::new) {
             self.input.push_back(cd?);
         }
@@ -114,7 +115,7 @@ impl Lexer {
         Ok(())
     }
 
-    pub fn try_close(&self) -> Result<(), LexErr> {
+    pub fn try_close(&self) -> LexResult<()> {
         if !self.delimiters.is_empty() {
             Err(LexErr::UnclosedDelimiter)?
         }
@@ -122,7 +123,7 @@ impl Lexer {
         Ok(())
     }
     /// Consume the lexer and return the tokens in it.
-    pub fn close(self) -> Result<Vec<Token>, LexErr> {
+    pub fn close(self) -> LexResult<Vec<Token>> {
         self.try_close()?;
         Ok(self.tokens)
     }
@@ -218,7 +219,7 @@ impl Lexer {
     /// Analyzes the next characters in the input as a str (e.g. "hello").
     /// 
     /// This function consumes characters from the input and adds a str literal token in the output.
-    fn push_str(&mut self) -> Result<(), LexErr> {
+    fn push_str(&mut self) -> LexResult<()> {
         let qt = self.next()
             .expect("String was validated to have a character, but failed to pop quotation mark")
             .chr;
@@ -240,7 +241,7 @@ impl Lexer {
     /// Analyzes the next characters in the input as a char (e.g. 'h').
     /// 
     /// This function consumes characters from the input and adds a char literal token in the output.
-    fn push_char(&mut self) -> Result<(), LexErr> {
+    fn push_char(&mut self) -> LexResult<()> {
         let qt = self.next()
             .expect("String was validated to have a character, but failed to pop quotation mark")
             .chr;
@@ -266,7 +267,7 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
-    fn push_punct(&mut self) -> Result<(), LexErr> {
+    fn push_punct(&mut self) -> LexResult<()> {
         let mut buf = String::new();
 
         while let Some(c) = self.match_cls(CharClass::Punct) {
@@ -318,7 +319,7 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a line comment 
     /// (a comment that goes to the end of a line) to the output.
-    fn push_line_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
+    fn push_line_comment(&mut self, mut buf: String) -> LexResult<()> {
         while let Some(CharData {chr, ..}) = self.next() {
             if chr == '\n' { break; }
             buf.push(chr);
@@ -334,7 +335,7 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a multi-line comment 
     /// (/* this kind of comment */) to the output.
-    fn push_multi_comment(&mut self, mut buf: String) -> Result<(), LexErr> {
+    fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
         lazy_static! {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
         }
@@ -386,7 +387,7 @@ impl Lexer {
 
     /// Verify that the top delimiter in the delimiter stack is the same as the argument's 
     /// delimiter type (Paren, Square, Curly, Comment) and pop it if they are the same.
-    fn match_delimiter(&mut self, d: Delimiter) -> Result<(), LexErr> {
+    fn match_delimiter(&mut self, d: Delimiter) -> LexResult<()> {
         let left = if d.is_right() { d.reversed() } else { d };
         
         match self.delimiters.last() {
