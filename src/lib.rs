@@ -6,6 +6,7 @@ pub use program::{BlockContext, TraverseRt};
 mod lexer;
 mod parser;
 mod program;
+mod util;
 
 pub fn lex_from_file(fp: impl AsRef<Path>) -> io::Result<Vec<lexer::token::Token>> {
     let source = fs::read_to_string(fp)?;

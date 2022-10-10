@@ -1,3 +1,9 @@
+use std::cell::{RefMut, Ref};
+use std::rc::Rc;
+use std::ops::Deref;
+
+use crate::util::{RefValue, RefValueUtil};
+
 use super::tree::{self, op};
 
 #[derive(PartialEq, Clone, Debug)]
@@ -7,7 +13,7 @@ pub enum Value {
     Char(char),
     Str(String),
     Bool(bool),
-    List(Vec<Value>),
+    List(RefValue<Vec<Value>>),
     Unit
 }
 
@@ -61,7 +67,41 @@ macro_rules! int_only_op {
     }
 }
 
+struct ValRefIter<'a> {
+    r: Option<Ref<'a, [Value]>>,
+}
+
+impl ValRefIter<'_> {
+    fn new(r: Ref<impl Deref<Target=[Value]>>) -> ValRefIter<'_> {
+        ValRefIter { r: Some(Ref::map(r, Deref::deref)) }
+    }
+}
+
+impl<'a> Iterator for ValRefIter<'a> {
+    type Item = Ref<'a, Value>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.r.take() {
+            Some(borrow) => match *borrow {
+                [] => None,
+                [_, ..] => {
+                    let (head, tail) = Ref::map_split(borrow, |slice| {
+                        (&slice[0], &slice[1..])
+                    });
+                    self.r.replace(tail);
+                    Some(head)
+                }
+            },
+            None => None,
+        }
+    }
+}
+
 impl Value {
+    pub fn list(l: Vec<Value>) -> Self {
+        return Value::List(RefValue::wrap(l))
+    }
+
     /// Truthiness of a value: when it is cast to bool, what truth value should it have?
     /// 
     /// Numerics: Non-zero => true
@@ -73,7 +113,7 @@ impl Value {
             Value::Char(_)  => true,
             Value::Str(v)   => !v.is_empty(),
             Value::Bool(v)  => *v,
-            Value::List(v)  => !v.is_empty(),
+            Value::List(v)  => !v.borrow().is_empty(),
             Value::Unit     => false
         }
     }
@@ -93,7 +133,7 @@ impl Value {
             Value::Bool(_)  => ValueType::Bool,
             Value::List(_)  => ValueType::List,
             Value::Unit     => ValueType::Unit
-        }.into()
+        }
     }
 
     /// If the current value can be interpreted as an iterator of values, convert it into an iterator.
@@ -101,7 +141,10 @@ impl Value {
     pub(super) fn as_iterator<'a>(&'a self) -> Option<Box<dyn Iterator<Item=Value> + 'a>> {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
-            Value::List(l)  => Some(Box::new(l.iter().cloned())),
+            Value::List(l)  => {
+                let iter = ValRefIter::new(l.borrow());
+                Some(Box::new(iter.map(|r| r.new_ref())))
+            },
             Value::Int(_)   => None,
             Value::Float(_) => None,
             Value::Char(_)  => None,
@@ -219,7 +262,7 @@ impl Value {
     /// Note that `.clone` is a full copy-by-value.
     pub fn new_ref(&self) -> Value {
         match self {
-            Value::List(_) => todo!(),
+            Value::List(l) => Value::List(Rc::clone(l)),
             e @ (
                 | Value::Int(_) 
                 | Value::Float(_) 

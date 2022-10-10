@@ -69,7 +69,7 @@ impl TraverseRt for tree::Expr {
                     .map(|expr| expr.traverse_rt(ctx))
                     .collect::<Result<_, _>>()?;
 
-                Ok(Value::List(vec))
+                Ok(Value::list(vec))
             },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
@@ -123,7 +123,7 @@ impl TraverseRt for tree::Expr {
                             .map(Value::Int)
                             .collect();
 
-                        Ok(Value::List(values))
+                        Ok(Value::list(values))
                     },
                     // (a, b @ Value::Float(_)) => compute_float_range(a, b, &step_value),
                     // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
@@ -138,7 +138,7 @@ impl TraverseRt for tree::Expr {
                             .map(Value::Char)
                             .collect();
 
-                        Ok(Value::List(values))
+                        Ok(Value::list(values))
                     },
                     _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
                 }
@@ -150,7 +150,7 @@ impl TraverseRt for tree::Expr {
                     values.push(block.traverse_rt(&mut ctx.child())?);
                 }
 
-                Ok(Value::List(values))
+                Ok(Value::list(values))
             },
             tree::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
@@ -166,7 +166,7 @@ impl TraverseRt for tree::Expr {
                     result.push(iteration);
                 }
 
-                Ok(Value::List(result))
+                Ok(Value::list(result))
             },
             tree::Expr::Call { funct, params } => {
                 todo!()
@@ -183,7 +183,7 @@ impl TraverseRt for tree::Expr {
                             let mi = usize::try_from(signed_index).ok();
                             
                             if let Value::List(l) = e {
-                                mi.and_then(|i| l.get(i).map(Value::new_ref))
+                                mi.and_then(|i| l.borrow().get(i).map(Value::new_ref))
                                     .ok_or(RuntimeErr::IndexOutOfBounds)
                             } else {
                                 unreachable!();
