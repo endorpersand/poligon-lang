@@ -49,7 +49,8 @@ pub enum RuntimeErr {
     CannotIndexWith(ValueType, ValueType),
     IndexOutOfBounds,
     UndefinedVar(String),
-    ExpectedNArgs(usize)
+    WrongArity(usize),
+    CannotCall
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -184,36 +185,37 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::Call { funct, params } => {
                 match &**funct {
-                    tree::Expr::Ident(s) => {
-                        if s == "print" {
-                            let exprs: Vec<_> = params.iter()
-                                .map(|e| e.traverse_rt(ctx))
-                                .collect::<Result<_, _>>()?;
-                            
-                            let strs = exprs.into_iter()
-                                .map(|v| v.str())
-                                .collect::<Vec<_>>()
-                                .join(" ");
+                    tree::Expr::Ident(s) if s == "print" => {
+                        let exprs: Vec<_> = params.iter()
+                            .map(|e| e.traverse_rt(ctx))
+                            .collect::<Result<_, _>>()?;
+                        
+                        let strs = exprs.into_iter()
+                            .map(|v| v.str())
+                            .collect::<Vec<_>>()
+                            .join(" ");
 
-                            println!("{}", strs);
-                            
-                            Ok(Value::Unit)
-                        } else if s == "is" {
-                            if let [a, b] = &params[..2] {
-                                let eval = match (a.traverse_rt(ctx)?, b.traverse_rt(ctx)?) {
-                                    (Value::List(al), Value::List(bl)) => Rc::ptr_eq(&al, &bl),
-                                    (av, bv) => av == bv
-                                };
+                        println!("{}", strs);
+                        
+                        Ok(Value::Unit)
+                    },
+                    tree::Expr::Ident(s) if s == "is" => {
+                        if let [a, b] = &params[..2] {
+                            let eval = match (a.traverse_rt(ctx)?, b.traverse_rt(ctx)?) {
+                                (Value::List(al), Value::List(bl)) => Rc::ptr_eq(&al, &bl),
+                                (av, bv) => av == bv
+                            };
 
-                                Ok(Value::Bool(eval))
-                            } else {
-                                Err(RuntimeErr::ExpectedNArgs(2))
-                            }
+                            Ok(Value::Bool(eval))
                         } else {
-                            todo!()
+                            Err(RuntimeErr::WrongArity(2))
                         }
                     },
-                    _ => todo!(),
+                    e => if let Value::Fun(f) = e.traverse_rt(ctx)? {
+                        f.call(params, ctx)
+                    } else {
+                        Err(RuntimeErr::CannotCall)
+                    },
                 }
             }
             tree::Expr::Index { expr, index } => {

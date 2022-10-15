@@ -3,9 +3,10 @@ use std::fmt::Display;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use crate::Printable;
+use crate::{Printable, TraverseRt};
 use crate::util::{RefValue, RefValueUtil};
 
+use super::RtResult;
 use super::tree::{self, op};
 
 #[derive(PartialEq, Clone, Debug)]
@@ -16,23 +17,101 @@ pub enum Value {
     Str(String),
     Bool(bool),
     List(RefValue<Vec<Value>>),
-    Unit
+    Unit,
+    Fun(GonFun)
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit }
+#[derive(PartialEq, Clone, Debug)]
+pub struct GonFun {
+    ident: Option<String>,
+    ty: FunType,
+    fun: fn(Vec<Value>) -> RtResult<Value>
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FunType(Box<FunParams>, Box<ValueType>);
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum FunParams {
+    Positional(Vec<VArbType>), // (int, int, int) -> ..
+    PosSpread(Vec<VArbType>, VArbType) // (int, int, ..int) -> ..
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit, Fun(FunType) }
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum VArbType {
+    Value(ValueType),
+    Unk
+}
 
 impl Display for ValueType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            ValueType::Int   => "int",
-            ValueType::Float => "float",
-            ValueType::Char  => "char",
-            ValueType::Str   => "string",
-            ValueType::Bool  => "bool",
-            ValueType::List  => "list",
-            ValueType::Unit  => "void"
-        })
+        match self {
+            ValueType::Int   => f.write_str("int"),
+            ValueType::Float => f.write_str("float"),
+            ValueType::Char  => f.write_str("char"),
+            ValueType::Str   => f.write_str("string"),
+            ValueType::Bool  => f.write_str("bool"),
+            ValueType::List  => f.write_str("list"),
+            ValueType::Unit  => f.write_str("void"),
+            ValueType::Fun(FunType(params, ret)) => {
+                let pstrs = match &**params {
+                    FunParams::Positional(p) => p.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+
+                    FunParams::PosSpread(p, s) => {
+                        let mut ps = p.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>();
+
+                        ps.push(format!("..{}", ret));
+
+                        ps
+                    },
+                };
+
+                f.write_str(
+                    &format!("({}) -> {}", pstrs.join(", "), ret)
+                )
+            },
+        }
+    }
+}
+
+impl Display for VArbType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VArbType::Value(v) => v.fmt(f),
+            VArbType::Unk => f.write_str("unk"),
+        }
+    }
+}
+
+impl GonFun {
+    pub fn arity(&self) -> Option<usize> {
+        let FunType(params, _) = &self.ty;
+        match &**params {
+            FunParams::Positional(p) => Some(p.len()),
+            FunParams::PosSpread(_, _) => None,
+        }
+    }
+
+    pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut super::BlockContext) -> RtResult<Value> {
+        // TODO, make lazy
+        let pvals = params.iter()
+            .map(|e| e.traverse_rt(ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+    
+        // check if arity matches
+        if let Some(a) = self.arity() {
+            if pvals.len() != a {
+                return Err(super::RuntimeErr::WrongArity(a));
+            }
+        }
+
+        (self.fun)(pvals)
     }
 }
 
@@ -57,6 +136,10 @@ impl Printable for Value {
             Value::Bool(b)  => b.to_string(),
             Value::List(l)  => list_repr(l),
             Value::Unit     => ValueType::Unit.to_string(),
+            Value::Fun(f)   => match &f.ident {
+                Some(n) => format!("<function {}>", n),
+                None => String::from("<anonymous function>"),
+            },
         }
     }
 
@@ -70,6 +153,7 @@ impl Printable for Value {
                 | Value::Bool(_) 
                 | Value::List(_) 
                 | Value::Unit
+                | Value::Fun(_)
             ) => v.repr(),
         }
     }
@@ -156,7 +240,8 @@ impl Value {
             Value::Str(v)   => !v.is_empty(),
             Value::Bool(v)  => *v,
             Value::List(v)  => !v.borrow().is_empty(),
-            Value::Unit     => false
+            Value::Unit     => false,
+            Value::Fun(_)   => true,
         }
     }
 
@@ -174,7 +259,8 @@ impl Value {
             Value::Str(_)   => ValueType::Str,
             Value::Bool(_)  => ValueType::Bool,
             Value::List(_)  => ValueType::List,
-            Value::Unit     => ValueType::Unit
+            Value::Unit     => ValueType::Unit,
+            Value::Fun(f)   => ValueType::Fun(f.ty.clone()),
         }
     }
 
@@ -192,6 +278,7 @@ impl Value {
             Value::Char(_)  => None,
             Value::Bool(_)  => None,
             Value::Unit     => None,
+            Value::Fun(_)   => None,
         }
     }
 
@@ -339,6 +426,7 @@ impl Value {
                 | Value::Str(_) 
                 | Value::Bool(_) 
                 | Value::Unit
+                | Value::Fun(_)
             ) => e.clone(),
         }
     }
