@@ -14,6 +14,16 @@ fn print_out(txt: &str) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
+    let args: Vec<_> = std::env::args().collect();
+    let mfp = args.get(1);
+
+    match mfp {
+        Some(fp) => run_file(fp),
+        None => open_repl(),
+    }
+}
+
+fn open_repl() -> io::Result<()> {
     print_out("> ")?;
     let mut repl = Repl::new();
 
