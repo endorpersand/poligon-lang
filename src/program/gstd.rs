@@ -41,6 +41,14 @@ fn std_is(args: Vec<Value>) -> RtResult<Value> {
     }
 }
 
+fn std_type(args: Vec<Value>) -> RtResult<Value> {
+    if let [a] = &args[..] {
+        Ok(Value::Str(a.ty().to_string()))
+    } else {
+        Err(RuntimeErr::WrongArity(1))
+    }
+}
+
 pub(super) fn std_map() -> HashMap<String, Value> {
     str_map! {
         "print": Value::new_fun(
@@ -52,6 +60,11 @@ pub(super) fn std_map() -> HashMap<String, Value> {
             Some("is"),
             FunType::new(FunParamType::Positional(vec![VArbType::Unk, VArbType::Unk]), VArbType::Value(ValueType::Bool)),
             std_is
+        ),
+        "type": Value::new_fun(
+            Some("type"),
+            FunType::new(FunParamType::Positional(vec![VArbType::Unk]), VArbType::Value(ValueType::Str)),
+            std_type
         )
     }
 }

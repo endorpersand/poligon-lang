@@ -164,7 +164,7 @@ impl Value {
             Value::Char(_)  => ValueType::Char,
             Value::Str(_)   => ValueType::Str,
             Value::Bool(_)  => ValueType::Bool,
-            Value::List(_)  => ValueType::List,
+            Value::List(_)  => ValueType::List(Box::new(VArbType::Unk)),
             Value::Unit     => ValueType::Unit,
             Value::Fun(f)   => ValueType::Fun(f.ty.clone()),
         }

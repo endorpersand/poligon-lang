@@ -1,7 +1,7 @@
 use crate::{BlockContext, TraverseRt};
 use crate::program::{RtResult, tree, RuntimeErr};
 
-use super::{VArbType, ValueType, Value};
+use super::{VArbType, Value};
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct GonFun {
