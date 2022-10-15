@@ -51,17 +51,17 @@ fn std_type(args: Vec<Value>) -> RtResult<Value> {
 
 pub(super) fn std_map() -> HashMap<String, Value> {
     str_map! {
-        "print": Value::new_fun(
+        "print": Value::new_rust_fn(
             Some("print"), 
             FunType::new(FunParamType::PosSpread(vec![], VArbType::Unk), VArbType::Value(ValueType::Unit)),
             std_print
         ),
-        "is": Value::new_fun(
+        "is": Value::new_rust_fn(
             Some("is"),
             FunType::new(FunParamType::Positional(vec![VArbType::Unk, VArbType::Unk]), VArbType::Value(ValueType::Bool)),
             std_is
         ),
-        "type": Value::new_fun(
+        "type": Value::new_rust_fn(
             Some("type"),
             FunType::new(FunParamType::Positional(vec![VArbType::Unk]), VArbType::Value(ValueType::Str)),
             std_type

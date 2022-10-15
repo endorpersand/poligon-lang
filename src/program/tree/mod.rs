@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use super::TraverseRt;
 
 pub type Program = Vec<Stmt>;
@@ -42,7 +44,7 @@ pub struct FunDecl {
     pub ident: String,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
-    pub block: Program
+    pub block: Rc<Program>
 }
 
 #[derive(Debug, PartialEq)]

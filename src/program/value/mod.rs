@@ -341,11 +341,21 @@ impl Value {
         Value::List(RefValue::wrap(l))
     }
 
-    pub fn new_fun(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {
+    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,
-            fun
+            fun: GInternalFun::Rust(fun)
+        };
+
+        Value::Fun(gf)
+    }
+
+    pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<tree::Program>) -> Self {
+        let gf = GonFun {
+            ident: name.map(ToString::to_string),
+            ty,
+            fun: GInternalFun::Poligon(params, fun)
         };
 
         Value::Fun(gf)

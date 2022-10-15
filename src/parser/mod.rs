@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use crate::err::GonErr;
 use crate::lexer::token::{Token, token};
@@ -356,7 +357,7 @@ impl Parser {
             ident,
             params,
             ret,
-            block
+            block: Rc::new(block)
         })
     }
 

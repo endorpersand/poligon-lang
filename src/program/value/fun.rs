@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{BlockContext, TraverseRt};
 use crate::program::{RtResult, tree, RuntimeErr};
 
@@ -7,7 +9,7 @@ use super::{VArbType, Value};
 pub struct GonFun {
     pub(super) ident: Option<String>,
     pub(super) ty: FunType,
-    pub(super) fun: fn(Vec<Value>) -> RtResult<Value>
+    pub(super) fun: GInternalFun
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -16,6 +18,12 @@ pub struct FunType(pub(super) Box<FunParamType>, pub(super) Box<VArbType>);
 pub enum FunParamType {
     Positional(Vec<VArbType>), // (int, int, int) -> ..
     PosSpread(Vec<VArbType>, VArbType) // (int, int, ..int) -> ..
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub(super) enum GInternalFun {
+    Rust(fn(Vec<Value>) -> RtResult<Value>),
+    Poligon(Vec<String>, Rc<tree::Program>)
 }
 
 impl GonFun {
@@ -40,7 +48,17 @@ impl GonFun {
             }
         }
 
-        (self.fun)(pvals)
+        match &self.fun {
+            GInternalFun::Rust(f) => (f)(pvals),
+            GInternalFun::Poligon(params, block) => {
+                let mut fscope = ctx.child(); // TODO: lexical scope
+                
+                for (ident, v) in std::iter::zip(params, pvals) {
+                    fscope.vars.set_top(ident.clone(), v);
+                }
+                block.traverse_rt(&mut fscope)
+            },
+        }
     }
 }
 

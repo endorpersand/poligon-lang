@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::err::GonErr;
 
 use self::tree::op;
@@ -173,7 +175,7 @@ impl TraverseRt for tree::Expr {
                 let mut result = vec![];
                 for val in it {
                     let mut scope = ctx.child();
-                    scope.vars.set(ident.clone(), val);
+                    scope.vars.set_top(ident.clone(), val);
 
                     let iteration = block.traverse_rt(&mut scope)?;
                     result.push(iteration);
@@ -404,7 +406,10 @@ impl TraverseRt for tree::FunDecl {
             )
             .collect();
         let p = FunParamType::Positional(resolved_params);
-        
+        let param_names: Vec<_> = params.iter()
+            .map(|p| p.ident.clone())
+            .collect();
+
         let r = ret.as_ref()
             .map_or_else(
                 || VArbType::Value(ValueType::Unit), 
@@ -413,10 +418,11 @@ impl TraverseRt for tree::FunDecl {
 
         let ty = FunType::new(p, r);
 
-        let val = Value::new_fun(
+        let val = Value::new_gon_fn(
             Some(&ident),
             ty,
-            todo!()
+            param_names,
+            Rc::clone(block)
         );
         let rf = ctx.vars.set(ident.clone(), val).new_ref();
         Ok(rf)

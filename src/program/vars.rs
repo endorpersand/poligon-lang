@@ -102,6 +102,13 @@ impl VarContext<'_> {
 
         self.get(&id).unwrap()
     }
+    /// Set a variable in the top scope (and declare it if it does not exist)
+    pub fn set_top(&mut self, ident: String, v: Value) -> &Value {
+        let id = ident.clone();
+        self.scope.insert(ident, v);
+
+        self.get(&id).unwrap()
+    }
 }
 
 #[cfg(test)]
