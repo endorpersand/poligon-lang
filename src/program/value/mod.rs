@@ -1,13 +1,16 @@
 use std::cell::Ref;
-use std::fmt::Display;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use crate::{Printable, TraverseRt};
+use crate::Printable;
 use crate::util::{RefValue, RefValueUtil};
 
-use super::RtResult;
 use super::tree::{self, op};
+pub mod fun;
+pub mod ty;
+
+pub use fun::*;
+pub use ty::*;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Value {
@@ -19,100 +22,6 @@ pub enum Value {
     List(RefValue<Vec<Value>>),
     Unit,
     Fun(GonFun)
-}
-
-#[derive(PartialEq, Clone, Debug)]
-pub struct GonFun {
-    ident: Option<String>,
-    ty: FunType,
-    fun: fn(Vec<Value>) -> RtResult<Value>
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct FunType(Box<FunParams>, Box<ValueType>);
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum FunParams {
-    Positional(Vec<VArbType>), // (int, int, int) -> ..
-    PosSpread(Vec<VArbType>, VArbType) // (int, int, ..int) -> ..
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit, Fun(FunType) }
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum VArbType {
-    Value(ValueType),
-    Unk
-}
-
-impl Display for ValueType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ValueType::Int   => f.write_str("int"),
-            ValueType::Float => f.write_str("float"),
-            ValueType::Char  => f.write_str("char"),
-            ValueType::Str   => f.write_str("string"),
-            ValueType::Bool  => f.write_str("bool"),
-            ValueType::List  => f.write_str("list"),
-            ValueType::Unit  => f.write_str("void"),
-            ValueType::Fun(FunType(params, ret)) => {
-                let pstrs = match &**params {
-                    FunParams::Positional(p) => p.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>(),
-
-                    FunParams::PosSpread(p, s) => {
-                        let mut ps = p.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>();
-
-                        ps.push(format!("..{}", ret));
-
-                        ps
-                    },
-                };
-
-                f.write_str(
-                    &format!("({}) -> {}", pstrs.join(", "), ret)
-                )
-            },
-        }
-    }
-}
-
-impl Display for VArbType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VArbType::Value(v) => v.fmt(f),
-            VArbType::Unk => f.write_str("unk"),
-        }
-    }
-}
-
-impl GonFun {
-    pub fn arity(&self) -> Option<usize> {
-        let FunType(params, _) = &self.ty;
-        match &**params {
-            FunParams::Positional(p) => Some(p.len()),
-            FunParams::PosSpread(_, _) => None,
-        }
-    }
-
-    pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut super::BlockContext) -> RtResult<Value> {
-        // TODO, make lazy
-        let pvals = params.iter()
-            .map(|e| e.traverse_rt(ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-    
-        // check if arity matches
-        if let Some(a) = self.arity() {
-            if pvals.len() != a {
-                return Err(super::RuntimeErr::WrongArity(a));
-            }
-        }
-
-        (self.fun)(pvals)
-    }
 }
 
 fn list_repr(l: &RefValue<Vec<Value>>) -> String {
