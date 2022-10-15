@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use super::{FunType, FunParams};
+use crate::program::tree;
+
+use super::{FunType, FunParamType};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ValueType { Int, Float, Char, Str, Bool, List, Unit, Fun(FunType) }
@@ -23,16 +25,16 @@ impl Display for ValueType {
             ValueType::Unit  => f.write_str("void"),
             ValueType::Fun(FunType(params, ret)) => {
                 let pstrs = match &**params {
-                    FunParams::Positional(p) => p.iter()
+                    FunParamType::Positional(p) => p.iter()
                         .map(ToString::to_string)
                         .collect::<Vec<_>>(),
 
-                    FunParams::PosSpread(p, s) => {
+                    FunParamType::PosSpread(p, s) => {
                         let mut ps = p.iter()
                         .map(ToString::to_string)
                         .collect::<Vec<_>>();
 
-                        ps.push(format!("..{}", ret));
+                        ps.push(format!("..{}", s));
 
                         ps
                     },
@@ -51,6 +53,31 @@ impl Display for VArbType {
         match self {
             VArbType::Value(v) => v.fmt(f),
             VArbType::Unk => f.write_str("unk"),
+        }
+    }
+}
+
+impl VArbType {
+    pub fn lookup(t: &tree::Type) -> Self {
+        // TODO, consider generics + resolve properly if not found
+        
+        let tree::Type(s, g) = t;
+        
+        match s.as_str() {
+            "int"    => Self::Value(ValueType::Int),
+            "float"  => Self::Value(ValueType::Float),
+            "char"   => Self::Value(ValueType::Char),
+            "string" => Self::Value(ValueType::Str),
+            "bool"   => Self::Value(ValueType::Bool),
+            "list"   => {
+                if let [t] = &g[..] {
+                    Self::lookup(t)
+                } else {
+                    Self::Unk
+                }
+            },
+            "void"   => Self::Value(ValueType::Unit),
+            _        => Self::Unk
         }
     }
 }

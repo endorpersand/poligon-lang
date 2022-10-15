@@ -1,15 +1,13 @@
-use std::rc::Rc;
-
-use crate::Printable;
 use crate::err::GonErr;
 
 use self::tree::op;
-use self::value::{Value, ValueType};
+use self::value::{Value, ValueType, VArbType, FunType, FunParamType};
 use self::vars::VarContext;
 
 pub(crate) mod tree;
 pub(crate) mod value;
 mod vars;
+mod gstd;
 
 /// Struct that holds all of the state information 
 /// of the current scope (variables, functions, etc).
@@ -84,7 +82,7 @@ impl TraverseRt for tree::Expr {
                     .map(|expr| expr.traverse_rt(ctx))
                     .collect::<Result<_, _>>()?;
 
-                Ok(Value::list(vec))
+                Ok(Value::new_list(vec))
             },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
@@ -138,7 +136,7 @@ impl TraverseRt for tree::Expr {
                             .map(Value::Int)
                             .collect();
 
-                        Ok(Value::list(values))
+                        Ok(Value::new_list(values))
                     },
                     // (a, b @ Value::Float(_)) => compute_float_range(a, b, &step_value),
                     // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
@@ -153,7 +151,7 @@ impl TraverseRt for tree::Expr {
                             .map(Value::Char)
                             .collect();
 
-                        Ok(Value::list(values))
+                        Ok(Value::new_list(values))
                     },
                     _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
                 }
@@ -165,7 +163,7 @@ impl TraverseRt for tree::Expr {
                     values.push(block.traverse_rt(&mut ctx.child())?);
                 }
 
-                Ok(Value::list(values))
+                Ok(Value::new_list(values))
             },
             tree::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
@@ -181,41 +179,13 @@ impl TraverseRt for tree::Expr {
                     result.push(iteration);
                 }
 
-                Ok(Value::list(result))
+                Ok(Value::new_list(result))
             },
             tree::Expr::Call { funct, params } => {
-                match &**funct {
-                    tree::Expr::Ident(s) if s == "print" => {
-                        let exprs: Vec<_> = params.iter()
-                            .map(|e| e.traverse_rt(ctx))
-                            .collect::<Result<_, _>>()?;
-                        
-                        let strs = exprs.into_iter()
-                            .map(|v| v.str())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-
-                        println!("{}", strs);
-                        
-                        Ok(Value::Unit)
-                    },
-                    tree::Expr::Ident(s) if s == "is" => {
-                        if let [a, b] = &params[..2] {
-                            let eval = match (a.traverse_rt(ctx)?, b.traverse_rt(ctx)?) {
-                                (Value::List(al), Value::List(bl)) => Rc::ptr_eq(&al, &bl),
-                                (av, bv) => av == bv
-                            };
-
-                            Ok(Value::Bool(eval))
-                        } else {
-                            Err(RuntimeErr::WrongArity(2))
-                        }
-                    },
-                    e => if let Value::Fun(f) = e.traverse_rt(ctx)? {
-                        f.call(params, ctx)
-                    } else {
-                        Err(RuntimeErr::CannotCall)
-                    },
+                if let Value::Fun(f) = funct.traverse_rt(ctx)? {
+                    f.call(params, &mut ctx.child())
+                } else {
+                    Err(RuntimeErr::CannotCall)
                 }
             }
             tree::Expr::Index { expr, index } => {
@@ -406,12 +376,49 @@ impl TraverseRt for tree::Program {
 impl TraverseRt for tree::Stmt {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         match self {
-            tree::Stmt::Decl(_) => todo!(),
+            tree::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
             tree::Stmt::Return(_) => todo!(),
             tree::Stmt::Break => todo!(),
             tree::Stmt::Continue => todo!(),
-            tree::Stmt::FunDecl(_) => todo!(),
+            tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
             tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
+    }
+}
+
+impl TraverseRt for tree::Decl {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+        todo!()
+    }
+}
+
+impl TraverseRt for tree::FunDecl {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+        let tree::FunDecl { ident, params, ret, block } = self;
+        
+        let resolved_params: Vec<_> = params.iter()
+            .map(|p| &p.ty)
+            .map(|mt| mt.as_ref().map_or_else(
+                || VArbType::Unk, 
+                |t| VArbType::lookup(t))
+            )
+            .collect();
+        let p = FunParamType::Positional(resolved_params);
+        
+        let r = ret.as_ref()
+            .map_or_else(
+                || VArbType::Value(ValueType::Unit), 
+                |t| VArbType::lookup(t)
+            );
+
+        let ty = FunType::new(p, r);
+
+        let val = Value::new_fun(
+            Some(&ident),
+            ty,
+            todo!()
+        );
+        let rf = ctx.vars.set(ident.clone(), val).new_ref();
+        Ok(rf)
     }
 }

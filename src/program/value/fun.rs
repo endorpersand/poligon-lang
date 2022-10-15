@@ -11,9 +11,9 @@ pub struct GonFun {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct FunType(pub(super) Box<FunParams>, pub(super) Box<ValueType>);
+pub struct FunType(pub(super) Box<FunParamType>, pub(super) Box<VArbType>);
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum FunParams {
+pub enum FunParamType {
     Positional(Vec<VArbType>), // (int, int, int) -> ..
     PosSpread(Vec<VArbType>, VArbType) // (int, int, ..int) -> ..
 }
@@ -22,8 +22,8 @@ impl GonFun {
     pub fn arity(&self) -> Option<usize> {
         let FunType(params, _) = &self.ty;
         match &**params {
-            FunParams::Positional(p) => Some(p.len()),
-            FunParams::PosSpread(_, _) => None,
+            FunParamType::Positional(p) => Some(p.len()),
+            FunParamType::PosSpread(_, _) => None,
         }
     }
 
@@ -41,5 +41,14 @@ impl GonFun {
         }
 
         (self.fun)(pvals)
+    }
+}
+
+impl FunType {
+    pub fn new(params: FunParamType, ret: VArbType) -> Self {
+        Self (
+            Box::new(params),
+            Box::new(ret)
+        )
     }
 }

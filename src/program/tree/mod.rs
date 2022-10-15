@@ -34,7 +34,7 @@ pub enum ReasgType { Let, Const }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MutType { Mut, Immut }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Type(pub String, pub Vec<Type>);
 
 #[derive(Debug, PartialEq)]

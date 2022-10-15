@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use super::gstd;
 use super::value::Value;
 
 /// Stores the variables in the current scope.
@@ -56,7 +57,7 @@ impl VarContext<'_> {
     /// Create a new VarContext.
     pub fn new() -> Self {
         Self { 
-            scope: HashMap::new(), 
+            scope: gstd::std_map(), 
             parent: None, 
             _ghost: PhantomData 
         }

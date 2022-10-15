@@ -5,6 +5,7 @@ use std::ops::Deref;
 use crate::Printable;
 use crate::util::{RefValue, RefValueUtil};
 
+use super::RtResult;
 use super::tree::{self, op};
 pub mod fun;
 pub mod ty;
@@ -133,10 +134,6 @@ impl<'a> Iterator for ValRefIter<'a> {
 }
 
 impl Value {
-    pub fn list(l: Vec<Value>) -> Self {
-        return Value::List(RefValue::wrap(l))
-    }
-
     /// Truthiness of a value: when it is cast to bool, what truth value should it have?
     /// 
     /// Numerics: Non-zero => true
@@ -271,7 +268,7 @@ impl Value {
                         let mut buf = a.borrow().clone();
                         buf.extend(b.borrow().iter().map(Value::new_ref));
 
-                        Ok(Value::list(buf))
+                        Ok(Value::new_list(buf))
                     }
                     _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
                 },
@@ -338,6 +335,20 @@ impl Value {
                 | Value::Fun(_)
             ) => e.clone(),
         }
+    }
+
+    pub fn new_list(l: Vec<Value>) -> Self {
+        Value::List(RefValue::wrap(l))
+    }
+
+    pub fn new_fun(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {
+        let gf = GonFun {
+            ident: name.map(ToString::to_string),
+            ty,
+            fun
+        };
+
+        Value::Fun(gf)
     }
 }
 
