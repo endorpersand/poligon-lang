@@ -59,7 +59,7 @@ pub struct Lexer {
     delimiters: Vec<Delimiter>,
     
     cursor: Cursor,
-    _current: char,
+    _current: Option<char>,
     remaining: VecDeque<CharData>,
 }
 
@@ -96,10 +96,11 @@ impl CharClass {
 }
 
 impl CharData {
-    fn new(c: char) -> LexResult<Self> {
-        CharClass::of(c)
-            .ok_or(LexErr::UnknownChar(c))
-            .map(|cls| Self { chr: c, cls })
+    fn new(c: char) -> Result<Self, char> {
+        match CharClass::of(c) {
+            Some(cls) => Ok(Self { chr: c, cls }),
+            None => Err(c),
+        }
     }
 }
 
@@ -112,7 +113,7 @@ impl Lexer {
             delimiters: vec![],
 
             cursor: (0, 0),
-            _current: '\0',
+            _current: None,
             remaining: VecDeque::new(), 
         };
         lexer.append_input(input)?;
@@ -147,6 +148,25 @@ impl Lexer {
     /// Add characters to the back of the input.
     /// This will output a lex error if a character is not recognized.
     pub fn append_input(&mut self, input: &str) -> LexResult<()> {
+        // compute the cursor of the end:
+
+        // the lines (from bottom to top)
+        let mut line_iter = self.remaining.make_contiguous().rsplit(|cd| cd.chr == '\n');
+
+        let (ilno, icno) = self.cursor;
+        let (dlno, dcno) = match line_iter.next() {
+            Some(c) => {
+                // let dcno = c.len();
+                (line_iter.count(), c.len())
+            },
+            None => (0, 0)
+        };
+
+        if dlno == 0 {
+
+        } else {
+
+        }
         for cd in input.chars().map(CharData::new) {
             self.remaining.push_back(cd?);
         }
@@ -170,10 +190,10 @@ impl Lexer {
     fn peek_cursor(&self) -> Cursor {
         let (lno, cno) = &self.cursor;
 
-        if self._current == '\n' {
-            (lno + 1, *cno)
-        } else {
-            (*lno, cno + 1)
+        match &self._current {
+            Some('\n') => (lno + 1, *cno),
+            Some(_)    => (*lno, cno + 1),
+            None       => (*lno, *cno)
         }
     }
 
@@ -187,7 +207,10 @@ impl Lexer {
     /// Consume the next character in the input and return it.
     fn next(&mut self) -> Option<CharData> {
         self.cursor = self.peek_cursor();
-        self.remaining.pop_front()
+        
+        let mcd = self.remaining.pop_front();
+        self._current = mcd.map(|cd| cd.chr);
+        mcd
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -424,10 +447,11 @@ impl Lexer {
 
         // reinsert any remaining characters into the input
         let len = nbuf.len();
-        let chrs: Vec<CharData> = nbuf
+        let chrs = nbuf
             .chars()
-            .map(CharData::new)
-            .collect::<Result<_, _>>()?;
+            // EXPECT: ok b/c we should've already seen this data
+            .map(|c| CharData::new(c)
+                .expect("Invalid character was inexplicably inserted in comment"));
 
         self.remaining.extend(chrs);
         self.remaining.rotate_left(len);
