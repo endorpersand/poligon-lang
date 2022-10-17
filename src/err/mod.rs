@@ -183,7 +183,7 @@ impl<E: GonErr> FullGonErr<E> {
                     let code = get_line(orig_txt, lno);
                     lines.push(code);
 
-                    let mut ptrs = vec![' '; *cnos.iter().max().unwrap()];
+                    let mut ptrs = vec![' '; *cnos.iter().max().unwrap() + 1];
                     for i in cnos {
                         ptrs[i] = '^';
                     }

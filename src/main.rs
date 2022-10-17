@@ -77,7 +77,20 @@ impl Repl<'_> {
                 match $e {
                     Ok(t) => t,
                     Err(e) => {
+                        eprintln!("{}", e.full_msg(&self.code));
+                        self.code.clear();
+                        return;
+                    }
+                }
+            }
+        }
+        macro_rules! consume_derr {
+            ($e:expr) => {
+                match $e {
+                    Ok(t) => t,
+                    Err(e) => {
                         eprintln!("{}", wrap_err(e).full_msg(&self.code));
+                        self.code.clear();
                         return;
                     }
                 }
@@ -104,9 +117,9 @@ impl Repl<'_> {
         }
 
         // if we got here, we should be able to close:
-        let tokens = consume_err! { lx.close() };
-        let tree   = consume_err! { parse_repl(tokens) };
-        let result = consume_err! { tree.traverse_rt(&mut self.ctx) };
+        let tokens = consume_derr! { lx.close() };
+        let tree   = consume_derr! { parse_repl(tokens) };
+        let result = consume_derr! { tree.traverse_rt(&mut self.ctx) };
 
         // success!
         self.code.clear();
