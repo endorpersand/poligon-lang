@@ -179,7 +179,11 @@ impl<E: GonErr> FullGonErr<E> {
                     lmap.entry(*lno).or_insert(vec![]).push(*cno);
                 }
 
-                for (lno, cnos) in lmap {
+                let mut linemaps: Vec<_> = lmap.into_iter()
+                    .collect();
+                linemaps.sort();
+
+                for (lno, cnos) in linemaps {
                     let code = get_line(orig_txt, lno);
                     lines.push(code);
 

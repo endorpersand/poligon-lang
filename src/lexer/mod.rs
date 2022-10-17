@@ -237,7 +237,7 @@ impl Lexer {
         let (lno, cno) = &self.cursor;
 
         match &self._current {
-            Some('\n') => (lno + 1, *cno),
+            Some('\n') => (lno + 1, 0),
             Some(_)    => (*lno, cno + 1),
             None       => (*lno, *cno)
         }
