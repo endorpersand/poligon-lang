@@ -63,7 +63,7 @@ pub struct Lexer {
     remaining: VecDeque<CharData>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum CharClass {
     Alpha,
     Numeric,
@@ -75,7 +75,7 @@ enum CharClass {
     Whitespace
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 struct CharData {
     chr: char,
     cls: CharClass
@@ -105,6 +105,58 @@ impl CharData {
 }
 
 type Cursor = (usize, usize);
+
+struct CursorTicker {
+    // assume cursor is pointing to the character AFTER the last character
+    cursor: Cursor
+}
+
+impl CursorTicker {
+    fn increment_by(&mut self, dlno: usize, dcno: usize) {
+        let (ilno, icno) = self.cursor;
+
+        self.cursor = if dlno != 0 {
+            (ilno + dlno, dcno)
+        } else {
+            (ilno, icno + dcno)
+        }
+    }
+
+    fn fwd_cd(&mut self, cds: &[CharData]) {
+        // lines from bottom to top
+        let mut chiter = cds.rsplit(|cd| cd.chr == '\n');
+
+        let (dlno, dcno) = match chiter.next() {
+            // non-empty:
+            // count how many lines we've traversed, and the length of the last line
+            Some(line) => (chiter.count(), line.len()),
+            // empty:
+            None => (0, 0),
+        };
+
+        self.increment_by(dlno, dcno);
+    }
+
+    fn fwd_str(&mut self, s: &str) {
+        // lines from bottom to top
+        let mut chiter = s.rsplit('\n');
+
+        let (dlno, dcno) = match chiter.next() {
+            // non-empty:
+            // count how many lines we've traversed, and the length of the last line
+            Some(line) => (chiter.count(), line.len()),
+            // empty:
+            None => (0, 0),
+        };
+
+        self.increment_by(dlno, dcno);
+    }
+
+    fn fwd_chr(&mut self, c: char) {
+        let (dlno, dcno) = if c == '\n' { (1, 0) } else { (0, 1) };
+        self.increment_by(dlno, dcno);
+    }
+}
 
 impl Lexer {
     pub fn new(input: &str) -> LexResult<Self> {
@@ -148,27 +200,17 @@ impl Lexer {
     /// Add characters to the back of the input.
     /// This will output a lex error if a character is not recognized.
     pub fn append_input(&mut self, input: &str) -> LexResult<()> {
-        // compute the cursor of the end:
+        let mut ticker = CursorTicker { cursor: self.peek_cursor() };
+        ticker.fwd_cd(self.remaining.make_contiguous());
 
-        // the lines (from bottom to top)
-        let mut line_iter = self.remaining.make_contiguous().rsplit(|cd| cd.chr == '\n');
-
-        let (ilno, icno) = self.cursor;
-        let (dlno, dcno) = match line_iter.next() {
-            Some(c) => {
-                // let dcno = c.len();
-                (line_iter.count(), c.len())
-            },
-            None => (0, 0)
-        };
-
-        if dlno == 0 {
-
-        } else {
-
-        }
-        for cd in input.chars().map(CharData::new) {
-            self.remaining.push_back(cd?);
+        for mcd in input.chars().map(CharData::new) {
+            match mcd {
+                Ok(cd) => {
+                    ticker.fwd_chr(cd.chr);
+                    self.remaining.push_back(cd);
+                },
+                Err(c) => return Err(LexErr::UnknownChar(c)),
+            }
         }
 
         Ok(())
