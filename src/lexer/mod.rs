@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use crate::err::GonErr;
+use crate::err::{GonErr, FullGonErr};
 
 use self::token::{Token, Keyword, OPMAP, Delimiter, token};
 pub mod token;
@@ -24,6 +24,8 @@ pub enum LexErr {
     UnclosedComment,     // Hit EOF on /* */
 }
 type LexResult<T> = Result<T, LexErr>;
+type FullLexErr = FullGonErr<LexErr>;
+
 impl GonErr for LexErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
@@ -53,9 +55,12 @@ fn wrapq(c: char) -> String {
 }
 
 pub struct Lexer {
-    input: VecDeque<CharData>,
     tokens: Vec<Token>,
-    delimiters: Vec<Delimiter>
+    delimiters: Vec<Delimiter>,
+    
+    cursor: Cursor,
+    _current: char,
+    remaining: VecDeque<CharData>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -98,12 +103,17 @@ impl CharData {
     }
 }
 
+type Cursor = (usize, usize);
+
 impl Lexer {
     pub fn new(input: &str) -> LexResult<Self> {
         let mut lexer = Self {
-            input: VecDeque::new(), 
             tokens: vec![],
-            delimiters: vec![]
+            delimiters: vec![],
+
+            cursor: (0, 0),
+            _current: '\0',
+            remaining: VecDeque::new(), 
         };
         lexer.append_input(input)?;
 
@@ -138,7 +148,7 @@ impl Lexer {
     /// This will output a lex error if a character is not recognized.
     pub fn append_input(&mut self, input: &str) -> LexResult<()> {
         for cd in input.chars().map(CharData::new) {
-            self.input.push_back(cd?);
+            self.remaining.push_back(cd?);
         }
 
         Ok(())
@@ -157,16 +167,27 @@ impl Lexer {
         Ok(self.tokens)
     }
 
+    fn peek_cursor(&self) -> Cursor {
+        let (lno, cno) = &self.cursor;
+
+        if self._current == '\n' {
+            (lno + 1, *cno)
+        } else {
+            (*lno, cno + 1)
+        }
+    }
+
     /// Look at the next character in the input.
     /// 
     /// If there are no more characters in the input, return None.
     fn peek(&self) -> Option<&CharData> {
-        self.input.get(0)
+        self.remaining.get(0)
     }
 
     /// Consume the next character in the input and return it.
     fn next(&mut self) -> Option<CharData> {
-        self.input.pop_front()
+        self.cursor = self.peek_cursor();
+        self.remaining.pop_front()
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -229,7 +250,7 @@ impl Lexer {
             // - the next character is alpha/underscore
 
             // then scan for any further numerics after that "."
-            match self.input.get(1) {
+            match self.remaining.get(1) {
                 Some(CharData { chr: '.', ..}) => {},
                 Some(CharData { cls: CharClass::Alpha | CharClass::Underscore, .. }) => {}
 
@@ -408,8 +429,8 @@ impl Lexer {
             .map(CharData::new)
             .collect::<Result<_, _>>()?;
 
-        self.input.extend(chrs);
-        self.input.rotate_left(len);
+        self.remaining.extend(chrs);
+        self.remaining.rotate_left(len);
 
         Ok(())
     }
