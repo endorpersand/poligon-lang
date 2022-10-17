@@ -18,7 +18,19 @@ fn main() -> io::Result<()> {
     let mfp = args.get(1);
 
     match mfp {
-        Some(fp) => run_file(fp),
+        Some(fp) => {
+            let ir = Interpreter::from_file(fp)?;
+            
+            match ir.run() {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                },
+            };
+
+            Ok(())
+        },
         None => open_repl(),
     }
 }
