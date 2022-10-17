@@ -23,7 +23,7 @@ pub enum LexErr {
     UnclosedDelimiter,   // A bracket wasn't closed
     UnclosedComment,     // Hit EOF on /* */
 }
-type LexResult<T> = Result<T, LexErr>;
+type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;
 
 impl GonErr for LexErr {
@@ -56,7 +56,7 @@ fn wrapq(c: char) -> String {
 
 pub struct Lexer {
     tokens: Vec<Token>,
-    delimiters: Vec<Delimiter>,
+    delimiters: Vec<(Cursor, Delimiter)>,
     
     cursor: Cursor,
     _current: Option<char>,
@@ -156,6 +156,10 @@ impl CursorTicker {
         let (dlno, dcno) = if c == '\n' { (1, 0) } else { (0, 1) };
         self.increment_by(dlno, dcno);
     }
+
+    fn add((lno, cno): Cursor, chars: usize) -> Cursor {
+        (lno, cno + chars)
+    }
 }
 
 impl Lexer {
@@ -209,7 +213,7 @@ impl Lexer {
                     ticker.fwd_chr(cd.chr);
                     self.remaining.push_back(cd);
                 },
-                Err(c) => return Err(LexErr::UnknownChar(c)),
+                Err(c) => return Err(LexErr::UnknownChar(c).at(ticker.cursor)),
             }
         }
 
@@ -217,8 +221,8 @@ impl Lexer {
     }
 
     pub fn try_close(&self) -> LexResult<()> {
-        if !self.delimiters.is_empty() {
-            Err(LexErr::UnclosedDelimiter)?
+        if let Some((p, _)) = self.delimiters.last() {
+            return Err(LexErr::UnclosedDelimiter.at(*p));
         }
 
         Ok(())
@@ -342,7 +346,7 @@ impl Lexer {
         let mut buf = String::new();
         loop {
             let c = self.next()
-                .ok_or(LexErr::UnclosedQuote)? // no more chars, hit EOF
+                .ok_or(LexErr::UnclosedQuote.at(self.cursor))? // no more chars, hit EOF
                 .chr;
 
             if c == qt { break; }
@@ -362,9 +366,9 @@ impl Lexer {
             .chr;
 
         // Get the next character:
-        let c = self.next().ok_or(LexErr::UnclosedQuote)?.chr;
+        let c = self.next().ok_or(LexErr::UnclosedQuote.at(self.cursor))?.chr;
         if c == qt {
-            Err(LexErr::EmptyChar)?;
+            Err(LexErr::EmptyChar.at(self.cursor))?;
         }
 
         // Assert next char matches quote:
@@ -373,8 +377,8 @@ impl Lexer {
                 self.tokens.push(Token::Char(c));
                 Ok(())
             },
-            Some(_) => Err(LexErr::ExpectedChar(qt)),
-            None => Err(LexErr::UnclosedQuote)
+            Some(_) => Err(LexErr::ExpectedChar(qt).at(self.cursor)),
+            None    => Err(LexErr::UnclosedQuote.at(self.cursor))
         }
     }
 
@@ -384,6 +388,9 @@ impl Lexer {
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
         let mut buf = String::new();
+        
+        let init_cursor = self.peek_cursor();
+        let mut buf_read = 0;
 
         while let Some(c) = self.match_cls(CharClass::Punct) {
             buf.push(c);
@@ -398,32 +405,42 @@ impl Lexer {
                 .rev()
                 .filter(|(&op, _)| buf.starts_with(op))
                 .next()
-                .ok_or_else(|| LexErr::UnknownOp(buf.clone()))?;
+                .ok_or_else(|| {
+                    let (lno, icno) = self.cursor;
+                    let oplen = buf.len();
+                    LexErr::UnknownOp(buf.clone())
+                        .at_range((lno, icno)..=(lno, icno + oplen))
+                })?;
             
             // Keep track of the delimiters.
             // If left delimiter, add to delimiter stack.
             // If right delimiter, verify the top of the stack is the matching left delimiter 
             //      (or error if mismatch).
             if let Token::Delimiter(d) = token {
+                let pos = CursorTicker::add(init_cursor, buf_read);
+                
                 if !d.is_right() {
-                    self.delimiters.push(*d);
+                    self.delimiters.push((pos, *d));
                 } else {
-                    self.match_delimiter(*d)?;
+                    self.match_delimiter(pos, *d)?;
                 }
             }
 
             // Stop tokenizing when we're dealing with comments:
             if token == &token!["//"] {
                 buf.drain(..2);
+                // buf_read += 2;
                 return self.push_line_comment(buf);
             } else if token == &token!["/*"] {
                 buf.drain(..2);
-                return self.push_multi_comment(buf);
+                buf_read += 2;
+                return self.push_multi_comment(buf, CursorTicker::add(init_cursor, buf_read));
             }
             
             self.tokens.push(token.clone());
             
             let len = op.len();
+            buf_read += len;
             buf.drain(..len);
         }
         Ok(())
@@ -450,36 +467,69 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a multi-line comment 
     /// (/* this kind of comment */) to the output.
-    fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
+    fn push_multi_comment(&mut self, mut buf: String, init_cursor: Cursor) -> LexResult<()> {
         lazy_static! {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
         }
 
-        // check recursive comments:
+        //read the current buffer to determine if any comments have been opened or closed
+        // note that there are recursive comments:
         /* /* */ */
+        /*/ */
         for m in RE.find_iter(&buf) {
+            let start = m.start();
             match m.as_str() {
-                "/*" => self.delimiters.push(Delimiter::LComment),
-                "*/" => self.match_delimiter(Delimiter::RComment)?,
+                "/*" => self.delimiters.push(
+                    (CursorTicker::add(init_cursor, start), Delimiter::LComment)
+                ),
+                "*/" => self.match_delimiter(
+                    CursorTicker::add(init_cursor, start), Delimiter::RComment
+                )?,
                 _ => {}
             }
         }
+        
+        let ci1 = buf.chars();
+        let mut ci2 = buf.chars();
+        ci2.next();
 
-        'com: while self.delimiters.last() == Some(&Delimiter::LComment) {
+        let mut ticker = CursorTicker { cursor: init_cursor };
+
+        let mut skip = false;
+        for pair in ci1.zip(ci2) {
+            if !skip {
+                if pair == ('/', '*') {
+                    self.delimiters.push((ticker.cursor, Delimiter::LComment));
+                    skip = true;
+                } else if pair == ('*', '/') {
+                    self.match_delimiter(ticker.cursor, Delimiter::RComment)?;
+                    skip = true;
+                }
+            }
+            
+            ticker.fwd_chr(pair.0);
+        }
+
+        let mut ticker = CursorTicker { cursor: init_cursor };
+        ticker.fwd_str(&buf);
+
+        'com: while let Some((_, Delimiter::LComment)) = self.delimiters.last() {
             while let Some(CharData {chr, ..}) = self.next() {
                 buf.push(chr);
 
                 if buf.ends_with("/*") {
-                    self.delimiters.push(Delimiter::LComment);
+                    self.delimiters.push((ticker.cursor, Delimiter::LComment));
+                    ticker.fwd_chr(chr);
                 } else if buf.ends_with("*/") {
-                    self.match_delimiter(Delimiter::RComment)?;
+                    self.match_delimiter(ticker.cursor, Delimiter::RComment)?;
+                    ticker.fwd_chr(chr);
                     continue 'com;
                 }
             }
 
             // if we got here, the entire string got consumed... 
             // and the comment is still open.
-            return Err(LexErr::UnclosedComment);
+            return Err(LexErr::UnclosedComment.at(self.cursor));
         }
 
         // there is a */ remaining:
@@ -503,13 +553,13 @@ impl Lexer {
 
     /// Verify that the top delimiter in the delimiter stack is the same as the argument's 
     /// delimiter type (Paren, Square, Curly, Comment) and pop it if they are the same.
-    fn match_delimiter(&mut self, d: Delimiter) -> LexResult<()> {
+    fn match_delimiter(&mut self, pos: Cursor, d: Delimiter) -> LexResult<()> {
         let left = if d.is_right() { d.reversed() } else { d };
         
         match self.delimiters.last() {
-            Some(l) if l == &left => Ok({ self.delimiters.pop(); }),
-            Some(_) => Err(LexErr::MismatchedDelimiter),
-            None => Err(LexErr::MismatchedDelimiter),
+            Some((_, l)) if l == &left => Ok({ self.delimiters.pop(); }),
+            Some((p, _)) => Err(LexErr::MismatchedDelimiter.at_points(&[*p, pos])),
+            None => Err(LexErr::MismatchedDelimiter.at(pos)),
         }
     }
 }
@@ -576,9 +626,9 @@ mod tests {
             Token::Numeric("1".to_string()),
             token![")"]
         ]);
-        assert_lex_fail!("(1" => LexErr::UnclosedDelimiter);
-        assert_lex_fail!("1)" => LexErr::MismatchedDelimiter);
-        assert_lex_fail!("(1]" => LexErr::MismatchedDelimiter);
+        assert_lex_fail!("(1" => LexErr::UnclosedDelimiter.at((0, 0)));
+        assert_lex_fail!("1)" => LexErr::MismatchedDelimiter.at((0, 1)));
+        assert_lex_fail!("(1]" => LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
     }
 
     #[test]
@@ -650,7 +700,7 @@ mod tests {
     #[test]
     fn char_lex() {
         assert_lex!("'a'" => vec![Token::Char('a')]);
-        assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\''));
-        assert_lex_fail!("''" => LexErr::EmptyChar);
+        assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
+        assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 1)));
     }
 }

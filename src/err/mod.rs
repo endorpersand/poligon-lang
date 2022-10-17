@@ -14,9 +14,13 @@ pub trait GonErr {
     fn at_points(self, pts: &[Point]) -> FullGonErr<Self> 
         where Self: Sized
     {
-        let mut vec: Vec<_> = pts.into();
-        vec.sort();
-        FullGonErr { err: self, position: ErrPos::Points(vec) }
+        if pts.len() == 1 {
+            self.at(pts[0])
+        } else {
+            let mut vec: Vec<_> = pts.into();
+            vec.sort();
+            FullGonErr { err: self, position: ErrPos::Points(vec) }
+        }
     }
     
     fn at_range(self, range: impl RangeBounds<Point>) -> FullGonErr<Self> 
@@ -56,12 +60,15 @@ impl<E: std::fmt::Debug> From<E> for FullGonErr<DebugErr<E>> {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub struct FullGonErr<E: GonErr> {
     err: E,
     position: ErrPos
 }
 
 type Point = (usize /* line */, usize /* line */);
+
+#[derive(PartialEq, Eq, Debug)]
 enum ErrPos {
     Point(Point),
     Points(Vec<Point>),
