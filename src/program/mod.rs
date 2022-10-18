@@ -179,7 +179,14 @@ impl TraverseRt for tree::Expr {
             tree::Expr::While { condition, block } => {
                 let mut values = vec![];
                 while condition.traverse_rt(ctx)?.truth() {
-                    values.push(block.traverse_rt(&mut ctx.child())?);
+                    let iteration = match block.traverse_rt(&mut ctx.child()) {
+                        Ok(t) => t,
+                        Err(TermOp::Break) => break,
+                        Err(TermOp::Continue) => continue,
+                        e => e?
+                    };
+
+                    values.push(iteration);
                 }
 
                 Ok(Value::new_list(values))
@@ -194,7 +201,12 @@ impl TraverseRt for tree::Expr {
                     let mut scope = ctx.child();
                     scope.vars.set_top(ident.clone(), val);
 
-                    let iteration = block.traverse_rt(&mut scope)?;
+                    let iteration = match block.traverse_rt(&mut scope) {
+                        Ok(t) => t,
+                        Err(TermOp::Break) => break,
+                        Err(TermOp::Continue) => continue,
+                        e => e?,
+                    };
                     result.push(iteration);
                 }
 
