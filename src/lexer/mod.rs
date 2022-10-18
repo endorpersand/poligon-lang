@@ -339,14 +339,21 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a str literal token in the output.
     fn push_str(&mut self) -> LexResult<()> {
-        let qt = self.next()
-            .expect("String was validated to have a character, but failed to pop quotation mark")
+        let init_cursor = self.cursor;
+        
+        // UNWRAP: this should only be called if there's a quote character
+        let qt = self.next().unwrap()
             .chr;
 
         let mut buf = String::new();
         loop {
             let c = self.next()
-                .ok_or(LexErr::UnclosedQuote.at(self.cursor))? // no more chars, hit EOF
+                .ok_or_else(|| {
+                    let start = init_cursor;
+                    let mut ticker = CursorTicker { cursor: start };
+                    ticker.fwd_str(&buf);
+                    LexErr::UnclosedQuote.at_range(init_cursor..=(ticker.cursor))
+                })? // no more chars, hit EOF
                 .chr;
 
             if c == qt { break; }
@@ -361,12 +368,14 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a char literal token in the output.
     fn push_char(&mut self) -> LexResult<()> {
-        let qt = self.next()
-            .expect("String was validated to have a character, but failed to pop quotation mark")
+        let init_cursor = self.cursor;
+        
+        // UNWRAP: this should only be called if there's a quote character
+        let qt = self.next().unwrap()
             .chr;
 
         // Get the next character:
-        let c = self.next().ok_or(LexErr::UnclosedQuote.at(self.cursor))?.chr;
+        let c = self.next().ok_or(LexErr::UnclosedQuote.at(init_cursor))?.chr;
         if c == qt {
             Err(LexErr::EmptyChar.at(self.cursor))?;
         }
@@ -378,7 +387,7 @@ impl Lexer {
                 Ok(())
             },
             Some(_) => Err(LexErr::ExpectedChar(qt).at(self.cursor)),
-            None    => Err(LexErr::UnclosedQuote.at(self.cursor))
+            None    => Err(LexErr::UnclosedQuote.at(init_cursor))
         }
     }
 

@@ -121,10 +121,8 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
         // _ _ _ ^ ~ ~ ~ ~ ~ ^ _ _ _
 
         let ptrs =
-            " ".repeat(start_lno)
-            + "^"
-            + &"~".repeat(end_lno - start_lno - 1)
-            + "^";
+            " ".repeat(start_cno)
+            + &"~".repeat(end_cno - start_cno + 1);
 
             vec![code, ptrs]
     } else {
@@ -155,18 +153,35 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
 
 impl<E: GonErr> FullGonErr<E> {
     pub fn short_msg(&self) -> String {
-        let (lno, cno) = *match &self.position {
-            ErrPos::Point(p) => p,
-            ErrPos::Points(pts) => pts.get(0).unwrap_or(&(0, 0)),
-            ErrPos::Range(ri) => ri.start(),
-            ErrPos::RangeFrom(RangeFrom { start }) => start,
+        let line_fmt = match &self.position {
+            ErrPos::Point((lno, cno)) => format!("{}:{}", lno, cno),
+
+            ErrPos::Points(pts) => pts.iter()
+                .map(|(lno, cno)| format!("{}:{}", lno, cno))
+                .collect::<Vec<_>>()
+                .join(", "),
+
+            ErrPos::Range(ri) => {
+                let (start_lno, start_cno) = ri.start();
+                let (end_lno, end_cno) = ri.end();
+                format!("{}:{}-{}:{}", start_lno, start_cno, end_lno, end_cno)
+            },
+            
+            ErrPos::RangeFrom(RangeFrom { start }) => {
+                let (start_lno, start_cno) = start;
+                format!("{}:{}-..", start_lno, start_cno)
+            },
         };
 
-        format!("{}:{} :: {}: {}", lno, cno, self.err.err_name(), self.err.message())
+        if !line_fmt.is_empty() {
+            format!("{} :: {}: {}", line_fmt, self.err.err_name(), self.err.message())
+        } else {
+            format!("{}: {}", self.err.err_name(), self.err.message())
+        }
     }
 
     pub fn full_msg(&self, orig_txt: &str) -> String {
-        let mut lines = vec![self.short_msg()];
+        let mut lines = vec![self.short_msg(), String::new()];
         
         match &self.position {
             ErrPos::Point(p) => {
