@@ -1,9 +1,10 @@
 use std::rc::Rc;
 
 use super::TraverseRt;
-
-pub type Program = Vec<Stmt>;
 pub mod op;
+
+#[derive(Debug, PartialEq)]
+pub struct Program(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
@@ -175,5 +176,20 @@ impl Expr {
             _ => self.traverse_rt(ctx)
                 .and_then(|v| cast! { v.apply_binary(o, &right.traverse_rt(ctx)?) } )
         }
+    }
+}
+
+impl Program {
+    pub fn run(self) -> super::RtResult<super::Value> {
+        self.run_with_ctx(&mut super::BlockContext::new())
+    }
+
+    pub fn run_with_ctx(self, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
+         self.traverse_rt(ctx).map_err(|to| match to {
+            super::TermOp::Err(e) => e,
+            super::TermOp::Return(_) => super::RuntimeErr::CannotReturn,
+            super::TermOp::Break     => super::RuntimeErr::CannotBreak,
+            super::TermOp::Continue  => super::RuntimeErr::CannotContinue,
+        })
     }
 }

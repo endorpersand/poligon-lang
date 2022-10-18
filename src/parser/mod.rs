@@ -156,7 +156,7 @@ impl Parser {
     /// Return the program,
     /// or error if the tokens do not represent a program.
     fn expect_program(&mut self) -> ParseResult<tree::Program> {
-        let mut program = vec![];
+        let mut stmts = vec![];
 
         /*
             SAMPLE:
@@ -188,13 +188,13 @@ impl Parser {
                     _ => self.expect1(token![;])?
                 }
 
-                program.push(st);
+                stmts.push(st);
             } else {
                 if !self.match1(token![;]) { break; }
             }
         }
 
-        Ok(program)
+        Ok(tree::Program(stmts))
     }
 
     /// Expect that the next tokens represent a block.
@@ -875,7 +875,7 @@ mod tests {
 
     macro_rules! assert_parse {
         ($s:expr => $r:expr) => {
-            assert_eq!(parse_str(&$s), Ok($r))
+            assert_eq!(parse_str(&$s), Ok(tree::Program($r)))
         }
     }
     macro_rules! assert_parse_fail {
@@ -911,7 +911,7 @@ mod tests {
         ]);
 
         assert_parse!("{}" => vec![
-            tree::Stmt::Expr(tree::Expr::Block(vec![]))
+            tree::Stmt::Expr(tree::Expr::Block(tree::Program(vec![])))
         ])
     }
 
@@ -922,7 +922,7 @@ mod tests {
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
-                if_true: vec![], 
+                if_true: tree::Program(vec![]),
                 if_false: None
             }))
         ]);
@@ -934,8 +934,8 @@ mod tests {
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
-                if_true: vec![], 
-                if_false: Some(Box::new(tree::Else::Block(vec![])))
+                if_true: tree::Program(vec![]),
+                if_false: Some(Box::new(tree::Else::Block(tree::Program(vec![]))))
             }))
         ]);
 
@@ -948,11 +948,11 @@ mod tests {
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
-                if_true: vec![], 
+                if_true: tree::Program(vec![]), 
                 if_false: Some(Box::new(tree::Else::If(tree::If { 
                     condition: Box::new(tree::Expr::Ident("condition".to_string())), 
-                    if_true: vec![], 
-                    if_false: Some(Box::new(tree::Else::Block(vec![])))
+                    if_true: tree::Program(vec![]), 
+                    if_false: Some(Box::new(tree::Else::Block(tree::Program(vec![]))))
                 })))
             }))
         ]);
@@ -972,20 +972,20 @@ mod tests {
         }" => vec![
             tree::Stmt::Expr(tree::Expr::If(tree::If { 
                 condition: Box::new(tree::Expr::Literal(tree::Literal::Bool(true))), 
-                if_true: vec![], 
+                if_true: tree::Program(vec![]), 
                 if_false: Some(Box::new(tree::Else::If(tree::If { 
                     condition: Box::new(tree::Expr::Ident("condition".to_string())), 
-                    if_true: vec![], 
+                    if_true: tree::Program(vec![]), 
                     if_false: Some(Box::new(tree::Else::If(tree::If { 
                         condition: Box::new(tree::Expr::Ident("condition".to_string())), 
-                        if_true: vec![], 
+                        if_true: tree::Program(vec![]), 
                         if_false: Some(Box::new(tree::Else::If(tree::If { 
                             condition: Box::new(tree::Expr::Ident("condition".to_string())), 
-                            if_true: vec![], 
+                            if_true: tree::Program(vec![]), 
                             if_false: Some(Box::new(tree::Else::If(tree::If { 
                                 condition: Box::new(tree::Expr::Ident("condition".to_string())), 
-                                if_true: vec![], 
-                                if_false: Some(Box::new(tree::Else::Block(vec![])))
+                                if_true: tree::Program(vec![]), 
+                                if_false: Some(Box::new(tree::Else::Block(tree::Program(vec![]))))
                             })))
                         })))
                     })))
@@ -1000,12 +1000,12 @@ mod tests {
 
         assert_parse!("if cond {}" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
             condition: Box::new(tree::Expr::Ident("cond".to_string())),
-            if_true: vec![],
+            if_true: tree::Program(vec![]),
             if_false: None
         }))]);
         assert_parse!("if cond {};" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
             condition: Box::new(tree::Expr::Ident("cond".to_string())),
-            if_true: vec![],
+            if_true: tree::Program(vec![]),
             if_false: None
         }))]);
 
@@ -1040,7 +1040,7 @@ mod tests {
             }),
             tree::Stmt::Expr(tree::Expr::If(tree::If {
                 condition: Box::new(tree::Expr::Ident("cond".to_string())),
-                if_true: vec![
+                if_true: tree::Program(vec![
                     tree::Stmt::Decl(tree::Decl { 
                         rt: tree::ReasgType::Let, 
                         mt: tree::MutType::Immut, 
@@ -1048,7 +1048,7 @@ mod tests {
                         ty: None, 
                         val: tree::Expr::Literal(tree::Literal::Int(3))
                     })
-                ],
+                ]),
                 if_false: None
             }))
         ])

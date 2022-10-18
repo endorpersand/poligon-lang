@@ -119,7 +119,7 @@ impl Repl<'_> {
         // if we got here, we should be able to close:
         let tokens = consume_derr! { lx.close() };
         let tree   = consume_derr! { parse_repl(tokens) };
-        let result = consume_derr! { tree.traverse_rt(&mut self.ctx) };
+        let result = consume_derr! { tree.run_with_ctx(&mut self.ctx) };
 
         // success!
         self.code.clear();

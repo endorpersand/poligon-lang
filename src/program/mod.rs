@@ -378,7 +378,7 @@ impl TraverseRt for tree::Else {
 
 impl TraverseRt for tree::Program {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let mut stmts = self.iter();
+        let mut stmts = self.0.iter();
         let maybe_last = stmts.next_back();
 
         if let Some(last) = maybe_last {

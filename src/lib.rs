@@ -48,9 +48,8 @@ impl Interpreter {
 
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
-        let mut ctx = BlockContext::new();
-
-        parsed.traverse_rt(&mut ctx)
+        
+        parsed.run()
             .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
             .map_err(InterpretErr)
     }
