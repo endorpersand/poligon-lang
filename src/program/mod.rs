@@ -367,24 +367,16 @@ impl TraverseRt for tree::BinaryOp {
 
 impl TraverseRt for tree::If {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let tree::If { condition, if_true, if_false } = self;
-
-        if condition.traverse_rt(ctx)?.truth() {
-            if_true.traverse_rt(&mut ctx.child())
-        } else {
-            if_false.as_ref()
-                .map(|e| e.traverse_rt(ctx))
-                .unwrap_or(Ok(Value::Unit))
+        for (cond, block) in &self.conditionals {
+            if cond.traverse_rt(ctx)?.truth() {
+                return block.traverse_rt(&mut ctx.child());
+            }
         }
-    }
-}
 
-impl TraverseRt for tree::Else {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        match self {
-            tree::Else::If(e) => e.traverse_rt(ctx),
-            tree::Else::Block(e) => e.traverse_rt(&mut ctx.child()),
-        }
+        self.last.as_ref().map_or(
+            Ok(Value::Unit),
+            |block| block.traverse_rt(&mut ctx.child())
+        )
     }
 }
 

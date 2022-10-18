@@ -135,15 +135,8 @@ pub struct BinaryOp {
 
 #[derive(Debug, PartialEq)]
 pub struct If {
-    pub condition: Box<Expr>,
-    pub if_true: Program,
-    pub if_false: Option<Box<Else>>
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Else {
-    If(If),
-    Block(Program)
+    pub conditionals: Vec<(Expr, Program)>,
+    pub last: Option<Program>
 }
 
 macro_rules! cast {
