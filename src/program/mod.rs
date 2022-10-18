@@ -50,7 +50,10 @@ pub enum RuntimeErr {
     IndexOutOfBounds,
     UndefinedVar(String),
     WrongArity(usize),
-    CannotCall
+    CannotCall,
+    CannotReturn,
+    CannotBreak,
+    CannotContinue,
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -63,19 +66,33 @@ impl GonErr for RuntimeErr {
 }
 type RtResult<T> = Result<T, RuntimeErr>;
 
+pub enum TermOp<T, E> {
+    Err(E),
+    Return(T),
+    Break,
+    Continue
+}
+impl<T> From<RuntimeErr> for TermOp<T, RuntimeErr> {
+    fn from(e: RuntimeErr) -> Self {
+        TermOp::Err(e)
+    }
+}
+type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
+
 /// This trait enables the traversal of a program tree.
 pub trait TraverseRt {
     /// Apply the effects of this node, and evaluate any of the children nodes to do so.
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value>;
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value>;
 }
 
 impl TraverseRt for tree::Expr {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
             tree::Expr::Ident(ident) => {
                 ctx.vars.get(ident)
                     .ok_or(RuntimeErr::UndefinedVar(ident.clone()))
                     .map(|v| v.new_ref())
+                    .map_err(TermOp::Err)
             },
             tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
             tree::Expr::Literal(e) => e.traverse_rt(ctx),
@@ -155,7 +172,7 @@ impl TraverseRt for tree::Expr {
 
                         Ok(Value::new_list(values))
                     },
-                    _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))
+                    _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))?
                 }
             },
             tree::Expr::If(e) => e.traverse_rt(ctx),
@@ -187,7 +204,7 @@ impl TraverseRt for tree::Expr {
                 if let Value::Fun(f) = funct.traverse_rt(ctx)? {
                     f.call(params, &mut ctx.child())
                 } else {
-                    Err(RuntimeErr::CannotCall)
+                    Err(RuntimeErr::CannotCall)?
                 }
             }
             tree::Expr::Index { expr, index } => {
@@ -203,12 +220,12 @@ impl TraverseRt for tree::Expr {
                             
                             if let Value::List(l) = e {
                                 mi.and_then(|i| l.borrow().get(i).map(Value::new_ref))
-                                    .ok_or(RuntimeErr::IndexOutOfBounds)
+                                    .ok_or(TermOp::Err(RuntimeErr::IndexOutOfBounds))
                             } else {
                                 unreachable!();
                             }
                         } else {
-                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
+                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))?
                         }
                     },
 
@@ -217,12 +234,12 @@ impl TraverseRt for tree::Expr {
                         if let Some(mut it) = e.as_iterator() {
                             if let Value::Int(signed_index) = index_val {
                                 let i = usize::try_from(signed_index).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
-                                it.nth(i).ok_or(RuntimeErr::IndexOutOfBounds)
+                                it.nth(i).ok_or(TermOp::Err(RuntimeErr::IndexOutOfBounds))
                             } else {
-                                Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))
+                                Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))?
                             }
                         } else {
-                            Err(RuntimeErr::CannotIndex(e.ty()))
+                            Err(RuntimeErr::CannotIndex(e.ty()))?
                         }
                     }
                 }
@@ -300,13 +317,13 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 // }
 
 impl TraverseRt for tree::Literal {
-    fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtTraversal<Value> {
         Ok(self.clone().into())
     }
 }
 
 impl TraverseRt for tree::UnaryOps {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let tree::UnaryOps {ops, expr} = self;
 
         let mut ops_iter = ops.iter().rev();
@@ -329,7 +346,7 @@ impl TraverseRt for tree::UnaryOps {
 }
 
 impl TraverseRt for tree::BinaryOp {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let tree::BinaryOp { op, left, right } = self;
 
         left.apply_binary(op, right, ctx)
@@ -337,7 +354,7 @@ impl TraverseRt for tree::BinaryOp {
 }
 
 impl TraverseRt for tree::If {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let tree::If { condition, if_true, if_false } = self;
 
         if condition.traverse_rt(ctx)?.truth() {
@@ -351,7 +368,7 @@ impl TraverseRt for tree::If {
 }
 
 impl TraverseRt for tree::Else {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
             tree::Else::If(e) => e.traverse_rt(ctx),
             tree::Else::Block(e) => e.traverse_rt(&mut ctx.child()),
@@ -360,7 +377,7 @@ impl TraverseRt for tree::Else {
 }
 
 impl TraverseRt for tree::Program {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let mut stmts = self.iter();
         let maybe_last = stmts.next_back();
 
@@ -376,12 +393,16 @@ impl TraverseRt for tree::Program {
 }
 
 impl TraverseRt for tree::Stmt {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
             tree::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::Return(_) => todo!(),
-            tree::Stmt::Break => todo!(),
-            tree::Stmt::Continue => todo!(),
+            tree::Stmt::Return(t) => {
+                let expr = t.traverse_rt(ctx)?;
+                
+                Err(TermOp::Return(expr))
+            },
+            tree::Stmt::Break     => Err(TermOp::Break),
+            tree::Stmt::Continue  => Err(TermOp::Continue),
             tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
             tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
@@ -389,13 +410,13 @@ impl TraverseRt for tree::Stmt {
 }
 
 impl TraverseRt for tree::Decl {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         todo!()
     }
 }
 
 impl TraverseRt for tree::FunDecl {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtResult<Value> {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let tree::FunDecl { ident, params, ret, block } = self;
         
         let resolved_params: Vec<_> = params.iter()

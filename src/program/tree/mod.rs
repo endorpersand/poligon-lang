@@ -145,16 +145,21 @@ pub enum Else {
     Block(Program)
 }
 
+macro_rules! cast {
+    ($e:expr) => { Ok($e?) }
+}
+
 impl Expr {
     /// Evaluate an expression and then apply the unary operator for it.
-    pub fn apply_unary(&self, o: &op::Unary, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
-        self.traverse_rt(ctx).and_then(|v| v.apply_unary(o))
+    pub fn apply_unary(&self, o: &op::Unary, ctx: &mut super::BlockContext) -> super::RtTraversal<super::Value> {
+        self.traverse_rt(ctx)
+            .and_then(|v| cast! { v.apply_unary(o) })
     }
 
     /// Evaluate the two arguments to the binary operator and then apply the operator to it.
     /// 
     /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
-    pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut super::BlockContext) -> super::RtResult<super::Value> {
+    pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut super::BlockContext) -> super::RtTraversal<super::Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
@@ -167,7 +172,8 @@ impl Expr {
             },
     
             // fallback to eager value binary
-            _ => self.traverse_rt(ctx).and_then(|v| v.apply_binary(o, &right.traverse_rt(ctx)?))
+            _ => self.traverse_rt(ctx)
+                .and_then(|v| cast! { v.apply_binary(o, &right.traverse_rt(ctx)?) } )
         }
     }
 }

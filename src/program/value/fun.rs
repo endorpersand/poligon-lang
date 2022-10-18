@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{BlockContext, TraverseRt};
-use crate::program::{RtResult, tree, RuntimeErr};
+use crate::program::{RtResult, tree, RuntimeErr, RtTraversal, TermOp};
 
 use super::{VArbType, Value};
 
@@ -35,7 +35,7 @@ impl GonFun {
         }
     }
 
-    pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut BlockContext) -> RtResult<Value> {
+    pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut BlockContext) -> RtTraversal<Value> {
         // TODO, make lazy
         let pvals = params.iter()
             .map(|e| e.traverse_rt(ctx))
@@ -44,19 +44,27 @@ impl GonFun {
         // check if arity matches
         if let Some(a) = self.arity() {
             if pvals.len() != a {
-                return Err(RuntimeErr::WrongArity(a));
+                Err(RuntimeErr::WrongArity(a))?;
             }
         }
 
         match &self.fun {
-            GInternalFun::Rust(f) => (f)(pvals),
+            GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
             GInternalFun::Poligon(params, block) => {
                 let mut fscope = ctx.child(); // TODO: lexical scope
                 
                 for (ident, v) in std::iter::zip(params, pvals) {
                     fscope.vars.set_top(ident.clone(), v);
                 }
-                block.traverse_rt(&mut fscope)
+                // traverse through the code.
+                // treat return statements as Ok's!
+                match block.traverse_rt(&mut fscope) {
+                    Ok(t) => Ok(t),
+                    Err(TermOp::Return(t)) => Ok(t),
+                    Err(TermOp::Err(e))    => Err(e)?,
+                    Err(TermOp::Break)     => Err(RuntimeErr::CannotBreak)?,
+                    Err(TermOp::Continue)  => Err(RuntimeErr::CannotContinue)?,
+                }
             },
         }
     }
