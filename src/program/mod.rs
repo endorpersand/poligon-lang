@@ -433,8 +433,8 @@ impl TraverseRt for tree::FunDecl {
         
         let resolved_params: Vec<_> = params.iter()
             .map(|p| &p.ty)
-            .map(|mt| mt.as_ref().map_or_else(
-                || VArbType::Unk, 
+            .map(|mt| mt.as_ref().map_or(
+                VArbType::Unk, 
                 |t| VArbType::lookup(t))
             )
             .collect();
@@ -444,8 +444,8 @@ impl TraverseRt for tree::FunDecl {
             .collect();
 
         let r = ret.as_ref()
-            .map_or_else(
-                || VArbType::Value(ValueType::Unit), 
+            .map_or(
+                VArbType::Value(ValueType::Unit), 
                 |t| VArbType::lookup(t)
             );
 
