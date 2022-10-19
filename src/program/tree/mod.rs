@@ -57,7 +57,7 @@ pub enum Expr {
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
     
-    Assign(String, Box<Expr>),
+    Assign(AsgPat, Box<Expr>),
     Attr(Attr), // a.b.c.d
     StaticAttr(Attr), // a::b::c::d
     UnaryOps(UnaryOps),
@@ -142,6 +142,43 @@ pub struct Index {
     pub index: Box<Expr>
 }
 
+#[derive(Debug, PartialEq)]
+pub enum AsgUnit {
+    Ident(String),
+    Path(Attr, bool /* static? */),
+    Index(Index)
+}
+#[derive(Debug, PartialEq)]
+pub enum AsgPat {
+    Unit(AsgUnit),
+    List(Vec<AsgPat>)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AsgPatErr {
+    InvalidAssignTarget
+}
+
+impl TryFrom<Expr> for AsgPat {
+    type Error = AsgPatErr;
+
+    fn try_from(value: Expr) -> Result<Self, Self::Error> {
+        match value {
+            Expr::Ident(ident)     => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
+            Expr::Attr(attr)       => Ok(AsgPat::Unit(AsgUnit::Path(attr, false))),
+            Expr::StaticAttr(attr) => Ok(AsgPat::Unit(AsgUnit::Path(attr, true))),
+            Expr::Index(idx)       => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
+            Expr::ListLiteral(lst) => {
+                let vec = lst.into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?;
+
+                Ok(AsgPat::List(vec))
+            }
+            _=> Err(AsgPatErr::InvalidAssignTarget),
+        }
+    }
+}
 macro_rules! cast {
     ($e:expr) => { Ok($e?) }
 }

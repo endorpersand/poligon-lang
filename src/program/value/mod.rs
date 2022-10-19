@@ -198,6 +198,56 @@ impl Value {
         }
     }
 
+    pub fn get_index(&self, idx: Value) -> RtResult<Value> {
+        match self {
+            // There is a more efficient method of indexing lists 
+            // than just "conv to iter => get nth item":
+            e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
+                let mi = usize::try_from(signed_idx).ok();
+                let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
+
+                mi.and_then(|i| lst.borrow().get(i).map(Value::new_ref))
+                    .ok_or(super::RuntimeErr::IndexOutOfBounds)
+            } else {
+                Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+            },
+
+            // Convert to iter => get nth item
+            e => {
+                let mut it = e.as_iterator().ok_or(super::RuntimeErr::CannotIndex(e.ty()))?;
+
+                if let Value::Int(signed_idx) = idx {
+                    let i = usize::try_from(signed_idx)
+                        .map_err(|_| super::RuntimeErr::IndexOutOfBounds)?;
+                    
+                    it.nth(i)
+                        .ok_or(super::RuntimeErr::IndexOutOfBounds)
+                } else {
+                    Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                }
+            }
+        }
+    }
+
+    pub fn set_index(&mut self, idx: Value, nv: Value) -> RtResult<Value> {
+        match self {
+            e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
+                let mi = usize::try_from(signed_idx).ok();
+                let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
+
+                mi.and_then(|i| {
+                    lst.borrow_mut()[i] = nv;
+                    lst.borrow().get(i).map(Value::new_ref)
+                })
+                    .ok_or(super::RuntimeErr::IndexOutOfBounds)
+            } else {
+                Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+            },
+
+            e => Err(super::RuntimeErr::CannotSetIndex(e.ty()))
+        }
+    }
+
     /// Apply a unary operator to a computed value.
     pub fn apply_unary(&self, o: &op::Unary) -> super::RtResult<Value> {
         match o {

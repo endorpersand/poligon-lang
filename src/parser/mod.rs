@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::err::GonErr;
 use crate::lexer::token::{Token, token};
-use crate::program::tree::{self, op};
+use crate::program::tree::{self, op, AsgPatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
@@ -25,7 +25,9 @@ pub enum ParseErr {
     ExpectedExpr,
     CannotParseNumeric,
     ExpectedBlock,
-    ExpectedType
+    ExpectedType,
+    ExpectedPattern,
+    AsgPatErr(AsgPatErr)
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
@@ -431,26 +433,32 @@ impl Parser {
     fn match_asg(&mut self) -> ParseResult<Option<tree::Expr>> {
         // a = b = c = d = e = [expr]
 
-        let mut vars = vec![];
+        let mut pats = vec![];
+        let mut last = self.match_lor()?;
         // TODO: asg ops
-        while let Some(token![=]) = self.tokens.get(1) {
-            vars.push(self.expect_ident()?);
-            self.tokens.pop_front(); // this is a =
+
+        while self.match1(token![=]) {
+            // if there was an equal sign, this expression must've been a pattern:
+            let pat_expr = last.ok_or(ParseErr::ExpectedPattern)?;
+            let pat = tree::AsgPat::try_from(pat_expr)
+                .map_err(ParseErr::AsgPatErr)?;
+            
+            pats.push(pat);
+            last = self.match_lor()?;
         }
 
-        // no more =, so this must be logical or
-        let expr = self.match_lor()?;
-        
-        if vars.is_empty() {
-            // if vars is empty this is not an assignment expression
-            Ok(expr)
-        } else {
-            let expr = expr.ok_or(ParseErr::ExpectedExpr)?;
+        if !pats.is_empty() {
+            let rhs = last.ok_or(ParseErr::ExpectedExpr)?;
 
-            let asg = vars.into_iter()
-                .rfold(expr, |e, v| tree::Expr::Assign(v, Box::new(e)));
+            let asg = pats.into_iter()
+                .rfold(rhs, |e, pat| {
+                    tree::Expr::Assign(pat, Box::new(e))
+                });
             
             Ok(Some(asg))
+        } else {
+            // if pats is empty this is not an assignment expression
+            Ok(last)
         }
     }
 

@@ -46,6 +46,7 @@ pub enum RuntimeErr {
     RangeIsInfinite, // TODO: remove
     CannotIterateOver(ValueType),
     CannotIndex(ValueType),
+    CannotSetIndex(ValueType),
     CannotIndexWith(ValueType, ValueType),
     IndexOutOfBounds,
     UndefinedVar(String),
@@ -106,11 +107,11 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
-            tree::Expr::Assign(ident, expr) => {
+            tree::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
-                let val = ctx.vars.set(ident.clone(), result);
-                Ok(val.new_ref())
+                assign_pat(pat, result, ctx)
+                    .map_err(TermOp::Err)
             },
             tree::Expr::Attr(_) => todo!(),
             tree::Expr::StaticAttr(_) => todo!(),
@@ -225,38 +226,7 @@ impl TraverseRt for tree::Expr {
                 let val = expr.traverse_rt(ctx)?;
                 let index_val = index.traverse_rt(ctx)?;
 
-                match val {
-                    // There is a more efficient method of indexing lists 
-                    // than just "conv to iter => get nth item":
-                    e @ Value::List(_) => {
-                        if let Value::Int(signed_index) = index_val {
-                            let mi = usize::try_from(signed_index).ok();
-                            
-                            if let Value::List(l) = e {
-                                mi.and_then(|i| l.borrow().get(i).map(Value::new_ref))
-                                    .ok_or(TermOp::Err(RuntimeErr::IndexOutOfBounds))
-                            } else {
-                                unreachable!();
-                            }
-                        } else {
-                            Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))?
-                        }
-                    },
-
-                    // Convert to iter => get nth item
-                    e => {
-                        if let Some(mut it) = e.as_iterator() {
-                            if let Value::Int(signed_index) = index_val {
-                                let i = usize::try_from(signed_index).map_err(|_| RuntimeErr::IndexOutOfBounds)?;
-                                it.nth(i).ok_or(TermOp::Err(RuntimeErr::IndexOutOfBounds))
-                            } else {
-                                Err(RuntimeErr::CannotIndexWith(e.ty(), index_val.ty()))?
-                            }
-                        } else {
-                            Err(RuntimeErr::CannotIndex(e.ty()))?
-                        }
-                    }
-                }
+                val.get_index(index_val).map_err(TermOp::Err)
             },
         }
     }
@@ -329,6 +299,36 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 //         Err(RuntimeErr::CannotApplySpread(left.ty(), right.ty()))
 //     }
 // }
+
+fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
+    match t {
+        TermOp::Err(e)    => e,
+        TermOp::Return(_) => RuntimeErr::CannotReturn,
+        TermOp::Break     => RuntimeErr::CannotBreak,
+        TermOp::Continue  => RuntimeErr::CannotContinue,
+    }
+}
+fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResult<Value> {
+    let val = match pat {
+        tree::AsgPat::Unit(unit) => match unit {
+            tree::AsgUnit::Ident(ident) => {
+                ctx.vars.set(ident.clone(), rhs).new_ref()
+            },
+            tree::AsgUnit::Path(_, _) => todo!(),
+            tree::AsgUnit::Index(idx) => {
+                let tree::Index {expr, index} = idx;
+                
+                let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
+                let index_val = index.traverse_rt(ctx).map_err(into_err)?;
+
+                val.set_index(index_val, rhs)?
+            },
+        },
+        tree::AsgPat::List(_) => todo!(),
+    };
+
+    Ok(val)
+}
 
 impl TraverseRt for tree::Literal {
     fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtTraversal<Value> {
