@@ -448,7 +448,7 @@ impl Parser {
             let expr = expr.ok_or(ParseErr::ExpectedExpr)?;
 
             let asg = vars.into_iter()
-                .rfold(expr, |e, v| tree::Expr::Assignment(v, Box::new(e)));
+                .rfold(expr, |e, v| tree::Expr::Assign(v, Box::new(e)));
             
             Ok(Some(asg))
         }
@@ -640,10 +640,10 @@ impl Parser {
                         let index = self.expect_expr()?;
                         self.expect1(token!["]"])?;
 
-                        e = tree::Expr::Index {
+                        e = tree::Expr::Index(tree::Index {
                             expr: Box::new(e), 
                             index: Box::new(index)
-                        };
+                        });
                     },
                     _ => unreachable!()
                 }

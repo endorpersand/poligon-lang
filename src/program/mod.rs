@@ -106,7 +106,7 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
-            tree::Expr::Assignment(ident, expr) => {
+            tree::Expr::Assign(ident, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
                 let val = ctx.vars.set(ident.clone(), result);
@@ -220,7 +220,8 @@ impl TraverseRt for tree::Expr {
                     Err(RuntimeErr::CannotCall)?
                 }
             }
-            tree::Expr::Index { expr, index } => {
+            tree::Expr::Index(idx) => {
+                let tree::Index {expr, index} = idx;
                 let val = expr.traverse_rt(ctx)?;
                 let index_val = index.traverse_rt(ctx)?;
 

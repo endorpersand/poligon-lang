@@ -57,7 +57,7 @@ pub enum Expr {
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
     
-    Assignment(String, Box<Expr>),
+    Assign(String, Box<Expr>),
     Attr(Attr), // a.b.c.d
     StaticAttr(Attr), // a::b::c::d
     UnaryOps(UnaryOps),
@@ -86,10 +86,7 @@ pub enum Expr {
         funct: Box<Expr>,
         params: Vec<Expr>
     },
-    Index {
-        expr: Box<Expr>,
-        index: Box<Expr>
-    }
+    Index(Index)
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -137,6 +134,12 @@ pub struct BinaryOp {
 pub struct If {
     pub conditionals: Vec<(Expr, Program)>,
     pub last: Option<Program>
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Index {
+    pub expr: Box<Expr>,
+    pub index: Box<Expr>
 }
 
 macro_rules! cast {
