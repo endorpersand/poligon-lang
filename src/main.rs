@@ -1,12 +1,7 @@
 use std::io::{self, BufRead, Write};
 
 use poligon_lang::*;
-use poligon_lang::err::{FullGonErr, GonErr};
-
-// TODO: delete once everything's implemented
-fn wrap_err<E: std::fmt::Debug>(r: E) -> FullGonErr<impl GonErr> {
-    r.into()
-}
+use poligon_lang::err::FullGonErr;
 
 fn print_out(txt: &str) -> io::Result<()> {
     print!("{}", txt);
@@ -77,19 +72,7 @@ impl Repl<'_> {
                 match $e {
                     Ok(t) => t,
                     Err(e) => {
-                        eprintln!("{}", e.full_msg(&self.code));
-                        self.code.clear();
-                        return;
-                    }
-                }
-            }
-        }
-        macro_rules! consume_derr {
-            ($e:expr) => {
-                match $e {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("{}", wrap_err(e).full_msg(&self.code));
+                        eprintln!("{}", FullGonErr::from(e).full_msg(&self.code));
                         self.code.clear();
                         return;
                     }
@@ -117,9 +100,9 @@ impl Repl<'_> {
         }
 
         // if we got here, we should be able to close:
-        let tokens = consume_derr! { lx.close() };
-        let tree   = consume_derr! { parse_repl(tokens) };
-        let result = consume_derr! { tree.run_with_ctx(&mut self.ctx) };
+        let tokens = consume_err! { lx.close() };
+        let tree   = consume_err! { parse_repl(tokens) };
+        let result = consume_err! { tree.run_with_ctx(&mut self.ctx) };
 
         // success!
         self.code.clear();

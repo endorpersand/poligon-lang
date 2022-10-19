@@ -61,7 +61,8 @@ impl GonErr for RuntimeErr {
     }
 
     fn message(&self) -> String {
-        todo!()
+        // TODO
+        format!("{:?}", self)
     }
 }
 type RtResult<T> = Result<T, RuntimeErr>;

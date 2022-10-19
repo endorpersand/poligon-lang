@@ -33,7 +33,8 @@ impl GonErr for ParseErr {
     }
 
     fn message(&self) -> String {
-        todo!()
+        // TODO
+        format!("{:?}", self)
     }
 }
 type ParseResult<T> = Result<T, ParseErr>;

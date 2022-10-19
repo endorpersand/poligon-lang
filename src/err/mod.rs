@@ -44,19 +44,9 @@ pub trait GonErr {
 
 // TODO: this impl is only here to be used for debug purposes.
 // it should be deleted once everything has been implemented.
-pub struct DebugErr<E: std::fmt::Debug>(E);
-impl<E: std::fmt::Debug> GonErr for DebugErr<E> {
-    fn err_name(&self) -> &'static str {
-        "error"
-    }
-
-    fn message(&self) -> String {
-        format!("{:?}", self.0)
-    }
-}
-impl<E: std::fmt::Debug> From<E> for FullGonErr<DebugErr<E>> {
+impl<E: GonErr> From<E> for FullGonErr<E> {
     fn from(err: E) -> Self {
-        DebugErr(err).at((0, 0))
+        err.at((0, 0))
     }
 }
 
