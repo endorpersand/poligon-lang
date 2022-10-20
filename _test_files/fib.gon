@@ -17,8 +17,8 @@ fun fib(n: int) -> list<int> {
         a = b;
         b = c;
 
-        c
-    }
+        c;
+    };
 }
 
 for i in 0..10 {

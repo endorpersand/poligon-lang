@@ -1,6 +1,6 @@
 // with lexical scope, this should be a RT error
 fun print_x() {
-    print(x)
+    print(x);
 }
 
 fun print_x2() {
@@ -8,4 +8,4 @@ fun print_x2() {
     print_x();
 }
 
-print_x2()
+print_x2();

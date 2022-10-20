@@ -187,6 +187,9 @@ impl Parser {
                         | tree::Expr::For { ident: _, iterator: _, block: _ }
                     ) => { self.match1(token![;]); },
 
+                    // also for function declarations
+                    tree::Stmt::FunDecl(_) => { self.match1(token![;]); },
+                    
                     // otherwise, it does
                     _ => self.expect1(token![;])?
                 }
