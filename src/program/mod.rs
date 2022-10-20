@@ -56,7 +56,8 @@ pub enum RuntimeErr {
     CannotBreak,
     CannotContinue,
     NotIterable(ValueType),
-    UnpackWrong(usize /* expected */, usize /* got */)
+    UnpackTooLittle(usize /* expected */, usize /* got */),
+    UnpackTooMany(usize /* expected */)
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -328,23 +329,26 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
         },
         tree::AsgPat::List(pats) => {
             let pat_len = pats.len();
-            let val_len = rhs.as_iterator()
-                .ok_or(RuntimeErr::NotIterable(rhs.ty()))?
-                .count();
+            let mut it = rhs.as_iterator()
+                .ok_or(RuntimeErr::NotIterable(rhs.ty()))?;
+            
+            let values: Vec<_> = it.by_ref().take(pat_len).collect();
+            let values_len = values.len();
 
-            if pat_len != val_len {
-                Err(RuntimeErr::UnpackWrong(pat_len, val_len))?
-            } else {
-                // assured by above:
-                let it = rhs.as_iterator().unwrap();
+            if pat_len > values_len {
+                Err(RuntimeErr::UnpackTooLittle(pat_len, values_len))?
+            } else if it.next().is_some() {
+                Err(RuntimeErr::UnpackTooMany(pat_len))?
+            };
 
-                let mut values = vec![];
-                for (pat, val) in pats.iter().zip(it) {
-                    values.push(assign_pat(pat, val, ctx)?);
-                }
+            std::mem::drop(it); // & give me 20
+            // allows rhs to be used again
 
-                rhs
+            for (pat, val) in std::iter::zip(pats, values) {
+                assign_pat(pat, val, ctx)?;
             }
+
+            rhs
         },
     };
 
