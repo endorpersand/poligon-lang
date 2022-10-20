@@ -1,17 +1,39 @@
+//! The tokens that the string can be parsed into.
+//! 
+//! See [Token] for more information.
+
 use std::fmt::Debug;
 use std::collections::BTreeMap;
 use lazy_static::lazy_static;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
+/// A specific unit that carries some value in Poligon.
 pub enum Token {
+    /// An identifier, such as function names or variable names. (e.g. `abcd`, `a_b`, `a1`)
     Ident(String),
+    
+    /// A numeric value (e.g. `123`, `123.1`, `1.11`, `14.`)
     Numeric(String),
+
+    /// A string literal (e.g. `"hello!"`)
     Str(String), // "abcd"
+
+    /// A character literal (e.g. `'a'`, `'b'`)
     Char(char), // 'a'
+
+    /// A comment (e.g. `// text`, `/* text */`)
     Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
+    
+    /// Keywords (e.g. `let`, `const`, `fun`). These cannot be identifiers in any circumstance.
     Keyword(Keyword),
+
+    /// Operators (e.g. `+`, `-`, `/`)
     Operator(Operator),
+
+    /// Delimiters (e.g. `()`, `[]`)
     Delimiter(Delimiter),
+
+    /// End of line (`;`)
     LineSep
 }
 

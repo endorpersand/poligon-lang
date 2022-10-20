@@ -3,6 +3,14 @@ use crate::Lexer;
 use crate::parser::parse_repl;
 use crate::runtime::BlockContext;
 
+/// Read-eval-print loop
+/// 
+/// This REPL is a command-line utility that can read individual lines ([`process_line`]),
+/// execute them, and print out their value.
+/// 
+/// TODO! code 
+/// 
+/// [`process_line`]: Repl::process_line
 pub struct Repl<'ctx> {
     lexer: Option<Lexer>,
     ctx: BlockContext<'ctx>,
@@ -10,14 +18,25 @@ pub struct Repl<'ctx> {
 }
 
 impl Repl<'_> {
+    /// Create a new instance of the REPL.
     pub fn new() -> Self {
         Self { lexer: None, ctx: BlockContext::new(), code: String::new() }
     }
 
+    /// Check if the previous input is awaiting another line
+    /// 
+    /// If true, this input is awaiting another line.
+    /// If false, [`process_line`] will start executing from a new line.
+    /// 
+    /// [`process_line`]: Repl::process_line
     pub fn line_continues(&self) -> bool {
         self.lexer.is_some()
     }
 
+    /// Execute the line given.
+    /// 
+    /// If the line has an unclosed delimiter, then the REPL will wait 
+    /// until the delimiter is closed to execute the line.
     pub fn process_line(&mut self, line: &str) {
         // If lexer exists, then the previous line is continues onto this line:
 

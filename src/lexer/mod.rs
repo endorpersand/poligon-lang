@@ -1,3 +1,7 @@
+//! Converts strings to sequences of tokens.
+//! 
+//! TODO! more doc
+
 use std::collections::VecDeque;
 
 use lazy_static::lazy_static;
@@ -12,16 +16,35 @@ pub fn tokenize(input: &str) -> LexResult<Vec<Token>> {
     Lexer::new(input)?.lex()
 }
 
+/// An error that occurs when a string could not be parsed into tokens.
 #[derive(PartialEq, Eq, Debug)]
 pub enum LexErr {
+    /// There was a character that isn't used in Poligon code (e.g. emojis)
     UnknownChar(char),   // Char isn't used in Poligon code
-    UnclosedQuote,       // Hit EOF instead of closing quote
-    ExpectedChar(char),  // Expected a specific character, f.e. '
-    EmptyChar,           // ''
-    UnknownOp(String),   // This operator cannot be resolved
-    MismatchedDelimiter, // A bracket was closed with the wrong type
-    UnclosedDelimiter,   // A bracket wasn't closed
-    UnclosedComment,     // Hit EOF on /* */
+
+    /// The lexer tried to parse a string or character literal 
+    /// but there was no closing quote. (e.g. `"hello!`)
+    UnclosedQuote,
+
+    /// A specific character was expected at some given position
+    /// 
+    /// This is used for when a character literal exceeds one character: `'hello!'`.
+    ExpectedChar(char),
+    
+    /// A char literal was empty (`''`).
+    EmptyChar,
+
+    /// The string of characters created made an operator which could not be resolved
+    UnknownOp(String),
+
+    /// A delimiter was closed with the wrong type (e.g. `[ ... )`)
+    MismatchedDelimiter,
+
+    /// A bracket was not closed (e.g. `( ... `)
+    UnclosedDelimiter,
+
+    /// A comment was not closed (e.g. `/* ... `)
+    UnclosedComment,
 }
 pub type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;

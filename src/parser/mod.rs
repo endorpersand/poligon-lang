@@ -1,3 +1,7 @@
+//! Converts sequences of tokens to a parseable program tree.
+//! 
+//! TODO! more doc
+
 use std::collections::VecDeque;
 use std::rc::Rc;
 

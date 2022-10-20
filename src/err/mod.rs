@@ -1,16 +1,37 @@
+//! Underlying core behind the error printing for the interpreter.
+//! 
+//! This module unifies the several different types of errors output by the other modules.
+//! Other error types (e.g. [`LexErr`]) can implement the [`GonErr`] trait to keep track of the 
+//! error type's name and message.
+//! 
+//! [`FullGonErr`] does much of the work to convert [`GonErr`]s into a printed error in terminal.
+//! 
+//! TODO!: code block
+//! 
+//! [`LexErr`]: crate::lexer::LexErr
+
 use std::collections::HashMap;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
+/// Errors that can be printed by the Poligon interpreter.
+/// 
+/// This trait requires that the struct provides the name of the error type and the message of the error.
+/// 
+/// This trait provides functionality to designate *where* an error occurred.
 pub trait GonErr {
+    /// The name of the error type (e.g. `syntax error`, `runtime error`)
     fn err_name(&self) -> &'static str;
+    /// The description of why the error occurred (e.g. `division by zero`)
     fn message(&self) -> String;
 
+    /// Designate that this error occurred at a specific position
     fn at(self, p: Point) -> FullGonErr<Self> 
         where Self: Sized
     {
         FullGonErr { err: self, position: ErrPos::Point(p) }
     }
     
+    /// Designate that this error occurred at a few specific positions
     fn at_points(self, pts: &[Point]) -> FullGonErr<Self> 
         where Self: Sized
     {
@@ -23,6 +44,7 @@ pub trait GonErr {
         }
     }
     
+    /// Designate that this error occurred within a range of positions
     fn at_range(self, range: impl RangeBounds<Point>) -> FullGonErr<Self> 
         where Self: Sized
     {
@@ -50,6 +72,9 @@ impl<E: GonErr> From<E> for FullGonErr<E> {
     }
 }
 
+/// An error that has an associated position.
+/// 
+/// This struct is used by the Poligon interpreter to format and print interpreter errors.
 #[derive(PartialEq, Eq, Debug)]
 pub struct FullGonErr<E: GonErr> {
     err: E,
@@ -142,6 +167,8 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
 }
 
 impl<E: GonErr> FullGonErr<E> {
+    /// Get a String designating where the error occurred 
+    /// and the message associated with the error.
     pub fn short_msg(&self) -> String {
         let line_fmt = match &self.position {
             ErrPos::Point((lno, cno)) => format!("{}:{}", lno, cno),
@@ -170,6 +197,9 @@ impl<E: GonErr> FullGonErr<E> {
         }
     }
 
+    /// Get a String designating where the error occurred,
+    /// the message associated with the error,
+    /// and a pointer to what happened at the line to cause the error.
     pub fn full_msg(&self, orig_txt: &str) -> String {
         let mut lines = vec![self.short_msg(), String::new()];
         

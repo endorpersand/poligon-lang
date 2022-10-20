@@ -1,3 +1,9 @@
+//! The full process that converts text into a running program.
+//! 
+//! The [Interpreter] struct does the full processing from string to execution.
+//! 
+//! TODO!: example
+
 use std::fmt::Display;
 use std::{io, fs};
 use std::path::Path;
@@ -6,6 +12,7 @@ use crate::FullGonErr;
 use crate::runtime::value::Value;
 use crate::{lexer, runtime, parser};
 
+/// The struct that performs the full processing from string to execution.
 pub struct Interpreter {
     source: String
 }

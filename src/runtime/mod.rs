@@ -1,3 +1,7 @@
+//! Takes a parse tree and executes it.
+//! 
+//! TODO! more doc
+
 use std::rc::Rc;
 
 use crate::GonErr;
