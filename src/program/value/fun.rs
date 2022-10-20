@@ -42,9 +42,9 @@ impl GonFun {
             .collect::<Result<Vec<_>, _>>()?;
     
         // check if arity matches
-        if let Some(a) = self.arity() {
-            if pvals.len() != a {
-                Err(RuntimeErr::WrongArity(a))?;
+        if let Some(arity) = self.arity() {
+            if pvals.len() != arity {
+                Err(RuntimeErr::WrongArity(arity))?;
             }
         }
 
