@@ -55,6 +55,8 @@ pub enum RuntimeErr {
     CannotReturn,
     CannotBreak,
     CannotContinue,
+    NotIterable(ValueType),
+    UnpackWrong(usize /* expected */, usize /* got */)
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -324,7 +326,26 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
                 val.set_index(index_val, rhs)?
             },
         },
-        tree::AsgPat::List(_) => todo!(),
+        tree::AsgPat::List(pats) => {
+            let pat_len = pats.len();
+            let val_len = rhs.as_iterator()
+                .ok_or(RuntimeErr::NotIterable(rhs.ty()))?
+                .count();
+
+            if pat_len != val_len {
+                Err(RuntimeErr::UnpackWrong(pat_len, val_len))?
+            } else {
+                // assured by above:
+                let it = rhs.as_iterator().unwrap();
+
+                let mut values = vec![];
+                for (pat, val) in pats.iter().zip(it) {
+                    values.push(assign_pat(pat, val, ctx)?);
+                }
+
+                rhs
+            }
+        },
     };
 
     Ok(val)
