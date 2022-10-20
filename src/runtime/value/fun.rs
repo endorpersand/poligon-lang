@@ -36,17 +36,17 @@ impl GonFun {
     }
 
     pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        // check if arity matches
+        if let Some(arity) = self.arity() {
+            if params.len() != arity {
+                Err(RuntimeErr::WrongArity(arity))?;
+            }
+        }
+        
         // TODO, make lazy
         let pvals = params.iter()
             .map(|e| e.traverse_rt(ctx))
             .collect::<Result<Vec<_>, _>>()?;
-    
-        // check if arity matches
-        if let Some(arity) = self.arity() {
-            if pvals.len() != arity {
-                Err(RuntimeErr::WrongArity(arity))?;
-            }
-        }
 
         match &self.fun {
             GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
