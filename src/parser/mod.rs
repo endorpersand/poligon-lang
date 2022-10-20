@@ -18,7 +18,7 @@ pub fn parse_repl<T>(mut tokens: T) -> ParseResult<tree::Program>
     tokens.extend(std::iter::once(token![;]));
     Parser::new(tokens).parse()
 }
-struct Parser {
+pub struct Parser {
     tokens: VecDeque<Token>
 }
 
