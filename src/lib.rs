@@ -1,4 +1,9 @@
+// useful crate items
+use lexer::Lexer;
 use runtime::{BlockContext, TraverseRt};
+use err::{GonErr, FullGonErr};
+
+// public API
 pub use repl::Repl;
 pub use interpreter::Interpreter;
 pub mod lexer;
@@ -8,8 +13,3 @@ pub mod interpreter;
 pub mod err;
 mod repl;
 mod util;
-
-pub trait Printable {
-    fn repr(&self) -> String;
-    fn str(&self) -> String;
-}

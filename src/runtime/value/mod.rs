@@ -2,7 +2,6 @@ use std::cell::Ref;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use crate::Printable;
 use crate::util::{RefValue, RefValueUtil};
 
 use super::RtResult;
@@ -29,44 +28,11 @@ fn list_repr(l: &RefValue<Vec<Value>>) -> String {
     format!("[{}]", {
         // TODO: deal with recursion
         let strs = l.borrow().iter()
-            .map(Printable::repr)
+            .map(Value::repr)
             .collect::<Vec<_>>();
 
         strs.join(", ")
     })
-}
-
-impl Printable for Value {
-    fn repr(&self) -> String {
-        match self {
-            Value::Int(i)   => i.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::Char(c)  => format!("{:?}", c), // TODO: link these to language representations
-            Value::Str(s)   => format!("{:?}", s), // TODO: link these to language representations
-            Value::Bool(b)  => b.to_string(),
-            Value::List(l)  => list_repr(l),
-            Value::Unit     => ValueType::Unit.to_string(),
-            Value::Fun(f)   => match &f.ident {
-                Some(n) => format!("<function {}>", n),
-                None => String::from("<anonymous function>"),
-            },
-        }
-    }
-
-    fn str(&self) -> String {
-        match self {
-            Value::Char(c)  => format!("{}", c),
-            Value::Str(s)   => format!("{}", s),
-            v @ (
-                | Value::Int(_) 
-                | Value::Float(_) 
-                | Value::Bool(_) 
-                | Value::List(_) 
-                | Value::Unit
-                | Value::Fun(_)
-            ) => v.repr(),
-        }
-    }
 }
 
 /// Utility to cast values onto float and compare them
@@ -195,6 +161,37 @@ impl Value {
             Value::Int(i) => Some(*i as _),
             Value::Float(f) => Some(*f),
             _ => None,
+        }
+    }
+
+    pub fn repr(&self) -> String {
+        match self {
+            Value::Int(i)   => i.to_string(),
+            Value::Float(f) => f.to_string(),
+            Value::Char(c)  => format!("{:?}", c), // TODO: link these to language representations
+            Value::Str(s)   => format!("{:?}", s), // TODO: link these to language representations
+            Value::Bool(b)  => b.to_string(),
+            Value::List(l)  => list_repr(l),
+            Value::Unit     => ValueType::Unit.to_string(),
+            Value::Fun(f)   => match &f.ident {
+                Some(n) => format!("<function {}>", n),
+                None => String::from("<anonymous function>"),
+            },
+        }
+    }
+
+    pub fn str(&self) -> String {
+        match self {
+            Value::Char(c)  => format!("{}", c),
+            Value::Str(s)   => format!("{}", s),
+            v @ (
+                | Value::Int(_) 
+                | Value::Float(_) 
+                | Value::Bool(_) 
+                | Value::List(_) 
+                | Value::Unit
+                | Value::Fun(_)
+            ) => v.repr(),
         }
     }
 

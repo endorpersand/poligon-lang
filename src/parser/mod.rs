@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use crate::err::GonErr;
+use crate::GonErr;
 use crate::lexer::token::{Token, token};
 use crate::runtime::tree::{self, op, AsgPatErr};
 
@@ -39,7 +39,7 @@ impl GonErr for ParseErr {
         format!("{:?}", self)
     }
 }
-type ParseResult<T> = Result<T, ParseErr>;
+pub type ParseResult<T> = Result<T, ParseErr>;
 
 macro_rules! left_assoc_op {
     ($n:ident = $ds:ident (($($op:tt),+) $_:ident)*;) => {

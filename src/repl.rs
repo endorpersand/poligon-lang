@@ -1,6 +1,5 @@
-use crate::Printable;
-use crate::err::FullGonErr;
-use crate::lexer::Lexer;
+use crate::FullGonErr;
+use crate::Lexer;
 use crate::parser::parse_repl;
 use crate::runtime::BlockContext;
 

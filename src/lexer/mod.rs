@@ -23,7 +23,7 @@ pub enum LexErr {
     UnclosedDelimiter,   // A bracket wasn't closed
     UnclosedComment,     // Hit EOF on /* */
 }
-type LexResult<T> = Result<T, FullLexErr>;
+pub type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;
 
 impl GonErr for LexErr {

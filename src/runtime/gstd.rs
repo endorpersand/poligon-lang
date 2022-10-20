@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::Printable;
-
 use super::{RtResult, RuntimeErr};
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType};
 

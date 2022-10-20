@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::err::GonErr;
+use crate::GonErr;
 
 use self::tree::op;
 use self::value::{Value, ValueType, VArbType, FunType, FunParamType};

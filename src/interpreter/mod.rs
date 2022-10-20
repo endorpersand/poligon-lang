@@ -2,11 +2,9 @@ use std::fmt::Display;
 use std::{io, fs};
 use std::path::Path;
 
-use crate::err::FullGonErr;
+use crate::FullGonErr;
 use crate::runtime::value::Value;
 use crate::{lexer, runtime, parser};
-
-// use crate::*;
 
 pub struct Interpreter {
     source: String
