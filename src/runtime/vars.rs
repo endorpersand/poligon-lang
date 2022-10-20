@@ -113,7 +113,7 @@ impl VarContext<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::program::value::Value;
+    use crate::runtime::value::Value;
 
     use super::VarContext;
 

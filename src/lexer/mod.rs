@@ -54,7 +54,7 @@ fn wrapq(c: char) -> String {
     if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
 }
 
-pub struct Lexer {
+pub(crate) struct Lexer {
     tokens: Vec<Token>,
     delimiters: Vec<(Cursor, Delimiter)>,
     

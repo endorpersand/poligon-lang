@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::err::GonErr;
 use crate::lexer::token::{Token, token};
-use crate::program::tree::{self, op, AsgPatErr};
+use crate::runtime::tree::{self, op, AsgPatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
@@ -189,7 +189,7 @@ impl Parser {
 
                     // also for function declarations
                     tree::Stmt::FunDecl(_) => { self.match1(token![;]); },
-                    
+
                     // otherwise, it does
                     _ => self.expect1(token![;])?
                 }
@@ -870,7 +870,7 @@ impl Parser {
 mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
-    use crate::program::tree::op;
+    use crate::runtime::tree::op;
 
     use super::{tree, parse, ParseErr, Parser};
 
