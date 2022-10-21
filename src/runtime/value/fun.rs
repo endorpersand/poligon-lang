@@ -54,7 +54,7 @@ impl GonFun {
                 let mut fscope = ctx.child(); // TODO: lexical scope
                 
                 for (ident, v) in std::iter::zip(params, pvals) {
-                    fscope.vars.set_top(ident.clone(), v);
+                    fscope.vars.declare(ident.clone(), v)?;
                 }
                 // traverse through the code.
                 // treat return statements as Ok's!

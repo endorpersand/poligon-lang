@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use super::gstd;
+use super::tree::{ReasgType, MutType};
 use super::value::Value;
 
 /// Stores the variables in the current scope.
@@ -84,53 +86,66 @@ impl VarContext<'_> {
     /// Query a variable (or return `None` if it does not exist)
     pub fn get(&self, ident: &str) -> Option<&Value> {
         self.hash_maps()
-            .flat_map(|m| m.get(ident))
-            .next()
+            .find_map(|m| m.get(ident))
     }
-    /// Set a variable (and declare it if it does not exist)
-    pub fn set(&mut self, ident: String, v: Value) -> &Value {
-        let maybe_map = self.hash_maps_mut()
-            .find(|m| m.contains_key(&ident));
 
-        let id = ident.clone();
-        if let Some(map) = maybe_map {
-            map.insert(ident, v);
-        } else {
-            self.scope.insert(ident, v);
+    /// Declares a variable in the current scope
+    pub fn declare(&mut self, ident: String, v: Value) -> super::RtResult<Value> {
+        self.declare_full(ident, v, ReasgType::Let, MutType::Mut)
+    }
+
+    /// Declares a variable in the current scope (with a reassignment type and mutability type)
+    pub fn declare_full(
+        &mut self, ident: String, v: Value, _rt: ReasgType, _mt: MutType
+    ) -> super::RtResult<Value> {
+        let entry = self.scope.entry(ident.clone());
+
+        // only allow declare if variable in the top level is not declared
+        match entry {
+            Entry::Occupied(_) => Err(super::RuntimeErr::AlreadyDeclared(ident)),
+            Entry::Vacant(_) => Ok(entry.or_insert(v).clone()),
         }
-
-        self.get(&id).unwrap()
     }
-    /// Set a variable in the top scope (and declare it if it does not exist)
-    pub fn set_top(&mut self, ident: String, v: Value) -> &Value {
-        let id = ident.clone();
-        self.scope.insert(ident, v);
 
-        self.get(&id).unwrap()
+    /// Set a variable (or error if it is not declared)
+    pub fn set(&mut self, ident: &str, v: Value) -> super::RtResult<&Value> {
+        let maybe_m = self.hash_maps_mut()
+            .find(|m| m.contains_key(ident));
+
+        if let Some(m) = maybe_m {
+            m.insert(String::from(ident), v);
+
+            Ok(self.get(ident).unwrap())
+        } else {
+            Err(super::RuntimeErr::NotDeclared(String::from(ident)))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::runtime::RtResult;
     use crate::runtime::value::Value;
 
     use super::VarContext;
 
     #[test]
-    fn scope_test() {
+    fn scope_test() -> RtResult<()> {
         let mut a = VarContext::new();
-        a.set(String::from("a"), Value::Int(1));
+        a.declare(String::from("a"), Value::Int(1))?;
         
         let mut b = a.child();
-        b.set(String::from("b"), Value::Int(2));
+        b.declare(String::from("b"), Value::Int(2))?;
         
         let mut c = b.child();
-        c.set(String::from("c"), Value::Int(3));
+        c.declare(String::from("c"), Value::Int(3))?;
         
         // err, b/c mutable borrow
         // b.set(String::from("c"), Value::Int(14));
         
         println!("{:?}", c.get("d"));
         println!("{:?}", b.get("b"));
+
+        Ok(())
     }
 }

@@ -63,7 +63,10 @@ pub enum RuntimeErr {
     NotIterable(ValueType),
     UnpackTooLittle(usize /* expected */, usize /* got */),
     UnpackTooMany(usize /* expected */),
-    RvErr(RvErr)
+    RvErr(RvErr),
+
+    AlreadyDeclared(String),
+    NotDeclared(String)
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -210,7 +213,7 @@ impl TraverseRt for tree::Expr {
                 let mut result = vec![];
                 for val in it {
                     let mut scope = ctx.child();
-                    scope.vars.set_top(ident.clone(), val);
+                    scope.vars.declare(ident.clone(), val)?;
 
                     let iteration = match block.traverse_rt(&mut scope) {
                         Ok(t) => t,
@@ -321,7 +324,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
     let val = match pat {
         tree::AsgPat::Unit(unit) => match unit {
             tree::AsgUnit::Ident(ident) => {
-                ctx.vars.set(ident.clone(), rhs).new_ref()
+                ctx.vars.set(ident, rhs)?.new_ref()
             },
             tree::AsgUnit::Path(_, _) => todo!(),
             tree::AsgUnit::Index(idx) => {
@@ -448,7 +451,14 @@ impl TraverseRt for tree::Stmt {
 
 impl TraverseRt for tree::Decl {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        todo!()
+        let rhs = self.val.traverse_rt(ctx)?;
+        
+        ctx.vars.declare_full(
+            self.ident.clone(), 
+            rhs, 
+            self.rt, 
+            self.mt
+        ).map_err(TermOp::Err)
     }
 }
 
@@ -482,7 +492,8 @@ impl TraverseRt for tree::FunDecl {
             param_names,
             Rc::clone(block)
         );
-        let rf = ctx.vars.set(ident.clone(), val).new_ref();
-        Ok(rf)
+        
+        let rf = ctx.vars.set(ident, val)?;
+        Ok(rf.new_ref())
     }
 }
