@@ -27,7 +27,7 @@ pub enum Value {
 fn list_repr(l: &RefValue<Vec<Value>>) -> String {
     format!("[{}]", {
         // TODO: deal with recursion
-        let strs = l.try_borrow().unwrap().iter()
+        let strs = l.borrow().iter()
             .map(Value::repr)
             .collect::<Vec<_>>();
 
@@ -111,7 +111,7 @@ impl Value {
             Value::Char(_)  => true,
             Value::Str(v)   => !v.is_empty(),
             Value::Bool(v)  => *v,
-            Value::List(v)  => !v.try_borrow().unwrap().is_empty(),
+            Value::List(v)  => !v.borrow().is_empty(),
             Value::Unit     => false,
             Value::Fun(_)   => true,
         }
@@ -142,7 +142,7 @@ impl Value {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
             Value::List(l)  => {
-                let iter = ValRefIter::new(l.try_borrow().unwrap());
+                let iter = ValRefIter::new(l.borrow());
                 Some(Box::new(iter.map(|r| r.new_ref())))
             },
             Value::Int(_)   => None,
@@ -204,7 +204,7 @@ impl Value {
                 let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
 
                 match mi {
-                    Some(i) => lst.try_borrow()?.get(i).map(Value::new_ref),
+                    Some(i) => lst.borrow().get(i).map(Value::new_ref),
                     None => None,
                 }.ok_or(super::RuntimeErr::IndexOutOfBounds)
             } else {
@@ -318,8 +318,8 @@ impl Value {
                         Ok(Value::Str(buf))
                     },
                     (Value::List(a), Value::List(b)) => {
-                        let mut buf = a.try_borrow()?.clone();
-                        buf.extend(b.try_borrow()?.iter().map(Value::new_ref));
+                        let mut buf = a.borrow().clone();
+                        buf.extend(b.borrow().iter().map(Value::new_ref));
 
                         Ok(Value::new_list(buf))
                     }

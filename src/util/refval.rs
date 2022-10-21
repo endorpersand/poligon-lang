@@ -1,4 +1,4 @@
-use std::cell::{RefCell, Ref, RefMut, BorrowError, BorrowMutError};
+use std::cell::{RefCell, Ref, RefMut, BorrowMutError};
 use std::rc::Rc;
 
 use crate::runtime::RuntimeErr;
@@ -11,16 +11,10 @@ pub struct RefValue<T> {
 
 #[derive(Debug)]
 pub enum RvErr {
-    BorrowConcur,
     BorrowMutConcur,
     BorrowMutImmutable
 }
 
-impl From<BorrowError> for RvErr {
-    fn from(_: BorrowError) -> Self {
-        RvErr::BorrowConcur
-    }
-}
 impl From<BorrowMutError> for RvErr {
     fn from(_: BorrowMutError) -> Self {
         RvErr::BorrowMutConcur
@@ -41,10 +35,12 @@ impl<T> RefValue<T> {
         Self { rc, mutable }
     }
 
-    pub fn try_borrow(&self) -> Result<Ref<'_, T>, RvErr> {
-        Ok(self.rc.try_borrow()?)
+    pub fn borrow(&self) -> Ref<'_, T> {
+        self.rc.borrow()
     }
 
+    // borrow muts should not be held. 
+    // they should only be used for the one update they need and then they should be released.
     pub fn try_borrow_mut(&self) -> Result<RefMut<'_, T>, RvErr> {
         if self.mutable {
             Ok(self.rc.try_borrow_mut()?)
