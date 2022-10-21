@@ -5,6 +5,7 @@
 use std::rc::Rc;
 
 use crate::GonErr;
+use crate::util::RvErr;
 
 use self::tree::op;
 use self::value::{Value, ValueType, VArbType, FunType, FunParamType};
@@ -61,7 +62,8 @@ pub enum RuntimeErr {
     CannotContinue,
     NotIterable(ValueType),
     UnpackTooLittle(usize /* expected */, usize /* got */),
-    UnpackTooMany(usize /* expected */)
+    UnpackTooMany(usize /* expected */),
+    RvErr(RvErr)
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {

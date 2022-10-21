@@ -2,7 +2,7 @@ use std::cell::Ref;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use crate::util::{RefValue, RefValueUtil};
+use crate::util::RefValue;
 
 use super::RtResult;
 use super::tree::{self, op};
@@ -27,7 +27,7 @@ pub enum Value {
 fn list_repr(l: &RefValue<Vec<Value>>) -> String {
     format!("[{}]", {
         // TODO: deal with recursion
-        let strs = l.borrow().iter()
+        let strs = l.try_borrow().unwrap().iter()
             .map(Value::repr)
             .collect::<Vec<_>>();
 
@@ -111,7 +111,7 @@ impl Value {
             Value::Char(_)  => true,
             Value::Str(v)   => !v.is_empty(),
             Value::Bool(v)  => *v,
-            Value::List(v)  => !v.borrow().is_empty(),
+            Value::List(v)  => !v.try_borrow().unwrap().is_empty(),
             Value::Unit     => false,
             Value::Fun(_)   => true,
         }
@@ -142,7 +142,7 @@ impl Value {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
             Value::List(l)  => {
-                let iter = ValRefIter::new(l.borrow());
+                let iter = ValRefIter::new(l.try_borrow().unwrap());
                 Some(Box::new(iter.map(|r| r.new_ref())))
             },
             Value::Int(_)   => None,
@@ -203,8 +203,10 @@ impl Value {
                 let mi = usize::try_from(signed_idx).ok();
                 let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
 
-                mi.and_then(|i| lst.borrow().get(i).map(Value::new_ref))
-                    .ok_or(super::RuntimeErr::IndexOutOfBounds)
+                match mi {
+                    Some(i) => lst.try_borrow()?.get(i).map(Value::new_ref),
+                    None => None,
+                }.ok_or(super::RuntimeErr::IndexOutOfBounds)
             } else {
                 Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
             },
@@ -232,11 +234,15 @@ impl Value {
                 let mi = usize::try_from(signed_idx).ok();
                 let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
 
-                mi.and_then(|i| {
-                    lst.borrow_mut()[i] = nv;
-                    lst.borrow().get(i).map(Value::new_ref)
-                })
-                    .ok_or(super::RuntimeErr::IndexOutOfBounds)
+                match mi {
+                    Some(i) => {
+                        let mut lst_ref = lst.try_borrow_mut()?;
+                        
+                        lst_ref[i] = nv;
+                        lst_ref.get(i).map(Value::new_ref)
+                    },
+                    None => None,
+                }.ok_or(super::RuntimeErr::IndexOutOfBounds)
             } else {
                 Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
             },
@@ -312,8 +318,8 @@ impl Value {
                         Ok(Value::Str(buf))
                     },
                     (Value::List(a), Value::List(b)) => {
-                        let mut buf = a.borrow().clone();
-                        buf.extend(b.borrow().iter().map(Value::new_ref));
+                        let mut buf = a.try_borrow()?.clone();
+                        buf.extend(b.try_borrow()?.iter().map(Value::new_ref));
 
                         Ok(Value::new_list(buf))
                     }
@@ -371,7 +377,7 @@ impl Value {
     /// Note that `.clone` is a full copy-by-value.
     pub fn new_ref(&self) -> Value {
         match self {
-            Value::List(l) => Value::List(Rc::clone(l)),
+            Value::List(l) => Value::List(l.clone()),
             e @ (
                 | Value::Int(_) 
                 | Value::Float(_) 
@@ -385,7 +391,7 @@ impl Value {
     }
 
     pub fn new_list(l: Vec<Value>) -> Self {
-        Value::List(RefValue::wrap(l))
+        Value::List(RefValue::new(l, true))
     }
 
     pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {

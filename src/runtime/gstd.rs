@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use super::{RtResult, RuntimeErr};
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType};
@@ -29,7 +28,7 @@ fn std_print(args: Vec<Value>) -> RtResult<Value> {
 fn std_is(args: Vec<Value>) -> RtResult<Value> {
     if let [a, b] = &args[..] {
         let eval = match (a, b) {
-            (Value::List(al), Value::List(bl)) => Rc::ptr_eq(&al, &bl),
+            (Value::List(al), Value::List(bl)) => al.ref_eq(bl),
             (av, bv) => av == bv
         };
 
