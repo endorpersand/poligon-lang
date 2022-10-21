@@ -90,8 +90,7 @@ impl VarContext<'_> {
     /// Set a variable (and declare it if it does not exist)
     pub fn set(&mut self, ident: String, v: Value) -> &Value {
         let maybe_map = self.hash_maps_mut()
-            .filter(|m| m.contains_key(&ident))
-            .next();
+            .find(|m| m.contains_key(&ident));
 
         let id = ident.clone();
         if let Some(map) = maybe_map {

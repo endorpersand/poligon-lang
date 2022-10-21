@@ -182,8 +182,8 @@ impl Value {
 
     pub fn str(&self) -> String {
         match self {
-            Value::Char(c)  => format!("{}", c),
-            Value::Str(s)   => format!("{}", s),
+            Value::Char(c) => c.to_string(),
+            Value::Str(s)  => s.to_string(),
             v @ (
                 | Value::Int(_) 
                 | Value::Float(_) 
@@ -213,7 +213,8 @@ impl Value {
 
             // Convert to iter => get nth item
             e => {
-                let mut it = e.as_iterator().ok_or(super::RuntimeErr::CannotIndex(e.ty()))?;
+                let mut it = e.as_iterator()
+                    .ok_or_else(|| super::RuntimeErr::CannotIndex(e.ty()))?;
 
                 if let Value::Int(signed_idx) = idx {
                     let i = usize::try_from(signed_idx)

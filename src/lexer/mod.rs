@@ -57,13 +57,13 @@ impl GonErr for LexErr {
     fn message(&self) -> String {
         match self {
             LexErr::UnknownChar(c)      => format!("invalid character {}", wrapq(*c)),
-            LexErr::UnclosedQuote       => format!("quote was never terminated"),
+            LexErr::UnclosedQuote       => ("quote was never terminated").to_string(),
             LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
-            LexErr::EmptyChar           => format!("char literal cannot be empty"),
-            LexErr::UnknownOp(_op)      => format!("unexpected operator"),
-            LexErr::MismatchedDelimiter => format!("mismatched delimiter"),
-            LexErr::UnclosedDelimiter   => format!("delimiter was never terminated"),
-            LexErr::UnclosedComment     => format!("comment was never terminated"),
+            LexErr::EmptyChar           => ("char literal cannot be empty").to_string(),
+            LexErr::UnknownOp(_op)      => ("unexpected operator").to_string(),
+            LexErr::MismatchedDelimiter => ("mismatched delimiter").to_string(),
+            LexErr::UnclosedDelimiter   => ("delimiter was never terminated").to_string(),
+            LexErr::UnclosedComment     => ("comment was never terminated").to_string(),
         }
     }
 }
@@ -112,7 +112,6 @@ impl CharClass {
         else if c == '\''                { Some(Self::CharQuote) }
         else if c == '"'                 { Some(Self::StrQuote) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
-        // else if c == '\n'                { Some(Self::NewLine) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
     }
@@ -312,7 +311,7 @@ impl Lexer {
         }
 
         let token = Keyword::get_kw(&buf)
-            .unwrap_or_else(|| Token::Ident(buf));
+            .unwrap_or(Token::Ident(buf));
 
         self.tokens.push(token);
     }
@@ -398,7 +397,9 @@ impl Lexer {
             .chr;
 
         // Get the next character:
-        let c = self.next().ok_or(LexErr::UnclosedQuote.at(init_cursor))?.chr;
+        let c = self.next()
+            .ok_or_else(|| LexErr::UnclosedQuote.at(init_cursor))?
+            .chr;
         if c == qt {
             Err(LexErr::EmptyChar.at(self.cursor))?;
         }
@@ -428,15 +429,14 @@ impl Lexer {
             buf.push(c);
         }
 
-        while buf.len() > 0 {
+        while !buf.is_empty() {
             let left = &buf[..1];
             let right = &buf[..];
     
             // Find the largest length operator that matches the start of the operator buffer.
             let (op, token) = OPMAP.range(left..=right)
                 .rev()
-                .filter(|(&op, _)| buf.starts_with(op))
-                .next()
+                .find(|(&op, _)| buf.starts_with(op))
                 .ok_or_else(|| {
                     let (lno, icno) = self.cursor;
                     let oplen = buf.len();
@@ -589,7 +589,10 @@ impl Lexer {
         let left = if d.is_right() { d.reversed() } else { d };
         
         match self.delimiters.last() {
-            Some((_, l)) if l == &left => Ok({ self.delimiters.pop(); }),
+            Some((_, l)) if l == &left => {
+                self.delimiters.pop();
+                Ok(())
+            },
             Some((p, _)) => Err(LexErr::MismatchedDelimiter.at_points(&[*p, pos])),
             None => Err(LexErr::MismatchedDelimiter.at(pos)),
         }

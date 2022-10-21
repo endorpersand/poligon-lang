@@ -24,7 +24,7 @@ pub struct Decl {
     pub ty: Option<Type>,
     pub val: Expr
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Param {
     pub rt: ReasgType,
     pub mt: MutType,
@@ -37,7 +37,7 @@ pub enum ReasgType { Let, Const }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MutType { Mut, Immut }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type(pub String, pub Vec<Type>);
 
 #[derive(Debug, PartialEq)]
@@ -154,7 +154,7 @@ pub enum AsgPat {
     List(Vec<AsgPat>)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AsgPatErr {
     InvalidAssignTarget
 }

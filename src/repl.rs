@@ -74,7 +74,7 @@ impl Repl<'_> {
         consume_err! { lx.partial_lex() };
 
         // We can't finish lexing, implying there's an open delimiter:
-        if let Err(_) = lx.try_close() {
+        if lx.try_close().is_err() {
             self.lexer = Some(lx);
             return;
         }

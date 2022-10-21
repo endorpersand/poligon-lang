@@ -22,7 +22,7 @@ pub struct Parser {
     tokens: VecDeque<Token>
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseErr {
     ExpectedTokens(Vec<Token>),
     ExpectedIdent,
@@ -199,8 +199,8 @@ impl Parser {
                 }
 
                 stmts.push(st);
-            } else {
-                if !self.match1(token![;]) { break; }
+            } else if !self.match1(token![;]) {
+                break; 
             }
         }
 

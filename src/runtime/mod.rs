@@ -460,7 +460,7 @@ impl TraverseRt for tree::FunDecl {
             .map(|p| &p.ty)
             .map(|mt| mt.as_ref().map_or(
                 VArbType::Unk, 
-                |t| VArbType::lookup(t))
+                VArbType::lookup)
             )
             .collect();
         let p = FunParamType::Positional(resolved_params);
@@ -471,13 +471,13 @@ impl TraverseRt for tree::FunDecl {
         let r = ret.as_ref()
             .map_or(
                 VArbType::Value(ValueType::Unit), 
-                |t| VArbType::lookup(t)
+                VArbType::lookup
             );
 
         let ty = FunType::new(p, r);
 
         let val = Value::new_gon_fn(
-            Some(&ident),
+            Some(ident),
             ty,
             param_names,
             Rc::clone(block)

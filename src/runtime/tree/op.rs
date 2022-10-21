@@ -1,6 +1,6 @@
 use crate::lexer::token::{Token, token};
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Unary {
     Plus,
     Minus,
@@ -9,7 +9,7 @@ pub enum Unary {
     Spread
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Binary {
     Add,
     Sub,
@@ -23,7 +23,7 @@ pub enum Binary {
     LogOr
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Cmp {
     Lt, Gt, Le, Ge, Eq, Ne
 }

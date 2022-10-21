@@ -104,7 +104,7 @@ fn ptr_point(orig_txt: &str, (lno, cno): Point) -> [String; 2] {
     let code = get_line(orig_txt, lno);
     let ptr = " ".repeat(cno) + "^";
 
-    return [code, ptr];
+    [code, ptr]
 }
 fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
     let (start_lno, start_cno) = match r.start_bound() {
