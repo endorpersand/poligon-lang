@@ -298,36 +298,39 @@ impl Value {
                 |a, b| Ok(Value::Float(a % b)), 
                 |a, b| a.checked_rem(b).map(Value::Int).ok_or(super::RuntimeErr::DivisionByZero)),
         
-                op::Binary::BitOr  => match (self, right) {
-                    (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a | b)),
-                    (Value::Str(a), Value::Str(b)) => {
-                        let mut buf = a.clone();
-                        buf.push_str(b);
+            op::Binary::Shl => int_only_op!(o => self << right),
+            op::Binary::Shr => int_only_op!(o => self >> right),
+            
+            op::Binary::BitOr  => match (self, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a | b)),
+                (Value::Str(a), Value::Str(b)) => {
+                    let mut buf = a.clone();
+                    buf.push_str(b);
 
-                        Ok(Value::Str(buf))
-                    },
-                    (Value::Char(a), Value::Str(b)) => {
-                        let mut buf = a.to_string();
-                        buf.push_str(b);
-
-                        Ok(Value::Str(buf))
-                    },
-                    (Value::Str(a), Value::Char(b)) => {
-                        let mut buf = a.clone();
-                        buf.push(*b);
-
-                        Ok(Value::Str(buf))
-                    },
-                    (Value::List(a), Value::List(b)) => {
-                        let mut buf = a.borrow().clone();
-                        buf.extend(b.borrow().iter().map(Value::new_ref));
-
-                        Ok(Value::new_list(buf))
-                    }
-                    _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
+                    Ok(Value::Str(buf))
                 },
-                op::Binary::BitAnd => int_only_op!(o => self & right),
-                op::Binary::BitXor => int_only_op!(o => self ^ right),
+                (Value::Char(a), Value::Str(b)) => {
+                    let mut buf = a.to_string();
+                    buf.push_str(b);
+
+                    Ok(Value::Str(buf))
+                },
+                (Value::Str(a), Value::Char(b)) => {
+                    let mut buf = a.clone();
+                    buf.push(*b);
+
+                    Ok(Value::Str(buf))
+                },
+                (Value::List(a), Value::List(b)) => {
+                    let mut buf = a.borrow().clone();
+                    buf.extend(b.borrow().iter().map(Value::new_ref));
+
+                    Ok(Value::new_list(buf))
+                }
+                _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
+            },
+            op::Binary::BitAnd => int_only_op!(o => self & right),
+            op::Binary::BitXor => int_only_op!(o => self ^ right),
             
             op::Binary::LogAnd => Ok(if self.truth() { right.new_ref() } else { self.new_ref() }),
             op::Binary::LogOr  => Ok(if self.truth() { self.new_ref() } else { right.new_ref() }),

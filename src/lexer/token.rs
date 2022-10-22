@@ -164,8 +164,8 @@ define_operators_and_delimiters! {
         DEqual: "==",
         Ne:     "!=",
     
-        Shl: "todo", //"<<",
-        Shr: "todo", //">>",
+        Shl: "<<",
+        Shr: ">>",
     
         Comma:  ",",
         Comment: "//",

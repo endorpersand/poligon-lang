@@ -144,6 +144,34 @@ impl Parser {
         }.is_some()
     }
 
+    fn match_langle(&mut self) -> bool {
+        // if the next token matches <, then done
+        // also have to check for <<
+        self.match1(token![<]) || {
+            let is_match = matches!(self.tokens.get(0), Some(token![<<]));
+            
+            if is_match {
+                self.tokens[0] = token![<];
+            }
+
+            is_match
+        }
+    }
+
+    fn match_rangle(&mut self) -> bool {
+        // if they match >, then done
+        // also have to check for >>
+        self.match1(token![>]) || {
+            let is_match = matches!(self.tokens.get(0), Some(token![>>]));
+            
+            if is_match {
+                self.tokens[0] = token![>];
+            }
+
+            is_match
+        }
+    }
+
     /// The parsing function.
     /// Takes a list of tokens and converts it into a parse tree.
     fn parse(mut self) -> ParseResult<tree::Program> {
@@ -386,9 +414,10 @@ impl Parser {
         if matches!(self.tokens.get(0), Some(Token::Ident(_))) {
             let ident = self.expect_ident()?;
 
-            let params = if self.match1(token![<]) {
+            let params = if self.match_langle() {
                 let tpl = self.expect_tuple_of(Parser::match_type)?;
-                self.expect1(token![>])?;
+                
+                if !self.match_rangle() { Err(ParseErr::ExpectedTokens(vec![token![>]]))? }
 
                 if !tpl.is_empty() {
                     tpl
