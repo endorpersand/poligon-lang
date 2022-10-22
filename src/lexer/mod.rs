@@ -77,15 +77,6 @@ fn wrapq(c: char) -> String {
     if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
 }
 
-pub struct Lexer {
-    tokens: Vec<Token>,
-    delimiters: Vec<(Cursor, Delimiter)>,
-    
-    cursor: Cursor,
-    _current: Option<char>,
-    remaining: VecDeque<CharData>,
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum CharClass {
     Alpha,
@@ -94,35 +85,19 @@ enum CharClass {
     CharQuote,
     StrQuote,
     Punct,
-    // NewLine,
     Whitespace
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-struct CharData {
-    chr: char,
-    cls: CharClass
-}
-
 impl CharClass {
-    fn of(c: char) -> Option<Self> {
+    fn of(c: &char) -> Option<Self> {
         if c.is_alphabetic()             { Some(Self::Alpha) }
         else if c.is_numeric()           { Some(Self::Numeric) }
-        else if c == '_'                 { Some(Self::Underscore) }
-        else if c == '\''                { Some(Self::CharQuote) }
-        else if c == '"'                 { Some(Self::StrQuote) }
+        else if c == &'_'                { Some(Self::Underscore) }
+        else if c == &'\''               { Some(Self::CharQuote) }
+        else if c == &'"'                { Some(Self::StrQuote) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
-    }
-}
-
-impl CharData {
-    fn new(c: char) -> Result<Self, char> {
-        match CharClass::of(c) {
-            Some(cls) => Ok(Self { chr: c, cls }),
-            None => Err(c),
-        }
     }
 }
 
@@ -142,21 +117,6 @@ impl CursorTicker {
         } else {
             (ilno, icno + dcno)
         }
-    }
-
-    fn fwd_cd(&mut self, cds: &[CharData]) {
-        // lines from bottom to top
-        let mut chiter = cds.rsplit(|cd| cd.chr == '\n');
-
-        let (dlno, dcno) = match chiter.next() {
-            // non-empty:
-            // count how many lines we've traversed, and the length of the last line
-            Some(line) => (chiter.count(), line.len()),
-            // empty:
-            None => (0, 0),
-        };
-
-        self.increment_by(dlno, dcno);
     }
 
     fn fwd_str(&mut self, s: &str) {
@@ -184,19 +144,31 @@ impl CursorTicker {
     }
 }
 
+macro_rules! char_class_or_err {
+    ($c:expr, $e:expr) => {
+        CharClass::of($c).ok_or_else(|| LexErr::UnknownChar(*$c).at($e))
+    }
+}
+
+pub struct Lexer {
+    tokens: Vec<Token>,
+    delimiters: Vec<(Cursor, Delimiter)>,
+    
+    cursor: Cursor,
+    _current: Option<char>,
+    remaining: VecDeque<char>,
+}
+
 impl Lexer {
     pub fn new(input: &str) -> LexResult<Self> {
-        let mut lexer = Self {
+        Ok(Self {
             tokens: vec![],
             delimiters: vec![],
 
             cursor: (0, 0),
             _current: None,
-            remaining: VecDeque::new(), 
-        };
-        lexer.append_input(input)?;
-
-        Ok(lexer)
+            remaining: input.chars().collect(), 
+        })
     }
 
     /// Perform the actual lexing. 
@@ -209,9 +181,11 @@ impl Lexer {
 
     /// Lex whatever is currently in the input, but do not consume the lexer.
     pub fn partial_lex(&mut self) -> LexResult<()> {
-        while let Some(CharData { cls, .. }) = self.peek() {
+        while let Some(chr) = self.peek() {
+            let cls = char_class_or_err!(chr, self.peek_cursor())?;
+            
             match cls {
-                CharClass::Alpha | CharClass::Underscore => self.push_ident(),
+                CharClass::Alpha | CharClass::Underscore => self.push_ident()?,
                 CharClass::Numeric    => self.push_numeric(),
                 CharClass::CharQuote  => self.push_char()?,
                 CharClass::StrQuote   => self.push_str()?,
@@ -223,23 +197,9 @@ impl Lexer {
         Ok(())
     }
 
-    /// Add characters to the back of the input.
-    /// This will output a lex error if a character is not recognized.
-    pub fn append_input(&mut self, input: &str) -> LexResult<()> {
-        let mut ticker = CursorTicker { cursor: self.peek_cursor() };
-        ticker.fwd_cd(self.remaining.make_contiguous());
-
-        for mcd in input.chars().map(CharData::new) {
-            match mcd {
-                Ok(cd) => {
-                    ticker.fwd_chr(cd.chr);
-                    self.remaining.push_back(cd);
-                },
-                Err(c) => return Err(LexErr::UnknownChar(c).at(ticker.cursor)),
-            }
-        }
-
-        Ok(())
+    /// Add characters to the end of the input.
+    pub fn append_input(&mut self, input: &str) {
+        self.remaining.extend(input.chars());
     }
 
     pub fn try_close(&self) -> LexResult<()> {
@@ -268,16 +228,16 @@ impl Lexer {
     /// Look at the next character in the input.
     /// 
     /// If there are no more characters in the input, return None.
-    fn peek(&self) -> Option<&CharData> {
+    fn peek(&self) -> Option<&char> {
         self.remaining.get(0)
     }
 
     /// Consume the next character in the input and return it.
-    fn next(&mut self) -> Option<CharData> {
+    fn next(&mut self) -> Option<char> {
         self.cursor = self.peek_cursor();
         
         let mcd = self.remaining.pop_front();
-        self._current = mcd.map(|cd| cd.chr);
+        self._current = mcd;
         mcd
     }
 
@@ -286,21 +246,21 @@ impl Lexer {
     /// If it does, consume it and return the character.
     /// If it does not, return None.
     fn match_cls(&mut self, match_cls: CharClass) -> Option<char> {
-        match self.peek() {
-            Some(CharData { cls, .. }) if cls == &match_cls => {
-                self.next().map(|cd| cd.chr)
-            }
-            _ => None
+        if self.peek().and_then(CharClass::of) == Some(match_cls) {
+            self.next()
+        } else {
+            None
         }
     }
 
     /// Analyzes the next characters in the input as an identifier (e.g. abc, ade, aVariable, a123, a_).
     /// 
     /// This function consumes characters from the input and adds an identifier token in the output.
-    fn push_ident(&mut self) {
+    fn push_ident(&mut self) -> LexResult<()> {
         let mut buf = String::new();
 
-        while let Some(CharData { chr, cls }) = self.peek() {
+        while let Some(chr) = self.peek() {
+            let cls = char_class_or_err!(chr, self.peek_cursor())?;
             match cls {
                 CharClass::Alpha | CharClass::Underscore | CharClass::Numeric => {
                     buf.push(*chr);
@@ -314,6 +274,7 @@ impl Lexer {
             .unwrap_or(Token::Ident(buf));
 
         self.tokens.push(token);
+        Ok(())
     }
 
     /// Analyzes the next characters in the input as a numeric value (e.g. 123, 123., 123.4).
@@ -332,7 +293,7 @@ impl Lexer {
         // 123. + 444 => [123.] [+] [444]
         
         // peek next character. check if it's .
-        if matches!(self.peek(), Some(CharData { chr: '.', .. })) {
+        if self.peek() == Some(&'.') {
             // whether the "." is part of the numeric or if it's a part of a spread/call operator
             // depends on the character after the "."
             
@@ -341,19 +302,21 @@ impl Lexer {
             // - the next character is alpha/underscore
 
             // then scan for any further numerics after that "."
-            match self.remaining.get(1) {
-                Some(CharData { chr: '.', ..}) => {},
-                Some(CharData { cls: CharClass::Alpha | CharClass::Underscore, .. }) => {}
+            let dot_isnt_numeric = match self.remaining.get(1) {
+                Some('.') => true,
+                Some(chr) => matches!(CharClass::of(chr), Some(CharClass::Alpha | CharClass::Underscore)),
+                None => false,
+            };
 
-                _ => {
-                    buf.push(self.next().unwrap().chr); // "."
+            if dot_isnt_numeric {
+                buf.push(self.next().unwrap()); // "."
 
-                    while let Some(c) = self.match_cls(CharClass::Numeric) {
-                        buf.push(c);
-                    }
+                while let Some(c) = self.match_cls(CharClass::Numeric) {
+                    buf.push(c);
                 }
             }
         }
+
         self.tokens.push(Token::Numeric(buf));
     }
 
@@ -364,8 +327,7 @@ impl Lexer {
         let init_cursor = self.cursor;
         
         // UNWRAP: this should only be called if there's a quote character
-        let qt = self.next().unwrap()
-            .chr;
+        let qt = self.next().unwrap();
 
         let mut buf = String::new();
         loop {
@@ -375,8 +337,7 @@ impl Lexer {
                     let mut ticker = CursorTicker { cursor: start };
                     ticker.fwd_str(&buf);
                     LexErr::UnclosedQuote.at_range(init_cursor..=(ticker.cursor))
-                })? // no more chars, hit EOF
-                .chr;
+                })?; // no more chars, hit EOF
 
             if c == qt { break; }
             buf.push(c);
@@ -393,20 +354,18 @@ impl Lexer {
         let init_cursor = self.cursor;
         
         // UNWRAP: this should only be called if there's a quote character
-        let qt = self.next().unwrap()
-            .chr;
+        let qt = self.next().unwrap();
 
         // Get the next character:
         let c = self.next()
-            .ok_or_else(|| LexErr::UnclosedQuote.at(init_cursor))?
-            .chr;
+            .ok_or_else(|| LexErr::UnclosedQuote.at(init_cursor))?;
         if c == qt {
             Err(LexErr::EmptyChar.at(self.cursor))?;
         }
 
         // Assert next char matches quote:
         match self.next() {
-            Some(CharData { chr, .. }) if chr == qt => {
+            Some(chr) if chr == qt => {
                 self.tokens.push(Token::Char(c));
                 Ok(())
             },
@@ -484,7 +443,7 @@ impl Lexer {
     /// This function consumes characters from the input and adds a line comment 
     /// (a comment that goes to the end of a line) to the output.
     fn push_line_comment(&mut self, mut buf: String) -> LexResult<()> {
-        while let Some(CharData {chr, ..}) = self.next() {
+        while let Some(chr) = self.next() {
             if chr == '\n' { break; }
             buf.push(chr);
         }
@@ -546,7 +505,7 @@ impl Lexer {
         ticker.fwd_str(&buf);
 
         'com: while let Some((_, Delimiter::LComment)) = self.delimiters.last() {
-            while let Some(CharData {chr, ..}) = self.next() {
+            while let Some(chr) = self.next() {
                 buf.push(chr);
 
                 if buf.ends_with("/*") {
@@ -571,13 +530,8 @@ impl Lexer {
 
         // reinsert any remaining characters into the input
         let len = nbuf.len();
-        let chrs = nbuf
-            .chars()
-            // EXPECT: ok b/c we should've already seen this data
-            .map(|c| CharData::new(c)
-                .expect("Invalid character was inexplicably inserted in comment"));
 
-        self.remaining.extend(chrs);
+        self.remaining.extend(nbuf.chars());
         self.remaining.rotate_left(len);
 
         Ok(())

@@ -64,7 +64,7 @@ impl Repl<'_> {
             let mut input = String::from("\n");
             input.push_str(line);
 
-            consume_err! { lx.append_input(&input) };
+            lx.append_input(&input);
             lx
         } else {
             consume_err! { Lexer::new(line) }
