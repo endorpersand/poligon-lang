@@ -8,6 +8,7 @@ use super::RtResult;
 use super::tree::{self, op};
 pub mod fun;
 pub mod ty;
+mod op_impl;
 
 pub use fun::*;
 pub use ty::*;
@@ -41,31 +42,6 @@ fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<
         Some(o.cmp(af, bf))
     } else {
         None
-    }
-}
-
-/// If a binary operator is solely numeric, this can be used to define the float & int versions of the operator.
-fn numeric_binary<FF, FI>(a: &Value, o: &op::Binary, b: &Value, ff: FF, fi: FI) -> super::RtResult<Value> 
-    where FF: FnOnce(f64, f64) -> super::RtResult<Value>,
-          FI: FnOnce(isize, isize) -> super::RtResult<Value>
-{
-    match (a, b) {
-        (Value::Float(a), Value::Float(b)) => ff(*a, *b),
-        (Value::Float(a), Value::Int(b))   => ff(*a, *b as _),
-        (Value::Int(a), Value::Float(b))   => ff(*a as _, *b),
-        (Value::Int(a), Value::Int(b))     => fi(*a, *b),
-
-        _ => Err(super::RuntimeErr::CannotApplyBinary(*o, a.ty(), b.ty()))
-    }
-}
-
-macro_rules! int_only_op {
-    ($oenum:expr => $a:ident $o:tt $b:ident) => {
-        if let (Value::Int(a), Value::Int(b)) = ($a, $b) {
-            Ok(Value::Int(a $o b))
-        } else {
-            Err(super::RuntimeErr::CannotApplyBinary(*$oenum, $a.ty(), $b.ty()))
-        }
     }
 }
 
@@ -253,9 +229,10 @@ impl Value {
     }
 
     /// Apply a unary operator to a computed value.
-    pub fn apply_unary(&self, o: &op::Unary) -> super::RtResult<Value> {
+    pub fn apply_unary(self, o: &op::Unary) -> super::RtResult<Value> {
+        let ty = self.ty();
         match o {
-            op::Unary::Plus   => if self.is_numeric() { Some(self.clone()) } else { None },
+            op::Unary::Plus   => if self.is_numeric() { Some(self) } else { None },
             op::Unary::Minus  => match self {
                 Value::Int(e)   => Some(Value::Int(-e)),
                 Value::Float(e) => Some(Value::Float(-e)),
@@ -264,77 +241,7 @@ impl Value {
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
             op::Unary::Spread => if let Value::Str(_e) = self { todo!() } else { None },
-        }.ok_or_else(|| super::RuntimeErr::CannotApplyUnary(*o, self.ty()))
-    }
-    
-    /// Apply a binary operator to two computed values.
-    pub fn apply_binary(&self, o: &op::Binary, right: &Self) -> super::RtResult<Value> {
-        match o {
-            op::Binary::Add => numeric_binary(self, o, right, 
-                |a, b| Ok(Value::Float(a + b)), 
-                |a, b| Ok(Value::Int(a + b))),
-            
-            op::Binary::Sub => numeric_binary(self, o, right, 
-                |a, b| Ok(Value::Float(a - b)), 
-                |a, b| Ok(Value::Int(a - b))),
-        
-            op::Binary::Mul => match (self, right) {
-                // numeric multiplication
-                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
-                (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a * (*b as f64))),
-                (Value::Int(a), Value::Float(b))   => Ok(Value::Float((*a as f64) * b)),
-                (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a * b)),
-        
-                // 2 * "a" == "aa"
-                (Value::Str(a), Value::Int(b)) => Ok(Value::Str(a.repeat(*b as usize))),
-                (Value::Int(a), Value::Str(b)) => Ok(Value::Str(b.repeat(*a as usize))),
-                _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
-            },
-            op::Binary::Div => numeric_binary(self, o, right, 
-                |a, b| Ok(Value::Float(a / b)), // IEEE 754
-                |a, b| Ok(Value::Float((a as f64) / (b as f64)))),
-        
-            op::Binary::Mod => numeric_binary(self, o, right, 
-                |a, b| Ok(Value::Float(a % b)), 
-                |a, b| a.checked_rem(b).map(Value::Int).ok_or(super::RuntimeErr::DivisionByZero)),
-        
-            op::Binary::Shl => int_only_op!(o => self << right),
-            op::Binary::Shr => int_only_op!(o => self >> right),
-            
-            op::Binary::BitOr  => match (self, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a | b)),
-                (Value::Str(a), Value::Str(b)) => {
-                    let mut buf = a.clone();
-                    buf.push_str(b);
-
-                    Ok(Value::Str(buf))
-                },
-                (Value::Char(a), Value::Str(b)) => {
-                    let mut buf = a.to_string();
-                    buf.push_str(b);
-
-                    Ok(Value::Str(buf))
-                },
-                (Value::Str(a), Value::Char(b)) => {
-                    let mut buf = a.clone();
-                    buf.push(*b);
-
-                    Ok(Value::Str(buf))
-                },
-                (Value::List(a), Value::List(b)) => {
-                    let mut buf = a.borrow().clone();
-                    buf.extend(b.borrow().iter().map(Value::clone));
-
-                    Ok(Value::new_list(buf))
-                }
-                _ => Err(super::RuntimeErr::CannotApplyBinary(*o, self.ty(), right.ty()))
-            },
-            op::Binary::BitAnd => int_only_op!(o => self & right),
-            op::Binary::BitXor => int_only_op!(o => self ^ right),
-            
-            op::Binary::LogAnd => Ok(if self.truth() { right.clone() } else { self.clone() }),
-            op::Binary::LogOr  => Ok(if self.truth() { self.clone() } else { right.clone() }),
-        }
+        }.ok_or(super::RuntimeErr::CannotApplyUnary(*o, ty))
     }
     
     /// Apply a comparison operator between two computed values.

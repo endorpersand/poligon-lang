@@ -60,4 +60,10 @@ impl<T> RefValue<T> {
     pub fn mutable(&self) -> bool {
         self.mutable
     }
+
+    pub fn clone_inner(&self) -> T
+        where T: Clone
+    {
+        self.rc.borrow().clone()
+    }
 }

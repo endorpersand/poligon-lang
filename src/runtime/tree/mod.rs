@@ -207,7 +207,7 @@ impl Expr {
     
             // fallback to eager value binary
             _ => self.traverse_rt(ctx)
-                .and_then(|v| cast! { v.apply_binary(o, &right.traverse_rt(ctx)?) } )
+                .and_then(|v| cast! { v.apply_binary(o, right.traverse_rt(ctx)?) } )
         }
     }
 }
