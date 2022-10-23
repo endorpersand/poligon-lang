@@ -40,6 +40,12 @@ impl BlockContext<'_> {
     }
 }
 
+impl Default for BlockContext<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub enum RuntimeErr {
     CannotCompare(op::Cmp, ValueType, ValueType),
@@ -104,7 +110,7 @@ impl TraverseRt for tree::Expr {
         match self {
             tree::Expr::Ident(ident) => {
                 ctx.vars.get(ident)
-                    .ok_or(RuntimeErr::UndefinedVar(ident.clone()))
+                    .ok_or_else(|| RuntimeErr::UndefinedVar(String::from(ident)))
                     .map(Value::clone)
                     .map_err(TermOp::Err)
             },
@@ -179,7 +185,7 @@ impl TraverseRt for tree::Expr {
                             .into_iter()
                             .map(|i| {
                                 char::from_u32(i)
-                                    .expect(&format!("u32 '{:x}' could not be parsed as char", i))
+                                    .unwrap_or_else(|| panic!("u32 '{:x}' could not be parsed as char", i))
                             })
                             .map(Value::Char)
                             .collect();
@@ -208,7 +214,7 @@ impl TraverseRt for tree::Expr {
             tree::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
                 let it = it_val.as_iterator()
-                    .ok_or(RuntimeErr::CannotIterateOver(it_val.ty()))?;
+                    .ok_or_else(|| RuntimeErr::CannotIterateOver(it_val.ty()))?;
 
                 let mut result = vec![];
                 for val in it {
@@ -339,7 +345,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
         tree::AsgPat::List(pats) => {
             let pat_len = pats.len();
             let mut it = rhs.as_iterator()
-                .ok_or(RuntimeErr::NotIterable(rhs.ty()))?;
+                .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
             
             let values: Vec<_> = it.by_ref().take(pat_len).collect();
             let values_len = values.len();
@@ -466,18 +472,20 @@ impl TraverseRt for tree::FunDecl {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let tree::FunDecl { ident, params, ret, block } = self;
         
-        let resolved_params: Vec<_> = params.iter()
-            .map(|p| &p.ty)
-            .map(|mt| mt.as_ref().map_or(
-                VArbType::Unk, 
-                VArbType::lookup)
-            )
-            .collect();
-        let p = FunParamType::Positional(resolved_params);
-        let param_names: Vec<_> = params.iter()
-            .map(|p| p.ident.clone())
-            .collect();
+        let mut param_types = vec![];
+        let mut param_names = vec![];
 
+        for p in params {
+            let tree::Param { ident, ty, .. } = p;
+
+            param_types.push(
+                ty.as_ref()
+                    .map_or(VArbType::Unk, VArbType::lookup)
+            );
+            param_names.push(ident.clone());
+        }
+
+        let p = FunParamType::Positional(param_types);
         let r = ret.as_ref()
             .map_or(
                 VArbType::Value(ValueType::Unit), 
@@ -494,6 +502,6 @@ impl TraverseRt for tree::FunDecl {
         );
         
         let rf = ctx.vars.declare(ident.clone(), val)?;
-        Ok(rf.clone())
+        Ok(rf)
     }
 }

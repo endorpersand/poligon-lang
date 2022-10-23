@@ -96,7 +96,7 @@ enum ErrPos {
 /// Panics if line number is not in the string.
 fn get_line(orig_txt: &str, lno: usize) -> String {
     orig_txt.lines().nth(lno)
-        .expect(&format!("Expected line {} to exist", lno))
+        .unwrap_or_else(|| panic!("Expected line {} to exist", lno))
         .into()
 }
 

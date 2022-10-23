@@ -35,7 +35,7 @@ impl GonFun {
         }
     }
 
-    pub fn call(&self, params: &Vec<tree::Expr>, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn call(&self, params: &[tree::Expr], ctx: &mut BlockContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {
@@ -44,9 +44,9 @@ impl GonFun {
         }
         
         // TODO, make lazy
-        let pvals = params.iter()
+        let pvals: Vec<_> = params.iter()
             .map(|e| e.traverse_rt(ctx))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
 
         match &self.fun {
             GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
@@ -78,3 +78,13 @@ impl FunType {
         )
     }
 }
+
+macro_rules! fun_type {
+    (($($e:expr),*) -> $r:expr) => {
+        FunType::new(FunParamType::Positional(vec![$($e),*]), $r)
+    };
+    (($($($e:expr),+,)? ~$f:expr) -> $r:expr) => {
+        FunType::new(FunParamType::PosSpread(vec![$($($e),+)?], $f), $r)
+    };
+}
+pub(crate) use fun_type;

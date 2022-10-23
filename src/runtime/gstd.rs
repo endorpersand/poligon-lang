@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::{RtResult, RuntimeErr};
-use super::value::{Value, FunParamType, VArbType, ValueType, FunType};
+use super::value::{Value, FunParamType, VArbType, ValueType, FunType, fun_type};
 
 macro_rules! str_map {
     ($($k:literal: $v:expr),*) => {
@@ -50,17 +50,17 @@ pub(super) fn std_map() -> HashMap<String, Value> {
     str_map! {
         "print": Value::new_rust_fn(
             Some("print"), 
-            FunType::new(FunParamType::PosSpread(vec![], VArbType::Unk), VArbType::Value(ValueType::Unit)),
+            fun_type! { (~VArbType::Unk) -> VArbType::Value(ValueType::Unit) },
             std_print
         ),
         "is": Value::new_rust_fn(
             Some("is"),
-            FunType::new(FunParamType::Positional(vec![VArbType::Unk, VArbType::Unk]), VArbType::Value(ValueType::Bool)),
+            fun_type! { (VArbType::Unk, VArbType::Unk) -> VArbType::Value(ValueType::Bool) },
             std_is
         ),
         "type": Value::new_rust_fn(
             Some("type"),
-            FunType::new(FunParamType::Positional(vec![VArbType::Unk]), VArbType::Value(ValueType::Str)),
+            fun_type! { (VArbType::Unk) -> VArbType::Value(ValueType::Str) },
             std_type
         )
     }

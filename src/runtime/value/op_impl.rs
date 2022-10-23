@@ -81,6 +81,14 @@ macro_rules! cannot_binary {
 
 impl Value {
     pub fn apply_binary(self, o: &op::Binary, rhs: Self) -> super::RtResult<Value> {
+        macro_rules! int_only_op {
+            ($l:ident $t:tt $r:ident) => {
+                match as_int_pairs($l, $r) {
+                    Ok((a, b)) => Ok(Value::Int(a $t b)),
+                    Err((a, b)) => Err(cannot_binary!(*o, a, b)),
+                }
+            }
+        }
         match o {
             op::Binary::Add => match NumOperands::new(self, rhs) {
                 NumOperands::Float(a, b) => Ok(Value::Float(a + b)),
@@ -123,23 +131,15 @@ impl Value {
             },
 
             // <<, >>
-            op::Binary::Shl => match as_int_pairs(self, rhs) {
-                Ok((a, b)) => Ok(Value::Int(a << b)),
-                Err((a, b)) => Err(cannot_binary!(*o, a, b)),
-            },
-            op::Binary::Shr => match as_int_pairs(self, rhs) {
-                Ok((a, b)) => Ok(Value::Int(a >> b)),
-                Err((a, b)) => Err(cannot_binary!(*o, a, b)),
-            },
+            op::Binary::Shl => int_only_op!(self << rhs),
+            op::Binary::Shr => int_only_op!(self >> rhs),
 
             op::Binary::BitOr => match as_int_pairs(self, rhs) {
                 Ok((a, b)) => Ok(Value::Int(a | b)),
                 Err((a, b)) => match (CollValue::new(a), CollValue::new(b)) {
-                    (CollValue::Str(s1), CollValue::Str(s2)) => {
-                        let mut st = s1.clone();
-                        st.push_str(&s2);
-    
-                        Ok(Value::Str(st))
+                    (CollValue::Str(mut s1), CollValue::Str(s2)) => {
+                        s1.push_str(&s2);
+                        Ok(Value::Str(s1))
                     },
                     (CollValue::List(l1), CollValue::List(l2)) => {
                         let lst = l1.clone_inner()
@@ -152,16 +152,10 @@ impl Value {
                     (a, b) => Err(cannot_binary!(*o, a.revert(), b.revert())),
                 },
             },
-            op::Binary::BitAnd => match as_int_pairs(self, rhs) {
-                Ok((a, b)) => Ok(Value::Int(a & b)),
-                Err((a, b)) => Err(cannot_binary!(*o, a, b)),
-            },
-            op::Binary::BitXor => match as_int_pairs(self, rhs) {
-                Ok((a, b)) => Ok(Value::Int(a ^ b)),
-                Err((a, b)) => Err(cannot_binary!(*o, a, b)),
-            },
-            op::Binary::LogAnd => Ok(if self.truth() { rhs.clone() } else { self.clone() }),
-            op::Binary::LogOr  => Ok(if self.truth() { self.clone() } else { rhs.clone() }),
+            op::Binary::BitAnd => int_only_op!(self & rhs),
+            op::Binary::BitXor => int_only_op!(self ^ rhs),
+            op::Binary::LogAnd => Ok(if self.truth() { rhs } else { self }),
+            op::Binary::LogOr  => Ok(if self.truth() { self } else { rhs }),
         }
     }
 }

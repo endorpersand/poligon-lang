@@ -90,3 +90,9 @@ impl Repl<'_> {
 
     }
 }
+
+impl Default for Repl<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

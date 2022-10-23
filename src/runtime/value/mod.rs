@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use crate::util::RefValue;
 
-use super::RtResult;
+use super::{RtResult, RuntimeErr};
 use super::tree::{self, op};
 pub mod fun;
 pub mod ty;
@@ -45,18 +45,18 @@ fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<
     }
 }
 
-struct ValRefIter<'a> {
+struct ListValueIter<'a> {
     r: Option<Ref<'a, [Value]>>,
 }
 
-impl ValRefIter<'_> {
-    fn new(r: Ref<impl Deref<Target=[Value]>>) -> ValRefIter<'_> {
-        ValRefIter { r: Some(Ref::map(r, Deref::deref)) }
+impl ListValueIter<'_> {
+    fn new(r: Ref<impl Deref<Target=[Value]>>) -> ListValueIter<'_> {
+        ListValueIter { r: Some(Ref::map(r, Deref::deref)) }
     }
 }
 
-impl<'a> Iterator for ValRefIter<'a> {
-    type Item = Ref<'a, Value>;
+impl<'a> Iterator for ListValueIter<'a> {
+    type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.r.take() {
@@ -67,7 +67,7 @@ impl<'a> Iterator for ValRefIter<'a> {
                         (&slice[0], &slice[1..])
                     });
                     self.r.replace(tail);
-                    Some(head)
+                    Some(head.clone())
                 }
             },
             None => None,
@@ -118,8 +118,8 @@ impl Value {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
             Value::List(l)  => {
-                let iter = ValRefIter::new(l.borrow());
-                Some(Box::new(iter.map(|r| r.clone())))
+                let iter = ListValueIter::new(l.borrow());
+                Some(Box::new(iter))
             },
             Value::Int(_)   => None,
             Value::Float(_) => None,
@@ -182,24 +182,24 @@ impl Value {
                 match mi {
                     Some(i) => lst.borrow().get(i).map(Value::clone),
                     None => None,
-                }.ok_or(super::RuntimeErr::IndexOutOfBounds)
+                }.ok_or(RuntimeErr::IndexOutOfBounds)
             } else {
-                Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
             },
 
             // Convert to iter => get nth item
             e => {
                 let mut it = e.as_iterator()
-                    .ok_or_else(|| super::RuntimeErr::CannotIndex(e.ty()))?;
+                    .ok_or_else(|| RuntimeErr::CannotIndex(e.ty()))?;
 
                 if let Value::Int(signed_idx) = idx {
                     let i = usize::try_from(signed_idx)
-                        .map_err(|_| super::RuntimeErr::IndexOutOfBounds)?;
+                        .map_err(|_| RuntimeErr::IndexOutOfBounds)?;
                     
                     it.nth(i)
-                        .ok_or(super::RuntimeErr::IndexOutOfBounds)
+                        .ok_or(RuntimeErr::IndexOutOfBounds)
                 } else {
-                    Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                    Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
                 }
             }
         }
@@ -219,12 +219,12 @@ impl Value {
                         lst_ref.get(i).map(Value::clone)
                     },
                     None => None,
-                }.ok_or(super::RuntimeErr::IndexOutOfBounds)
+                }.ok_or(RuntimeErr::IndexOutOfBounds)
             } else {
-                Err(super::RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
             },
 
-            e => Err(super::RuntimeErr::CannotSetIndex(e.ty()))
+            e => Err(RuntimeErr::CannotSetIndex(e.ty()))
         }
     }
 
@@ -241,7 +241,7 @@ impl Value {
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
             op::Unary::Spread => if let Value::Str(_e) = self { todo!() } else { None },
-        }.ok_or(super::RuntimeErr::CannotApplyUnary(*o, ty))
+        }.ok_or(RuntimeErr::CannotApplyUnary(*o, ty))
     }
     
     /// Apply a comparison operator between two computed values.
@@ -281,7 +281,7 @@ impl Value {
                     _ => None
                 }
             },
-        }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
+        }.ok_or_else(|| RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
     }
 
     /// Copies item directly. For lists, this means that this value 
