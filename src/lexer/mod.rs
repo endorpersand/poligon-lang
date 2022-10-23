@@ -302,13 +302,13 @@ impl Lexer {
             // - the next character is alpha/underscore
 
             // then scan for any further numerics after that "."
-            let dot_isnt_numeric = match self.remaining.get(1) {
-                Some('.') => true,
-                Some(chr) => matches!(CharClass::of(chr), Some(CharClass::Alpha | CharClass::Underscore)),
-                None => false,
+            let dot_is_numeric = match self.remaining.get(1) {
+                Some('.') => false,
+                Some(chr) => !matches!(CharClass::of(chr), Some(CharClass::Alpha | CharClass::Underscore)),
+                None => true,
             };
 
-            if dot_isnt_numeric {
+            if dot_is_numeric {
                 buf.push(self.next().unwrap()); // "."
 
                 while let Some(c) = self.match_cls(CharClass::Numeric) {
