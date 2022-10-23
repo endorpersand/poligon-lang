@@ -105,7 +105,7 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Ident(ident) => {
                 ctx.vars.get(ident)
                     .ok_or(RuntimeErr::UndefinedVar(ident.clone()))
-                    .map(|v| v.new_ref())
+                    .map(Value::clone)
                     .map_err(TermOp::Err)
             },
             tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
@@ -324,7 +324,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
     let val = match pat {
         tree::AsgPat::Unit(unit) => match unit {
             tree::AsgUnit::Ident(ident) => {
-                ctx.vars.set(ident, rhs)?.new_ref()
+                ctx.vars.set(ident, rhs)?.clone()
             },
             tree::AsgUnit::Path(_, _) => todo!(),
             tree::AsgUnit::Index(idx) => {
@@ -494,6 +494,6 @@ impl TraverseRt for tree::FunDecl {
         );
         
         let rf = ctx.vars.set(ident, val)?;
-        Ok(rf.new_ref())
+        Ok(rf.clone())
     }
 }

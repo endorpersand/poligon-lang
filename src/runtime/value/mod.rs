@@ -143,7 +143,7 @@ impl Value {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
             Value::List(l)  => {
                 let iter = ValRefIter::new(l.borrow());
-                Some(Box::new(iter.map(|r| r.new_ref())))
+                Some(Box::new(iter.map(|r| r.clone())))
             },
             Value::Int(_)   => None,
             Value::Float(_) => None,
@@ -204,7 +204,7 @@ impl Value {
                 let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
 
                 match mi {
-                    Some(i) => lst.borrow().get(i).map(Value::new_ref),
+                    Some(i) => lst.borrow().get(i).map(Value::clone),
                     None => None,
                 }.ok_or(super::RuntimeErr::IndexOutOfBounds)
             } else {
@@ -240,7 +240,7 @@ impl Value {
                         let mut lst_ref = lst.try_borrow_mut()?;
                         
                         lst_ref[i] = nv;
-                        lst_ref.get(i).map(Value::new_ref)
+                        lst_ref.get(i).map(Value::clone)
                     },
                     None => None,
                 }.ok_or(super::RuntimeErr::IndexOutOfBounds)
@@ -323,7 +323,7 @@ impl Value {
                 },
                 (Value::List(a), Value::List(b)) => {
                     let mut buf = a.borrow().clone();
-                    buf.extend(b.borrow().iter().map(Value::new_ref));
+                    buf.extend(b.borrow().iter().map(Value::clone));
 
                     Ok(Value::new_list(buf))
                 }
@@ -332,8 +332,8 @@ impl Value {
             op::Binary::BitAnd => int_only_op!(o => self & right),
             op::Binary::BitXor => int_only_op!(o => self ^ right),
             
-            op::Binary::LogAnd => Ok(if self.truth() { right.new_ref() } else { self.new_ref() }),
-            op::Binary::LogOr  => Ok(if self.truth() { self.new_ref() } else { right.new_ref() }),
+            op::Binary::LogAnd => Ok(if self.truth() { right.clone() } else { self.clone() }),
+            op::Binary::LogOr  => Ok(if self.truth() { self.clone() } else { right.clone() }),
         }
     }
     
@@ -377,11 +377,12 @@ impl Value {
         }.ok_or_else(|| super::RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
     }
 
-    /// Create a clone of a value (if it is copy-by-value) or create a new reference (if it copy-by-ref). 
-    /// Note that `.clone` is a full copy-by-value.
-    pub fn new_ref(&self) -> Value {
+    /// Copies item directly. For lists, this means that this value 
+    /// is equal but does not have the same identity as the previous value.
+    /// This is different from `.clone`, which preserves identity.
+    pub fn hard_clone(&self) -> Value {
         match self {
-            Value::List(l) => Value::List(l.clone()),
+            Value::List(l) => Value::new_list(l.borrow().clone()),
             e @ (
                 | Value::Int(_) 
                 | Value::Float(_) 
