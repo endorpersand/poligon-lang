@@ -493,7 +493,7 @@ impl TraverseRt for tree::FunDecl {
             Rc::clone(block)
         );
         
-        let rf = ctx.vars.set(ident, val)?;
+        let rf = ctx.vars.declare(ident.clone(), val)?;
         Ok(rf.clone())
     }
 }

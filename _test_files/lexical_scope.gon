@@ -1,11 +1,19 @@
-// with lexical scope, this should be a RT error
-fun print_x() {
-    print(x);
+let a = "global";
+
+{
+  fun showA() {
+    print(a);
+  }
+
+  showA();
+  let a = "block";
+  showA();
 }
 
-fun print_x2() {
-    x = 1;
-    print_x();
-}
+// dynamic scope:
+// global
+// block
 
-print_x2();
+// lexical scope:
+// global
+// global
