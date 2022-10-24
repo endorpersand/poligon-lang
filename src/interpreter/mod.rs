@@ -8,9 +8,9 @@ use std::fmt::Display;
 use std::{io, fs};
 use std::path::Path;
 
-use crate::FullGonErr;
+use crate::{FullGonErr, tree};
 use crate::runtime::value::Value;
-use crate::{lexer, runtime, parser};
+use crate::{lexer, parser};
 
 /// The struct that performs the full processing from string to execution.
 pub struct Interpreter {
@@ -39,7 +39,7 @@ impl Interpreter {
             .map_err(InterpretErr)
     }
 
-    pub fn parse(&self) -> InterpretResult<runtime::tree::Program> {
+    pub fn parse(&self) -> InterpretResult<tree::Program> {
         let lexed = self.lex()?;
 
         parser::parse(lexed)

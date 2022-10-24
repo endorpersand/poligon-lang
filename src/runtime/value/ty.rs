@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::runtime::tree;
+use crate::tree;
 
 use super::{FunType, FunParamType};
 

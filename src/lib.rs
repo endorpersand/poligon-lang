@@ -21,5 +21,6 @@ pub mod parser;
 pub mod runtime;
 pub mod interpreter;
 pub mod err;
+pub(crate) mod tree;
 mod repl;
 mod util;

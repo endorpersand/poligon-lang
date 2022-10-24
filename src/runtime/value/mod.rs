@@ -5,7 +5,7 @@ use std::ops::Deref;
 use crate::util::RefValue;
 
 use super::{RtResult, RuntimeErr};
-use super::tree::{self, op};
+use crate::tree::{self, op};
 pub mod fun;
 pub mod ty;
 mod op_impl;

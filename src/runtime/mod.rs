@@ -4,14 +4,13 @@
 
 use std::rc::Rc;
 
-use crate::GonErr;
+use crate::{GonErr, tree};
 use crate::util::RvErr;
 
-use self::tree::op;
+use crate::tree::op;
 use self::value::{Value, ValueType, VArbType, FunType, FunParamType};
 use self::vars::VarContext;
 
-pub(crate) mod tree;
 pub(crate) mod value;
 mod vars;
 mod gstd;
@@ -43,6 +42,54 @@ impl BlockContext<'_> {
 impl Default for BlockContext<'_> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+macro_rules! cast {
+    ($e:expr) => { Ok($e?) }
+}
+
+impl tree::Expr {
+    /// Evaluate an expression and then apply the unary operator for it.
+    pub fn apply_unary(&self, o: &op::Unary, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        self.traverse_rt(ctx)
+            .and_then(|v| cast! { v.apply_unary(o) })
+    }
+
+    /// Evaluate the two arguments to the binary operator and then apply the operator to it.
+    /// 
+    /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
+    pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        match o {
+            // &&, || have special short circuiting that needs to be dealt with
+            op::Binary::LogAnd => {
+                let left = self.traverse_rt(ctx)?;
+                if left.truth() { right.traverse_rt(ctx) } else { Ok(left) }
+            },
+            op::Binary::LogOr => {
+                let left = self.traverse_rt(ctx)?;
+                if left.truth() { Ok(left) } else { right.traverse_rt(ctx) }
+            },
+    
+            // fallback to eager value binary
+            _ => self.traverse_rt(ctx)
+                .and_then(|v| cast! { v.apply_binary(o, right.traverse_rt(ctx)?) } )
+        }
+    }
+}
+
+impl tree::Program {
+    pub fn run(self) -> RtResult<Value> {
+        self.run_with_ctx(&mut BlockContext::new())
+    }
+
+    pub fn run_with_ctx(self, ctx: &mut BlockContext) -> RtResult<Value> {
+         self.traverse_rt(ctx).map_err(|to| match to {
+            TermOp::Err(e) => e,
+            TermOp::Return(_) => RuntimeErr::CannotReturn,
+            TermOp::Break     => RuntimeErr::CannotBreak,
+            TermOp::Continue  => RuntimeErr::CannotContinue,
+        })
     }
 }
 

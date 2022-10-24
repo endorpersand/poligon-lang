@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
-use crate::{BlockContext, TraverseRt};
-use crate::runtime::{RtResult, tree, RuntimeErr, RtTraversal, TermOp};
+use crate::{BlockContext, TraverseRt, tree};
+use crate::runtime::{RtResult, RuntimeErr, RtTraversal, TermOp};
 
 use super::{VArbType, Value};
 

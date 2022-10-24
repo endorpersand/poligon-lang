@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::GonErr;
 use crate::lexer::token::{Token, token};
-use crate::runtime::tree::{self, op, AsgPatErr};
+use crate::tree::{self, op, AsgPatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
@@ -903,7 +903,7 @@ impl Parser {
 mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
-    use crate::runtime::tree::op;
+    use crate::tree::op;
 
     use super::{tree, parse, ParseErr, Parser};
 
