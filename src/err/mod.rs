@@ -77,7 +77,7 @@ impl<E: GonErr> From<E> for FullGonErr<E> {
 /// This struct is used by the Poligon interpreter to format and print interpreter errors.
 #[derive(PartialEq, Eq, Debug)]
 pub struct FullGonErr<E: GonErr> {
-    err: E,
+    pub(crate) err: E,
     position: ErrPos
 }
 

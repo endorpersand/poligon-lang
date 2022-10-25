@@ -732,6 +732,18 @@ mod tests {
         }
     }
 
+    macro_rules! assert_lex_fail_basic {
+        ($e1:literal => $e2:expr) => {
+            if let Err(e) = tokenize($e1) {
+                assert_eq!(&e.err, &$e2)
+            } else {
+                assert!(false, "Lexing did not result in error.");
+            }
+
+
+        }
+    }
+
     #[test]
     fn basic_lex() {
         assert_lex!("123 + abc * def" => vec![
@@ -854,5 +866,25 @@ mod tests {
         assert_lex!("'a'" => vec![Token::Char('a')]);
         assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 1)));
+    }
+
+    #[test]
+    fn escape_char_lex() {
+        // basic escape tests
+        assert_lex!("'\\''" => vec![Token::Char('\'')]); // '\''
+        assert_lex!("'\\n'" => vec![Token::Char('\n')]); // '\n'
+        assert_lex_fail_basic!("'\\n" => LexErr::UnclosedQuote); // '\n
+        assert_lex_fail_basic!("'\\e'" => LexErr::InvalidEscape('e')); // '\e'
+        
+        // \x test
+        assert_lex!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
+        assert_lex_fail_basic!("'\\x'" => LexErr::InvalidX);   // '\x'
+        assert_lex_fail_basic!("'\\x0'" => LexErr::InvalidX);  // '\x0'
+        assert_lex_fail_basic!("'\\xqq'" => LexErr::InvalidX); // '\xqq'
+
+        assert_lex!("'\\u{0}'" => vec![Token::Char('\0')]); // '\u{0}'
+        assert_lex!("'\\u{1f97a}'" => vec![Token::Char('\u{1f97a}')]); // '\u{1f97a}'
+        assert_lex_fail_basic!("'\\u{21f97a}'" => LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
+        assert_lex_fail_basic!("'\\u{0000000}'" => LexErr::InvalidU); // '\u{0000000}'
     }
 }
