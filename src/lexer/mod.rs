@@ -281,6 +281,10 @@ impl<'lx> LiteralCharReader<'lx> {
         
         reader.next()?.ok_or(LCError::InvalidChar('\n' as u32))
     }
+
+    fn cursor(&self) -> Cursor {
+        self.lexer.cursor
+    }
 }
 
 macro_rules! char_class_or_err {
@@ -464,26 +468,38 @@ impl Lexer {
     /// This function consumes characters from the input and adds a str literal token in the output.
     fn push_str(&mut self) -> LexResult<()> {
         let init_cursor = self.cursor;
-        
+
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
-
+        
         let mut buf = String::new();
-        loop {
-            let c = self.next()
-                .ok_or_else(|| {
-                    let start = init_cursor;
-                    let mut ticker = CursorTicker { cursor: start };
-                    ticker.fwd_str(&buf);
-                    LexErr::UnclosedQuote.at_range(init_cursor..=(ticker.cursor))
-                })?; // no more chars, hit EOF
+        let mut reader = LiteralCharReader::new(self, qt);
 
-            if c == qt { break; }
-            buf.push(c);
+        loop {
+            let chr_cursor = CursorTicker::add(reader.cursor(), 1);
+            match reader.next() {
+                Ok(c) => buf.extend(c),
+                Err(e) => Err(match e {
+                    LCError::HitTerminal => break,
+                    LCError::HitEOF => {
+                        LexErr::UnclosedQuote.at_range(init_cursor..=reader.cursor())
+                    },
+                    LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(chr_cursor..reader.cursor()),
+                    LCError::InvalidX         => LexErr::InvalidX.at_range(chr_cursor..reader.cursor()),
+                    LCError::InvalidU         => LexErr::InvalidU.at_range(chr_cursor..reader.cursor()),
+                    LCError::InvalidChar(c)   => LexErr::InvalidChar(c).at_range(chr_cursor..reader.cursor()),
+                })?,
+            }
         }
         
-        self.tokens.push(Token::Str(buf));
-        Ok(())
+        // Assert next char matches quote:
+        match self.next() {
+            Some(chr) if chr == qt => {
+                self.tokens.push(Token::Str(buf));
+                Ok(())
+            },
+            _ => Err(LexErr::UnclosedQuote.at(init_cursor))
+        }
     }
 
     /// Analyzes the next characters in the input as a char (e.g. 'h').
@@ -508,6 +524,7 @@ impl Lexer {
                 LCError::InvalidChar(v)   => LexErr::InvalidChar(v).at_range(init_cursor_p1..self.cursor),
             }),
         }?;
+
         // Assert next char matches quote:
         match self.next() {
             Some(chr) if chr == qt => {
