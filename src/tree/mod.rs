@@ -63,8 +63,7 @@ pub enum Expr {
     BinaryOp(BinaryOp),
     Comparison {
         left: Box<Expr>,
-        right: (op::Cmp, Box<Expr>),
-        extra: Vec<(op::Cmp, Box<Expr>)>
+        rights: Vec<(op::Cmp, Expr)>
     },
     Range {
         left: Box<Expr>,

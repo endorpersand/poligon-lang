@@ -542,25 +542,21 @@ impl Parser {
                 token![<=], token![>=], 
                 token![==], token![!=]
             ];
+
             // check if there's a comparison here
-            if let Some(t) = self.match_n(&cmp_ops) {
+            let mut rights = vec![];
+            while let Some(t) = self.match_n(&cmp_ops) {
+                let op = t.try_into().unwrap();
                 let rexpr = self.match_spread()?
                     .ok_or(ParseErr::ExpectedExpr)?;
-                let right = (t.try_into().unwrap(), Box::new(rexpr));
-
                 
-                // check for any other comparisons:
-                // e.g. 2 < 3 < 4 < 5 < 6 < 7 < 8
-                let mut extra = vec![];
-                while let Some(t) = self.match_n(&cmp_ops) {
-                    let e = self.match_spread()?.ok_or(ParseErr::ExpectedExpr)?;
-                    extra.push((t.try_into().unwrap(), Box::new(e)))
-                }
+                rights.push((op, rexpr));
 
+            }
+            if !rights.is_empty() {
                 e = tree::Expr::Comparison { 
                     left: Box::new(e), 
-                    right, 
-                    extra 
+                    rights 
                 }
             }
 

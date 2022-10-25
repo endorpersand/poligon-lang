@@ -182,15 +182,12 @@ impl TraverseRt for tree::Expr {
             tree::Expr::StaticAttr(_) => todo!(),
             tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
             tree::Expr::BinaryOp(o) => o.traverse_rt(ctx),
-            tree::Expr::Comparison { left, right, extra } => {
-                let mut cmps = vec![right];
-                cmps.extend(extra);
-
+            tree::Expr::Comparison { left, rights } => {
                 let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
                 // break it up into a < b && b < c && c < d && d < e
                 // do each comparison. if any ever returns false, short circuit and return
-                for (cmp, rexpr) in cmps {
+                for (cmp, rexpr) in rights {
                     let rval = rexpr.traverse_rt(ctx)?;
 
                     if lval.apply_cmp(cmp, &rval)? {
