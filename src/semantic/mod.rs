@@ -163,7 +163,7 @@ impl TraverseResolve for tree::Expr {
 
                 map.open_scope();
                 map.declare(ident);
-                block.traverse_rs(map);
+                block.0.traverse_rs(map);
                 map.close_scope();
             },
             tree::Expr::Call { funct, params } => {

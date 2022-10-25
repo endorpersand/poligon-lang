@@ -1,23 +1,12 @@
-// Classless syntax example
-
 fun fib(n: int) -> list<int> {
     let a = 0;
     let b = 1;
 
-    let entries = while n > 0 {
-        n -= 1;
+    while n > 0 {
+        n = n - 1; // with asg ops: make into n -= 1
 
-        /*
-            perhaps, in allowing pattern matching, we should allow:
-            (a, b) = (b, a + b);
-            b
-        */
-
-        let c = a + b;
-        a = b;
-        b = c;
-
-        c;
+        [a, b] = [b, a + b];
+        b;
     };
 }
 
