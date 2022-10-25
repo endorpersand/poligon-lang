@@ -243,7 +243,7 @@ mod test {
     use by_address::ByAddress;
 
     use crate::semantic::ResolveState;
-    use crate::tree::*;
+    use crate::{tree::*, Interpreter};
 
     use super::TraverseResolve;
 
@@ -328,5 +328,29 @@ mod test {
         };
 
         assert_eq!(&state.steps, &steps);
+    }
+
+    #[test]
+    fn lex_scope_closure() {
+        let program = Interpreter::from_string("
+        let a = \"global\";
+
+        {
+            fun showA() {
+                print(a);
+            }
+
+            {
+                showA();
+                let a = \"block\";
+                showA();
+            }
+        }
+        ").parse().ok().unwrap();
+
+        let mut state = ResolveState::new();
+        program.traverse_rs(&mut state);
+
+        println!("{:?}", state);
     }
 }
