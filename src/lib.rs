@@ -18,6 +18,7 @@ pub use repl::Repl;
 pub use interpreter::Interpreter;
 pub mod lexer;
 pub mod parser;
+pub mod semantic;
 pub mod runtime;
 pub mod interpreter;
 pub mod err;
