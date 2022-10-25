@@ -14,7 +14,8 @@ use super::value::Value;
 pub struct VarContext<'a> {
     scope: HashMap<String, Value>,
     parent: Option<NonNull<VarContext<'a>>>,
-    _ghost: PhantomData<&'a ()>
+    _ghost: PhantomData<&'a ()>,
+    _idx: usize
 }
 
 /// Iterates through a VarContext and its parents to provide all accessible HashMaps
@@ -61,7 +62,8 @@ impl VarContext<'_> {
         Self { 
             scope: gstd::std_map(), 
             parent: None, 
-            _ghost: PhantomData 
+            _ghost: PhantomData,
+            _idx: 0
         }
     }
 
@@ -71,7 +73,8 @@ impl VarContext<'_> {
         VarContext { 
             scope: HashMap::new(), 
             parent: NonNull::new(self),
-            _ghost: PhantomData
+            _ghost: PhantomData,
+            _idx: self._idx + 1
         }
     }
 
@@ -169,8 +172,15 @@ impl VarContext<'_> {
         }
     }
 
-    pub fn get_ancestor_mut(&mut self, idx: usize) -> Option<&mut VarContext> {
-        self.ancestors_mut().nth(idx)
+    // HACK.
+    
+    pub fn idx(&self) -> usize {
+        self._idx
+    }
+
+    pub fn goto_idx(&mut self, idx: usize) -> Option<&mut VarContext> {
+        self.ancestors_mut()
+            .find(|ctx| ctx._idx == idx)
     }
 }
 

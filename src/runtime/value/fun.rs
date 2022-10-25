@@ -23,7 +23,7 @@ pub enum FunParamType {
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
     Rust(fn(Vec<Value>) -> RtResult<Value>),
-    Poligon(Vec<String>, Rc<tree::Program>)
+    Poligon(Vec<String>, Rc<tree::Program>, usize /* scope idx */)
 }
 
 impl GonFun {
@@ -50,8 +50,8 @@ impl GonFun {
 
         match &self.fun {
             GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
-            GInternalFun::Poligon(params, block) => {
-                let mut fscope = ctx.child();
+            GInternalFun::Poligon(params, block, idx) => {
+                let mut fscope = ctx.fun_body_scope_at(*idx);
                 
                 for (ident, v) in std::iter::zip(params, pvals) {
                     fscope.vars.declare(ident.clone(), v)?;

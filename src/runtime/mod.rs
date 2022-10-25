@@ -41,6 +41,14 @@ impl BlockContext<'_> {
             rs: Rc::clone(&self.rs)
         }
     }
+    pub fn fun_body_scope_at(&mut self, idx: usize) -> BlockContext {
+        let mv = self.vars.goto_idx(idx);
+
+        mv.map(|v| BlockContext {
+            vars: v.child(),
+            rs: Rc::clone(&self.rs)
+        }).unwrap()
+    }
 
     pub fn get_var(&self, ident: &str, e: &tree::Expr) -> Option<&Value> {
         self.vars.get_indexed(ident, self.rs.get_steps(e))
@@ -562,7 +570,8 @@ impl TraverseRt for tree::FunDecl {
             Some(ident),
             ty,
             param_names,
-            Rc::clone(block)
+            Rc::clone(block),
+            ctx.vars.idx()
         );
         
         let rf = ctx.vars.declare(ident.clone(), val)?;
