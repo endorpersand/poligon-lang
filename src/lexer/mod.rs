@@ -2,7 +2,7 @@
 //! 
 //! TODO! more doc
 
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -45,6 +45,11 @@ pub enum LexErr {
 
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
+
+    InvalidEscape(char),
+    InvalidX,
+    InvalidU,
+    InvalidChar(u32)
 }
 pub type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;
@@ -57,13 +62,22 @@ impl GonErr for LexErr {
     fn message(&self) -> String {
         match self {
             LexErr::UnknownChar(c)      => format!("invalid character {}", wrapq(*c)),
-            LexErr::UnclosedQuote       => ("quote was never terminated").to_string(),
+            LexErr::UnclosedQuote       => String::from("quote was never terminated"),
             LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
-            LexErr::EmptyChar           => ("char literal cannot be empty").to_string(),
-            LexErr::UnknownOp(_op)      => ("unexpected operator").to_string(),
-            LexErr::MismatchedDelimiter => ("mismatched delimiter").to_string(),
-            LexErr::UnclosedDelimiter   => ("delimiter was never terminated").to_string(),
-            LexErr::UnclosedComment     => ("comment was never terminated").to_string(),
+            LexErr::EmptyChar           => String::from("char literal cannot be empty"),
+            LexErr::UnknownOp(_op)      => String::from("unexpected operator"),
+            LexErr::MismatchedDelimiter => String::from("mismatched delimiter"),
+            LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
+            LexErr::UnclosedComment     => String::from("comment was never terminated"),
+            LexErr::InvalidEscape(e)    => format!("unknown character escape '{}'", 
+                if e == &'\n' {
+                    String::from("\\n") 
+                } else {
+                    String::from(*e)
+                }),
+            LexErr::InvalidX            => String::from("invalid \\xXX escape"),
+            LexErr::InvalidU            => String::from("invalid \\u{XXXX} escape"),
+            LexErr::InvalidChar(c)      => format!("invalid char {:x}", c),
         }
     }
 }
@@ -141,6 +155,131 @@ impl CursorTicker {
 
     fn add((lno, cno): Cursor, chars: usize) -> Cursor {
         (lno, cno + chars)
+    }
+}
+
+struct LiteralCharReader<'lx> {
+    lexer: &'lx mut Lexer,
+    terminal: char
+}
+
+enum LCError {
+    HitTerminal,
+    HitEOF,
+    InvalidEscape(char),
+    InvalidX,
+    InvalidU,
+    InvalidChar(u32)
+}
+type LiteralCharResult<T> = Result<T, LCError>;
+
+
+impl<'lx> LiteralCharReader<'lx> {
+    fn new(lexer: &'lx mut Lexer, terminal: char) -> Self {
+        Self { lexer, terminal }
+    }
+
+    fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
+        match self.lexer.peek() {
+            Some(c) if c == &self.terminal && !allow_term => { Err(LCError::HitTerminal) }
+            Some(_) => {
+                Ok(self.lexer.next().unwrap())
+            }
+            None => { Err(LCError::HitEOF) }
+        }
+    }
+
+    fn next(&mut self) -> LiteralCharResult<Option<char>> {
+        lazy_static! {
+            static ref BASIC_ESCAPES: HashMap<char, Option<char>> = {
+                let mut m = HashMap::new();
+    
+                m.insert('0',  Some('\0'));
+                m.insert('\\', Some('\\'));
+                m.insert('n',  Some('\n'));
+                m.insert('t',  Some('\t'));
+                m.insert('r',  Some('\r'));
+                m.insert('\'', Some( '\''));
+                m.insert('"',  Some('"'));
+                m.insert('\n', None);
+                m
+            };
+        }
+        
+        match self.next_raw(false)? {
+            '\\' => {
+                let c = self.next_raw(true)?;
+
+                if let Some(escaped) = BASIC_ESCAPES.get(&c) {
+                    Ok(escaped.clone())
+                } else {
+                    match c {
+                        'u' => {
+                            let c8: String = std::iter::repeat_with(|| self.next_raw(false))
+                                .take(8)
+                                .collect::<Result<_, _>>()
+                                .map_err(|_| LCError::InvalidU)?;
+                            
+                            if c8.starts_with("{") && c8.ends_with("}") {
+                                let codepoint = u32::from_str_radix(&c8[1..5], 16)
+                                    .map_err(|_| LCError::InvalidU)?;
+                                
+                                let chr = char::from_u32(codepoint)
+                                    .ok_or(LCError::InvalidChar(codepoint))?;
+                                
+                                Ok(Some(chr))
+                            } else {
+                                Err(LCError::InvalidU)
+                            }
+                        }
+                        'x' => {
+                            let c2: String = std::iter::repeat_with(|| self.next_raw(false))
+                                .take(2)
+                                .collect::<Result<_, _>>()
+                                .map_err(|_| LCError::InvalidX)?;
+                            
+                            let codepoint = u32::from_str_radix(&c2, 16)
+                                .map_err(|_| LCError::InvalidX)?;
+                            
+                            let chr = char::from_u32(codepoint)
+                                .ok_or(LCError::InvalidChar(codepoint))?;
+                            
+                            Ok(Some(chr))
+                        },
+                        c => {
+                            Err(LCError::InvalidEscape(c))
+                        }
+                    }
+                }
+            },
+            c => Ok(Some(c))
+        }
+        // // if terminal, mark the char as terminal
+        // if self.peek() != Some(&term_chr) {
+        //     // if there's a 
+        //     match unwrap_chr!(self.next()) {
+        //         '\\' => {
+        //             let c = unwrap_chr!(self.next());
+
+        //             match BASIC_ESCAPES.get(&c) {
+        //                 Some(c) => Ok((c.clone(), 2)),
+        //                 None => match c {
+        //                     'x' => {},
+        //                     'u' => {}
+        //                 },
+        //             }
+        //         },
+        //         c => Ok((Some(c), 1)),
+        //     }
+        // } else {
+        //     Err(LCError::HitTerminal)
+        // }
+    }
+
+    fn one(lexer: &'lx mut Lexer, terminal: char) -> LiteralCharResult<char> {
+        let mut reader = Self::new(lexer, terminal);
+        
+        reader.next()?.ok_or(LCError::InvalidChar('\n' as u32))
     }
 }
 
@@ -351,18 +490,24 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a char literal token in the output.
     fn push_char(&mut self) -> LexResult<()> {
-        let init_cursor = self.cursor;
-        
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
+        
+        let init_cursor = self.cursor;
+        let init_cursor_p1 = CursorTicker::add(self.cursor, 1);
 
-        // Get the next character:
-        let c = self.next()
-            .ok_or_else(|| LexErr::UnclosedQuote.at(init_cursor))?;
-        if c == qt {
-            Err(LexErr::EmptyChar.at(self.cursor))?;
-        }
 
+        let c = match LiteralCharReader::one(self, qt) {
+            Ok(c) => Ok(c),
+            Err(e) => Err(match e {
+                LCError::HitTerminal => LexErr::EmptyChar.at(self.cursor),
+                LCError::HitEOF      => LexErr::UnclosedQuote.at(init_cursor),
+                LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(init_cursor_p1..self.cursor),
+                LCError::InvalidX         => LexErr::InvalidX.at_range(init_cursor_p1..self.cursor),
+                LCError::InvalidU         => LexErr::InvalidU.at_range(init_cursor_p1..self.cursor),
+                LCError::InvalidChar(v)   => LexErr::InvalidChar(v).at_range(init_cursor_p1..self.cursor),
+            }),
+        }?;
         // Assert next char matches quote:
         match self.next() {
             Some(chr) if chr == qt => {
