@@ -12,7 +12,7 @@ pub struct ResolveState<'a> {
 
 impl<'map> ResolveState<'map> {
     fn new() -> Self {
-        Self { steps: HashMap::new(), locals: vec![HashSet::new()] }
+        Self { steps: HashMap::new(), locals: vec![] }
     }
 
     fn open_scope(&mut self) {
@@ -29,8 +29,9 @@ impl<'map> ResolveState<'map> {
     // }
 
     fn declare(&mut self, ident: &str) -> () {
-        self.locals.last_mut().unwrap()
-            .insert(String::from(ident));
+        if let Some(locals) = self.locals.last_mut() {
+            locals.insert(String::from(ident));
+        }
     }
 
     fn resolve<'a>(&mut self, e: &'a tree::Expr, ident: &str) -> ()
@@ -45,6 +46,13 @@ impl<'map> ResolveState<'map> {
             .map(|(idx, _)| idx);
         
         self.steps.insert(ByAddress(e), scope_count);
+    }
+
+    fn from_tree(t: &'map tree::Program) -> Self {
+        let mut state = ResolveState::new();
+        t.0.traverse_rs(&mut state);
+
+        state
     }
 }
 
@@ -294,12 +302,11 @@ mod test {
             Stmt::Expr(ident("a"))
         ]);
 
-        let mut state = ResolveState::new();
-        program.traverse_rs(&mut state);
+        let state = ResolveState::from_tree(&program);
 
         let a = if let Stmt::Expr(e) = &program.0[1] { e } else { unreachable!() };
         let steps = map! {
-            ByAddress(a) => Some(0)
+            ByAddress(a) => None
         };
 
 
@@ -320,9 +327,33 @@ mod test {
             if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
         } else { unreachable!() };
 
-        let mut state = ResolveState::new();
-        program.traverse_rs(&mut state);
+        let state = ResolveState::from_tree(&program);
+        let steps = map! {
+            ByAddress(a) => None
+        };
 
+        assert_eq!(&state.steps, &steps);
+
+        let program = Program(vec![
+            Stmt::Expr(Expr::Block(Program(vec![
+                Stmt::Decl(Decl {
+                    rt: ReasgType::Const, 
+                    mt: MutType::Immut, 
+                    ident: String::from("a"), 
+                    ty: None, 
+                    val: Expr::Literal(Literal::Int(0)),
+                }),
+                Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
+            ])))
+        ]);
+
+        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0[0] {
+            if let Stmt::Expr(Expr::Block(prog)) = &prog.0[1] { 
+                if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
+            } else { unreachable!() }
+        } else { unreachable!() };
+
+        let state = ResolveState::from_tree(&program);
         let steps = map! {
             ByAddress(a) => Some(1)
         };
