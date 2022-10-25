@@ -4,6 +4,7 @@
 
 use std::rc::Rc;
 
+use crate::semantic::ResolveState;
 use crate::{GonErr, tree};
 use crate::util::RvErr;
 
@@ -19,13 +20,15 @@ mod gstd;
 /// of the current scope (variables, functions, etc).
 pub struct BlockContext<'ctx> {
     vars: VarContext<'ctx>,
+    rs: Rc<ResolveState>
 }
 
 impl BlockContext<'_> {
     /// Create a new context.
     pub fn new() -> Self {
         Self {
-            vars: VarContext::new()
+            vars: VarContext::new(),
+            rs: Rc::new(ResolveState::new())
         }
     }
 
@@ -34,8 +37,16 @@ impl BlockContext<'_> {
     /// As long as the child scope is in use, this scope cannot be used.
     pub fn child(&mut self) -> BlockContext {
         BlockContext {
-            vars: self.vars.child()
+            vars: self.vars.child(),
+            rs: Rc::clone(&self.rs)
         }
+    }
+
+    pub fn get_var(&self, ident: &str, e: &tree::Expr) -> Option<&Value> {
+        self.vars.get_indexed(ident, self.rs.get_steps(e))
+    }
+    pub fn set_var(&mut self, ident: &str, v: Value, e: &tree::Expr) -> RtResult<Value> {
+        self.vars.set_indexed(ident, v, self.rs.get_steps(e))
     }
 }
 
@@ -84,7 +95,15 @@ impl tree::Program {
     }
 
     pub fn run_with_ctx(self, ctx: &mut BlockContext) -> RtResult<Value> {
-         self.traverse_rt(ctx).map_err(|to| match to {
+        // Semantic traversal
+        let rs = Rc::get_mut(&mut ctx.rs)
+            .expect("Cannot resolve while in traversal");
+        
+        rs.clear();
+        rs.traverse_tree(&self);
+
+        // Runtime traversal
+        self.traverse_rt(ctx).map_err(|to| match to {
             TermOp::Err(e) => e,
             TermOp::Return(_) => RuntimeErr::CannotReturn,
             TermOp::Break     => RuntimeErr::CannotBreak,
@@ -156,7 +175,7 @@ impl TraverseRt for tree::Expr {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
             tree::Expr::Ident(ident) => {
-                ctx.vars.get(ident)
+                ctx.get_var(ident, self)
                     .ok_or_else(|| RuntimeErr::UndefinedVar(String::from(ident)))
                     .map(Value::clone)
                     .map_err(TermOp::Err)
@@ -175,7 +194,7 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
-                assign_pat(pat, result, ctx)
+                assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
             tree::Expr::Attr(_) => todo!(),
@@ -278,7 +297,8 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::Call { funct, params } => {
                 if let Value::Fun(f) = funct.traverse_rt(ctx)? {
-                    f.call(params, &mut ctx.child())
+                    // TODO proper function
+                    f.call(params, ctx)
                 } else {
                     Err(RuntimeErr::CannotCall)?
                 }
@@ -370,11 +390,11 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
         TermOp::Continue  => RuntimeErr::CannotContinue,
     }
 }
-fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResult<Value> {
+fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tree::Expr) -> RtResult<Value> {
     let val = match pat {
         tree::AsgPat::Unit(unit) => match unit {
             tree::AsgUnit::Ident(ident) => {
-                ctx.vars.set(ident, rhs)?.clone()
+                ctx.set_var(ident, rhs, from)?
             },
             tree::AsgUnit::Path(_, _) => todo!(),
             tree::AsgUnit::Index(idx) => {
@@ -404,7 +424,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext) -> RtResul
             // allows rhs to be used again
 
             for (pat, val) in std::iter::zip(pats, values) {
-                assign_pat(pat, val, ctx)?;
+                assign_pat(pat, val, ctx, from)?;
             }
 
             rhs
@@ -547,5 +567,19 @@ impl TraverseRt for tree::FunDecl {
         
         let rf = ctx.vars.declare(ident.clone(), val)?;
         Ok(rf)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::Interpreter;
+
+    #[test]
+    fn lexical_scope_test() -> std::io::Result<()> {
+        Interpreter::from_file("_test_files/lexical_scope.gon")?
+            .run()
+            .unwrap();
+
+        Ok(())
     }
 }

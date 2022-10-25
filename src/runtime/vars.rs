@@ -22,7 +22,7 @@ struct VCtxIter<'a> {
     next: Option<&'a VarContext<'a>>
 }
 impl<'a> Iterator for VCtxIter<'a> {
-    type Item = &'a HashMap<String, Value>;
+    type Item = &'a VarContext<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.map(|current| {
@@ -31,7 +31,7 @@ impl<'a> Iterator for VCtxIter<'a> {
             // SAFETY: Since we're here, this context must be a child context,
             // so there must be a pointer to a parent context here.
             self.next = m_next_ptr.map(|next_ptr| unsafe { next_ptr.as_ref() });
-            &current.scope
+            current
         })
     }
 }
@@ -41,7 +41,7 @@ struct VCtxIterMut<'a> {
     next: Option<NonNull<VarContext<'a>>>
 }
 impl<'a> Iterator for VCtxIterMut<'a> {
-    type Item = &'a mut HashMap<String, Value>;
+    type Item = &'a mut VarContext<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.take().map(|mut c_ptr| {
@@ -50,7 +50,7 @@ impl<'a> Iterator for VCtxIterMut<'a> {
             let current = unsafe { c_ptr.as_mut() };
 
             self.next = current.parent;
-            &mut current.scope
+            current
         })
     }
 }
@@ -75,15 +75,23 @@ impl VarContext<'_> {
         }
     }
 
-    /// Iterator providing an immutable reference to all HashMaps of variables
-    fn hash_maps(&self) -> VCtxIter {
+    fn ancestors(&self) -> VCtxIter {
         VCtxIter { next: Some(self) }
     }
-    /// Iterator providing a mutable reference to all HashMaps of variables
-    fn hash_maps_mut(&mut self) -> VCtxIterMut {
+    fn ancestors_mut(&mut self) -> VCtxIterMut {
         VCtxIterMut { next: NonNull::new(self) }
     }
+
+    /// Iterator providing an immutable reference to all HashMaps of variables
+    fn hash_maps(&self) -> impl Iterator<Item = &HashMap<String, Value>> {
+        self.ancestors().map(|m| &m.scope)
+    }
+    /// Iterator providing a mutable reference to all HashMaps of variables
+    fn hash_maps_mut(&mut self) -> impl Iterator<Item = &mut HashMap<String, Value>> {
+        self.ancestors_mut().map(|m| &mut m.scope)
+    }
     /// Query a variable (or return `None` if it does not exist)
+    #[allow(unused)]
     pub fn get(&self, ident: &str) -> Option<&Value> {
         self.hash_maps()
             .find_map(|m| m.get(ident))
@@ -108,6 +116,7 @@ impl VarContext<'_> {
     }
 
     /// Set a variable (or error if it is not declared)
+    #[allow(unused)]
     pub fn set(&mut self, ident: &str, v: Value) -> super::RtResult<&Value> {
         let maybe_m = self.hash_maps_mut()
             .find(|m| m.contains_key(ident));
@@ -119,6 +128,49 @@ impl VarContext<'_> {
         } else {
             Err(super::RuntimeErr::NotDeclared(String::from(ident)))
         }
+    }
+
+    pub fn get_indexed(&self, ident: &str, midx: Option<usize>) -> Option<&Value> {
+        let maybe_m = {
+            let mut hms = self.hash_maps();
+
+            match midx {
+                Some(idx) => hms.nth(idx),
+                None => hms.last()
+            }
+        };
+        
+        maybe_m.and_then(|m| m.get(ident))
+    }
+
+    pub fn set_indexed(&mut self, ident: &str, v: Value, midx: Option<usize>) -> super::RtResult<Value> {
+        let maybe_m = {
+            let mut hms = self.hash_maps_mut();
+
+            match midx {
+                Some(idx) => hms.nth(idx),
+                None => hms.last()
+            }
+        };
+
+        let ident = String::from(ident);
+        if let Some(m) = maybe_m {
+            match m.entry(ident) {
+                Entry::Occupied(mut ent) => {
+                    ent.insert(v);
+                    Ok(ent.get().clone())
+                },
+                Entry::Vacant(ent) => {
+                    Err(super::RuntimeErr::NotDeclared(ent.into_key()))
+                },
+            }
+        } else {
+            Err(super::RuntimeErr::NotDeclared(ident))
+        }
+    }
+
+    pub fn get_ancestor_mut(&mut self, idx: usize) -> Option<&mut VarContext> {
+        self.ancestors_mut().nth(idx)
     }
 }
 

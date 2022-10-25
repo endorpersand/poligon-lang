@@ -51,7 +51,7 @@ impl GonFun {
         match &self.fun {
             GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
             GInternalFun::Poligon(params, block) => {
-                let mut fscope = ctx.child(); // TODO: lexical scope
+                let mut fscope = ctx.child();
                 
                 for (ident, v) in std::iter::zip(params, pvals) {
                     fscope.vars.declare(ident.clone(), v)?;

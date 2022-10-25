@@ -16,6 +16,8 @@ use crate::{lexer, parser};
 pub struct Interpreter {
     source: String
 }
+
+#[derive(Debug)]
 pub struct InterpretErr(String);
 
 pub type InterpretResult<T> = Result<T, InterpretErr>;

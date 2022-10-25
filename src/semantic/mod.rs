@@ -4,12 +4,12 @@ use crate::tree;
 
 #[derive(Debug, PartialEq)]
 pub struct ResolveState {
-    steps: HashMap<*const tree::Expr, Option<usize>>,
+    steps: HashMap<*const tree::Expr, usize>,
     locals: Vec<HashSet<String>>
 }
 
 impl ResolveState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { steps: HashMap::new(), locals: vec![] }
     }
 
@@ -41,16 +41,22 @@ impl ResolveState {
             .find(|(_, scope)| scope.contains(ident))
             .map(|(idx, _)| idx);
         
-        self.steps.insert(e as _, scope_count);
+        if let Some(sc) = scope_count {
+            self.steps.insert(e as _, sc);
+        }
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.steps.clear();
         self.locals.clear();
     }
 
     pub fn traverse_tree(&mut self, t: &tree::Program) {
         t.0.traverse_rs(self);
+    }
+
+    pub fn get_steps(&self, t: &tree::Expr) -> Option<usize> {
+        self.steps.get(&(t as *const _)).map(|i| *i)
     }
 }
 
@@ -252,13 +258,16 @@ mod test {
     use super::TraverseResolve;
 
     macro_rules! map {
-        ($($k:expr => $v:expr),*) => {
+        () => {
+            HashMap::new()
+        };
+        ($($k:expr => $v:expr),+) => {
             {
                 let mut m = HashMap::new();
                 $(m.insert($k, $v);)+
                 m
             }
-        }
+        };
     }
 
     fn ident(s: &str) -> Expr {
@@ -274,15 +283,7 @@ mod test {
         let mut state = ResolveState::new();
         a.traverse_rs(&mut state);
 
-        let steps = if let Stmt::Expr(e) = &a.0[0] {
-            map! {
-                e as _ => None
-            }
-        } else {
-            unreachable!();
-        };
-
-        assert_eq!(&state.steps, &steps);
+        assert_eq!(&state.steps, &map!{});
     }
 
     #[test]
@@ -301,13 +302,7 @@ mod test {
         let mut state = ResolveState::new();
         state.traverse_tree(&program);
 
-        let a = if let Stmt::Expr(e) = &program.0[1] { e } else { unreachable!() };
-        let steps = map! {
-            a as _ => None
-        };
-
-
-        assert_eq!(&state.steps, &steps);
+        assert_eq!(&state.steps, &map!{});
 
         let program = Program(vec![
             Stmt::Decl(Decl {
@@ -320,18 +315,10 @@ mod test {
             Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
         ]);
 
-        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0[1] { 
-            if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
-        } else { unreachable!() };
-
         let mut state = ResolveState::new();
         state.traverse_tree(&program);
 
-        let steps = map! {
-            a as _ => None
-        };
-
-        assert_eq!(&state.steps, &steps);
+        assert_eq!(&state.steps, &map!{});
 
         let program = Program(vec![
             Stmt::Expr(Expr::Block(Program(vec![
@@ -356,7 +343,7 @@ mod test {
         state.traverse_tree(&program);
 
         let steps = map! {
-            a as _ => Some(1)
+            a as _ => 1
         };
 
         assert_eq!(&state.steps, &steps);
