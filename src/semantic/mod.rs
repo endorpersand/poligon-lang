@@ -7,20 +7,20 @@ use crate::tree;
 #[derive(Debug, PartialEq)]
 pub struct ResolveState<'a> {
     steps: HashMap<ByAddress<&'a tree::Expr>, Option<usize>>,
-    vars: Vec<HashSet<String>>
+    locals: Vec<HashSet<String>>
 }
 
 impl<'map> ResolveState<'map> {
     fn new() -> Self {
-        Self { steps: HashMap::new(), vars: vec![HashSet::new()] }
+        Self { steps: HashMap::new(), locals: vec![HashSet::new()] }
     }
 
     fn open_scope(&mut self) {
-        self.vars.push(HashSet::new());
+        self.locals.push(HashSet::new());
     }
 
     fn close_scope(&mut self) {
-        self.vars.pop();
+        self.locals.pop();
     }
 
     // fn partial_declare(&mut self, ident: &str) -> () {
@@ -29,7 +29,7 @@ impl<'map> ResolveState<'map> {
     // }
 
     fn declare(&mut self, ident: &str) -> () {
-        self.vars.last_mut().unwrap()
+        self.locals.last_mut().unwrap()
             .insert(String::from(ident));
     }
 
@@ -37,9 +37,9 @@ impl<'map> ResolveState<'map> {
         where 'a: 'map
     {
         // at depth 0, this means it is in our scope and we have to traverse 0 scopes
-        // at depth 1, it is one scope ahead
+        // at depth 1, it is one scope above
         // etc.
-        let scope_count = self.vars.iter().rev()
+        let scope_count = self.locals.iter().rev()
             .enumerate()
             .find(|(_, scope)| scope.contains(ident))
             .map(|(idx, _)| idx);
