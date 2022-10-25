@@ -1,16 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use by_address::ByAddress;
-
 use crate::tree;
 
 #[derive(Debug, PartialEq)]
-pub struct ResolveState<'a> {
-    steps: HashMap<ByAddress<&'a tree::Expr>, Option<usize>>,
+pub struct ResolveState {
+    steps: HashMap<*const tree::Expr, Option<usize>>,
     locals: Vec<HashSet<String>>
 }
 
-impl<'map> ResolveState<'map> {
+impl ResolveState {
     fn new() -> Self {
         Self { steps: HashMap::new(), locals: vec![] }
     }
@@ -34,9 +32,7 @@ impl<'map> ResolveState<'map> {
         }
     }
 
-    fn resolve<'a>(&mut self, e: &'a tree::Expr, ident: &str) -> ()
-        where 'a: 'map
-    {
+    fn resolve(&mut self, e: &tree::Expr, ident: &str) -> () {
         // at depth 0, this means it is in our scope and we have to traverse 0 scopes
         // at depth 1, it is one scope above
         // etc.
@@ -45,39 +41,41 @@ impl<'map> ResolveState<'map> {
             .find(|(_, scope)| scope.contains(ident))
             .map(|(idx, _)| idx);
         
-        self.steps.insert(ByAddress(e), scope_count);
+        self.steps.insert(e as _, scope_count);
     }
 
-    fn from_tree(t: &'map tree::Program) -> Self {
-        let mut state = ResolveState::new();
-        t.0.traverse_rs(&mut state);
+    fn clear(&mut self) {
+        self.steps.clear();
+        self.locals.clear();
+    }
 
-        state
+    pub fn traverse_tree(&mut self, t: &tree::Program) {
+        t.0.traverse_rs(self);
     }
 }
 
-impl Default for ResolveState<'_> {
+impl Default for ResolveState {
     fn default() -> Self {
         Self::new()
     }
 }
 
 pub trait TraverseResolve {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> ();
+    fn traverse_rs(&self, map: &mut ResolveState) -> ();
 }
 trait TRsDependent {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>, e: &'map tree::Expr) -> ();
+    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ();
 }
 
 impl<T: TraverseResolve> TraverseResolve for [T] {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         for t in self {
             t.traverse_rs(map)
         }
     }
 }
 impl<T: TraverseResolve> TraverseResolve for Option<T> {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         map.open_scope();
         if let Some(t) = self {
             t.traverse_rs(map)
@@ -86,7 +84,7 @@ impl<T: TraverseResolve> TraverseResolve for Option<T> {
     }
 }
 impl<T: TRsDependent> TRsDependent for [T] {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>, e: &'map tree::Expr) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> () {
         for t in self {
             t.traverse_rs(map, e)
         }
@@ -94,7 +92,7 @@ impl<T: TRsDependent> TRsDependent for [T] {
 }
 
 impl TraverseResolve for tree::Program {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         map.open_scope();
         self.0.traverse_rs(map);
         map.close_scope();
@@ -102,7 +100,7 @@ impl TraverseResolve for tree::Program {
 }
 
 impl TraverseResolve for tree::Stmt {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         match self {
             tree::Stmt::Decl(d) => d.traverse_rs(map),
             tree::Stmt::Return(e) => e.traverse_rs(map),
@@ -115,7 +113,7 @@ impl TraverseResolve for tree::Stmt {
 }
 
 impl TraverseResolve for tree::Expr {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         match self {
             e @ tree::Expr::Ident(s) => map.resolve(e, s),
             tree::Expr::Block(p) => p.traverse_rs(map),
@@ -172,7 +170,7 @@ impl TraverseResolve for tree::Expr {
 }
 
 impl TraverseResolve for tree::Decl {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         let tree::Decl { ident, val, .. } = self;
 
         // map.partial_declare(ident);
@@ -182,7 +180,7 @@ impl TraverseResolve for tree::Decl {
 }
 
 impl TraverseResolve for tree::FunDecl {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         map.declare(&self.ident);
 
         map.open_scope();
@@ -197,19 +195,19 @@ impl TraverseResolve for tree::FunDecl {
 }
 
 impl TraverseResolve for tree::UnaryOps {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         self.expr.traverse_rs(map)
     }
 }
 impl TraverseResolve for tree::BinaryOp {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         self.left.traverse_rs(map);
         self.right.traverse_rs(map)
     }
 }
 
 impl TraverseResolve for tree::If {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         for (e, p) in &self.conditionals {
             e.traverse_rs(map);
             p.traverse_rs(map);
@@ -220,14 +218,14 @@ impl TraverseResolve for tree::If {
 }
 
 impl TraverseResolve for tree::Index {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState) -> () {
         self.expr.traverse_rs(map);
         self.index.traverse_rs(map);
     }
 }
 
 impl TRsDependent for tree::AsgPat {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>, e: &'map tree::Expr) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> () {
         match self {
             tree::AsgPat::Unit(u) => u.traverse_rs(map, e),
             tree::AsgPat::List(lst) => lst.traverse_rs(map, e),
@@ -236,7 +234,7 @@ impl TRsDependent for tree::AsgPat {
 }
 
 impl TRsDependent for tree::AsgUnit {
-    fn traverse_rs<'map>(&'map self, map: &mut ResolveState<'map>, e: &'map tree::Expr) -> () {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> () {
         match self {
             tree::AsgUnit::Ident(ident) => map.resolve(e, ident),
             tree::AsgUnit::Path(_, _) => todo!(),
@@ -247,8 +245,6 @@ impl TRsDependent for tree::AsgUnit {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
-
-    use by_address::ByAddress;
 
     use crate::semantic::ResolveState;
     use crate::{tree::*, Interpreter};
@@ -280,7 +276,7 @@ mod test {
 
         let steps = if let Stmt::Expr(e) = &a.0[0] {
             map! {
-                ByAddress(e) => None
+                e as _ => None
             }
         } else {
             unreachable!();
@@ -302,11 +298,12 @@ mod test {
             Stmt::Expr(ident("a"))
         ]);
 
-        let state = ResolveState::from_tree(&program);
+        let mut state = ResolveState::new();
+        state.traverse_tree(&program);
 
         let a = if let Stmt::Expr(e) = &program.0[1] { e } else { unreachable!() };
         let steps = map! {
-            ByAddress(a) => None
+            a as _ => None
         };
 
 
@@ -327,9 +324,11 @@ mod test {
             if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
         } else { unreachable!() };
 
-        let state = ResolveState::from_tree(&program);
+        let mut state = ResolveState::new();
+        state.traverse_tree(&program);
+
         let steps = map! {
-            ByAddress(a) => None
+            a as _ => None
         };
 
         assert_eq!(&state.steps, &steps);
@@ -353,9 +352,11 @@ mod test {
             } else { unreachable!() }
         } else { unreachable!() };
 
-        let state = ResolveState::from_tree(&program);
+        let mut state = ResolveState::new();
+        state.traverse_tree(&program);
+
         let steps = map! {
-            ByAddress(a) => Some(1)
+            a as _ => Some(1)
         };
 
         assert_eq!(&state.steps, &steps);

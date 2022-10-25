@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 lazy_static = "1.4.0"
 regex = "1.6.0"
-by_address = "1.0.4"
