@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::tree;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ResolveState {
     steps: HashMap<*const tree::Expr, usize>,
     locals: Vec<HashSet<String>>
@@ -56,7 +56,7 @@ impl ResolveState {
     }
 
     pub fn get_steps(&self, t: &tree::Expr) -> Option<usize> {
-        self.steps.get(&(t as *const _)).map(|i| *i)
+        self.steps.get(&(t as *const _)).copied()
     }
 }
 

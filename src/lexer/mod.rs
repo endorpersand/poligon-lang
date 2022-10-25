@@ -211,17 +211,18 @@ impl<'lx> LiteralCharReader<'lx> {
                 let c = self.next_raw(true)?;
 
                 if let Some(escaped) = BASIC_ESCAPES.get(&c) {
-                    Ok(escaped.clone())
+                    Ok(*escaped)
                 } else {
                     match c {
                         'u' => {
                             let c8: String = std::iter::repeat_with(|| self.next_raw(false))
                                 .take(8)
+                                .take_while(|c| !matches!(c, Ok('}')))
                                 .collect::<Result<_, _>>()
                                 .map_err(|_| LCError::InvalidU)?;
                             
-                            if c8.starts_with("{") && c8.ends_with("}") {
-                                let codepoint = u32::from_str_radix(&c8[1..5], 16)
+                            if c8.starts_with("{") && c8.len() < 8 {
+                                let codepoint = u32::from_str_radix(&c8[1..], 16)
                                     .map_err(|_| LCError::InvalidU)?;
                                 
                                 let chr = char::from_u32(codepoint)
