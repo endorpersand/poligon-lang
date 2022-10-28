@@ -221,7 +221,7 @@ impl<'lx> LiteralCharReader<'lx> {
                                 .collect::<Result<_, _>>()
                                 .map_err(|_| LCError::InvalidU)?;
                             
-                            if c8.starts_with("{") && c8.len() < 8 {
+                            if c8.starts_with('{') && c8.len() < 8 {
                                 let codepoint = u32::from_str_radix(&c8[1..], 16)
                                     .map_err(|_| LCError::InvalidU)?;
                                 

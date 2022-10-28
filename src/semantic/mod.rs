@@ -69,18 +69,18 @@ impl ResolveState {
         t
     }
 
-    // fn partial_declare(&mut self, ident: &str) -> () {
+    // fn partial_declare(&mut self, ident: &str) {
     //     self.vars.last_mut().unwrap()
     //         .insert(String::from(ident), false);
     // }
 
-    fn declare(&mut self, ident: &str) -> () {
+    fn declare(&mut self, ident: &str) {
         if let Some(locals) = self.locals.last_mut() {
             locals.insert(String::from(ident));
         }
     }
 
-    fn resolve(&mut self, e: &tree::Expr, ident: &str) -> () {
+    fn resolve(&mut self, e: &tree::Expr, ident: &str) {
         // at depth 0, this means it is in our scope and we have to traverse 0 scopes
         // at depth 1, it is one scope above
         // etc.
