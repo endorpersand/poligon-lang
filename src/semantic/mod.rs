@@ -39,23 +39,34 @@ impl ResolveState {
         Self { steps: HashMap::new(), locals: vec![], block_type: BlockType::Program }
     }
 
-    fn open_scope(&mut self) {
+    fn _open_scope(&mut self) {
         self.locals.push(HashSet::new());
     }
 
-    fn close_scope(&mut self) {
+    fn _close_scope(&mut self) {
         self.locals.pop();
     }
 
-    fn scope<F, T>(&mut self, ty: BlockType, f: F) -> ResolveResult<T>
+    fn scope<F, T>(&mut self, f: F) -> ResolveResult<T>
+        where F: FnOnce(&mut Self) -> ResolveResult<T>
+    {
+        self._open_scope();
+        let t = f(self);
+        self._close_scope();
+        
+        t
+    }
+
+    fn typed_scope<F, T>(&mut self, ty: BlockType, f: F) -> ResolveResult<T>
         where F: FnOnce(&mut Self) -> ResolveResult<T>
     {
         let orig;
         (orig, self.block_type) = (self.block_type, ty);
-        
-        let t = f(self)?;
+
+        let t = self.scope(f);
+
         self.block_type = orig;
-        Ok(t)
+        t
     }
 
     // fn partial_declare(&mut self, ident: &str) -> () {
@@ -121,13 +132,11 @@ impl<T: TraverseResolve> TraverseResolve for [T] {
 }
 impl<T: TraverseResolve> TraverseResolve for Option<T> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        map.open_scope();
         if let Some(t) = self {
-            t.traverse_rs(map)?
+            t.traverse_rs(map)
+        } else {
+            Ok(())
         }
-        map.close_scope();
-
-        Ok(())
     }
 }
 impl<T: TRsDependent> TRsDependent for [T] {
@@ -140,23 +149,33 @@ impl<T: TRsDependent> TRsDependent for [T] {
     }
 }
 
+// The Program node's default traversal is to create a new scope without modifying the type.
+// This may differ from an intended goal, and in that case, 
+// the implementation for [T] should be used instead.
 impl TraverseResolve for tree::Program {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        map.open_scope();
-        self.0.traverse_rs(map)?;
-        map.close_scope();
-
-        Ok(())
+        map.scope(|map| {
+            self.0.traverse_rs(map)
+        })
     }
 }
 
 impl TraverseResolve for tree::Stmt {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
-            tree::Stmt::Decl(d)    => d.traverse_rs(map),
-            tree::Stmt::Return(e)  => e.traverse_rs(map),
-            tree::Stmt::Break      => Ok(()),
-            tree::Stmt::Continue   => Ok(()),
+            tree::Stmt::Decl(d)   => d.traverse_rs(map),
+            tree::Stmt::Return(e) => match map.block_type {
+                BlockType::Function => e.traverse_rs(map),
+                _ => Err(ResolveErr::CannotReturn)
+            },
+            tree::Stmt::Break => match map.block_type {
+                BlockType::Loop => Ok(()),
+                _ => Err(ResolveErr::CannotBreak)
+            },
+            tree::Stmt::Continue => match map.block_type {
+                BlockType::Loop => Ok(()),
+                _ => Err(ResolveErr::CannotContinue)
+            },
             tree::Stmt::FunDecl(f) => f.traverse_rs(map),
             tree::Stmt::Expr(e)   => e.traverse_rs(map),
         }
@@ -208,17 +227,17 @@ impl TraverseResolve for tree::Expr {
             tree::Expr::If(e) => e.traverse_rs(map),
             tree::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
-                block.traverse_rs(map)
+                map.typed_scope(BlockType::Loop, |map| {
+                    block.0.traverse_rs(map)
+                })
             },
             tree::Expr::For { ident, iterator, block } => {
                 iterator.traverse_rs(map)?;
 
-                map.open_scope();
-                map.declare(ident);
-                block.0.traverse_rs(map)?;
-                map.close_scope();
-
-                Ok(())
+                map.typed_scope(BlockType::Loop, |map| {
+                    map.declare(ident);
+                    block.0.traverse_rs(map)
+                })
             },
             tree::Expr::Call { funct, params } => {
                 funct.traverse_rs(map)?;
@@ -243,15 +262,13 @@ impl TraverseResolve for tree::FunDecl {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.declare(&self.ident);
 
-        map.open_scope();
-        for p in &self.params {
-            map.declare(&p.ident);
-        }
-
-        self.block.0.traverse_rs(map)?;
-
-        map.close_scope();
-        Ok(())
+        map.typed_scope(BlockType::Function, |map| {
+            for p in &self.params {
+                map.declare(&p.ident);
+            }
+    
+            self.block.0.traverse_rs(map)
+        })
     }
 }
 
@@ -313,7 +330,7 @@ mod test {
     use crate::semantic::ResolveState;
     use crate::{tree::*, Interpreter};
 
-    use super::{TraverseResolve, ResolveResult};
+    use super::ResolveResult;
 
     macro_rules! map {
         () => {
@@ -334,12 +351,12 @@ mod test {
 
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
-        let a = Program(vec![
+        let program = Program(vec![
             Stmt::Expr(ident("a"))
         ]);
 
         let mut state = ResolveState::new();
-        a.traverse_rs(&mut state)?;
+        state.traverse_tree(&program)?;
 
         assert_eq!(&state.steps, &map!{});
         Ok(())
@@ -428,7 +445,7 @@ mod test {
         ").parse().ok().unwrap();
 
         let mut state = ResolveState::new();
-        program.traverse_rs(&mut state)?;
+        state.traverse_tree(&program)?;
 
         println!("{:?}", state);
         Ok(())
