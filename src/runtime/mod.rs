@@ -108,7 +108,7 @@ impl tree::Program {
             .expect("Cannot resolve while in traversal");
         
         rs.clear();
-        rs.traverse_tree(&self);
+        rs.traverse_tree(&self)?;
 
         // Runtime traversal
         self.traverse_rt(ctx).map_err(|to| match to {
