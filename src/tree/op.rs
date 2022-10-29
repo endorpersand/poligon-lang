@@ -5,8 +5,7 @@ pub enum Unary {
     Plus,
     Minus,
     LogNot,
-    BitNot,
-    Spread
+    BitNot
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -61,7 +60,6 @@ impl TryFrom<Token> for Unary {
             token![-]  => Ok(Unary::Minus),
             token![!]  => Ok(Unary::LogNot),
             token![~]  => Ok(Unary::BitNot),
-            token![..] => Ok(Unary::Spread),
             _ => Err(TokenOpCastErr("Token cannot be converted into a unary operator"))
         }
         

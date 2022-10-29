@@ -144,6 +144,7 @@ pub enum RuntimeErr {
     UnpackTooLittle(usize /* expected */, usize /* got */),
     UnpackTooMany(usize /* expected */),
     RvErr(RvErr),
+    CannotSpreadHere,
 
     AlreadyDeclared(String),
     NotDeclared(String)
@@ -191,9 +192,20 @@ impl TraverseRt for tree::Expr {
             tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
             tree::Expr::Literal(e) => e.traverse_rt(ctx),
             tree::Expr::ListLiteral(exprs) => {
-                let vec = exprs.iter()
-                    .map(|expr| expr.traverse_rt(ctx))
-                    .collect::<Result<_, _>>()?;
+                let mut vec = vec![];
+                
+                for e in exprs.iter() {
+                    match e {
+                        tree::Expr::Spread(inner) => {
+                            let inner = inner.traverse_rt(ctx)?;
+                            let it = inner.as_iterator()
+                                .ok_or(RuntimeErr::NotIterable(inner.ty()))?;
+                                
+                            vec.extend(it);
+                        },
+                        e => vec.push(e.traverse_rt(ctx)?)
+                    }
+                }
 
                 Ok(Value::new_list(vec))
             },
@@ -316,6 +328,7 @@ impl TraverseRt for tree::Expr {
 
                 val.get_index(index_val).map_err(TermOp::Err)
             },
+            tree::Expr::Spread(_) => Err(RuntimeErr::CannotSpreadHere)?,
         }
     }
 }

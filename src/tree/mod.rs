@@ -83,7 +83,8 @@ pub enum Expr {
         funct: Box<Expr>,
         params: Vec<Expr>
     },
-    Index(Index)
+    Index(Index),
+    Spread(Box<Expr>)
 }
 
 #[derive(Debug, PartialEq, Clone)]

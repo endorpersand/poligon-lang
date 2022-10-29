@@ -275,7 +275,6 @@ impl Value {
             },
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
-            op::Unary::Spread => if let Value::Str(_e) = self { todo!() } else { None },
         }.ok_or(RuntimeErr::CannotApplyUnary(*o, ty))
     }
     

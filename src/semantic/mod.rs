@@ -243,6 +243,7 @@ impl TraverseResolve for tree::Expr {
                 params.traverse_rs(map)
             },
             tree::Expr::Index(idx) => idx.traverse_rs(map),
+            tree::Expr::Spread(e) => e.traverse_rs(map),
         }
     }
 }

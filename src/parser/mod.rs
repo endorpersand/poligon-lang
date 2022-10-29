@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::GonErr;
 use crate::lexer::token::{Token, token};
-use crate::tree::{self, op, AsgPatErr};
+use crate::tree::{self, AsgPatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
@@ -572,7 +572,7 @@ impl Parser {
         
         if let Some(mut e) = self.match_range()? {
             if is_spread {
-                e = Parser::wrap_unary_op(vec![op::Unary::Spread], e);
+                e = tree::Expr::Spread(Box::new(e))
             }
 
             Ok(Some(e))
