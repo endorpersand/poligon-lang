@@ -525,8 +525,12 @@ impl TraverseRt for tree::Stmt {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
             tree::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::Return(t) => {
-                let expr = t.traverse_rt(ctx)?;
+            tree::Stmt::Return(mt) => {
+                let expr = mt.as_ref()
+                    .map_or(
+                        Ok(Value::Unit), 
+                        |t| t.traverse_rt(ctx)
+                    )?;
                 
                 Err(TermOp::Return(expr))
             },

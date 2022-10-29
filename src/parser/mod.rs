@@ -348,7 +348,7 @@ impl Parser {
     /// or error if the tokens do not represent a return statement.
     fn expect_return(&mut self) -> ParseResult<tree::Stmt> {
         self.expect1(token![return])?;
-        let e = self.expect_expr()?;
+        let e = self.match_expr()?;
 
         Ok(tree::Stmt::Return(e))
     }

@@ -7,12 +7,12 @@ pub struct Program(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
-    Decl(Decl),       // declaration
-    Return(Expr),     // return x;
-    Break,            // break;
-    Continue,         // continue;
-    FunDecl(FunDecl), // function declaration
-    Expr(Expr)        // any expression
+    Decl(Decl),           // declaration
+    Return(Option<Expr>), // return x;
+    Break,                // break;
+    Continue,             // continue;
+    FunDecl(FunDecl),     // function declaration
+    Expr(Expr)            // any expression
 }
 
 #[derive(Debug, PartialEq)]
