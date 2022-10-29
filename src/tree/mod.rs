@@ -84,7 +84,7 @@ pub enum Expr {
         params: Vec<Expr>
     },
     Index(Index),
-    Spread(Box<Expr>)
+    Spread(Option<Box<Expr>>)
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -147,17 +147,19 @@ pub struct Index {
 pub enum AsgUnit {
     Ident(String),
     Path(Path),
-    Index(Index)
+    Index(Index),
 }
 #[derive(Debug, PartialEq)]
 pub enum AsgPat {
     Unit(AsgUnit),
+    Spread(Option<Box<AsgPat>>),
     List(Vec<AsgPat>)
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AsgPatErr {
-    InvalidAssignTarget
+    InvalidAssignTarget,
+    CannotSpreadMultiple,
 }
 
 impl TryFrom<Expr> for AsgPat {
@@ -165,17 +167,30 @@ impl TryFrom<Expr> for AsgPat {
 
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
-            Expr::Ident(ident)     => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
-            Expr::Path(attrs)      => Ok(AsgPat::Unit(AsgUnit::Path(attrs))),
-            Expr::Index(idx)       => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
+            Expr::Ident(ident) => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
+            Expr::Path(attrs)  => Ok(AsgPat::Unit(AsgUnit::Path(attrs))),
+            Expr::Index(idx)   => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
+            Expr::Spread(me) => match me {
+                Some(e) => AsgPat::try_from(*e),
+                None => Ok(AsgPat::Spread(None)),
+            }
             Expr::ListLiteral(lst) => {
-                let vec = lst.into_iter()
+                let vec: Vec<_> = lst.into_iter()
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()?;
 
-                Ok(AsgPat::List(vec))
+                // check spread count is <2
+                let mut it = vec.iter()
+                    .filter(|pat| matches!(pat, AsgPat::Spread(_)));
+                
+                it.next(); // skip 
+                if it.next().is_some() {
+                    Err(AsgPatErr::CannotSpreadMultiple)
+                } else {
+                    Ok(AsgPat::List(vec))
+                }
             }
-            _=> Err(AsgPatErr::InvalidAssignTarget),
+            _ => Err(AsgPatErr::InvalidAssignTarget),
         }
     }
 }

@@ -569,15 +569,13 @@ impl Parser {
     // Match a spread operation. (..[1,2,3,4])
     fn match_spread(&mut self) -> ParseResult<Option<tree::Expr>> {
         let is_spread = self.match1(token![..]);
+        let me = self.match_range()?;
         
-        if let Some(mut e) = self.match_range()? {
-            if is_spread {
-                e = tree::Expr::Spread(Box::new(e))
-            }
-
-            Ok(Some(e))
+        if is_spread {
+            let boxed = me.map(Box::new);
+            Ok(Some(tree::Expr::Spread(boxed)))
         } else {
-            Ok(None)
+            Ok(me)
         }
     }
 

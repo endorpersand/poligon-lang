@@ -303,9 +303,15 @@ impl TraverseResolve for tree::Expr {
             },
             tree::Expr::Index(idx) => idx.traverse_rs(map),
             tree::Expr::Spread(e) => match map.sub_type() {
-                SubType::None    => Err(ResolveErr::CannotSpread),
-                SubType::List    => e.traverse_rs(map),
-                SubType::Pattern => e.traverse_rs(map),
+                SubType::None => Err(ResolveErr::CannotSpread),
+                SubType::List => match e {
+                    Some(inner) => inner.traverse_rs(map),
+                    None => Err(ResolveErr::CannotSpreadNone),
+                },
+                SubType::Pattern => match e {
+                    Some(inner) => inner.traverse_rs(map),
+                    None => Ok(()),
+                },
             },
         }
     }
@@ -370,6 +376,10 @@ impl TRsDependent for tree::AsgPat {
         match self {
             tree::AsgPat::Unit(u) => u.traverse_rs(map, e),
             tree::AsgPat::List(lst) => lst.traverse_rs(map, e),
+            tree::AsgPat::Spread(mp) => match mp {
+                Some(p) => p.traverse_rs(map, e),
+                None => Ok(()),
+            },
         }
     }
 }

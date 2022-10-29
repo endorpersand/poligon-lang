@@ -198,7 +198,9 @@ impl TraverseRt for tree::Expr {
                 for e in exprs.iter() {
                     match e {
                         tree::Expr::Spread(inner) => {
-                            let inner = inner.traverse_rt(ctx)?;
+                            let inner = inner.as_ref()
+                                .ok_or(RuntimeErr::CannotSpreadNone)?
+                                .traverse_rt(ctx)?;
                             let it = inner.as_iterator()
                                 .ok_or(RuntimeErr::NotIterable(inner.ty()))?;
 
@@ -427,6 +429,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
             },
         },
         tree::AsgPat::List(pats) => {
+            // TODO: spread
             let pat_len = pats.len();
             let mut it = rhs.as_iterator()
                 .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
@@ -448,6 +451,10 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
             }
 
             rhs
+        },
+        tree::AsgPat::Spread(mp) => match mp {
+            Some(p) => assign_pat(&**p, rhs, ctx, from)?,
+            None => rhs, // we can dispose if spread is None, TODO!: what does a no-spread return?
         },
     };
 
