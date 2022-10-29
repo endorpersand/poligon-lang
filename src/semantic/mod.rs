@@ -3,6 +3,13 @@ use std::collections::{HashMap, HashSet};
 use crate::tree;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum SubType {
+    None,
+    List,
+    Pattern
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum BlockType {
     Function,
     Loop,
@@ -12,14 +19,16 @@ enum BlockType {
 #[derive(Debug, PartialEq, Eq)]
 struct Local {
     vars: HashSet<String>,
-    block_type: Option<BlockType>
+    block_type: Option<BlockType>,
+    sub_types: Vec<SubType>
 }
 
 impl Local {
     fn new(bt: Option<BlockType>) -> Self {
         Self {
             vars: HashSet::new(),
-            block_type: bt
+            block_type: bt,
+            sub_types: vec![],
         }
     }
 
@@ -34,30 +43,35 @@ impl Local {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResolveState {
     steps: HashMap<*const tree::Expr, usize>,
-    locals: Vec<Local>
+    locals: Vec<Local>,
+    global_subs: Vec<SubType>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ResolveErr {
     CannotReturn,
     CannotBreak,
-    CannotContinue
+    CannotContinue,
+    CannotSpread,
+    CannotSpreadNone
 }
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
 impl From<ResolveErr> for crate::runtime::RuntimeErr {
     fn from(re: ResolveErr) -> Self {
         match re {
-            ResolveErr::CannotReturn   => Self::CannotReturn,
-            ResolveErr::CannotBreak    => Self::CannotBreak,
-            ResolveErr::CannotContinue => Self::CannotContinue,
+            ResolveErr::CannotReturn     => Self::CannotReturn,
+            ResolveErr::CannotBreak      => Self::CannotBreak,
+            ResolveErr::CannotContinue   => Self::CannotContinue,
+            ResolveErr::CannotSpread     => Self::CannotSpread,
+            ResolveErr::CannotSpreadNone => Self::CannotSpreadNone,
         }
     }
 }
 
 impl ResolveState {
     pub fn new() -> Self {
-        Self { steps: HashMap::new(), locals: vec![] }
+        Self { steps: HashMap::new(), locals: vec![], global_subs: vec![] }
     }
 
     fn block_type(&self) -> BlockType {
@@ -65,6 +79,21 @@ impl ResolveState {
             .rev()
             .find_map(|local| local.block_type)
             .unwrap_or(BlockType::Program)
+    }
+
+    fn top_sub(&self) -> &[SubType] {
+        self.locals.last()
+            .map_or(&self.global_subs, |local| &local.sub_types)
+    }
+    fn top_sub_mut(&mut self) -> &mut Vec<SubType> {
+        self.locals.last_mut()
+            .map_or(&mut self.global_subs, |local| &mut local.sub_types)
+    }
+    fn sub_type(&self) -> SubType {
+        self.top_sub()
+            .last()
+            .copied()
+            .unwrap_or(SubType::None)
     }
 
     fn scope<F, T>(&mut self, f: F) -> ResolveResult<T>
@@ -83,6 +112,16 @@ impl ResolveState {
         self.locals.push(Local::new(Some(ty)));
         let t = f(self);
         self.locals.pop();
+
+        t
+    }
+
+    fn with_sub<F, T>(&mut self, ty: SubType, f: F) -> ResolveResult<T>
+        where F: FnOnce(&mut Self) -> ResolveResult<T>
+    {
+        self.top_sub_mut().push(ty);
+        let t = f(self);
+        self.top_sub_mut().pop();
 
         t
     }
@@ -209,7 +248,9 @@ impl TraverseResolve for tree::Expr {
             },
             tree::Expr::Block(p) => p.traverse_rs(map),
             tree::Expr::Literal(_) => Ok(()),
-            tree::Expr::ListLiteral(l) => l.traverse_rs(map),
+            tree::Expr::ListLiteral(l) => {
+                map.with_sub(SubType::List, |map| l.traverse_rs(map))
+            },
             tree::Expr::SetLiteral(s) => s.traverse_rs(map),
             tree::Expr::DictLiteral(d) => {
                 for (k, v) in d {
@@ -221,7 +262,7 @@ impl TraverseResolve for tree::Expr {
             },
             tree::Expr::Assign(lhs, rhs) => {
                 rhs.traverse_rs(map)?;
-                lhs.traverse_rs(map, self)
+                map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(op) => op.traverse_rs(map),
@@ -261,7 +302,11 @@ impl TraverseResolve for tree::Expr {
                 params.traverse_rs(map)
             },
             tree::Expr::Index(idx) => idx.traverse_rs(map),
-            tree::Expr::Spread(e) => e.traverse_rs(map),
+            tree::Expr::Spread(e) => match map.sub_type() {
+                SubType::None    => Err(ResolveErr::CannotSpread),
+                SubType::List    => e.traverse_rs(map),
+                SubType::Pattern => e.traverse_rs(map),
+            },
         }
     }
 }

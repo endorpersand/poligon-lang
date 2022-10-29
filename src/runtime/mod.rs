@@ -125,7 +125,7 @@ pub enum RuntimeErr {
     CannotCompare(op::Cmp, ValueType, ValueType),
     CannotApplyUnary(op::Unary, ValueType),
     CannotApplyBinary(op::Binary, ValueType, ValueType),
-    CannotApplySpread(ValueType, ValueType),
+    CannotApplyRange(ValueType, ValueType),
     DivisionByZero,
     ExpectedType(ValueType),
     RangeIsInfinite, // TODO: remove
@@ -145,6 +145,7 @@ pub enum RuntimeErr {
     UnpackTooMany(usize /* expected */),
     RvErr(RvErr),
     CannotSpread,
+    CannotSpreadNone,
 
     AlreadyDeclared(String),
     NotDeclared(String)
@@ -274,7 +275,7 @@ impl TraverseRt for tree::Expr {
 
                         Ok(Value::new_list(values))
                     },
-                    _ => Err(RuntimeErr::CannotApplySpread(l.ty(), r.ty()))?
+                    _ => Err(RuntimeErr::CannotApplyRange(l.ty(), r.ty()))?
                 }
             },
             tree::Expr::If(e) => e.traverse_rt(ctx),
@@ -397,7 +398,7 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 //             Err(RuntimeErr::RangeIsInfinite)
 //         }
 //     } else {
-//         Err(RuntimeErr::CannotApplySpread(left.ty(), right.ty()))
+//         Err(RuntimeErr::CannotApplyRange(left.ty(), right.ty()))
 //     }
 // }
 
