@@ -167,7 +167,11 @@ impl TryFrom<Expr> for AsgPat {
             Expr::Path(attrs)  => Ok(AsgPat::Path(attrs)),
             Expr::Index(idx)   => Ok(AsgPat::Index(idx)),
             Expr::Spread(me) => match me {
-                Some(e) => AsgPat::try_from(*e),
+                Some(e) => {
+                    let inner = Some(Box::new(AsgPat::try_from(*e)?));
+                    
+                    Ok(AsgPat::Spread(inner))
+                },
                 None => Ok(AsgPat::Spread(None)),
             }
             Expr::ListLiteral(lst) => {

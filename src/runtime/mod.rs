@@ -142,6 +142,7 @@ pub enum RuntimeErr {
     CannotContinue,
     NotIterable(ValueType),
     UnpackTooLittle(usize /* expected */, usize /* got */),
+    UnpackTooLittleS(usize /* expected at least */, usize /* got */),
     UnpackTooMany(usize /* expected */),
     RvErr(RvErr),
     CannotSpread,
@@ -202,7 +203,7 @@ impl TraverseRt for tree::Expr {
                                 .ok_or(RuntimeErr::CannotSpreadNone)?
                                 .traverse_rt(ctx)?;
                             let it = inner.as_iterator()
-                                .ok_or(RuntimeErr::NotIterable(inner.ty()))?;
+                                .ok_or_else(|| RuntimeErr::NotIterable(inner.ty()))?;
 
                             vec.extend(it);
                         },
@@ -427,24 +428,57 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
             val.set_index(index_val, rhs)?
         },
         tree::AsgPat::List(pats) => {
-            // TODO: spread
-            let pat_len = pats.len();
             let mut it = rhs.as_iterator()
                 .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
+
+            let has_spread = pats.iter().any(|p| matches!(p, tree::AsgPat::Spread(_)));
+            let mut left_values = vec![];
+            let mut right_values = vec![];
+            let mut consumed = 0;
+
+            for (i, p) in pats.iter().enumerate() {
+                if matches!(p, tree::AsgPat::Spread(_)) {
+                    consumed = i;
+                    break;
+                } else if let Some(t) = it.next() {
+                    left_values.push(t);
+                } else {
+                    // we ran out of elements:
+
+                    if has_spread {
+                        Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))
+                    } else {
+                        Err(RuntimeErr::UnpackTooLittle(pats.len(), i))
+                    }?
+                };
+            }
+
+            if has_spread {
+                // do the reverse pass:
+                for (i, p) in std::iter::zip(consumed.., pats.iter().rev()) {
+                    if matches!(p, tree::AsgPat::Spread(_)) {
+                        break;
+                    } else if let Some(t) = it.next_back() {
+                        right_values.push(t);
+                    } else {
+                        // we ran out of elements:
+                        Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))?
+                    };
+                }
+            } else {
+                // confirm no extra elements:
+                if it.next().is_some() {
+                    Err(RuntimeErr::UnpackTooMany(pats.len()))?
+                }
+            }
             
-            let values: Vec<_> = it.by_ref().take(pat_len).collect();
-            let values_len = values.len();
+            let middle_values = Value::new_list(it.collect());
 
-            if pat_len > values_len {
-                Err(RuntimeErr::UnpackTooLittle(pat_len, values_len))?
-            } else if it.next().is_some() {
-                Err(RuntimeErr::UnpackTooMany(pat_len))?
-            };
-
-            std::mem::drop(it); // & give me 20
-            // allows rhs to be used again
-
-            for (pat, val) in std::iter::zip(pats, values) {
+            let val_chain = left_values.into_iter()
+                .chain(std::iter::once(middle_values))
+                .chain(right_values);
+            
+            for (pat, val) in std::iter::zip(pats, val_chain) {
                 assign_pat(pat, val, ctx, from)?;
             }
 
