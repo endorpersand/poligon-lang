@@ -45,8 +45,28 @@ impl GonErr for ParseErr {
     }
 
     fn message(&self) -> String {
-        // TODO
-        format!("{:?}", self)
+        match self {
+            ParseErr::ExpectedTokens(tokens) => if tokens.len() == 1 {
+                format!("expected '{}'", tokens[0])
+            } else {
+                let tstr = tokens.iter()
+                    .map(ToString::to_string)
+                    .map(|s| format!("'{}'", s))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("expected one of {}", tstr)
+            },
+            ParseErr::ExpectedIdent      => String::from("expected identifier"),
+            ParseErr::ExpectedExpr       => String::from("expected expression"),
+            ParseErr::CannotParseNumeric => String::from("could not parse numeric"),
+            ParseErr::ExpectedBlock      => String::from("expected block"),
+            ParseErr::ExpectedType       => String::from("expected type expression"),
+            ParseErr::ExpectedPattern    => String::from("expected pattern"),
+            ParseErr::AsgPatErr(e) => match e {
+                PatErr::InvalidAssignTarget => String::from("invalid assign target"),
+                PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
+            },
+        }
     }
 }
 pub type ParseResult<T> = Result<T, FullGonErr<ParseErr>>;

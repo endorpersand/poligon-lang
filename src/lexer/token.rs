@@ -2,7 +2,7 @@
 //! 
 //! See [Token] for more information.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::collections::BTreeMap;
 use lazy_static::lazy_static;
 
@@ -67,6 +67,14 @@ macro_rules! define_keywords {
                 }
             }
         }
+
+        impl Display for Keyword {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(match self {
+                    $(Self::$id => $ex),*
+                })
+            }
+        }
     };
 }
 
@@ -80,6 +88,14 @@ macro_rules! define_operators_and_delimiters {
             $(
                 $id
             ),*
+        }
+
+        impl Display for Operator {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(match self {
+                    $(Self::$id => $ex),*
+                })
+            }
         }
 
         #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -102,6 +118,16 @@ macro_rules! define_operators_and_delimiters {
                     $(Self::$idl => false),+,
                     $(Self::$idr => true),+
                 }
+            }
+        }
+
+
+        impl Display for Delimiter {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(match self {
+                    $(Self::$idl => $exl),*,
+                    $(Self::$idr => $exr),*
+                })
             }
         }
 
@@ -266,3 +292,23 @@ macro_rules! token {
 
 #[allow(unused_imports)]
 pub(crate) use token;
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Ident(s) => f.write_str(s),
+            Token::Numeric(n) => f.write_str(n),
+            Token::Str(s)  => write!(f, "{:?}", s),
+            Token::Char(c) => write!(f, "{:?}", c),
+            Token::Comment(c, single_line) => if *single_line {
+                write!(f, "// {}", c)
+            } else {
+                write!(f, "/* {} */", c)
+            },
+            Token::Keyword(kw)  => Display::fmt(kw, f),
+            Token::Operator(op) => Display::fmt(op, f),
+            Token::Delimiter(d) => Display::fmt(d, f),
+            Token::LineSep => f.write_str(";"),
+        }
+    }
+}
