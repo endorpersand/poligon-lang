@@ -286,6 +286,10 @@ impl<'lx> LiteralCharReader<'lx> {
     fn cursor(&self) -> Cursor {
         self.lexer.cursor
     }
+
+    fn cursor_range(&self) -> std::ops::RangeInclusive<Cursor> {
+        self.lexer.token_start ..= self.lexer.cursor
+    }
 }
 
 macro_rules! char_class_or_err {
@@ -299,6 +303,7 @@ pub struct Lexer {
     delimiters: Vec<(Cursor, Delimiter)>,
     
     cursor: Cursor,
+    token_start: Cursor,
     _current: Option<char>,
     remaining: VecDeque<char>,
 }
@@ -310,6 +315,7 @@ impl Lexer {
             delimiters: vec![],
 
             cursor: (0, 0),
+            token_start: (0, 0),
             _current: None,
             remaining: input.chars().collect(), 
         })
@@ -325,8 +331,9 @@ impl Lexer {
 
     /// Lex whatever is currently in the input, but do not consume the lexer.
     pub fn partial_lex(&mut self) -> LexResult<()> {
-        while let Some(chr) = self.peek() {
-            let cls = char_class_or_err!(chr, self.peek_cursor())?;
+        while let Some(&chr) = self.peek() {
+            self.token_start = self.peek_cursor();
+            let cls = char_class_or_err!(&chr, self.token_start)?;
             
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident()?,
@@ -468,8 +475,6 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a str literal token in the output.
     fn push_str(&mut self) -> LexResult<()> {
-        let init_cursor = self.cursor;
-
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
         
@@ -483,7 +488,7 @@ impl Lexer {
                 Err(e) => Err(match e {
                     LCError::HitTerminal => break,
                     LCError::HitEOF => {
-                        LexErr::UnclosedQuote.at_range(init_cursor..=reader.cursor())
+                        LexErr::UnclosedQuote.at_range(reader.cursor_range())
                     },
                     LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(chr_cursor..reader.cursor()),
                     LCError::InvalidX         => LexErr::InvalidX.at_range(chr_cursor..reader.cursor()),
@@ -494,12 +499,12 @@ impl Lexer {
         }
         
         // Assert next char matches quote:
-        match self.next() {
-            Some(chr) if chr == qt => {
-                self.tokens.push(Token::Str(buf));
-                Ok(())
-            },
-            _ => Err(LexErr::UnclosedQuote.at(init_cursor))
+        if self.next().unwrap() == qt {
+            self.tokens.push(Token::Str(buf));
+            Ok(())
+        } else {
+            // Loop can only be exited when terminal character is found.
+            unreachable!();
         }
     }
 
@@ -510,19 +515,18 @@ impl Lexer {
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
         
-        let init_cursor = self.cursor;
-        let init_cursor_p1 = CursorTicker::add(self.cursor, 1);
-
+        let token_start = self.token_start;
+        let token_start_p1 = CursorTicker::add(token_start, 1);
 
         let c = match LiteralCharReader::one(self, qt) {
             Ok(c) => Ok(c),
             Err(e) => Err(match e {
                 LCError::HitTerminal => LexErr::EmptyChar.at(self.cursor),
-                LCError::HitEOF      => LexErr::UnclosedQuote.at(init_cursor),
-                LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(init_cursor_p1..self.cursor),
-                LCError::InvalidX         => LexErr::InvalidX.at_range(init_cursor_p1..self.cursor),
-                LCError::InvalidU         => LexErr::InvalidU.at_range(init_cursor_p1..self.cursor),
-                LCError::InvalidChar(v)   => LexErr::InvalidChar(v).at_range(init_cursor_p1..self.cursor),
+                LCError::HitEOF      => LexErr::UnclosedQuote.at(token_start),
+                LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(token_start_p1..self.cursor),
+                LCError::InvalidX         => LexErr::InvalidX.at_range(token_start_p1..self.cursor),
+                LCError::InvalidU         => LexErr::InvalidU.at_range(token_start_p1..self.cursor),
+                LCError::InvalidChar(c)   => LexErr::InvalidChar(c).at_range(token_start_p1..self.cursor),
             }),
         }?;
 
@@ -533,7 +537,7 @@ impl Lexer {
                 Ok(())
             },
             Some(_) => Err(LexErr::ExpectedChar(qt).at(self.cursor)),
-            None    => Err(LexErr::UnclosedQuote.at(init_cursor))
+            None    => Err(LexErr::UnclosedQuote.at(token_start))
         }
     }
 
