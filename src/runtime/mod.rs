@@ -304,7 +304,6 @@ impl TraverseRt for tree::Expr {
             },
             tree::Expr::Call { funct, params } => {
                 if let Value::Fun(f) = funct.traverse_rt(ctx)? {
-                    // TODO proper function
                     f.call(params, ctx)
                 } else {
                     Err(RuntimeErr::CannotCall)?
