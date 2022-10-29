@@ -54,7 +54,13 @@ pub trait GonErr {
         };
         
         let position = match range.end_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => ErrPos::Range(start..=(*p)),
+            Bound::Included(p) | Bound::Excluded(p) => {
+                if p == &start {
+                    ErrPos::Point(start)
+                } else {
+                    ErrPos::Range(start..=(*p))
+                }
+            },
             Bound::Unbounded => ErrPos::RangeFrom(start..),
         };
 

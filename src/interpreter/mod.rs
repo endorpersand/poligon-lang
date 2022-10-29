@@ -35,7 +35,7 @@ impl Interpreter {
         })
     }
 
-    pub fn lex(&self) -> InterpretResult<Vec<lexer::token::Token>> {
+    pub fn lex(&self) -> InterpretResult<Vec<lexer::token::FullToken>> {
         lexer::tokenize(&self.source)
             .map_err(|err| err.full_msg(&self.source))
             .map_err(InterpretErr)
@@ -45,7 +45,7 @@ impl Interpreter {
         let lexed = self.lex()?;
 
         parser::parse(lexed)
-            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+            .map_err(|err| err.full_msg(&self.source))
             .map_err(InterpretErr)
     }
 

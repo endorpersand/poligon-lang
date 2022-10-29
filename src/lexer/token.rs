@@ -39,7 +39,7 @@ pub enum Token {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pos: std::ops::RangeInclusive<(usize, usize)>,
+    pub(crate) pos: std::ops::RangeInclusive<(usize, usize)>,
     pub(crate) tt: Token
 }
 

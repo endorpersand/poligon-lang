@@ -12,7 +12,7 @@ use crate::err::{GonErr, FullGonErr};
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
 
-pub fn tokenize(input: &str) -> LexResult<Vec<Token>> {
+pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
     Lexer::new(input)?.lex()
 }
 
@@ -287,7 +287,7 @@ impl Lexer {
     /// Perform the actual lexing. 
     /// 
     /// Takes a string and converts it into a list of tokens.
-    pub fn lex(mut self) -> LexResult<Vec<Token>> {
+    pub fn lex(mut self) -> LexResult<Vec<FullToken>> {
         self.partial_lex()?;
         self.close()
     }
@@ -324,10 +324,9 @@ impl Lexer {
         Ok(())
     }
     /// Consume the lexer and return the tokens in it.
-    pub fn close(self) -> LexResult<Vec<Token>> {
+    pub fn close(self) -> LexResult<Vec<FullToken>> {
         self.try_close()?;
-        // TODO: FullToken
-        Ok(self.tokens.into_iter().map(|t| t.tt).collect())
+        Ok(self.tokens)
     }
 
     fn peek_cursor(&self) -> Cursor {
@@ -678,9 +677,23 @@ impl Lexer {
 mod tests {
     use super::*;
 
+    #[allow(unused)]
     macro_rules! assert_lex {
         ($e1:literal => $e2:expr) => {
             assert_eq!(tokenize($e1), Ok($e2))
+        }
+    }
+
+    macro_rules! assert_lex_basic {
+        ($e1:literal => $e2:expr) => {
+            assert_eq!(
+                tokenize($e1)
+                    .map(|vec| {
+                        vec.into_iter()
+                        .map(|t| t.tt)
+                        .collect()
+                    }),
+                Ok($e2))
         }
     }
 
@@ -704,7 +717,7 @@ mod tests {
 
     #[test]
     fn basic_lex() {
-        assert_lex!("123 + abc * def" => vec![
+        assert_lex_basic!("123 + abc * def" => vec![
             Token::Numeric("123".to_string()),
             token![+],
             Token::Ident("abc".to_string()),
@@ -715,7 +728,7 @@ mod tests {
 
     #[test]
     fn multiline_lex() {
-        assert_lex!("
+        assert_lex_basic!("
         let x = 1;
         const y = abc;
         const mut z = 5;
@@ -743,7 +756,7 @@ mod tests {
 
     #[test]
     fn delimiter_lex() {
-        assert_lex!("(1)" => vec![
+        assert_lex_basic!("(1)" => vec![
             token!["("],
             Token::Numeric("1".to_string()),
             token![")"]
@@ -755,20 +768,20 @@ mod tests {
 
     #[test]
     fn numeric_lex() {
-        assert_lex!("123.444"    => vec![
+        assert_lex_basic!("123.444"    => vec![
             Token::Numeric("123.444".to_string())
         ]);
-        assert_lex!("123.ident"  => vec![
+        assert_lex_basic!("123.ident"  => vec![
             Token::Numeric("123".to_string()), 
             token![.], 
             Token::Ident("ident".to_string())
         ]);
-        assert_lex!("123..444"   => vec![
+        assert_lex_basic!("123..444"   => vec![
             Token::Numeric("123".to_string()),
             token![..],
             Token::Numeric("444".to_string())
         ]);
-        assert_lex!("123. + 444" => vec![
+        assert_lex_basic!("123. + 444" => vec![
             Token::Numeric("123.".to_string()),
             token![+],
             Token::Numeric("444".to_string())
@@ -805,7 +818,7 @@ mod tests {
         //     token![;]
         // ]);
 
-        assert_lex!("
+        assert_lex_basic!("
         /* /* 
             comments in comments :)
         */ */
@@ -821,7 +834,7 @@ mod tests {
 
     #[test]
     fn char_lex() {
-        assert_lex!("'a'" => vec![Token::Char('a')]);
+        assert_lex_basic!("'a'" => vec![Token::Char('a')]);
         assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 0)));
     }
@@ -829,20 +842,25 @@ mod tests {
     #[test]
     fn escape_char_lex() {
         // basic escape tests
-        assert_lex!("'\\''" => vec![Token::Char('\'')]); // '\''
-        assert_lex!("'\\n'" => vec![Token::Char('\n')]); // '\n'
+        assert_lex_basic!("'\\''" => vec![Token::Char('\'')]); // '\''
+        assert_lex_basic!("'\\n'" => vec![Token::Char('\n')]); // '\n'
         assert_lex_fail_basic!("'\\n" => LexErr::UnclosedQuote); // '\n
         assert_lex_fail_basic!("'\\e'" => LexErr::InvalidEscape('e')); // '\e'
         
         // \x test
-        assert_lex!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
+        assert_lex_basic!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
         assert_lex_fail_basic!("'\\x'" => LexErr::InvalidX);   // '\x'
         assert_lex_fail_basic!("'\\x0'" => LexErr::InvalidX);  // '\x0'
         assert_lex_fail_basic!("'\\xqq'" => LexErr::InvalidX); // '\xqq'
 
-        assert_lex!("'\\u{0}'" => vec![Token::Char('\0')]); // '\u{0}'
-        assert_lex!("'\\u{1f97a}'" => vec![Token::Char('\u{1f97a}')]); // '\u{1f97a}'
+        assert_lex_basic!("'\\u{0}'" => vec![Token::Char('\0')]); // '\u{0}'
+        assert_lex_basic!("'\\u{1f97a}'" => vec![Token::Char('\u{1f97a}')]); // '\u{1f97a}'
         assert_lex_fail_basic!("'\\u{21f97a}'" => LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
         assert_lex_fail_basic!("'\\u{0000000}'" => LexErr::InvalidU); // '\u{0000000}'
+    }
+
+    #[test]
+    fn token_pos_lex() {
+
     }
 }
