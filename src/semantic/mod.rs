@@ -10,10 +10,31 @@ enum BlockType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+struct Local {
+    vars: HashSet<String>,
+    block_type: Option<BlockType>
+}
+
+impl Local {
+    fn new(bt: Option<BlockType>) -> Self {
+        Self {
+            vars: HashSet::new(),
+            block_type: bt
+        }
+    }
+
+    fn insert(&mut self, s: String) -> bool {
+        self.vars.insert(s)
+    }
+
+    fn contains(&self, s: &str) -> bool {
+        self.vars.contains(s)
+    }
+}
+#[derive(Debug, PartialEq, Eq)]
 pub struct ResolveState {
     steps: HashMap<*const tree::Expr, usize>,
-    locals: Vec<HashSet<String>>,
-    block_type: BlockType
+    locals: Vec<Local>
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -36,23 +57,22 @@ impl From<ResolveErr> for crate::runtime::RuntimeErr {
 
 impl ResolveState {
     pub fn new() -> Self {
-        Self { steps: HashMap::new(), locals: vec![], block_type: BlockType::Program }
+        Self { steps: HashMap::new(), locals: vec![] }
     }
 
-    fn _open_scope(&mut self) {
-        self.locals.push(HashSet::new());
-    }
-
-    fn _close_scope(&mut self) {
-        self.locals.pop();
+    fn block_type(&self) -> BlockType {
+        self.locals.iter()
+            .rev()
+            .find_map(|local| local.block_type)
+            .unwrap_or(BlockType::Program)
     }
 
     fn scope<F, T>(&mut self, f: F) -> ResolveResult<T>
         where F: FnOnce(&mut Self) -> ResolveResult<T>
     {
-        self._open_scope();
+        self.locals.push(Local::new(None));
         let t = f(self);
-        self._close_scope();
+        self.locals.pop();
         
         t
     }
@@ -60,12 +80,10 @@ impl ResolveState {
     fn typed_scope<F, T>(&mut self, ty: BlockType, f: F) -> ResolveResult<T>
         where F: FnOnce(&mut Self) -> ResolveResult<T>
     {
-        let orig;
-        (orig, self.block_type) = (self.block_type, ty);
+        self.locals.push(Local::new(Some(ty)));
+        let t = f(self);
+        self.locals.pop();
 
-        let t = self.scope(f);
-
-        self.block_type = orig;
         t
     }
 
@@ -164,15 +182,15 @@ impl TraverseResolve for tree::Stmt {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
             tree::Stmt::Decl(d)   => d.traverse_rs(map),
-            tree::Stmt::Return(e) => match map.block_type {
+            tree::Stmt::Return(e) => match map.block_type() {
                 BlockType::Function => e.traverse_rs(map),
                 _ => Err(ResolveErr::CannotReturn)
             },
-            tree::Stmt::Break => match map.block_type {
+            tree::Stmt::Break => match map.block_type() {
                 BlockType::Loop => Ok(()),
                 _ => Err(ResolveErr::CannotBreak)
             },
-            tree::Stmt::Continue => match map.block_type {
+            tree::Stmt::Continue => match map.block_type() {
                 BlockType::Loop => Ok(()),
                 _ => Err(ResolveErr::CannotContinue)
             },
