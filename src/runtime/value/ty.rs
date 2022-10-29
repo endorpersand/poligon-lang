@@ -40,9 +40,7 @@ impl Display for ValueType {
                     },
                 };
 
-                f.write_str(
-                    &format!("({}) -> {}", pstrs.join(", "), ret)
-                )
+                write!(f, "({}) -> {}", pstrs.join(", "), ret)
             },
         }
     }

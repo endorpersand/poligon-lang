@@ -5,7 +5,7 @@ use crate::runtime::RuntimeErr;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RefValue<T> {
-    rc: Rc<RefCell<T>>,
+    pub(crate) rc: Rc<RefCell<T>>,
     mutable: bool
 }
 

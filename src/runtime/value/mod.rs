@@ -1,4 +1,5 @@
 use std::cell::Ref;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::ops::Deref;
 
@@ -13,6 +14,9 @@ mod op_impl;
 pub use fun::*;
 pub use ty::*;
 
+type GonList = RefValue<Vec<Value>>;
+type GonListPtr = *const std::cell::RefCell<Vec<Value>>;
+
 #[derive(PartialEq, Clone, Debug)]
 pub enum Value {
     Int(isize),
@@ -20,20 +24,51 @@ pub enum Value {
     Char(char),
     Str(String),
     Bool(bool),
-    List(RefValue<Vec<Value>>),
+    List(GonList),
     Unit,
     Fun(GonFun)
 }
 
-fn list_repr(l: &RefValue<Vec<Value>>) -> String {
-    format!("[{}]", {
-        // TODO: deal with recursion
-        let strs = l.borrow().iter()
-            .map(Value::repr)
-            .collect::<Vec<_>>();
+struct ListRepr {
+    refs: Vec<HashSet<GonListPtr>>
+}
+impl ListRepr {
+    fn new() -> Self {
+        ListRepr { refs: vec![] }
+    }
+    
+    fn contains(&self, t: &GonList) -> bool {
+        self.refs.iter()
+            .any(|s| s.contains(&Rc::as_ptr(&t.rc)))
+    }
 
-        strs.join(", ")
-    })
+    fn repr(&mut self, t: &Value) -> String {
+        // push scope:
+        self.refs.push(HashSet::new());
+
+        let result = match t {
+            Value::List(l) => if self.contains(l) {
+                String::from("[...]")
+            } else {
+                format!("[{}]", {
+                    self.refs.last_mut().unwrap().insert(Rc::as_ptr(&l.rc));
+        
+                    let strs = l.borrow().iter()
+                        .map(|t| self.repr(t))
+                        .collect::<Vec<_>>();
+                    
+                    strs.join(", ")
+                })
+            },
+            
+            t => t.repr(),
+        };
+
+        // pop scope:
+        self.refs.pop();
+        
+        result
+    }
 }
 
 /// Utility to cast values onto float and compare them
@@ -147,7 +182,7 @@ impl Value {
             Value::Char(c)  => format!("{:?}", c), // TODO: link these to language representations
             Value::Str(s)   => format!("{:?}", s), // TODO: link these to language representations
             Value::Bool(b)  => b.to_string(),
-            Value::List(l)  => list_repr(l),
+            Value::List(_)  => ListRepr::new().repr(self),
             Value::Unit     => ValueType::Unit.to_string(),
             Value::Fun(f)   => match &f.ident {
                 Some(n) => format!("<function {}>", n),
