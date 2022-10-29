@@ -205,8 +205,7 @@ impl TraverseResolve for tree::Expr {
                 rhs.traverse_rs(map)?;
                 lhs.traverse_rs(map, self)
             },
-            tree::Expr::Attr(_) => todo!(),
-            tree::Expr::StaticAttr(_) => todo!(),
+            tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(op) => op.traverse_rs(map),
             tree::Expr::BinaryOp(op) => op.traverse_rs(map),
             tree::Expr::Comparison { left, rights } => {
@@ -318,7 +317,7 @@ impl TRsDependent for tree::AsgUnit {
                 map.resolve(e, ident);
                 Ok(())
             },
-            tree::AsgUnit::Path(_, _) => todo!(),
+            tree::AsgUnit::Path(_) => todo!(),
             tree::AsgUnit::Index(idx) => idx.traverse_rs(map),
         }
     }

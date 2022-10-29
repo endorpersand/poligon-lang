@@ -205,8 +205,7 @@ impl TraverseRt for tree::Expr {
                 assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
-            tree::Expr::Attr(_) => todo!(),
-            tree::Expr::StaticAttr(_) => todo!(),
+            tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
             tree::Expr::BinaryOp(o) => o.traverse_rt(ctx),
             tree::Expr::Comparison { left, rights } => {
@@ -404,7 +403,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
             tree::AsgUnit::Ident(ident) => {
                 ctx.set_var(ident, rhs, from)?
             },
-            tree::AsgUnit::Path(_, _) => todo!(),
+            tree::AsgUnit::Path(_) => todo!(),
             tree::AsgUnit::Index(idx) => {
                 let tree::Index {expr, index} = idx;
                 

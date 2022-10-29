@@ -57,8 +57,7 @@ pub enum Expr {
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
     
     Assign(AsgPat, Box<Expr>),
-    Attr(Attr), // a.b.c.d
-    StaticAttr(Attr), // a::b::c::d
+    Path(Path),
     UnaryOps(UnaryOps),
     BinaryOp(BinaryOp),
     Comparison {
@@ -110,9 +109,12 @@ impl Literal {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Attr {
+pub struct Path {
     pub obj: Box<Expr>,
-    pub attr: String
+
+    // the attribute & whether or not it's static
+    // a.b.c.d vs a::b::c::d
+    pub attrs: Vec<(String, bool)>
 }
 
 #[derive(Debug, PartialEq)]
@@ -143,7 +145,7 @@ pub struct Index {
 #[derive(Debug, PartialEq)]
 pub enum AsgUnit {
     Ident(String),
-    Path(Attr, bool /* static? */),
+    Path(Path),
     Index(Index)
 }
 #[derive(Debug, PartialEq)]
@@ -163,8 +165,7 @@ impl TryFrom<Expr> for AsgPat {
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
             Expr::Ident(ident)     => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
-            Expr::Attr(attr)       => Ok(AsgPat::Unit(AsgUnit::Path(attr, false))),
-            Expr::StaticAttr(attr) => Ok(AsgPat::Unit(AsgUnit::Path(attr, true))),
+            Expr::Path(attrs)      => Ok(AsgPat::Unit(AsgUnit::Path(attrs))),
             Expr::Index(idx)       => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
             Expr::ListLiteral(lst) => {
                 let vec = lst.into_iter()

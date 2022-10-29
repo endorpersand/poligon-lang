@@ -698,23 +698,25 @@ impl Parser {
     /// Match a path. (a.b.c::d::e::f.g.h.i)
     fn match_path(&mut self) -> ParseResult<Option<tree::Expr>> {
         if let Some(mut e) = self.match_unit()? {
-            let mut segments = vec![];
+            let mut attrs = vec![];
 
             while let Some(t) = self.match_n(&[token![.], token![::]]) {
-                segments.push((t, self.expect_ident()?));
+                let static_attr = match t {
+                    token![.]  => false,
+                    token![::] => true,
+                    _ => unreachable!()
+                };
+
+                attrs.push((self.expect_ident()?, static_attr));
             }
 
-            e = segments.into_iter()
-                .rfold(e, |expr, (t, ident)| match t {
-                    token![.]  => tree::Expr::Attr(tree::Attr {
-                        obj: Box::new(expr), attr: ident
-                    }),
-                    token![::] => tree::Expr::StaticAttr(tree::Attr {
-                        obj: Box::new(expr), attr: ident
-                    }),
-                    _ => unreachable!()
-                });
-
+            if !attrs.is_empty() {
+                e = tree::Expr::Path(tree::Path {
+                    obj: Box::new(e),
+                    attrs
+                })
+            }
+            
             Ok(Some(e))
         } else {
             Ok(None)
