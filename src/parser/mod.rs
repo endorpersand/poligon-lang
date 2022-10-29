@@ -275,13 +275,8 @@ impl Parser {
             _ => unreachable!()
         };
         
-        let mt = if self.match1(token![mut]) {
-            tree::MutType::Mut
-        } else {
-            tree::MutType::Immut
-        };
-
-        let ident = self.expect_ident()?;
+        let pat = self.match_decl_pat()?
+            .ok_or(ParseErr::ExpectedPattern)?;
 
         let ty = if self.match1(token![:]) {
             Some(self.expect_type()?)
@@ -294,11 +289,45 @@ impl Parser {
 
         Ok(tree::Decl {
             rt,
-            mt,
-            ident,
+            pat,
             ty,
             val: expr
         })
+    }
+
+    fn match_decl_pat(&mut self) -> ParseResult<Option<tree::DeclPat>> {
+        if let Some(t) = self.tokens.get(0) {
+            let pat = match t {
+                token!["["] => {
+                    self.expect1(token!["["])?;
+                    let tpl = self.expect_tuple_of(Parser::match_decl_pat)?;
+                    self.expect1(token!["]"])?;
+
+                    tree::DeclPat::List(tpl)
+                },
+                token![..] => {
+                    self.expect1(token![..])?;
+                    let item = self.match_decl_pat()?.map(Box::new);
+
+                    tree::DeclPat::Spread(item)
+                }
+                token![mut] | Token::Ident(_) => {
+                    let mt = if self.match1(token![mut]) {
+                        tree::MutType::Mut
+                    } else {
+                        tree::MutType::Immut
+                    };
+
+                    let node = tree::DeclUnit::Ident(self.expect_ident()?, mt);
+                    tree::DeclPat::Unit(node)
+                },
+                _ => return Ok(None)
+            };
+
+            Ok(Some(pat))
+        } else {
+            Ok(None)
+        }
     }
 
     /// If the next tokens match a function parameter, 
@@ -1040,22 +1069,19 @@ mod tests {
         " => vec![
             tree::Stmt::Decl(tree::Decl { 
                 rt: tree::ReasgType::Let, 
-                mt: tree::MutType::Immut, 
-                ident: String::from("a"), 
+                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("a"), tree::MutType::Immut)), 
                 ty: None, 
                 val: tree::Expr::Literal(tree::Literal::Int(0))
             }),
             tree::Stmt::Decl(tree::Decl { 
                 rt: tree::ReasgType::Let, 
-                mt: tree::MutType::Immut, 
-                ident: String::from("b"), 
+                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("b"), tree::MutType::Immut)), 
                 ty: None, 
                 val: tree::Expr::Literal(tree::Literal::Int(1))
             }),
             tree::Stmt::Decl(tree::Decl { 
                 rt: tree::ReasgType::Let, 
-                mt: tree::MutType::Immut, 
-                ident: String::from("c"), 
+                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("c"), tree::MutType::Immut)), 
                 ty: None, 
                 val: tree::Expr::Literal(tree::Literal::Int(2))
             }),
@@ -1065,8 +1091,7 @@ mod tests {
                     tree::Program(vec![
                         tree::Stmt::Decl(tree::Decl { 
                             rt: tree::ReasgType::Let, 
-                            mt: tree::MutType::Immut, 
-                            ident: String::from("d"), 
+                            pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("d"), tree::MutType::Immut)), 
                             ty: None, 
                             val: tree::Expr::Literal(tree::Literal::Int(3))
                         })

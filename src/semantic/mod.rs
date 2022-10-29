@@ -319,10 +319,9 @@ impl TraverseResolve for tree::Expr {
 
 impl TraverseResolve for tree::Decl {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        let tree::Decl { ident, val, .. } = self;
+        let tree::Decl { pat, val, .. } = self;
 
-        // map.partial_declare(ident);
-        map.declare(ident);
+        pat.traverse_rs(map)?;
         val.traverse_rs(map)
     }
 }
@@ -411,7 +410,7 @@ impl TRsDependent for tree::AsgUnit {
 impl TraverseResolve for tree::DeclUnit {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
-            tree::DeclUnit::Ident(ident) => {
+            tree::DeclUnit::Ident(ident, _) => {
                 map.declare(ident);
                 Ok(())
             },
@@ -464,8 +463,7 @@ mod test {
         let program = Program(vec![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
-                mt: MutType::Immut, 
-                ident: String::from("a"), 
+                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
@@ -480,8 +478,7 @@ mod test {
         let program = Program(vec![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
-                mt: MutType::Immut, 
-                ident: String::from("a"), 
+                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
@@ -497,8 +494,7 @@ mod test {
             Stmt::Expr(Expr::Block(Program(vec![
                 Stmt::Decl(Decl {
                     rt: ReasgType::Const, 
-                    mt: MutType::Immut, 
-                    ident: String::from("a"), 
+                    pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                     ty: None, 
                     val: Expr::Literal(Literal::Int(0)),
                 }),

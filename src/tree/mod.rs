@@ -18,8 +18,7 @@ pub enum Stmt {
 #[derive(Debug, PartialEq)]
 pub struct Decl {
     pub rt: ReasgType,
-    pub mt: MutType,
-    pub ident: String,
+    pub pat: DeclPat,
     pub ty: Option<Type>,
     pub val: Expr
 }
@@ -151,7 +150,7 @@ pub enum AsgUnit {
 }
 #[derive(Debug, PartialEq)]
 pub enum DeclUnit {
-    Ident(String),
+    Ident(String, MutType),
     Expr(Expr)
 }
 
@@ -179,16 +178,6 @@ impl TryFrom<Expr> for AsgUnit {
             Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
             Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
             Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
-            _ => Err(PatErr::InvalidAssignTarget)
-        }
-    }
-}
-impl TryFrom<Expr> for DeclUnit {
-    type Error = PatErr;
-    
-    fn try_from(value: Expr) -> Result<Self, Self::Error> {
-        match value {
-            Expr::Ident(ident) => Ok(DeclUnit::Ident(ident)),
             _ => Err(PatErr::InvalidAssignTarget)
         }
     }
