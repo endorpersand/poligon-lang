@@ -865,7 +865,7 @@ mod tests {
     fn char_lex() {
         assert_lex!("'a'" => vec![Token::Char('a')]);
         assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
-        assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 1)));
+        assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 0)));
     }
 
     #[test]

@@ -928,13 +928,13 @@ impl Parser {
 mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
-    use crate::tree::op;
+    use crate::tree::*;
 
-    use super::{tree, parse, ParseErr, Parser};
+    use super::{parse, ParseErr, Parser};
 
     macro_rules! assert_parse {
         ($s:expr => $r:expr) => {
-            assert_eq!(parse_str(&$s), Ok(tree::Program($r)))
+            assert_eq!(parse_str(&$s), Ok(Program($r)))
         }
     }
     macro_rules! assert_parse_fail {
@@ -943,34 +943,34 @@ mod tests {
         }
     }
 
-    fn parse_str(s: &str) -> Result<tree::Program, ParseErr> {
+    fn parse_str(s: &str) -> Result<Program, ParseErr> {
         parse(tokenize(s).unwrap())
     }
 
     #[test]
     fn expression_test() {
         assert_parse!("2 + 3;" => vec![
-            tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
+            Stmt::Expr(Expr::BinaryOp(BinaryOp {
                 op: op::Binary::Add, 
-                left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
-                right: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+                left: Box::new(Expr::Literal(Literal::Int(2))), 
+                right: Box::new(Expr::Literal(Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("2 + 3 * 4;" => vec![
-            tree::Stmt::Expr(tree::Expr::BinaryOp(tree::BinaryOp {
+            Stmt::Expr(Expr::BinaryOp(BinaryOp {
                 op: op::Binary::Add, 
-                left: Box::new(tree::Expr::Literal(tree::Literal::Int(2))), 
-                right: Box::new(tree::Expr::BinaryOp(tree::BinaryOp {
+                left: Box::new(Expr::Literal(Literal::Int(2))), 
+                right: Box::new(Expr::BinaryOp(BinaryOp {
                     op: op::Binary::Mul, 
-                    left: Box::new(tree::Expr::Literal(tree::Literal::Int(3))), 
-                    right: Box::new(tree::Expr::Literal(tree::Literal::Int(4)))
+                    left: Box::new(Expr::Literal(Literal::Int(3))), 
+                    right: Box::new(Expr::Literal(Literal::Int(4)))
                 }))
             }))
         ]);
 
         assert_parse!("{}" => vec![
-            tree::Stmt::Expr(tree::Expr::Block(tree::Program(vec![])))
+            Stmt::Expr(Expr::Block(Program(vec![])))
         ])
     }
 
@@ -979,9 +979,9 @@ mod tests {
         assert_parse!("if true {
             // :)
         }" => vec![
-            tree::Stmt::Expr(tree::Expr::If(tree::If {
+            Stmt::Expr(Expr::If(If {
                 conditionals: vec![
-                    ((tree::Expr::Literal(tree::Literal::Bool(true)), tree::Program(vec![])))
+                    ((Expr::Literal(Literal::Bool(true)), Program(vec![])))
                 ],
                 last: None
             }))
@@ -992,11 +992,11 @@ mod tests {
         } else {
             // :(
         }" => vec![
-            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+            Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (tree::Expr::Literal(tree::Literal::Bool(true)), tree::Program(vec![]))
+                    (Expr::Literal(Literal::Bool(true)), Program(vec![]))
                 ],
-                last: Some(tree::Program(vec![]))
+                last: Some(Program(vec![]))
             }))
         ]);
 
@@ -1007,12 +1007,12 @@ mod tests {
         } else {
             // :(
         }" => vec![
-            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+            Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (tree::Expr::Literal(tree::Literal::Bool(true)), tree::Program(vec![])),
-                    (tree::Expr::Ident("condition".to_string()), tree::Program(vec![]))
+                    (Expr::Literal(Literal::Bool(true)), Program(vec![])),
+                    (Expr::Ident("condition".to_string()), Program(vec![]))
                 ],
-                last: Some(tree::Program(vec![]))
+                last: Some(Program(vec![]))
             }))
         ]);
 
@@ -1029,15 +1029,15 @@ mod tests {
         } else {
             // :(
         }" => vec![
-            tree::Stmt::Expr(tree::Expr::If(tree::If { 
+            Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (tree::Expr::Literal(tree::Literal::Bool(true)), tree::Program(vec![])),
-                    (tree::Expr::Ident("condition".to_string()), tree::Program(vec![])),
-                    (tree::Expr::Ident("condition".to_string()), tree::Program(vec![])),
-                    (tree::Expr::Ident("condition".to_string()), tree::Program(vec![])),
-                    (tree::Expr::Ident("condition".to_string()), tree::Program(vec![])),
+                    (Expr::Literal(Literal::Bool(true)), Program(vec![])),
+                    (Expr::Ident("condition".to_string()), Program(vec![])),
+                    (Expr::Ident("condition".to_string()), Program(vec![])),
+                    (Expr::Ident("condition".to_string()), Program(vec![])),
+                    (Expr::Ident("condition".to_string()), Program(vec![])),
                 ],
-                last: Some(tree::Program(vec![]))
+                last: Some(Program(vec![]))
             }))
         ]);
     }
@@ -1046,15 +1046,15 @@ mod tests {
     fn semicolon_test() {
         assert_parse_fail!("2 2" => ParseErr::ExpectedTokens(vec![token![;]]));
 
-        assert_parse!("if cond {}" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
+        assert_parse!("if cond {}" => vec![Stmt::Expr(Expr::If(If {
             conditionals: vec![
-                (tree::Expr::Ident("cond".to_string()), tree::Program(vec![]))
+                (Expr::Ident("cond".to_string()), Program(vec![]))
             ],
             last: None
         }))]);
-        assert_parse!("if cond {};" => vec![tree::Stmt::Expr(tree::Expr::If(tree::If {
+        assert_parse!("if cond {};" => vec![Stmt::Expr(Expr::If(If {
             conditionals: vec![
-                (tree::Expr::Ident("cond".to_string()), tree::Program(vec![]))
+                (Expr::Ident("cond".to_string()), Program(vec![]))
             ],
             last: None
         }))]);
@@ -1067,33 +1067,33 @@ mod tests {
             let d = 3;
         }
         " => vec![
-            tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasgType::Let, 
-                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("a"), tree::MutType::Immut)), 
+            Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                 ty: None, 
-                val: tree::Expr::Literal(tree::Literal::Int(0))
+                val: Expr::Literal(Literal::Int(0))
             }),
-            tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasgType::Let, 
-                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("b"), tree::MutType::Immut)), 
+            Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: DeclPat::Unit(DeclUnit::Ident(String::from("b"), MutType::Immut)), 
                 ty: None, 
-                val: tree::Expr::Literal(tree::Literal::Int(1))
+                val: Expr::Literal(Literal::Int(1))
             }),
-            tree::Stmt::Decl(tree::Decl { 
-                rt: tree::ReasgType::Let, 
-                pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("c"), tree::MutType::Immut)), 
+            Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: DeclPat::Unit(DeclUnit::Ident(String::from("c"), MutType::Immut)), 
                 ty: None, 
-                val: tree::Expr::Literal(tree::Literal::Int(2))
+                val: Expr::Literal(Literal::Int(2))
             }),
-            tree::Stmt::Expr(tree::Expr::If(tree::If {
+            Stmt::Expr(Expr::If(If {
                 conditionals: vec![(
-                    tree::Expr::Ident("cond".to_string()),
-                    tree::Program(vec![
-                        tree::Stmt::Decl(tree::Decl { 
-                            rt: tree::ReasgType::Let, 
-                            pat: tree::DeclPat::Unit(tree::DeclUnit::Ident(String::from("d"), tree::MutType::Immut)), 
+                    Expr::Ident("cond".to_string()),
+                    Program(vec![
+                        Stmt::Decl(Decl { 
+                            rt: ReasgType::Let, 
+                            pat: DeclPat::Unit(DeclUnit::Ident(String::from("d"), MutType::Immut)), 
                             ty: None, 
-                            val: tree::Expr::Literal(tree::Literal::Int(3))
+                            val: Expr::Literal(Literal::Int(3))
                         })
                     ])
                 )],
@@ -1107,27 +1107,27 @@ mod tests {
         
         let tokens = tokenize("int").unwrap();
         assert_eq!(Parser::new(tokens).expect_type(), Ok(
-            tree::Type("int".to_string(), vec![])
+            Type("int".to_string(), vec![])
         ));
 
         let tokens = tokenize("dict<a, b>").unwrap();
 
         assert_eq!(Parser::new(tokens).expect_type(), Ok(
-            tree::Type("dict".to_string(), vec![
-                tree::Type("a".to_string(), vec![]),
-                tree::Type("b".to_string(), vec![])
+            Type("dict".to_string(), vec![
+                Type("a".to_string(), vec![]),
+                Type("b".to_string(), vec![])
             ])
         ));
 
         let tokens = tokenize("dict<list<list<int>>, str>").unwrap();
         assert_eq!(Parser::new(tokens).expect_type(), Ok(
-            tree::Type("dict".to_string(), vec![
-                tree::Type("list".to_string(), vec![
-                    tree::Type("list".to_string(), vec![
-                        tree::Type("int".to_string(), vec![])
+            Type("dict".to_string(), vec![
+                Type("list".to_string(), vec![
+                    Type("list".to_string(), vec![
+                        Type("int".to_string(), vec![])
                     ])
                 ]),
-                tree::Type("str".to_string(), vec![])
+                Type("str".to_string(), vec![])
             ])
         ));
     }
@@ -1137,36 +1137,36 @@ mod tests {
         assert_parse!("
         +3;
         " => vec![
-            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+            Stmt::Expr(Expr::UnaryOps(UnaryOps {
                 ops: vec![token![+].try_into().unwrap()],
-                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+                expr: Box::new(Expr::Literal(Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("
         +++++++3;
         " => vec![
-            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+            Stmt::Expr(Expr::UnaryOps(UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(7),
-                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+                expr: Box::new(Expr::Literal(Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("
         +-+-+-+-3;
         " => vec![
-            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+            Stmt::Expr(Expr::UnaryOps(UnaryOps {
                 ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
-                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+                expr: Box::new(Expr::Literal(Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("
-        ..+-+-+-+-3;
+        !+-+-+-+-3;
         " => vec![
-            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+            Stmt::Expr(Expr::UnaryOps(UnaryOps {
                 ops: vec![
-                    token![..].try_into().unwrap(), 
+                    token![!].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
@@ -1175,14 +1175,14 @@ mod tests {
                     token![-].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap()],
-                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(3)))
+                expr: Box::new(Expr::Literal(Literal::Int(3)))
             }))
         ]);
 
         assert_parse!("+(+2);" => vec![
-            tree::Stmt::Expr(tree::Expr::UnaryOps(tree::UnaryOps {
+            Stmt::Expr(Expr::UnaryOps(UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(2),
-                expr: Box::new(tree::Expr::Literal(tree::Literal::Int(2)))
+                expr: Box::new(Expr::Literal(Literal::Int(2)))
             }))
         ])
     }
