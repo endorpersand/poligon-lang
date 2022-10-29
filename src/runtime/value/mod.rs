@@ -94,18 +94,34 @@ impl<'a> Iterator for ListValueIter<'a> {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.r.take() {
-            Some(borrow) => match *borrow {
-                [] => None,
-                [_, ..] => {
-                    let (head, tail) = Ref::map_split(borrow, |slice| {
-                        (&slice[0], &slice[1..])
-                    });
-                    self.r.replace(tail);
-                    Some(head.clone())
-                }
-            },
-            None => None,
+        let borrow = self.r.take()?;
+        
+        match *borrow {
+            [] => None,
+            [_, ..] => {
+                let (head, tail) = Ref::map_split(borrow, |slice| {
+                    (&slice[0], &slice[1..])
+                });
+                self.r.replace(tail);
+                Some(head.clone())
+            }
+        }
+    }
+}
+impl<'a> DoubleEndedIterator for ListValueIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let borrow = self.r.take()?;
+        
+        match *borrow {
+            [] => None,
+            [.., _] => {
+                let (head, tail) = Ref::map_split(borrow, |slice| {
+                    let last = slice.len() - 1;
+                    (&slice[0..last], &slice[last])
+                });
+                self.r.replace(head);
+                Some(tail.clone())
+            }
         }
     }
 }
@@ -149,7 +165,7 @@ impl Value {
 
     /// If the current value can be interpreted as an iterator of values, convert it into an iterator.
     /// Otherwise, return `None`.
-    pub(super) fn as_iterator<'a>(&'a self) -> Option<Box<dyn Iterator<Item=Value> + 'a>> {
+    pub(super) fn as_iterator<'a>(&'a self) -> Option<Box<dyn DoubleEndedIterator<Item=Value> + 'a>> {
         match self {
             Value::Str(s)   => Some(Box::new(s.chars().map(Value::Char))),
             Value::List(l)  => {
