@@ -150,33 +150,62 @@ pub enum AsgUnit {
     Index(Index),
 }
 #[derive(Debug, PartialEq)]
-pub enum AsgPat {
-    Unit(AsgUnit),
-    Spread(Option<Box<AsgPat>>),
-    List(Vec<AsgPat>)
+pub enum DeclUnit {
+    Ident(String),
+    Expr(Expr)
 }
 
+
+#[derive(Debug, PartialEq)]
+pub enum Pat<T> {
+    Unit(T),
+    Spread(Option<Box<Self>>),
+    List(Vec<Self>)
+}
+pub type AsgPat = Pat<AsgUnit>;
+pub type DeclPat = Pat<DeclUnit>;
+
 #[derive(Debug, PartialEq, Eq)]
-pub enum AsgPatErr {
+pub enum PatErr {
     InvalidAssignTarget,
     CannotSpreadMultiple,
 }
 
-impl TryFrom<Expr> for AsgPat {
-    type Error = AsgPatErr;
+impl TryFrom<Expr> for AsgUnit {
+    type Error = PatErr;
+    
+    fn try_from(value: Expr) -> Result<Self, Self::Error> {
+        match value {
+            Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
+            Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
+            Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
+            _ => Err(PatErr::InvalidAssignTarget)
+        }
+    }
+}
+impl TryFrom<Expr> for DeclUnit {
+    type Error = PatErr;
+    
+    fn try_from(value: Expr) -> Result<Self, Self::Error> {
+        match value {
+            Expr::Ident(ident) => Ok(DeclUnit::Ident(ident)),
+            _ => Err(PatErr::InvalidAssignTarget)
+        }
+    }
+}
+
+impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
+    type Error = PatErr;
 
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
-            Expr::Ident(ident) => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
-            Expr::Path(attrs)  => Ok(AsgPat::Unit(AsgUnit::Path(attrs))),
-            Expr::Index(idx)   => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
             Expr::Spread(me) => match me {
                 Some(e) => {
-                    let inner = Some(Box::new(AsgPat::try_from(*e)?));
+                    let inner = Some(Box::new(Self::try_from(*e)?));
                     
-                    Ok(AsgPat::Spread(inner))
+                    Ok(Self::Spread(inner))
                 },
-                None => Ok(AsgPat::Spread(None)),
+                None => Ok(Self::Spread(None)),
             }
             Expr::ListLiteral(lst) => {
                 let vec: Vec<_> = lst.into_iter()
@@ -185,16 +214,20 @@ impl TryFrom<Expr> for AsgPat {
 
                 // check spread count is <2
                 let mut it = vec.iter()
-                    .filter(|pat| matches!(pat, AsgPat::Spread(_)));
+                    .filter(|pat| matches!(pat, Self::Spread(_)));
                 
                 it.next(); // skip 
                 if it.next().is_some() {
-                    Err(AsgPatErr::CannotSpreadMultiple)
+                    Err(PatErr::CannotSpreadMultiple)
                 } else {
-                    Ok(AsgPat::List(vec))
+                    Ok(Self::List(vec))
                 }
             }
-            _ => Err(AsgPatErr::InvalidAssignTarget),
+            e => {
+                let unit = T::try_from(e)?;
+                
+                Ok(Self::Unit(unit))
+            }
         }
     }
 }

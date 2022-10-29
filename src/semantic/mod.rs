@@ -371,13 +371,25 @@ impl TraverseResolve for tree::Index {
     }
 }
 
-impl TRsDependent for tree::AsgPat {
+impl<T: TRsDependent> TRsDependent for tree::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
         match self {
-            tree::AsgPat::Unit(u) => u.traverse_rs(map, e),
-            tree::AsgPat::List(lst) => lst.traverse_rs(map, e),
-            tree::AsgPat::Spread(mp) => match mp {
+            tree::Pat::Unit(u) => u.traverse_rs(map, e),
+            tree::Pat::List(lst) => lst.traverse_rs(map, e),
+            tree::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map, e),
+                None => Ok(()),
+            },
+        }
+    }
+}
+impl<T: TraverseResolve> TraverseResolve for tree::Pat<T> {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        match self {
+            tree::Pat::Unit(u) => u.traverse_rs(map),
+            tree::Pat::List(lst) => lst.traverse_rs(map),
+            tree::Pat::Spread(mp) => match mp {
+                Some(p) => p.traverse_rs(map),
                 None => Ok(()),
             },
         }
@@ -396,6 +408,18 @@ impl TRsDependent for tree::AsgUnit {
         }
     }
 }
+impl TraverseResolve for tree::DeclUnit {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        match self {
+            tree::DeclUnit::Ident(ident) => {
+                map.declare(ident);
+                Ok(())
+            },
+            tree::DeclUnit::Expr(_) => todo!(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;

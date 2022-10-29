@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::GonErr;
 use crate::lexer::token::{Token, token};
-use crate::tree::{self, AsgPatErr};
+use crate::tree::{self, PatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=Token>) -> ParseResult<tree::Program> {
     Parser::new(tokens).parse()
@@ -31,7 +31,7 @@ pub enum ParseErr {
     ExpectedBlock,
     ExpectedType,
     ExpectedPattern,
-    AsgPatErr(AsgPatErr)
+    AsgPatErr(PatErr)
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {

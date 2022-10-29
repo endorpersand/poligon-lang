@@ -9,7 +9,8 @@ use crate::{GonErr, tree};
 use crate::util::RvErr;
 
 use crate::tree::op;
-use self::value::{Value, ValueType, VArbType, FunType, FunParamType};
+pub use self::value::Value;
+use self::value::{ValueType, VArbType, FunType, FunParamType};
 use self::vars::VarContext;
 
 pub(crate) mod value;
@@ -161,7 +162,7 @@ impl GonErr for RuntimeErr {
         format!("{:?}", self)
     }
 }
-type RtResult<T> = Result<T, RuntimeErr>;
+pub type RtResult<T> = Result<T, RuntimeErr>;
 
 pub enum TermOp<T, E> {
     Err(E),
@@ -413,86 +414,103 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
         TermOp::Continue  => RuntimeErr::CannotContinue,
     }
 }
-fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tree::Expr) -> RtResult<Value> {
-    let val = match pat {
-        tree::AsgPat::Unit(unit) => match unit {
-            tree::AsgUnit::Ident(ident) => {
-                ctx.set_var(ident, rhs, from)?
-            },
-            tree::AsgUnit::Path(_) => todo!(),
-            tree::AsgUnit::Index(idx) => {
-                let tree::Index {expr, index} = idx;
-                
-                let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
-                let index_val = index.traverse_rt(ctx).map_err(into_err)?;
 
-                val.set_index(index_val, rhs)?
-            },
-        },
-        tree::AsgPat::List(pats) => {
-            let mut it = rhs.as_iterator()
-                .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
+impl<T> tree::Pat<T> {
+    pub fn unpack<F>(&self, rhs: crate::runtime::Value, mut unit_mapper: F) -> RtResult<Value>
+        where F: FnMut(&T, Value) -> RtResult<Value>
+    {
+        self.unpack_mut(rhs, &mut unit_mapper)
+    }
 
-            let has_spread = pats.iter().any(|p| matches!(p, tree::AsgPat::Spread(_)));
-            let mut left_values = vec![];
-            let mut right_values = vec![];
-            let mut consumed = 0;
-
-            for (i, p) in pats.iter().enumerate() {
-                if matches!(p, tree::AsgPat::Spread(_)) {
-                    consumed = i;
-                    break;
-                } else if let Some(t) = it.next() {
-                    left_values.push(t);
-                } else {
-                    // we ran out of elements:
-
-                    if has_spread {
-                        Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))
-                    } else {
-                        Err(RuntimeErr::UnpackTooLittle(pats.len(), i))
-                    }?
-                };
-            }
-
-            if has_spread {
-                // do the reverse pass:
-                for (i, p) in std::iter::zip(consumed.., pats.iter().rev()) {
-                    if matches!(p, tree::AsgPat::Spread(_)) {
+    /// Unpack with a mutable reference to a closure.
+    /// This is necessary because the mutable reference is passed several times.
+    /// 
+    /// This function is used to implement `unpack`.
+    fn unpack_mut<F>(&self, rhs: crate::runtime::Value, unit_mapper: &mut F) -> RtResult<Value>
+        where F: FnMut(&T, Value) -> RtResult<Value>
+    {
+        match self {
+            tree::Pat::Unit(unit) => unit_mapper(unit, rhs),
+            tree::Pat::List(pats) => {
+                let mut it = rhs.as_iterator()
+                    .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
+    
+                let has_spread = pats.iter().any(|p| matches!(p, Self::Spread(_)));
+                let mut left_values = vec![];
+                let mut right_values = vec![];
+                let mut consumed = 0;
+    
+                for (i, p) in pats.iter().enumerate() {
+                    if matches!(p, Self::Spread(_)) {
+                        consumed = i;
                         break;
-                    } else if let Some(t) = it.next_back() {
-                        right_values.push(t);
+                    } else if let Some(t) = it.next() {
+                        left_values.push(t);
                     } else {
                         // we ran out of elements:
-                        Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))?
+    
+                        if has_spread {
+                            Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))
+                        } else {
+                            Err(RuntimeErr::UnpackTooLittle(pats.len(), i))
+                        }?
                     };
                 }
-            } else {
-                // confirm no extra elements:
-                if it.next().is_some() {
-                    Err(RuntimeErr::UnpackTooMany(pats.len()))?
+    
+                if has_spread {
+                    // do the reverse pass:
+                    for (i, p) in std::iter::zip(consumed.., pats.iter().rev()) {
+                        if matches!(p, Self::Spread(_)) {
+                            break;
+                        } else if let Some(t) = it.next_back() {
+                            right_values.push(t);
+                        } else {
+                            // we ran out of elements:
+                            Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))?
+                        };
+                    }
+                } else {
+                    // confirm no extra elements:
+                    if it.next().is_some() {
+                        Err(RuntimeErr::UnpackTooMany(pats.len()))?
+                    }
                 }
-            }
-            
-            let middle_values = Value::new_list(it.collect());
+                
+                let middle_values = Value::new_list(it.collect());
+    
+                let val_chain = left_values.into_iter()
+                    .chain(std::iter::once(middle_values))
+                    .chain(right_values);
+                
+                for (pat, val) in std::iter::zip(pats, val_chain) {
+                    pat.unpack_mut(val, unit_mapper)?;
+                }
+                
+                Ok(rhs)
+            },
+            tree::Pat::Spread(mp) => match mp {
+                Some(p) => p.unpack_mut(rhs, unit_mapper),
+                None => Ok(rhs), // we can dispose if spread is None, TODO!: what does a no-spread return?
+            },
+        }
+    }
+}
 
-            let val_chain = left_values.into_iter()
-                .chain(std::iter::once(middle_values))
-                .chain(right_values);
-            
-            for (pat, val) in std::iter::zip(pats, val_chain) {
-                assign_pat(pat, val, ctx, from)?;
-            }
-
-            rhs
+fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tree::Expr) -> RtResult<Value> {
+    pat.unpack(rhs, |unit, rhs| match unit {
+        tree::AsgUnit::Ident(ident) => {
+            ctx.set_var(ident, rhs, from)
         },
-        tree::AsgPat::Spread(mp) => match mp {
-            Some(p) => assign_pat(&**p, rhs, ctx, from)?,
-            None => rhs, // we can dispose if spread is None, TODO!: what does a no-spread return?
+        tree::AsgUnit::Path(_) => todo!(),
+        tree::AsgUnit::Index(idx) => {
+            let tree::Index {expr, index} = idx;
+            
+            let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
+            let index_val = index.traverse_rt(ctx).map_err(into_err)?;
+    
+            val.set_index(index_val, rhs)
         },
-    };
-
-    Ok(val)
+    })
 }
 
 impl TraverseRt for tree::Literal {

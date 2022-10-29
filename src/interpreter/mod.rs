@@ -9,7 +9,7 @@ use std::{io, fs};
 use std::path::Path;
 
 use crate::{FullGonErr, tree};
-use crate::runtime::value::Value;
+use crate::runtime::Value;
 use crate::{lexer, parser};
 
 /// The struct that performs the full processing from string to execution.
