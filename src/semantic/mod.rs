@@ -374,12 +374,7 @@ impl TraverseResolve for tree::Index {
 impl TRsDependent for tree::AsgPat {
     fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
         match self {
-            tree::AsgPat::Ident(ident) => {
-                map.resolve(e, ident);
-                Ok(())
-            },
-            tree::AsgPat::Path(_) => todo!(),
-            tree::AsgPat::Index(idx) => idx.traverse_rs(map),
+            tree::AsgPat::Unit(u) => u.traverse_rs(map, e),
             tree::AsgPat::List(lst) => lst.traverse_rs(map, e),
             tree::AsgPat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map, e),
@@ -389,6 +384,18 @@ impl TRsDependent for tree::AsgPat {
     }
 }
 
+impl TRsDependent for tree::AsgUnit {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
+        match self {
+            tree::AsgUnit::Ident(ident) => {
+                map.resolve(e, ident);
+                Ok(())
+            },
+            tree::AsgUnit::Path(_) => todo!(),
+            tree::AsgUnit::Index(idx) => idx.traverse_rs(map),
+        }
+    }
+}
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;

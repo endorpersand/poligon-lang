@@ -415,17 +415,19 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
 }
 fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tree::Expr) -> RtResult<Value> {
     let val = match pat {
-        tree::AsgPat::Ident(ident) => {
-            ctx.set_var(ident, rhs, from)?
-        },
-        tree::AsgPat::Path(_) => todo!(),
-        tree::AsgPat::Index(idx) => {
-            let tree::Index {expr, index} = idx;
-            
-            let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
-            let index_val = index.traverse_rt(ctx).map_err(into_err)?;
+        tree::AsgPat::Unit(unit) => match unit {
+            tree::AsgUnit::Ident(ident) => {
+                ctx.set_var(ident, rhs, from)?
+            },
+            tree::AsgUnit::Path(_) => todo!(),
+            tree::AsgUnit::Index(idx) => {
+                let tree::Index {expr, index} = idx;
+                
+                let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
+                let index_val = index.traverse_rt(ctx).map_err(into_err)?;
 
-            val.set_index(index_val, rhs)?
+                val.set_index(index_val, rhs)?
+            },
         },
         tree::AsgPat::List(pats) => {
             let mut it = rhs.as_iterator()

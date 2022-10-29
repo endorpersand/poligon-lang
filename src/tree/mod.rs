@@ -144,10 +144,14 @@ pub struct Index {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum AsgPat {
+pub enum AsgUnit {
     Ident(String),
     Path(Path),
     Index(Index),
+}
+#[derive(Debug, PartialEq)]
+pub enum AsgPat {
+    Unit(AsgUnit),
     Spread(Option<Box<AsgPat>>),
     List(Vec<AsgPat>)
 }
@@ -163,9 +167,9 @@ impl TryFrom<Expr> for AsgPat {
 
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
-            Expr::Ident(ident) => Ok(AsgPat::Ident(ident)),
-            Expr::Path(attrs)  => Ok(AsgPat::Path(attrs)),
-            Expr::Index(idx)   => Ok(AsgPat::Index(idx)),
+            Expr::Ident(ident) => Ok(AsgPat::Unit(AsgUnit::Ident(ident))),
+            Expr::Path(attrs)  => Ok(AsgPat::Unit(AsgUnit::Path(attrs))),
+            Expr::Index(idx)   => Ok(AsgPat::Unit(AsgUnit::Index(idx))),
             Expr::Spread(me) => match me {
                 Some(e) => {
                     let inner = Some(Box::new(AsgPat::try_from(*e)?));
