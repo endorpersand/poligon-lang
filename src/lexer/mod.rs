@@ -9,7 +9,7 @@ use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr};
 
-use self::token::{Token, Keyword, OPMAP, Delimiter, token};
+use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
 
 pub fn tokenize(input: &str) -> LexResult<Vec<Token>> {
@@ -34,7 +34,7 @@ pub enum LexErr {
     /// A char literal was empty (`''`).
     EmptyChar,
 
-    /// The string of characters created made an operator which could not be resolved
+    /// The string of characters are punctuation but they don't create a valid operator ('@')
     UnknownOp(String),
 
     /// A delimiter was closed with the wrong type (e.g. `[ ... )`)
@@ -65,7 +65,7 @@ impl GonErr for LexErr {
             LexErr::UnclosedQuote       => String::from("quote was never terminated"),
             LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
             LexErr::EmptyChar           => String::from("char literal cannot be empty"),
-            LexErr::UnknownOp(_op)      => String::from("unexpected operator"),
+            LexErr::UnknownOp(op)       => format!("operator \"{}\" does not exist", op),
             LexErr::MismatchedDelimiter => String::from("mismatched delimiter"),
             LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
@@ -117,45 +117,8 @@ impl CharClass {
 
 type Cursor = (usize, usize);
 
-struct CursorTicker {
-    // assume cursor is pointing to the character AFTER the last character
-    cursor: Cursor
-}
-
-impl CursorTicker {
-    fn increment_by(&mut self, dlno: usize, dcno: usize) {
-        let (ilno, icno) = self.cursor;
-
-        self.cursor = if dlno != 0 {
-            (ilno + dlno, dcno)
-        } else {
-            (ilno, icno + dcno)
-        }
-    }
-
-    fn fwd_str(&mut self, s: &str) {
-        // lines from bottom to top
-        let mut chiter = s.rsplit('\n');
-
-        let (dlno, dcno) = match chiter.next() {
-            // non-empty:
-            // count how many lines we've traversed, and the length of the last line
-            Some(line) => (chiter.count(), line.len()),
-            // empty:
-            None => (0, 0),
-        };
-
-        self.increment_by(dlno, dcno);
-    }
-
-    fn fwd_chr(&mut self, c: char) {
-        let (dlno, dcno) = if c == '\n' { (1, 0) } else { (0, 1) };
-        self.increment_by(dlno, dcno);
-    }
-
-    fn add((lno, cno): Cursor, chars: usize) -> Cursor {
-        (lno, cno + chars)
-    }
+fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
+    (lno, cno + chars)
 }
 
 struct LiteralCharReader<'lx> {
@@ -299,7 +262,7 @@ macro_rules! char_class_or_err {
 }
 
 pub struct Lexer {
-    tokens: Vec<Token>,
+    tokens: Vec<FullToken>,
     delimiters: Vec<(Cursor, Delimiter)>,
     
     cursor: Cursor,
@@ -363,7 +326,8 @@ impl Lexer {
     /// Consume the lexer and return the tokens in it.
     pub fn close(self) -> LexResult<Vec<Token>> {
         self.try_close()?;
-        Ok(self.tokens)
+        // TODO: FullToken
+        Ok(self.tokens.into_iter().map(|t| t.tt).collect())
     }
 
     fn peek_cursor(&self) -> Cursor {
@@ -390,6 +354,18 @@ impl Lexer {
         let mcd = self.remaining.pop_front();
         self._current = mcd;
         mcd
+    }
+
+    fn token_range(&self) -> std::ops::RangeInclusive<Cursor> {
+        self.token_start ..= self.cursor
+    }
+
+    fn push_token(&mut self, t: Token) {
+        self.push_token_with_range(t, self.token_range());
+    }
+    fn push_token_with_range(&mut self, t: Token, r: std::ops::RangeInclusive<Cursor>) {
+        let ft = FullToken::new(t, r);
+        self.tokens.push(ft);
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -424,7 +400,7 @@ impl Lexer {
         let token = Keyword::get_kw(&buf)
             .unwrap_or(Token::Ident(buf));
 
-        self.tokens.push(token);
+        self.push_token(token);
         Ok(())
     }
 
@@ -468,7 +444,7 @@ impl Lexer {
             }
         }
 
-        self.tokens.push(Token::Numeric(buf));
+        self.push_token(Token::Numeric(buf));
     }
 
     /// Analyzes the next characters in the input as a str (e.g. "hello").
@@ -482,7 +458,7 @@ impl Lexer {
         let mut reader = LiteralCharReader::new(self, qt);
 
         loop {
-            let chr_cursor = CursorTicker::add(reader.cursor(), 1);
+            let chr_cursor = cur_shift(reader.cursor(), 1);
             match reader.next() {
                 Ok(c) => buf.extend(c),
                 Err(e) => Err(match e {
@@ -500,7 +476,7 @@ impl Lexer {
         
         // Assert next char matches quote:
         if self.next().unwrap() == qt {
-            self.tokens.push(Token::Str(buf));
+            self.tokens.push(FullToken::new(Token::Str(buf), self.token_range()));
             Ok(())
         } else {
             // Loop can only be exited when terminal character is found.
@@ -516,7 +492,7 @@ impl Lexer {
         let qt = self.next().unwrap();
         
         let token_start = self.token_start;
-        let token_start_p1 = CursorTicker::add(token_start, 1);
+        let token_start_p1 = cur_shift(token_start, 1);
 
         let c = match LiteralCharReader::one(self, qt) {
             Ok(c) => Ok(c),
@@ -533,7 +509,7 @@ impl Lexer {
         // Assert next char matches quote:
         match self.next() {
             Some(chr) if chr == qt => {
-                self.tokens.push(Token::Char(c));
+                self.push_token(Token::Char(c));
                 Ok(())
             },
             Some(_) => Err(LexErr::ExpectedChar(qt).at(self.cursor)),
@@ -547,9 +523,6 @@ impl Lexer {
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
         let mut buf = String::new();
-        
-        let init_cursor = self.peek_cursor();
-        let mut buf_read = 0;
 
         while let Some(c) = self.match_cls(CharClass::Punct) {
             buf.push(c);
@@ -561,13 +534,11 @@ impl Lexer {
     
             // Find the largest length operator that matches the start of the operator buffer.
             let (op, token) = OPMAP.range(left..=right)
-                .rev()
-                .find(|(&op, _)| buf.starts_with(op))
+                .rev() // largest length
+                .find(|(&op, _)| buf.starts_with(op)) // that occurs in the text
                 .ok_or_else(|| {
-                    let (lno, icno) = self.cursor;
-                    let oplen = buf.len();
                     LexErr::UnknownOp(buf.clone())
-                        .at_range((lno, icno)..=(lno, icno + oplen))
+                        .at_range(self.token_start..=self.cursor)
                 })?;
             
             // Keep track of the delimiters.
@@ -575,7 +546,7 @@ impl Lexer {
             // If right delimiter, verify the top of the stack is the matching left delimiter 
             //      (or error if mismatch).
             if let Token::Delimiter(d) = token {
-                let pos = CursorTicker::add(init_cursor, buf_read);
+                let pos = self.token_start;
                 
                 if !d.is_right() {
                     self.delimiters.push((pos, *d));
@@ -587,18 +558,19 @@ impl Lexer {
             // Stop tokenizing when we're dealing with comments:
             if token == &token!["//"] {
                 buf.drain(..2);
-                // buf_read += 2;
                 return self.push_line_comment(buf);
             } else if token == &token!["/*"] {
                 buf.drain(..2);
-                buf_read += 2;
-                return self.push_multi_comment(buf, CursorTicker::add(init_cursor, buf_read));
+                return self.push_multi_comment(buf);
             }
             
-            self.tokens.push(token.clone());
             
             let len = op.len();
-            buf_read += len;
+
+            let token_end = cur_shift(self.token_start, len - 1);
+            self.push_token_with_range(token.clone(), self.token_start..=token_end);
+
+            self.token_start = cur_shift(self.token_start, len);
             buf.drain(..len);
         }
         Ok(())
@@ -616,7 +588,7 @@ impl Lexer {
         }
 
         let buf = String::from(buf.trim()); // lame allocation.
-        self.tokens.push(Token::Comment(buf, true));
+        self.push_token(Token::Comment(buf, true));
         Ok(())
     }
 
@@ -625,10 +597,17 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a multi-line comment 
     /// (/* this kind of comment */) to the output.
-    fn push_multi_comment(&mut self, mut buf: String, init_cursor: Cursor) -> LexResult<()> {
+    fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
         lazy_static! {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
         }
+
+        // since it is not possible to get \n from anything here it is safe to use in this function only
+        fn cur_shift_back((lno, cno): Cursor, chars: usize) -> Cursor {
+            (lno, cno - chars)
+        }
+
+        let comment_start = cur_shift(self.token_start, 2);
 
         //read the current buffer to determine if any comments have been opened or closed
         // note that there are recursive comments:
@@ -638,68 +617,43 @@ impl Lexer {
             let start = m.start();
             match m.as_str() {
                 "/*" => self.delimiters.push(
-                    (CursorTicker::add(init_cursor, start), Delimiter::LComment)
+                    (cur_shift(comment_start, start), Delimiter::LComment)
                 ),
                 "*/" => self.match_delimiter(
-                    CursorTicker::add(init_cursor, start), Delimiter::RComment
+                    cur_shift(comment_start, start), Delimiter::RComment
                 )?,
                 _ => {}
             }
         }
-        
-        let ci1 = buf.chars();
-        let mut ci2 = buf.chars();
-        ci2.next();
-
-        let mut ticker = CursorTicker { cursor: init_cursor };
-
-        let mut skip = false;
-        for pair in ci1.zip(ci2) {
-            if !skip {
-                if pair == ('/', '*') {
-                    self.delimiters.push((ticker.cursor, Delimiter::LComment));
-                    skip = true;
-                } else if pair == ('*', '/') {
-                    self.match_delimiter(ticker.cursor, Delimiter::RComment)?;
-                    skip = true;
-                }
-            }
-            
-            ticker.fwd_chr(pair.0);
-        }
-
-        let mut ticker = CursorTicker { cursor: init_cursor };
-        ticker.fwd_str(&buf);
 
         'com: while let Some((_, Delimiter::LComment)) = self.delimiters.last() {
             while let Some(chr) = self.next() {
                 buf.push(chr);
 
                 if buf.ends_with("/*") {
-                    self.delimiters.push((ticker.cursor, Delimiter::LComment));
-                    ticker.fwd_chr(chr);
+                    self.delimiters.push((cur_shift_back(self.cursor, 1), Delimiter::LComment));
                 } else if buf.ends_with("*/") {
-                    self.match_delimiter(ticker.cursor, Delimiter::RComment)?;
-                    ticker.fwd_chr(chr);
+                    self.match_delimiter(cur_shift_back(self.cursor, 1), Delimiter::RComment)?;
                     continue 'com;
                 }
             }
 
             // if we got here, the entire string got consumed... 
             // and the comment is still open.
-            return Err(LexErr::UnclosedComment.at(self.cursor));
+            return Err(LexErr::UnclosedComment.at_range(self.token_start..=self.cursor));
         }
 
         // there is a */ remaining:
         let (com, nbuf) = buf.rsplit_once("*/").expect("Expected closing */");
         
-        self.tokens.push(Token::Comment(String::from(com.trim()), false));
-
         // reinsert any remaining characters into the input
         let len = nbuf.len();
-
         self.remaining.extend(nbuf.chars());
         self.remaining.rotate_left(len);
+        // move cursor back to the end of the comment
+        self.cursor = cur_shift_back(self.cursor, len);
+
+        self.push_token(Token::Comment(String::from(com.trim()), false));
 
         Ok(())
     }

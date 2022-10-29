@@ -37,6 +37,17 @@ pub enum Token {
     LineSep
 }
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct FullToken {
+    pos: std::ops::RangeInclusive<(usize, usize)>,
+    pub(crate) tt: Token
+}
+
+impl FullToken {
+    pub fn new(tt: Token, pos: std::ops::RangeInclusive<(usize, usize)>) -> Self {
+        Self { pos, tt }
+    }
+}
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
         #[derive(PartialEq, Eq, Debug, Clone)]
