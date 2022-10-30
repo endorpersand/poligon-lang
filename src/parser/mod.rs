@@ -15,10 +15,12 @@ pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Pro
 }
 pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program> 
 {
-    if let Some(FullToken { pos, .. }) = tokens.last() {
-        let (lno, cno) = pos.end();
-        let cursor = (*lno, cno + 1);
-        tokens.push(FullToken::new(token![;], cursor..=cursor));
+    if let Some(FullToken { pos, tt }) = tokens.last() {
+        if tt != &token![;] {
+            let (lno, cno) = pos.end();
+            let cursor = (*lno, cno + 1);
+            tokens.push(FullToken::new(token![;], cursor..=cursor));
+        }
     }
 
     Parser::new(tokens).parse()

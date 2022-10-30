@@ -13,7 +13,7 @@ use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
 
 pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
-    Lexer::new(input)?.lex()
+    Lexer::new(input).lex()
 }
 
 /// An error that occurs when a string could not be parsed into tokens.
@@ -272,8 +272,8 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(input: &str) -> LexResult<Self> {
-        Ok(Self {
+    pub fn new(input: &str) -> Self {
+        Self {
             tokens: vec![],
             delimiters: vec![],
 
@@ -281,7 +281,7 @@ impl Lexer {
             token_start: (0, 0),
             _current: None,
             remaining: input.chars().collect(), 
-        })
+        }
     }
 
     /// Perform the actual lexing. 

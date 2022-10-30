@@ -67,7 +67,7 @@ impl Repl<'_> {
             lx.append_input(&input);
             lx
         } else {
-            consume_err! { Lexer::new(line) }
+            Lexer::new(line)
         };
 
         // Lex the current data in lexer, and check to make sure there's no syntax errors:
