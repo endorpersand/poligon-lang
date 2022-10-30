@@ -115,6 +115,12 @@ macro_rules! left_assoc_rules {
     };
 }
 
+macro_rules! expected_tokens {
+    ($($t:tt),*) => {
+        ParseErr::ExpectedTokens(vec![$(token![$t])*,])
+    }
+}
+
 fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T>) -> std::ops::RangeInclusive<T> {
     let (start, _) = l.into_inner();
     let (_, end) = r.into_inner();
@@ -252,7 +258,7 @@ impl Parser {
             // there are more tokens left that couldn't be parsed as a program.
             // we have an issue.
 
-            Err(ParseErr::ExpectedTokens(vec![token![;]]).at_range(loc.clone()))
+            Err(expected_tokens![;].at_range(loc.clone()))
         } else {
             Ok(program)
         }
@@ -531,7 +537,7 @@ impl Parser {
                     Err(if comma_end {
                         ParseErr::ExpectedType
                     } else {
-                        ParseErr::ExpectedTokens(vec![token![,]])
+                        expected_tokens![,]
                     }.at_range(self.peek_loc()))?
                 }
 
@@ -933,7 +939,7 @@ impl Parser {
             let e = if comma_end {
                 or_else
             } else {
-                ParseErr::ExpectedTokens(vec![token![,]])
+                expected_tokens![,]
             };
 
             Err(e.at_range(self.peek_loc()))
@@ -1196,7 +1202,7 @@ mod tests {
 
     #[test]
     fn semicolon_test() {
-        assert_parse_fail_basic!("2 2" => ParseErr::ExpectedTokens(vec![token![;]]));
+        assert_parse_fail_basic!("2 2" => expected_tokens![;]);
 
         assert_parse!("if cond {}" => vec![Stmt::Expr(Expr::If(If {
             conditionals: vec![
