@@ -2,6 +2,8 @@
 //! 
 //! TODO! more doc
 
+use lazy_static::lazy_static;
+
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -676,15 +678,17 @@ impl Parser {
         let me = self.match_spread()?;
 
         if let Some(mut e) = me {
-            let cmp_ops = [
-                token![<], token![>], 
-                token![<=], token![>=], 
-                token![==], token![!=]
-            ];
+            lazy_static! {
+                static ref CMP_OPS: [Token; 6] = [
+                    token![<], token![>], 
+                    token![<=], token![>=], 
+                    token![==], token![!=]
+                ];
+            }
 
             // check if there's a comparison here
             let mut rights = vec![];
-            while let Some(t) = self.match_n(&cmp_ops) {
+            while let Some(t) = self.match_n(&*CMP_OPS) {
                 let op = t.tt.try_into().unwrap();
                 let rexpr = self.match_spread()?
                     .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
@@ -758,10 +762,12 @@ impl Parser {
 
     /// Match a unary operation. (!expr, ~expr, -expr, +expr)
     fn match_unary(&mut self) -> ParseResult<Option<tree::Expr>> {
-        let unary_ops = [token![!], token![~], token![-], token![+]];
+        lazy_static! {
+            static ref UNARY_OPS: [Token; 4] = [token![!], token![~], token![-], token![+]];
+        }
 
         let mut ops = vec![];
-        while let Some(t) = self.match_n(&unary_ops) {
+        while let Some(t) = self.match_n(&*UNARY_OPS) {
             ops.push(t.tt.try_into().unwrap());
         }
 
@@ -948,15 +954,15 @@ impl Parser {
 
     /// Expect a literal (numeric, str, char)
     fn expect_literal(&mut self) -> ParseResult<tree::Expr> {
-        let ft = self.tokens.pop_front().expect("unreachable");
+        let FullToken { tt, loc } = self.tokens.pop_front().expect("unreachable");
         
-        let lit = match ft {
-            FullToken { tt: Token::Numeric(s), loc } => tree::Literal::from_numeric(&s)
+        let lit = match tt {
+            Token::Numeric(s) => tree::Literal::from_numeric(&s)
                 .ok_or_else(|| ParseErr::CannotParseNumeric.at_range(loc))?,
-            FullToken { tt: Token::Str(s), .. }  => tree::Literal::Str(s),
-            FullToken { tt: Token::Char(c), .. } => tree::Literal::Char(c),
-            FullToken { tt: token![true], .. }   => tree::Literal::Bool(true),
-            FullToken { tt: token![false], .. }  => tree::Literal::Bool(false),
+            Token::Str(s)  => tree::Literal::Str(s),
+            Token::Char(c) => tree::Literal::Char(c),
+            token![true]   => tree::Literal::Bool(true),
+            token![false]  => tree::Literal::Bool(false),
             _ => unreachable!()
         };
 
