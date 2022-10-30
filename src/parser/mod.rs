@@ -15,9 +15,9 @@ pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Pro
 }
 pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program> 
 {
-    if let Some(FullToken { pos, tt }) = tokens.last() {
+    if let Some(FullToken { loc, tt }) = tokens.last() {
         if tt != &token![;] {
-            let (lno, cno) = pos.end();
+            let (lno, cno) = loc.end();
             let cursor = (*lno, cno + 1);
             tokens.push(FullToken::new(token![;], cursor..=cursor));
         }
@@ -83,7 +83,7 @@ macro_rules! left_assoc_op {
                         left: Box::new(e),
                         right: self.$ds()?
                             .map(Box::new)
-                            .ok_or(ParseErr::ExpectedExpr.at_range(self.peek_pos()))?
+                            .ok_or(ParseErr::ExpectedExpr.at_range(self.peek_loc()))?
                     });
                 }
 
@@ -123,8 +123,8 @@ impl Parser {
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
             .collect();
         
-        let eof = if let Some(FullToken { pos, ..}) = tokens.make_contiguous().last() {
-            let &(lno, cno) = pos.end();
+        let eof = if let Some(FullToken { loc, ..}) = tokens.make_contiguous().last() {
+            let &(lno, cno) = loc.end();
             (lno, cno + 1)
         } else {
             (0, 0)
@@ -156,11 +156,11 @@ impl Parser {
     /// 
     /// Error if the next token is not the specified token.
     fn expect1(&mut self, u: Token) -> ParseResult<()> {
-        if let Some(FullToken {tt: t, pos}) = self.tokens.pop_front() {
+        if let Some(FullToken {tt: t, loc}) = self.tokens.pop_front() {
             if t == u {
                 Ok(())
             } else {
-                Err(ParseErr::ExpectedTokens(vec![u]).at_range(pos))
+                Err(ParseErr::ExpectedTokens(vec![u]).at_range(loc))
             }
         } else {
             Err(ParseErr::ExpectedTokens(vec![u]).at(self.eof))
@@ -194,10 +194,10 @@ impl Parser {
             let is_double = matches!(self.peek_token(), Some(token![<<]));
             
             if is_double {
-                let FullToken { pos, .. } = &self.tokens[0];
+                let FullToken { loc, .. } = &self.tokens[0];
 
-                let &(slno, scno) = pos.start();
-                let &end = pos.end();
+                let &(slno, scno) = loc.start();
+                let &end = loc.end();
 
                 self.tokens[0] = FullToken::new(token![<], (slno, scno + 1)..=end);
             }
@@ -213,10 +213,10 @@ impl Parser {
             let is_double = matches!(self.peek_token(), Some(token![>>]));
             
             if is_double {
-                let FullToken { pos, .. } = &self.tokens[0];
+                let FullToken { loc, .. } = &self.tokens[0];
 
-                let &(slno, scno) = pos.start();
-                let &end = pos.end();
+                let &(slno, scno) = loc.start();
+                let &end = loc.end();
                 self.tokens[0] = FullToken::new(token![>], (slno, scno + 1)..=end);
             }
 
@@ -230,11 +230,11 @@ impl Parser {
     fn next_token(&mut self) -> Option<Token> {
         self.tokens.pop_front().map(|FullToken {tt, ..}| tt)
     }
-    fn peek_pos(&self) -> std::ops::RangeInclusive<(usize, usize)> {
+    fn peek_loc(&self) -> std::ops::RangeInclusive<(usize, usize)> {
         self.tokens.get(0)
             .map_or(
                 self.eof..=self.eof,
-                |FullToken {pos, ..}| pos.clone()
+                |FullToken {loc, ..}| loc.clone()
             )
     }
     
@@ -243,11 +243,11 @@ impl Parser {
     fn parse(mut self) -> ParseResult<tree::Program> {
         let program = self.expect_program()?;
 
-        if let Some(FullToken { pos, .. }) = self.tokens.get(0) {
+        if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
             // there are more tokens left that couldn't be parsed as a program.
             // we have an issue.
 
-            Err(ParseErr::ExpectedTokens(vec![token![;]]).at_range(pos.clone()))
+            Err(ParseErr::ExpectedTokens(vec![token![;]]).at_range(loc.clone()))
         } else {
             Ok(program)
         }
@@ -343,7 +343,7 @@ impl Parser {
         };
         
         let pat = self.match_decl_pat()?
-            .ok_or_else(|| ParseErr::ExpectedPattern.at_range(self.peek_pos()))?;
+            .ok_or_else(|| ParseErr::ExpectedPattern.at_range(self.peek_loc()))?;
 
         let ty = if self.match1(token![:]) {
             Some(self.expect_type()?)
@@ -503,7 +503,7 @@ impl Parser {
     fn expect_ident(&mut self) -> ParseResult<String> {
         match self.tokens.pop_front() {
             Some(FullToken { tt: Token::Ident(s), .. }) => Ok(s),
-            Some(FullToken { pos, .. }) => Err(ParseErr::ExpectedIdent.at_range(pos)),
+            Some(FullToken { loc, .. }) => Err(ParseErr::ExpectedIdent.at_range(loc)),
             None => Err(ParseErr::ExpectedIdent.at(self.eof))
         }
     }
@@ -513,11 +513,11 @@ impl Parser {
             let ident = self.expect_ident()?;
 
             let params = if self.match_langle() {
-                let token_pos = self.peek_pos();
+                let token_pos = self.peek_loc();
                 let tpl = self.expect_tuple_of(Parser::match_type)?;
                 
                 if !self.match_rangle() {
-                    Err(ParseErr::ExpectedTokens(vec![token![>]]).at_range(self.peek_pos()))?
+                    Err(ParseErr::ExpectedTokens(vec![token![>]]).at_range(self.peek_loc()))?
                 }
 
                 if !tpl.is_empty() {
@@ -543,7 +543,7 @@ impl Parser {
     /// or error if the tokens do not represent a type expression.
     fn expect_type(&mut self) -> ParseResult<tree::Type> {
         self.match_type()?
-            .ok_or_else(|| ParseErr::ExpectedType.at_range(self.peek_pos()))
+            .ok_or_else(|| ParseErr::ExpectedType.at_range(self.peek_loc()))
     }
 
     ///// EXPRESSION MATCHING
@@ -566,7 +566,7 @@ impl Parser {
     /// or error if the tokens do not represent a expression.
     fn expect_expr(&mut self) -> ParseResult<tree::Expr> {
         self.match_expr()?
-            .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))
+            .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))
     }
 
     /// Match an assignment operation. (a = b)
@@ -576,11 +576,11 @@ impl Parser {
         let mut pats = vec![];
 
         // TODO: better positioning
-        let mut pat_pos = self.peek_pos();
+        let mut pat_pos = self.peek_loc();
         let mut last = self.match_lor()?;
         // TODO: asg ops
 
-        let mut eq_pos = self.peek_pos();
+        let mut eq_pos = self.peek_loc();
         while self.match1(token![=]) {
             // if there was an equal sign, this expression must've been a pattern:
             let pat_expr = last
@@ -595,14 +595,14 @@ impl Parser {
             
             pats.push(pat);
 
-            pat_pos = self.peek_pos();
+            pat_pos = self.peek_loc();
             last = self.match_lor()?;
-            eq_pos = self.peek_pos();
+            eq_pos = self.peek_loc();
         }
 
         if !pats.is_empty() {
             let rhs = last
-                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))?;
+                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
             let asg = pats.into_iter()
                 .rfold(rhs, |e, pat| {
@@ -666,7 +666,7 @@ impl Parser {
             while let Some(t) = self.match_n(&cmp_ops) {
                 let op = t.tt.try_into().unwrap();
                 let rexpr = self.match_spread()?
-                    .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))?;
+                    .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
                 
                 rights.push((op, rexpr));
 
@@ -702,11 +702,11 @@ impl Parser {
         if let Some(mut e) = self.match_bor()? {
             if self.match1(token![..]) {
                 let right = self.match_bor()?
-                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))?;
+                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
                 let step = if self.match1(token![step]) {
                     let sexpr = self.match_bor()?
-                    .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))?;
+                    .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
                     Some(sexpr)
                 } else {
                     None
@@ -748,7 +748,7 @@ impl Parser {
             self.match_call_index()?
         } else {
             let e = self.match_call_index()?
-                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_pos()))?;
+                .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
             Some(Parser::wrap_unary_op(ops, e))
         };
@@ -901,8 +901,8 @@ impl Parser {
         let ft = self.tokens.pop_front().expect("unreachable");
         
         let lit = match ft {
-            FullToken { tt: Token::Numeric(s), pos } => tree::Literal::from_numeric(&s)
-                .ok_or_else(|| ParseErr::CannotParseNumeric.at_range(pos))?,
+            FullToken { tt: Token::Numeric(s), loc } => tree::Literal::from_numeric(&s)
+                .ok_or_else(|| ParseErr::CannotParseNumeric.at_range(loc))?,
             FullToken { tt: Token::Str(s), .. }  => tree::Literal::Str(s),
             FullToken { tt: Token::Char(c), .. } => tree::Literal::Char(c),
             FullToken { tt: token![true], .. }   => tree::Literal::Bool(true),
@@ -981,7 +981,7 @@ impl Parser {
                     last.replace(block);
                     break;
                 },
-                _ => Err(ParseErr::ExpectedBlock.at_range(self.peek_pos()))?
+                _ => Err(ParseErr::ExpectedBlock.at_range(self.peek_loc()))?
             }
         }
 

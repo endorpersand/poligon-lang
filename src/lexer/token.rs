@@ -39,13 +39,13 @@ pub enum Token {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pub(crate) pos: std::ops::RangeInclusive<(usize, usize)>,
+    pub(crate) loc: std::ops::RangeInclusive<(usize, usize)>,
     pub(crate) tt: Token
 }
 
 impl FullToken {
-    pub fn new(tt: Token, pos: std::ops::RangeInclusive<(usize, usize)>) -> Self {
-        Self { pos, tt }
+    pub fn new(tt: Token, loc: std::ops::RangeInclusive<(usize, usize)>) -> Self {
+        Self { loc, tt }
     }
 }
 macro_rules! define_keywords {
