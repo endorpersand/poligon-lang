@@ -12,10 +12,10 @@ use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken};
 use crate::tree::{self, PatErr};
 
-pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Program> {
+pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Block> {
     Parser::new(tokens).parse()
 }
-pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program> 
+pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Block> 
 {
     if let Some(FullToken { loc, tt }) = tokens.last() {
         if tt != &token![;] {
@@ -253,7 +253,7 @@ impl Parser {
     
     /// The parsing function.
     /// Takes a list of tokens and converts it into a parse tree.
-    fn parse(mut self) -> ParseResult<tree::Program> {
+    fn parse(mut self) -> ParseResult<tree::Block> {
         let program = self.expect_program()?;
 
         if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
@@ -270,7 +270,7 @@ impl Parser {
     /// 
     /// Return the program,
     /// or error if the tokens do not represent a program.
-    fn expect_program(&mut self) -> ParseResult<tree::Program> {
+    fn expect_program(&mut self) -> ParseResult<tree::Block> {
         let mut stmts = vec![];
 
         /*
@@ -312,14 +312,14 @@ impl Parser {
             }
         }
 
-        Ok(tree::Program(stmts))
+        Ok(tree::Block(stmts))
     }
 
     /// Expect that the next tokens represent a block.
     /// 
     /// Return the program encompassed by the block,
     /// or error if the tokens do not represent a block.
-    fn expect_block(&mut self) -> ParseResult<tree::Program> {
+    fn expect_block(&mut self) -> ParseResult<tree::Block> {
         self.expect1(token!["{"])?;
         let p = self.expect_program()?;
         self.expect1(token!["}"])?;
@@ -1085,7 +1085,7 @@ mod tests {
 
     macro_rules! assert_parse {
         ($s:expr => $r:expr) => {
-            assert_eq!(parse_str(&$s), Ok(Program($r)))
+            assert_eq!(parse_str(&$s), Ok(Block($r)))
         }
     }
 
@@ -1107,7 +1107,7 @@ mod tests {
         }
     }
 
-    fn parse_str(s: &str) -> ParseResult<Program> {
+    fn parse_str(s: &str) -> ParseResult<Block> {
         parse(tokenize(s).unwrap())
     }
 
@@ -1134,7 +1134,7 @@ mod tests {
         ]);
 
         assert_parse!("{}" => vec![
-            Stmt::Expr(Expr::Block(Program(vec![])))
+            Stmt::Expr(Expr::Block(Block(vec![])))
         ])
     }
 
@@ -1145,7 +1145,7 @@ mod tests {
         }" => vec![
             Stmt::Expr(Expr::If(If {
                 conditionals: vec![
-                    ((Expr::Literal(Literal::Bool(true)), Program(vec![])))
+                    ((Expr::Literal(Literal::Bool(true)), Block(vec![])))
                 ],
                 last: None
             }))
@@ -1158,9 +1158,9 @@ mod tests {
         }" => vec![
             Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (Expr::Literal(Literal::Bool(true)), Program(vec![]))
+                    (Expr::Literal(Literal::Bool(true)), Block(vec![]))
                 ],
-                last: Some(Program(vec![]))
+                last: Some(Block(vec![]))
             }))
         ]);
 
@@ -1173,10 +1173,10 @@ mod tests {
         }" => vec![
             Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (Expr::Literal(Literal::Bool(true)), Program(vec![])),
-                    (Expr::Ident("condition".to_string()), Program(vec![]))
+                    (Expr::Literal(Literal::Bool(true)), Block(vec![])),
+                    (Expr::Ident("condition".to_string()), Block(vec![]))
                 ],
-                last: Some(Program(vec![]))
+                last: Some(Block(vec![]))
             }))
         ]);
 
@@ -1195,13 +1195,13 @@ mod tests {
         }" => vec![
             Stmt::Expr(Expr::If(If { 
                 conditionals: vec![
-                    (Expr::Literal(Literal::Bool(true)), Program(vec![])),
-                    (Expr::Ident("condition".to_string()), Program(vec![])),
-                    (Expr::Ident("condition".to_string()), Program(vec![])),
-                    (Expr::Ident("condition".to_string()), Program(vec![])),
-                    (Expr::Ident("condition".to_string()), Program(vec![])),
+                    (Expr::Literal(Literal::Bool(true)), Block(vec![])),
+                    (Expr::Ident("condition".to_string()), Block(vec![])),
+                    (Expr::Ident("condition".to_string()), Block(vec![])),
+                    (Expr::Ident("condition".to_string()), Block(vec![])),
+                    (Expr::Ident("condition".to_string()), Block(vec![])),
                 ],
-                last: Some(Program(vec![]))
+                last: Some(Block(vec![]))
             }))
         ]);
     }
@@ -1212,13 +1212,13 @@ mod tests {
 
         assert_parse!("if cond {}" => vec![Stmt::Expr(Expr::If(If {
             conditionals: vec![
-                (Expr::Ident("cond".to_string()), Program(vec![]))
+                (Expr::Ident("cond".to_string()), Block(vec![]))
             ],
             last: None
         }))]);
         assert_parse!("if cond {};" => vec![Stmt::Expr(Expr::If(If {
             conditionals: vec![
-                (Expr::Ident("cond".to_string()), Program(vec![]))
+                (Expr::Ident("cond".to_string()), Block(vec![]))
             ],
             last: None
         }))]);
@@ -1252,7 +1252,7 @@ mod tests {
             Stmt::Expr(Expr::If(If {
                 conditionals: vec![(
                     Expr::Ident("cond".to_string()),
-                    Program(vec![
+                    Block(vec![
                         Stmt::Decl(Decl { 
                             rt: ReasgType::Let, 
                             pat: DeclPat::Unit(DeclUnit::Ident(String::from("d"), MutType::Immut)), 

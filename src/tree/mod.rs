@@ -3,7 +3,7 @@ use std::rc::Rc;
 pub mod op;
 
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Vec<Stmt>);
+pub struct Block(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
@@ -43,13 +43,13 @@ pub struct FunDecl {
     pub ident: String,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
-    pub block: Rc<Program>
+    pub block: Rc<Block>
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     Ident(String), // a variable
-    Block(Program), // a block
+    Block(Block), // a block
     Literal(Literal), // int, float, char, str literal
     ListLiteral(Vec<Expr>), // [1, 2, 3, 4]
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
@@ -71,12 +71,12 @@ pub enum Expr {
     If(If),
     While {
         condition: Box<Expr>,
-        block: Program
+        block: Block
     },
     For {
         ident: String,
         iterator: Box<Expr>,
-        block: Program
+        block: Block
     },
     Call {
         funct: Box<Expr>,
@@ -132,8 +132,8 @@ pub struct BinaryOp {
 
 #[derive(Debug, PartialEq)]
 pub struct If {
-    pub conditionals: Vec<(Expr, Program)>,
-    pub last: Option<Program>
+    pub conditionals: Vec<(Expr, Block)>,
+    pub last: Option<Block>
 }
 
 #[derive(Debug, PartialEq)]
