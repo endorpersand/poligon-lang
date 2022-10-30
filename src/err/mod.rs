@@ -28,43 +28,21 @@ pub trait GonErr {
     fn at(self, p: Point) -> FullGonErr<Self> 
         where Self: Sized
     {
-        FullGonErr { err: self, position: ErrPos::Point(p) }
+        FullGonErr::new(self, ErrPos::from_point(p))
     }
     
     /// Designate that this error occurred at a few specific positions
     fn at_points(self, pts: &[Point]) -> FullGonErr<Self> 
         where Self: Sized
     {
-        if pts.len() == 1 {
-            self.at(pts[0])
-        } else {
-            let mut vec: Vec<_> = pts.into();
-            vec.sort();
-            FullGonErr { err: self, position: ErrPos::Points(vec) }
-        }
+        FullGonErr::new(self, ErrPos::from_points(pts))
     }
     
     /// Designate that this error occurred within a range of positions
     fn at_range(self, range: impl RangeBounds<Point>) -> FullGonErr<Self> 
         where Self: Sized
     {
-        let start = match range.start_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => *p,
-            Bound::Unbounded => (0, 0),
-        };
-        
-        let position = match range.end_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => {
-                if p == &start {
-                    ErrPos::Point(start)
-                } else {
-                    ErrPos::Range(start..=(*p))
-                }
-            },
-            Bound::Unbounded => ErrPos::RangeFrom(start..),
-        };
-
-        FullGonErr { err: self, position }
+        FullGonErr::new(self, ErrPos::from_range(range))
     }
 
 
@@ -97,6 +75,38 @@ enum ErrPos {
     RangeFrom(RangeFrom<Point>)
 }
 
+impl ErrPos {
+    pub fn from_point(p: Point) -> Self {
+        Self::Point(p)
+    }
+    pub fn from_points(pts: &[Point]) -> Self {
+        if let [pt] = pts {
+            Self::Point(*pt)
+        } else {
+            let mut vec: Vec<_> = pts.into();
+            vec.sort();
+
+            Self::Points(vec)
+        }
+    }
+    pub fn from_range(range: impl RangeBounds<Point>) -> Self {
+        let start = match range.start_bound() {
+            Bound::Included(p) | Bound::Excluded(p) => *p,
+            Bound::Unbounded => (0, 0),
+        };
+        
+        match range.end_bound() {
+            Bound::Included(p) | Bound::Excluded(p) => {
+                if p == &start {
+                    ErrPos::Point(start)
+                } else {
+                    ErrPos::Range(start..=(*p))
+                }
+            },
+            Bound::Unbounded => ErrPos::RangeFrom(start..),
+        }
+    }
+}
 /// Get line from original text.
 /// 
 /// Panics if line number is not in the string.
@@ -173,6 +183,10 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
 }
 
 impl<E: GonErr> FullGonErr<E> {
+    fn new(e: E, err_pos: ErrPos) -> Self {
+        Self { err: e, position: err_pos }
+    }
+
     /// Get a String designating where the error occurred 
     /// and the message associated with the error.
     pub fn short_msg(&self) -> String {
