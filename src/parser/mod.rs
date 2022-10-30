@@ -39,6 +39,8 @@ pub enum ParseErr {
     ExpectedBlock,
     ExpectedType,
     ExpectedPattern,
+    ExpectedEntry,
+    ExpectedParam,
     AsgPatErr(PatErr)
 }
 impl GonErr for ParseErr {
@@ -64,6 +66,8 @@ impl GonErr for ParseErr {
             ParseErr::ExpectedBlock      => String::from("expected block"),
             ParseErr::ExpectedType       => String::from("expected type expression"),
             ParseErr::ExpectedPattern    => String::from("expected pattern"),
+            ParseErr::ExpectedEntry      => String::from("expected entry"),
+            ParseErr::ExpectedParam      => String::from("expected param"),
             ParseErr::AsgPatErr(e) => match e {
                 PatErr::InvalidAssignTarget => String::from("invalid assign target"),
                 PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
@@ -117,6 +121,7 @@ fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T
     
     start ..= end
 }
+
 impl Parser {
     fn new(tokens: impl IntoIterator<Item=FullToken>) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
@@ -367,8 +372,11 @@ impl Parser {
             let pat = match t {
                 token!["["] => {
                     self.expect1(token!["["])?;
-                    let tpl = self.expect_tuple_of(Parser::match_decl_pat)?;
-                    self.expect1(token!["]"])?;
+                    let tpl = self.expect_closing_tuple_of(
+                        Parser::match_decl_pat, 
+                        token!["]"], 
+                        ParseErr::ExpectedPattern
+                    )?;
 
                     tree::DeclPat::List(tpl)
                 },
@@ -477,8 +485,11 @@ impl Parser {
         let ident = self.expect_ident()?;
 
         self.expect1(token!["("])?;
-        let params = self.expect_tuple_of(Parser::match_param)?;
-        self.expect1(token![")"])?;
+        let params = self.expect_closing_tuple_of(
+            Parser::match_param,
+            token![")"], 
+            ParseErr::ExpectedParam
+        )?;
 
         let ret = if self.match1(token![->]) {
             Some(self.expect_type()?)
@@ -514,10 +525,14 @@ impl Parser {
 
             let params = if self.match_langle() {
                 let token_pos = self.peek_loc();
-                let tpl = self.expect_tuple_of(Parser::match_type)?;
-                
+
+                let (tpl, comma_end) = self.expect_tuple_of(Parser::match_type)?;
                 if !self.match_rangle() {
-                    Err(ParseErr::ExpectedTokens(vec![token![>]]).at_range(self.peek_loc()))?
+                    Err(if comma_end {
+                        ParseErr::ExpectedType
+                    } else {
+                        ParseErr::ExpectedTokens(vec![token![,]])
+                    }.at_range(self.peek_loc()))?
                 }
 
                 if !tpl.is_empty() {
@@ -787,8 +802,7 @@ impl Parser {
             while let Some(delim) = self.match_n(&[token!["("], token!["["]]) {
                 match delim.tt {
                     token!["("] => {
-                        let params = self.expect_tuple()?;
-                        self.expect1(token![")"])?;
+                        let params = self.expect_closing_tuple(token![")"])?;
 
                         e = tree::Expr::Call {
                             funct: Box::new(e), 
@@ -875,25 +889,55 @@ impl Parser {
     /// (optionally with a terminating comma)
     /// 
     /// This function requires a function that represents the match function for type T
-    fn expect_tuple_of<T, F>(&mut self, f: F) -> ParseResult<Vec<T>> 
+    fn expect_tuple_of<T, F>(&mut self, f: F) -> ParseResult<(Vec<T>, bool /* ended in comma? */)> 
         where F: Fn(&mut Self) -> ParseResult<Option<T>>
     {
         let mut exprs = vec![];
+        let mut comma_end = true;
+
         // terminate when there's no more expression or when there's no more ,
         while let Some(e) = f(self)? {
             exprs.push(e);
+
             if !self.match1(token![,]) {
+                comma_end = false;
                 break;
             }
         }
 
-        Ok(exprs)
+        Ok((exprs, comma_end))
     }
 
     /// Expect that the next tokens represent expressions separated by commas
-    fn expect_tuple(&mut self) -> ParseResult<Vec<tree::Expr>> 
+    fn expect_closing_tuple(&mut self, close_with: Token) -> ParseResult<Vec<tree::Expr>> 
     {
-        self.expect_tuple_of(Parser::match_expr)
+        self.expect_closing_tuple_of(Parser::match_expr, close_with, ParseErr::ExpectedExpr)
+    }
+
+    /// Expect that the next tokens represent values of type T separated by commas 
+    /// (optionally with a terminating comma)
+    /// 
+    /// This function requires a function that represents the match function for type T
+    fn expect_closing_tuple_of<T, F>(
+        &mut self, f: F, close_with: Token, or_else: ParseErr
+    ) -> ParseResult<Vec<T>> 
+        where F: Fn(&mut Self) -> ParseResult<Option<T>>
+    {
+        let (exprs, comma_end) = self.expect_tuple_of(f)?;
+
+        // if the next token is not the close token,
+        // then raise an error, because the tuple did not close properly
+        if self.match1(close_with) {
+            Ok(exprs)
+        } else {
+            let e = if comma_end {
+                or_else
+            } else {
+                ParseErr::ExpectedTokens(vec![token![,]])
+            };
+
+            Err(e.at_range(self.peek_loc()))
+        }
     }
 
     /// Expect a literal (numeric, str, char)
@@ -916,8 +960,7 @@ impl Parser {
     /// Expect a list ([1, 2, 3, 4, 5])
     fn expect_list(&mut self) -> ParseResult<tree::Expr> {
         self.expect1(token!["["])?;
-        let exprs = self.expect_tuple()?;
-        self.expect1(token!["]"])?;
+        let exprs = self.expect_closing_tuple(token!["]"])?;
         
         Ok(tree::Expr::ListLiteral(exprs))
     }
@@ -927,8 +970,7 @@ impl Parser {
         self.expect1(Token::Ident("set".to_string()))?;
 
         let e = if self.match1(token!["{"]) {
-            let exprs = self.expect_tuple()?;
-            self.expect1(token!["}"])?;
+            let exprs = self.expect_closing_tuple(token!["}"])?;
             
             tree::Expr::SetLiteral(exprs)
         } else {
@@ -942,8 +984,11 @@ impl Parser {
         self.expect1(Token::Ident("dict".to_string()))?;
 
         let e = if self.match1(token!["{"]) {
-            let entries = self.expect_tuple_of(Parser::match_entry)?;
-            self.expect1(token!["}"])?;
+            let entries = self.expect_closing_tuple_of(
+                Parser::match_entry,
+                token!["}"], 
+                ParseErr::ExpectedEntry
+            )?;
             
             tree::Expr::DictLiteral(entries)
         } else {
