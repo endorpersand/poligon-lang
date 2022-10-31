@@ -148,6 +148,7 @@ pub enum RuntimeErr {
     RvErr(RvErr),
     CannotSpread,
     CannotSpreadNone,
+    Todo(&'static str),
 
     AlreadyDeclared(String),
     NotDeclared(String)
@@ -214,15 +215,15 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::new_list(vec))
             },
-            tree::Expr::SetLiteral(_) => todo!(),
-            tree::Expr::DictLiteral(_) => todo!(),
+            tree::Expr::SetLiteral(_) => Err(RuntimeErr::Todo("sets not yet implemented"))?,
+            tree::Expr::DictLiteral(_) => Err(RuntimeErr::Todo("dicts not yet implemented"))?,
             tree::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
                 assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
-            tree::Expr::Path(_) => todo!(),
+            tree::Expr::Path(_) => Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?,
             tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
             tree::Expr::BinaryOp(o) => o.traverse_rt(ctx),
             tree::Expr::Comparison { left, rights } => {
@@ -320,10 +321,52 @@ impl TraverseRt for tree::Expr {
                 Ok(Value::new_list(result))
             },
             tree::Expr::Call { funct, params } => {
-                if let Value::Fun(f) = funct.traverse_rt(ctx)? {
-                    f.call(params, ctx)
-                } else {
-                    Err(RuntimeErr::CannotCall)?
+                match &**funct {
+                    // HACK: generalize methods
+                    e @ tree::Expr::Path(tree::Path { obj, attrs }) => {
+                        match obj.traverse_rt(ctx)? {
+                            this @ Value::List(_) => {
+                                if attrs.len() == 1 {
+                                    let (property, _) = &attrs[0];
+                                    let mut call_params = vec![this];
+                                    call_params.extend(params.iter()
+                                        .map(|e| e.traverse_rt(ctx))
+                                        .collect::<Result<Vec<_>, _>>()?
+                                    );
+
+                                    match property.as_str() {
+                                        "contains" => {
+                                            let var = ctx.get_var("in", e).cloned();
+                                            if let Some(Value::Fun(f)) = var {
+                                                return f.call_computed(call_params, ctx)
+                                            }
+                                        },
+                                        "push" => {
+                                            let var = ctx.get_var("@@push", e).cloned();
+                                            if let Some(Value::Fun(f)) = var {
+                                                return f.call_computed(call_params, ctx)
+                                            }
+                                        },
+                                        "pop" => {
+                                            let var = ctx.get_var("@@pop", e).cloned();
+                                            if let Some(Value::Fun(f)) = var {
+                                                return f.call_computed(call_params, ctx)
+                                            }
+                                        },
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        
+                        Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?
+                    },
+                    funct => if let Value::Fun(f) = funct.traverse_rt(ctx)? {
+                        f.call(params, ctx)
+                    } else {
+                        Err(RuntimeErr::CannotCall)?
+                    }
                 }
             }
             tree::Expr::Index(idx) => {
@@ -652,7 +695,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
         tree::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
         },
-        tree::AsgUnit::Path(_) => todo!(),
+        tree::AsgUnit::Path(_) => Err(RuntimeErr::Todo("general attribute functionality not yet implemented")),
         tree::AsgUnit::Index(idx) => {
             let tree::Index {expr, index} = idx;
             

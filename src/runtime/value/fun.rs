@@ -42,11 +42,22 @@ impl GonFun {
                 Err(RuntimeErr::WrongArity(arity))?;
             }
         }
-        
+
         // TODO, make lazy
         let pvals: Vec<_> = params.iter()
             .map(|e| e.traverse_rt(ctx))
             .collect::<Result<_, _>>()?;
+
+        self.call_computed(pvals, ctx)
+    }
+
+    pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        // check if arity matches
+        if let Some(arity) = self.arity() {
+            if pvals.len() != arity {
+                Err(RuntimeErr::WrongArity(arity))?;
+            }
+        }
 
         match &self.fun {
             GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),

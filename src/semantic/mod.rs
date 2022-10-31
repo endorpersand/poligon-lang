@@ -264,7 +264,7 @@ impl TraverseResolve for tree::Expr {
                 rhs.traverse_rs(map)?;
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
-            tree::Expr::Path(_) => todo!(),
+            tree::Expr::Path(p) => p.obj.traverse_rs(map),
             tree::Expr::UnaryOps(op) => op.traverse_rs(map),
             tree::Expr::BinaryOp(op) => op.traverse_rs(map),
             tree::Expr::Comparison { left, rights } => {
@@ -402,7 +402,7 @@ impl TRsDependent for tree::AsgUnit {
                 map.resolve(e, ident);
                 Ok(())
             },
-            tree::AsgUnit::Path(_) => todo!(),
+            tree::AsgUnit::Path(p) => p.obj.traverse_rs(map),
             tree::AsgUnit::Index(idx) => idx.traverse_rs(map),
         }
     }
