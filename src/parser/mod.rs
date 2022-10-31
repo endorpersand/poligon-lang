@@ -12,10 +12,10 @@ use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken};
 use crate::tree::{self, PatErr};
 
-pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Program> {
+pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Block> {
     Parser::new(tokens).parse()
 }
-pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program> 
+pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Block> 
 {
     if let Some(FullToken { loc, tt }) = tokens.last() {
         if tt != &token![;] {
@@ -29,9 +29,7 @@ pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program>
 }
 pub struct Parser {
     tokens: VecDeque<FullToken>,
-    eof: (usize, usize),
-
-    arenas: tree::program::NodeArena
+    eof: (usize, usize)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -145,7 +143,7 @@ impl Parser {
             (0, 0)
         };
 
-        Self { tokens, eof, arenas: tree::program::NodeArena::new() }
+        Self { tokens, eof }
     }
 
     // General terminology:
@@ -255,7 +253,7 @@ impl Parser {
     
     /// The parsing function.
     /// Takes a list of tokens and converts it into a parse tree.
-    fn parse(mut self) -> ParseResult<tree::Program> {
+    fn parse(mut self) -> ParseResult<tree::Block> {
         let program = self.expect_program()?;
 
         if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
@@ -264,7 +262,7 @@ impl Parser {
 
             Err(expected_tokens![;].at_range(loc.clone()))
         } else {
-            Ok(tree::Program::new(program, self.arenas))
+            Ok(program)
         }
     }
 
@@ -1110,7 +1108,7 @@ mod tests {
     }
 
     fn parse_str(s: &str) -> ParseResult<Block> {
-        Ok(parse(tokenize(s).unwrap())?.program)
+        parse(tokenize(s).unwrap())
     }
 
     #[test]

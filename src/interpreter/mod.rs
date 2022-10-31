@@ -41,7 +41,7 @@ impl Interpreter {
             .map_err(InterpretErr)
     }
 
-    pub fn parse(&self) -> InterpretResult<tree::Program> {
+    pub fn parse(&self) -> InterpretResult<tree::Block> {
         let lexed = self.lex()?;
 
         parser::parse(lexed)

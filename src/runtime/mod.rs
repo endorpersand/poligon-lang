@@ -98,7 +98,7 @@ impl tree::Expr {
     }
 }
 
-impl tree::Program {
+impl tree::Block {
     pub fn run(self) -> RtResult<Value> {
         self.run_with_ctx(&mut BlockContext::new())
     }
@@ -109,10 +109,10 @@ impl tree::Program {
             .expect("Cannot resolve while in traversal");
         
         rs.clear();
-        rs.traverse_tree(&self.program)?;
+        rs.traverse_tree(&self)?;
 
         // Runtime traversal
-        self.program.traverse_rt(ctx).map_err(|to| match to {
+        self.traverse_rt(ctx).map_err(|to| match to {
             TermOp::Err(e) => e,
             TermOp::Return(_) => RuntimeErr::CannotReturn,
             TermOp::Break     => RuntimeErr::CannotBreak,
