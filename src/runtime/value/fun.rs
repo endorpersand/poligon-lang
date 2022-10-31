@@ -23,7 +23,7 @@ pub enum FunParamType {
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
     Rust(fn(Vec<Value>) -> RtResult<Value>),
-    Poligon(Vec<String>, Rc<tree::Block>, usize /* scope idx */)
+    Poligon(Vec<String>, Rc<tree::Program>, usize /* scope idx */)
 }
 
 impl GonFun {

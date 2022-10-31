@@ -98,7 +98,7 @@ impl tree::Expr {
     }
 }
 
-impl tree::Block {
+impl tree::Program {
     pub fn run(self) -> RtResult<Value> {
         self.run_with_ctx(&mut BlockContext::new())
     }
@@ -467,7 +467,7 @@ impl TraverseRt for tree::If {
     }
 }
 
-impl TraverseRt for tree::Block {
+impl TraverseRt for tree::Program {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let mut stmts = self.0.iter();
         let maybe_last = stmts.next_back();

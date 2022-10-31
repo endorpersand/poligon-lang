@@ -366,7 +366,7 @@ impl Value {
         Value::Fun(gf)
     }
 
-    pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<tree::Block>, idx: usize) -> Self {
+    pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<tree::Program>, idx: usize) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,

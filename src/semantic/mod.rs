@@ -156,7 +156,7 @@ impl ResolveState {
         self.locals.clear();
     }
 
-    pub fn traverse_tree(&mut self, t: &tree::Block) -> ResolveResult<()> {
+    pub fn traverse_tree(&mut self, t: &tree::Program) -> ResolveResult<()> {
         t.0.traverse_rs(self)
     }
 
@@ -209,7 +209,7 @@ impl<T: TRsDependent> TRsDependent for [T] {
 // The Program node's default traversal is to create a new scope without modifying the type.
 // This may differ from an intended goal, and in that case, 
 // the implementation for [T] should be used instead.
-impl TraverseResolve for tree::Block {
+impl TraverseResolve for tree::Program {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.scope(|map| {
             self.0.traverse_rs(map)
@@ -447,7 +447,7 @@ mod test {
 
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
-        let program = Block(vec![
+        let program = Program(vec![
             Stmt::Expr(ident("a"))
         ]);
 
@@ -460,7 +460,7 @@ mod test {
 
     #[test]
     fn declare_in_scope() -> ResolveResult<()> {
-        let program = Block(vec![
+        let program = Program(vec![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
                 pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
@@ -475,14 +475,14 @@ mod test {
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = Block(vec![
+        let program = Program(vec![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
                 pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
-            Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
+            Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
         ]);
 
         let mut state = ResolveState::new();
@@ -490,15 +490,15 @@ mod test {
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = Block(vec![
-            Stmt::Expr(Expr::Block(Block(vec![
+        let program = Program(vec![
+            Stmt::Expr(Expr::Block(Program(vec![
                 Stmt::Decl(Decl {
                     rt: ReasgType::Const, 
                     pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                     ty: None, 
                     val: Expr::Literal(Literal::Int(0)),
                 }),
-                Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
+                Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
             ])))
         ]);
 
