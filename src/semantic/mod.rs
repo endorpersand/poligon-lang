@@ -535,7 +535,7 @@ mod test {
                 showA();
             }
         }
-        ").parse().ok().unwrap();
+        ").parse().ok().unwrap().program;
 
         let mut state = ResolveState::new();
         state.traverse_tree(&program)?;

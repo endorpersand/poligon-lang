@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
+pub use program::Program;
+
 pub mod op;
+pub mod program;
 
 #[derive(Debug, PartialEq)]
 pub struct Block(pub Vec<Stmt>);
