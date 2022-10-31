@@ -138,7 +138,6 @@ macro_rules! define_operators_and_delimiters {
                 $(m.insert($ex, Token::Operator(Operator::$id));)*
                 $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
                 $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
-                m.insert(";", Token::LineSep);
 
                 m
             };

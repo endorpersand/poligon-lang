@@ -43,6 +43,9 @@ pub enum LexErr {
     /// A bracket was not closed (e.g. `( ... `)
     UnclosedDelimiter,
 
+    /// A delimiter got closed with a semicolon (e.g. `( ...; `)
+    DelimiterClosedSemi,
+
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
 
@@ -68,6 +71,7 @@ impl GonErr for LexErr {
             LexErr::UnknownOp(op)       => format!("operator \"{}\" does not exist", op),
             LexErr::MismatchedDelimiter => String::from("mismatched delimiter"),
             LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
+            LexErr::DelimiterClosedSemi => String::from("unexpected ';'"),
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
             LexErr::InvalidEscape(e)    => format!("unknown character escape '{}'", 
                 if e == &'\n' {
@@ -98,8 +102,9 @@ enum CharClass {
     Underscore,
     CharQuote,
     StrQuote,
+    Semi,
     Punct,
-    Whitespace
+    Whitespace,
 }
 
 impl CharClass {
@@ -109,6 +114,7 @@ impl CharClass {
         else if c == &'_'                { Some(Self::Underscore) }
         else if c == &'\''               { Some(Self::CharQuote) }
         else if c == &'"'                { Some(Self::StrQuote) }
+        else if c == &';'                { Some(Self::Semi) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
@@ -305,6 +311,28 @@ impl Lexer {
                 CharClass::StrQuote   => self.push_str()?,
                 CharClass::Punct      => self.push_punct()?,
                 CharClass::Whitespace => { self.next(); },
+                CharClass::Semi       => {
+                    self.next();
+                    self.push_token(token![;]);
+
+                    match self.delimiters.last() {
+                        Some((_, de)) => match de {
+                            Delimiter::LParen
+                            | Delimiter::LSquare  => {
+                                Err(LexErr::DelimiterClosedSemi.at(self.cursor))?
+                            },
+
+                            Delimiter::LCurly
+                            | Delimiter::LComment => {},
+
+                            Delimiter::RParen
+                            | Delimiter::RSquare
+                            | Delimiter::RCurly
+                            | Delimiter::RComment => unreachable!(),
+                        },
+                        None => {},
+                    }
+                },
             }
         }
 
