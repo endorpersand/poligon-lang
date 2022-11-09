@@ -324,40 +324,37 @@ impl TraverseRt for tree::Expr {
                 match &**funct {
                     // HACK: generalize methods
                     e @ tree::Expr::Path(tree::Path { obj, attrs }) => {
-                        match obj.traverse_rt(ctx)? {
-                            this @ Value::List(_) => {
-                                if attrs.len() == 1 {
-                                    let (property, _) = &attrs[0];
-                                    let mut call_params = vec![this];
-                                    call_params.extend(params.iter()
-                                        .map(|e| e.traverse_rt(ctx))
-                                        .collect::<Result<Vec<_>, _>>()?
-                                    );
+                        if let this @ Value::List(_) = obj.traverse_rt(ctx)? {
+                            if attrs.len() == 1 {
+                                let (property, _) = &attrs[0];
+                                let mut call_params = vec![this];
+                                call_params.extend(params.iter()
+                                    .map(|e| e.traverse_rt(ctx))
+                                    .collect::<Result<Vec<_>, _>>()?
+                                );
 
-                                    match property.as_str() {
-                                        "contains" => {
-                                            let var = ctx.get_var("in", e).cloned();
-                                            if let Some(Value::Fun(f)) = var {
-                                                return f.call_computed(call_params, ctx)
-                                            }
-                                        },
-                                        "push" => {
-                                            let var = ctx.get_var("@@push", e).cloned();
-                                            if let Some(Value::Fun(f)) = var {
-                                                return f.call_computed(call_params, ctx)
-                                            }
-                                        },
-                                        "pop" => {
-                                            let var = ctx.get_var("@@pop", e).cloned();
-                                            if let Some(Value::Fun(f)) = var {
-                                                return f.call_computed(call_params, ctx)
-                                            }
-                                        },
-                                        _ => {}
-                                    }
+                                match property.as_str() {
+                                    "contains" => {
+                                        let var = ctx.get_var("in", e).cloned();
+                                        if let Some(Value::Fun(f)) = var {
+                                            return f.call_computed(call_params, ctx)
+                                        }
+                                    },
+                                    "push" => {
+                                        let var = ctx.get_var("@@push", e).cloned();
+                                        if let Some(Value::Fun(f)) = var {
+                                            return f.call_computed(call_params, ctx)
+                                        }
+                                    },
+                                    "pop" => {
+                                        let var = ctx.get_var("@@pop", e).cloned();
+                                        if let Some(Value::Fun(f)) = var {
+                                            return f.call_computed(call_params, ctx)
+                                        }
+                                    },
+                                    _ => {}
                                 }
                             }
-                            _ => {}
                         }
                         
                         Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?

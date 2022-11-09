@@ -315,8 +315,8 @@ impl Lexer {
                     self.next();
                     self.push_token(token![;]);
 
-                    match self.delimiters.last() {
-                        Some((_, de)) => match de {
+                    if let Some((_, de)) = self.delimiters.last() {
+                        match de {
                             Delimiter::LParen
                             | Delimiter::LSquare  => {
                                 Err(LexErr::DelimiterClosedSemi.at(self.cursor))?
@@ -329,8 +329,7 @@ impl Lexer {
                             | Delimiter::RSquare
                             | Delimiter::RCurly
                             | Delimiter::RComment => unreachable!(),
-                        },
-                        None => {},
+                        }
                     }
                 },
             }

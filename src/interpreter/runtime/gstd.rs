@@ -54,7 +54,7 @@ fn std_contains(args: Vec<Value>) -> RtResult<Value> {
         let b = match collection {
             Value::Char(c1) => match item {
                 Value::Char(c2) => c1 == c2,
-                Value::Str(s2) => s2.len() == 0 || (s2.len() == 1 && s2 == &c1.to_string()),
+                Value::Str(s2) => s2.is_empty() || (s2.len() == 1 && s2 == &c1.to_string()),
                 _ => Err(RuntimeErr::ExpectedType(ValueType::Str))?
             },
             Value::Str(s)  => match item {
@@ -99,7 +99,7 @@ fn std_time(args: Vec<Value>) -> RtResult<Value> {
     lazy_static! {
         static ref PROGRAM_START: Instant = Instant::now();
     }
-    if args.len() == 0 {
+    if args.is_empty() {
         let now = Instant::now();
         Ok(Value::Int((now - *PROGRAM_START).as_millis() as isize))
     } else {
