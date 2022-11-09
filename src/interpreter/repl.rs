@@ -1,7 +1,7 @@
 use crate::FullGonErr;
 use crate::Lexer;
 use crate::parser::parse_repl;
-use crate::runtime::BlockContext;
+use super::runtime::BlockContext;
 
 /// Read-eval-print loop
 /// 

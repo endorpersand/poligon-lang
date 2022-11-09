@@ -8,9 +8,14 @@ use std::fmt::Display;
 use std::{io, fs};
 use std::path::Path;
 
-use crate::{FullGonErr, tree};
-use crate::runtime::Value;
-use crate::{lexer, parser};
+use crate::{lexer, parser, FullGonErr, tree};
+use runtime::Value;
+use runtime::{BlockContext, TraverseRt};
+pub use repl::Repl;
+
+pub mod semantic;
+pub mod runtime;
+mod repl;
 
 /// The struct that performs the full processing from string to execution.
 pub struct Interpreter {

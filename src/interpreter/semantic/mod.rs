@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::tree;
 
+use super::runtime;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SubType {
     None,
@@ -57,7 +59,7 @@ pub enum ResolveErr {
 }
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
-impl From<ResolveErr> for crate::runtime::RuntimeErr {
+impl From<ResolveErr> for runtime::RuntimeErr {
     fn from(re: ResolveErr) -> Self {
         match re {
             ResolveErr::CannotReturn     => Self::CannotReturn,
@@ -423,7 +425,7 @@ impl TraverseResolve for tree::DeclUnit {
 mod test {
     use std::collections::HashMap;
 
-    use crate::semantic::ResolveState;
+    use crate::interpreter::semantic::ResolveState;
     use crate::{tree::*, Interpreter};
 
     use super::ResolveResult;

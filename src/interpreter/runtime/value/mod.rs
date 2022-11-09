@@ -3,13 +3,14 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use crate::util::RefValue;
-
 use super::{RtResult, RuntimeErr};
 use crate::tree::{self, op};
+pub(super) use refval::*;
+
 pub mod fun;
 pub mod ty;
 mod op_impl;
+pub(super) mod refval;
 
 pub use fun::*;
 pub use ty::*;

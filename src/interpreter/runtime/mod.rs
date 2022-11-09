@@ -4,9 +4,9 @@
 
 use std::rc::Rc;
 
-use crate::semantic::ResolveState;
+use super::semantic::ResolveState;
 use crate::{GonErr, tree};
-use crate::util::RvErr;
+use value::RvErr;
 
 use crate::tree::op;
 pub use self::value::Value;
@@ -610,7 +610,7 @@ mod test {
 }
 
 impl<T> tree::Pat<T> {
-    pub fn unpack<F>(&self, rhs: crate::runtime::Value, mut unit_mapper: F) -> RtResult<Value>
+    pub fn unpack<F>(&self, rhs: Value, mut unit_mapper: F) -> RtResult<Value>
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
         self.unpack_mut(rhs, &mut unit_mapper)
@@ -620,7 +620,7 @@ impl<T> tree::Pat<T> {
     /// This is necessary because the mutable reference is passed several times.
     /// 
     /// This function is used to implement `unpack`.
-    fn unpack_mut<F>(&self, rhs: crate::runtime::Value, unit_mapper: &mut F) -> RtResult<Value>
+    fn unpack_mut<F>(&self, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
         match self {

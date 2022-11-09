@@ -1,7 +1,7 @@
 use std::cell::{RefCell, Ref, RefMut, BorrowMutError};
 use std::rc::Rc;
 
-use crate::runtime::RuntimeErr;
+use crate::interpreter::runtime::RuntimeErr;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RefValue<T> {

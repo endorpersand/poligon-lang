@@ -31,7 +31,7 @@ fn main() -> io::Result<()> {
 
 fn open_repl() -> io::Result<()> {
     print_out("> ")?;
-    let mut repl = Repl::new();
+    let mut repl = interpreter::Repl::new();
 
     for line in io::stdin().lock().lines() {
         repl.process_line(&line?);

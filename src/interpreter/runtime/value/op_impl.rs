@@ -1,8 +1,7 @@
 use crate::tree::op;
-use crate::runtime::RuntimeErr;
-use crate::util::RefValue;
+use crate::interpreter::runtime::RuntimeErr;
 
-use super::Value;
+use super::{Value, RefValue};
 
 enum NumOperands {
     Float(f64, f64),

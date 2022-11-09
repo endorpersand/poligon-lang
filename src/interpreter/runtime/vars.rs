@@ -186,8 +186,8 @@ impl VarContext<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::RtResult;
-    use crate::runtime::Value;
+    use crate::interpreter::runtime::RtResult;
+    use crate::interpreter::runtime::Value;
 
     use super::VarContext;
 
