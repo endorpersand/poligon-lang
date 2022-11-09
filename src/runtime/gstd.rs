@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::time::Instant;
+
+use lazy_static::lazy_static;
 
 use super::{RtResult, RuntimeErr};
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType, fun_type};
@@ -91,6 +94,19 @@ fn std_pop(args: Vec<Value>) -> RtResult<Value> {
     }
 }
 
+
+fn std_time(args: Vec<Value>) -> RtResult<Value> {
+    lazy_static! {
+        static ref PROGRAM_START: Instant = Instant::now();
+    }
+    if args.len() == 0 {
+        let now = Instant::now();
+        Ok(Value::Int((now - *PROGRAM_START).as_millis() as isize))
+    } else {
+        Err(RuntimeErr::WrongArity(0))
+    }
+}
+
 pub(super) fn std_map() -> HashMap<String, Value> {
     str_map! {
         "print": Value::new_rust_fn(
@@ -122,6 +138,11 @@ pub(super) fn std_map() -> HashMap<String, Value> {
             Some("pop"),
             fun_type! { (VArbType::Value(ValueType::List(Box::new(VArbType::Unk)))) -> VArbType::Unk },
             std_pop
+        ),
+        "time": Value::new_rust_fn(
+            Some("time"), 
+            fun_type! { () -> VArbType::Value(ValueType::Int)}, 
+            std_time
         )
     }
 }
