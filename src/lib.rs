@@ -16,6 +16,8 @@ use err::{GonErr, FullGonErr};
 pub use interpreter::Interpreter;
 pub mod lexer;
 pub mod parser;
-pub mod interpreter;
-pub mod err;
 pub(crate) mod tree;
+
+pub mod interpreter;
+pub mod compiler;
+pub mod err;
