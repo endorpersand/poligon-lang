@@ -3,11 +3,10 @@ mod op_impl;
 use std::collections::HashMap;
 
 use inkwell::FloatPredicate;
-use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, PointerValue, FunctionValue};
+use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, BasicValueEnum};
 
 use crate::tree;
 
@@ -16,7 +15,7 @@ pub struct Compiler<'ctx> {
     builder: Builder<'ctx>,
     module: Module<'ctx>,
 
-    vars: HashMap<String, PointerValue<'ctx>>
+    vars: HashMap<String, BasicValueEnum<'ctx>>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -125,7 +124,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
     fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
             tree::Expr::Ident(ident) => match compiler.vars.get(ident) {
-                Some(var_ptr) => Ok(compiler.builder.build_load(*var_ptr, ident).into_float_value()),
+                Some(var) => Ok(var.into_float_value()),
                 None => Err(IRErr::UndefinedVariable(ident.clone())),
             },
             tree::Expr::Block(_) => todo!(),
@@ -159,7 +158,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                                     .map(|p| p.traverse_ir(compiler).map(Into::into))
                                     .collect::<Result<_, _>>()?;
 
-                                let call = compiler.builder.build_call(fun, &resolved_params, "calltmp");
+                                let call = compiler.builder.build_call(fun, &resolved_params, "call");
                                 
                                 match call.try_as_basic_value().left() {
                                     Some(basic) => Ok(basic.into_float_value()),
@@ -204,50 +203,64 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
         let parent = compiler.builder.get_insert_block().and_then(|bb| bb.get_parent())
             .expect("Expected if to be generated in function");
         
-        // TODO, expand conditionals
-        if let [(cmp, block), ..] = &conditionals[..] {
+        let mut incoming = vec![];
+        let mut prev_else = None;
+        let merge_bb = compiler.ctx.append_basic_block(parent, "merge");
+
+        for (cmp, block) in conditionals {
+            // if there was a previous else, reposition us there
+            if let Some(bb) = prev_else.take() {
+                compiler.builder.position_at_end(bb);
+            }
             // comparison value
             // TODO, handle non-float
             let cmp_fval = cmp.traverse_ir(compiler)?;
             let zero = compiler.ctx.f64_type().const_zero();
             let cmp_val = compiler.builder.build_float_compare(FloatPredicate::ONE, cmp_fval, zero, "cond_cmp");
-    
+                
             // create blocks and branch
-            let mut then_block = compiler.ctx.append_basic_block(parent, "then");
-            let mut else_block = compiler.ctx.append_basic_block(parent, "else");
-            let merge_block = compiler.ctx.append_basic_block(parent, "merge");
+            let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
+            let else_bb     = compiler.ctx.prepend_basic_block(merge_bb, "else");
     
-            compiler.builder.build_conditional_branch(cmp_val, then_block, else_block);
-    
+            compiler.builder.build_conditional_branch(cmp_val, then_bb, else_bb);
+
             // build then block
-            compiler.builder.position_at_end(then_block);
+            compiler.builder.position_at_end(then_bb);
             let then_result = block.traverse_ir(compiler)?;
-            compiler.builder.build_unconditional_branch(merge_block);
+            compiler.builder.build_unconditional_branch(merge_bb);
             //update then block
-            then_block = compiler.builder.get_insert_block().unwrap();
-            
-            // build else block
-            compiler.builder.position_at_end(else_block);
-            let else_result = match last {
-                Some(lb) => lb.traverse_ir(compiler)?,
-                None => todo!("support without else"),
-            };
-            compiler.builder.build_unconditional_branch(merge_block);
-            //update else block
-            else_block = compiler.builder.get_insert_block().unwrap();
+            then_bb = compiler.builder.get_insert_block().unwrap();
 
-            compiler.builder.position_at_end(merge_block);
-            let phi = compiler.builder.build_phi(compiler.ctx.f64_type(), "ifval");
-            phi.add_incoming(&[
-                (&then_result, then_block),
-                (&else_result, else_block)
-            ]);
-
-            // TODO, non floats
-            Ok(phi.as_basic_value().into_float_value())
-        } else {
-            unreachable!();
+            incoming.push((then_result, then_bb));
+            prev_else.replace(else_bb);
         }
+
+        // handle last
+        match (prev_else, last) {
+            (Some(mut else_bb), Some(block)) => {
+                // build else block
+                compiler.builder.position_at_end(else_bb);
+                let else_result = block.traverse_ir(compiler)?;
+                compiler.builder.build_unconditional_branch(merge_bb);
+                //update else block
+                else_bb = compiler.builder.get_insert_block().unwrap();
+
+                incoming.push((else_result, else_bb));
+            },
+            (None, Some(_))    => unreachable!(),
+            (_, None)          => todo!("Support if with no else"),
+        }
+
+        compiler.builder.position_at_end(merge_bb);
+        let phi = compiler.builder.build_phi(compiler.ctx.f64_type(), "ifval");
+        
+        let (incoming_results, incoming_blocks): (Vec<_>, Vec<_>) = incoming.into_iter().unzip();
+        let incoming: Vec<_> = std::iter::zip(incoming_results.iter(), incoming_blocks)
+            .map(|(a, b)| (a as &dyn BasicValue, b))
+            .collect();
+        phi.add_incoming(&incoming);
+
+        Ok(phi.as_basic_value().into_float_value())
     }
 }
 
@@ -278,8 +291,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
         // store params
         for (param, arg) in std::iter::zip(params, fun.get_param_iter()) {
             // todo: see if there's a more efficient way of allocating
-            let ptr = builder.build_alloca(ctx.f64_type(), "param_ptr");
-            vars.insert(param.ident.clone(), ptr);
+            vars.insert(param.ident.clone(), arg);
         }
 
         // TODO: expand beyond 1 expr
@@ -378,7 +390,7 @@ mod tests {
             if a {
                 main(0.); 
             } else {
-                main(0.) + 2.;
+                main(0.) + 1.;
             }
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
@@ -400,6 +412,47 @@ mod tests {
                 main(0.) + 1.;
             } else {
                 main(0.) + 2.;
+            }
+        }").unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0[..] {
+            let fun = compiler.compile(fdcl).unwrap();
+            fun.print_to_stderr();
+        } else {
+            panic!(":(");
+        };
+
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed = lexer::tokenize("fun main(a) {
+            if a {
+                main(0.); 
+            } else if a {
+                main(0.) + 1.;
+            } else if a {
+                main(0.) + 2.;
+            } else if a {
+                main(0.) + 3.;
+            } else if a {
+                main(0.) + 4.;
+            } else if a {
+                main(0.) + 5.;
+            } else if a {
+                main(0.) + 6.;
+            } else if a {
+                main(0.) + 7.;
+            } else if a {
+                main(0.) + 8.;
+            } else if a {
+                main(0.) + 9.;
+            } else if a {
+                main(0.) + 10.;
+            } else if a {
+                main(0.) + 11.;
+            } else {
+                main(0.) + 12.;
             }
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
