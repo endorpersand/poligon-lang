@@ -230,4 +230,23 @@ mod tests {
             panic!(":(");
         };
     }
+
+    #[test]
+    fn what_am_i_doing_3() {
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed = lexer::tokenize("fun double(a) {
+            a * 2.;
+        }").unwrap();
+        
+        let tree::Program(parsed) = parser::parse(lexed).unwrap();
+
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed[..] {
+            let fun = compiler.compile(fdcl).unwrap();
+            fun.print_to_stderr();
+        } else {
+            panic!(":(");
+        };
+    }
 }
