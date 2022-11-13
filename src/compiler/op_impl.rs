@@ -35,7 +35,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 }
 
-trait Binary<'ctx, Rhs=Self> {
+pub(super) trait Binary<'ctx, Rhs=Self> {
     type Output;
 
     fn apply_binary(self, b: &op::Binary, right: Rhs, c: &Compiler<'ctx>) -> Self::Output;
