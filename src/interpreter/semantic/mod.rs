@@ -159,7 +159,7 @@ impl ResolveState {
     }
 
     pub fn traverse_tree(&mut self, t: &tree::Program) -> ResolveResult<()> {
-        t.0.traverse_rs(self)
+        t.traverse_rs(self)
     }
 
     pub fn get_steps(&self, t: &tree::Expr) -> Option<usize> {
@@ -208,10 +208,17 @@ impl<T: TRsDependent> TRsDependent for [T] {
     }
 }
 
-// The Program node's default traversal is to create a new scope without modifying the type.
+// As a program, we do not want to create another scope.
+impl TraverseResolve for tree::Program {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        self.0.0.traverse_rs(map)
+    }
+}
+
+// The Block node's default traversal is to create a new scope without modifying the type.
 // This may differ from an intended goal, and in that case, 
 // the implementation for [T] should be used instead.
-impl TraverseResolve for tree::Program {
+impl TraverseResolve for tree::Block {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.scope(|map| {
             self.0.traverse_rs(map)
@@ -430,6 +437,13 @@ mod test {
 
     use super::ResolveResult;
 
+
+    macro_rules! program {
+        ($($e:expr),*) => {
+            Program(Block(vec![$($e),*]))
+        }
+    }
+
     macro_rules! map {
         () => {
             HashMap::new()
@@ -449,9 +463,9 @@ mod test {
 
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
-        let program = Program(vec![
+        let program = program![
             Stmt::Expr(ident("a"))
-        ]);
+        ];
 
         let mut state = ResolveState::new();
         state.traverse_tree(&program)?;
@@ -462,7 +476,7 @@ mod test {
 
     #[test]
     fn declare_in_scope() -> ResolveResult<()> {
-        let program = Program(vec![
+        let program = program![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
                 pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
@@ -470,41 +484,41 @@ mod test {
                 val: Expr::Literal(Literal::Int(0)),
             }),
             Stmt::Expr(ident("a"))
-        ]);
+        ];
 
         let mut state = ResolveState::new();
         state.traverse_tree(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = Program(vec![
+        let program = program![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
                 pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
-            Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
-        ]);
+            Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
+        ];
 
         let mut state = ResolveState::new();
         state.traverse_tree(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = Program(vec![
-            Stmt::Expr(Expr::Block(Program(vec![
+        let program = program![
+            Stmt::Expr(Expr::Block(Block(vec![
                 Stmt::Decl(Decl {
                     rt: ReasgType::Const, 
                     pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
                     ty: None, 
                     val: Expr::Literal(Literal::Int(0)),
                 }),
-                Stmt::Expr(Expr::Block(Program(vec![Stmt::Expr(ident("a"))])))
+                Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
             ])))
-        ]);
+        ];
 
-        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0[0] {
+        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0.0[0] {
             if let Stmt::Expr(Expr::Block(prog)) = &prog.0[1] { 
                 if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
             } else { unreachable!() }

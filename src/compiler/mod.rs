@@ -65,7 +65,7 @@ trait TraverseIR<'ctx> {
     fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Program {
+impl<'ctx> TraverseIR<'ctx> for tree::Block {
     type Return = IRResult<FloatValue<'ctx>>;
 
     fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
@@ -94,6 +94,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
         //     unsafe { fun.delete() }
         //     Err(IRErr::InvalidFunction)
         // }
+    }
+}
+
+impl<'ctx> TraverseIR<'ctx> for tree::Program {
+    type Return = IRResult<FloatValue<'ctx>>;
+
+    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        todo!()
     }
 }
 
@@ -295,7 +303,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
         }
 
         // TODO: expand beyond 1 expr
-        let tree::Program(inner) = &**block;
+        let tree::Block(inner) = &**block;
         let ret_value = if let [tree::Stmt::Expr(e)] = &inner[..] {
             e.traverse_ir(compiler)?
         } else {
@@ -343,9 +351,9 @@ mod tests {
             2. + 3.;
         }").unwrap();
         
-        let tree::Program(parsed) = parser::parse(lexed).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed[..] {
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
         } else {
@@ -362,9 +370,9 @@ mod tests {
             a * 2.;
         }").unwrap();
         
-        let tree::Program(parsed) = parser::parse(lexed).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed[..] {
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
         }
@@ -395,7 +403,7 @@ mod tests {
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0[..] {
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
         } else {
@@ -416,7 +424,7 @@ mod tests {
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0[..] {
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
         } else {
@@ -457,7 +465,7 @@ mod tests {
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0[..] {
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
         } else {

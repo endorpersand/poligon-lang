@@ -509,6 +509,12 @@ impl TraverseRt for tree::If {
 
 impl TraverseRt for tree::Program {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        self.0.traverse_rt(ctx)
+    }
+}
+
+impl TraverseRt for tree::Block {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let mut stmts = self.0.iter();
         let maybe_last = stmts.next_back();
 
