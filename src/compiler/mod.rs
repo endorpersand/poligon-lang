@@ -66,11 +66,11 @@ trait TraverseIR<'ctx> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Block {
-    type Return = IRResult<FloatValue<'ctx>>;
+    type Return = IRResult<Option<FloatValue<'ctx>>>;
 
     fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         if let [tree::Stmt::Expr(e)] = &self.0[..] {
-            e.traverse_ir(compiler)
+            Ok(Some(e.traverse_ir(compiler)?))
         } else {
             todo!()
         }
@@ -234,7 +234,8 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
 
             // build then block
             compiler.builder.position_at_end(then_bb);
-            let then_result = block.traverse_ir(compiler)?;
+            let then_result = block.traverse_ir(compiler)?
+                .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
             compiler.builder.build_unconditional_branch(merge_bb);
             //update then block
             then_bb = compiler.builder.get_insert_block().unwrap();
@@ -248,15 +249,16 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
             (Some(mut else_bb), Some(block)) => {
                 // build else block
                 compiler.builder.position_at_end(else_bb);
-                let else_result = block.traverse_ir(compiler)?;
+                let else_result = block.traverse_ir(compiler)?
+                    .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
                 compiler.builder.build_unconditional_branch(merge_bb);
                 //update else block
                 else_bb = compiler.builder.get_insert_block().unwrap();
 
                 incoming.push((else_result, else_bb));
             },
-            (None, Some(_))    => unreachable!(),
-            (_, None)          => todo!("Support if with no else"),
+            (None, Some(_)) => unreachable!(),
+            (_, None)       => todo!("Support if with no else"),
         }
 
         compiler.builder.position_at_end(merge_bb);
@@ -298,19 +300,11 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
 
         // store params
         for (param, arg) in std::iter::zip(params, fun.get_param_iter()) {
-            // todo: see if there's a more efficient way of allocating
             vars.insert(param.ident.clone(), arg);
         }
 
-        // TODO: expand beyond 1 expr
-        let tree::Block(inner) = &**block;
-        let ret_value = if let [tree::Stmt::Expr(e)] = &inner[..] {
-            e.traverse_ir(compiler)?
-        } else {
-            todo!()
-        };
-        
-        compiler.builder.build_return(Some(&ret_value));
+        let ret_value = block.traverse_ir(compiler)?;
+        compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         
         if fun.verify(true) {
             Ok(fun)
