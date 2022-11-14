@@ -6,18 +6,26 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, BasicValueEnum, PointerValue};
+use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, PointerValue};
 
 use crate::tree;
 
 use self::op_impl::GonValue;
+
+macro_rules! pattern_or_todo {
+    (let $p:pat = $i:ident $b:block else { $($l:literal)? }) => {
+        if let $p = $i $b else {
+            todo!($($l)?)
+        }
+    }
+}
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
 
-    vars: HashMap<String, BasicValueEnum<'ctx>>
+    vars: HashMap<String, PointerValue<'ctx>>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -43,6 +51,45 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.get_insert_block()
             .and_then(BasicBlock::get_parent)
             .expect("No insert block found")
+    }
+
+    /// Create an alloca instruction in the entry block of
+    /// the function.  This is used for mutable variables etc.
+    fn create_entry_block_alloca(&mut self, ident: &str) -> PointerValue<'ctx> {
+        let builder = self.ctx.create_builder();
+
+        let fun_bb = self.parent_fn().get_first_basic_block().expect("Expected function to have block");
+        // reposition this builder to the top of the first block
+        match fun_bb.get_first_instruction() {
+            Some(instr) => builder.position_before(&instr),
+            None => builder.position_at_end(fun_bb),
+        };
+
+        // create alloca
+        let alloca = builder.build_alloca(self.ctx.f64_type(), ident);
+        self.vars.insert(String::from(ident), alloca);
+        alloca
+    }
+
+    /// Store the value in the allocated position or return None if there is no allocated position
+    fn store_val<V>(&mut self, ident: &str, val: V) -> Option<PointerValue<'ctx>> 
+        where V: BasicValue<'ctx>
+    {
+        self.vars.get(ident)
+            .map(|&alloca| {
+                self.builder.build_store(alloca, val);
+                alloca
+            })
+    }
+
+    /// Create an alloca instruction at the top and also store the value at the current insert point
+    fn alloca_and_store<V>(&mut self, ident: &str, val: V) -> PointerValue<'ctx> 
+        where V: BasicValue<'ctx>
+    {
+        let alloca = self.create_entry_block_alloca(ident);
+
+        self.builder.build_store(alloca, val);
+        alloca
     }
 }
 
@@ -145,7 +192,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
             tree::Expr::Ident(ident) => match compiler.vars.get(ident) {
-                Some(var) => Ok(var.into_float_value()),
+                Some(&ptr) => Ok(compiler.builder.build_load(ptr, "load").into_float_value()),
                 None => Err(IRErr::UndefinedVariable(ident.clone())),
             },
             tree::Expr::Block(_) => todo!(),
@@ -153,7 +200,17 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::ListLiteral(_) => todo!(),
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
-            tree::Expr::Assign(_, _) => todo!(),
+            tree::Expr::Assign(pat, expr) => {
+                pattern_or_todo! {
+                    let tree::Pat::Unit(tree::AsgUnit::Ident(ident)) = pat {
+                        let val = expr.write_ir(compiler)?;
+                        compiler.store_val(ident, val);
+                        Ok(val)
+                    } else {
+                        "pattern destructuring not implemented"
+                    }
+                }
+            },
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(_) => todo!(),
             tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
@@ -227,11 +284,11 @@ impl<'ctx> TraverseIR<'ctx> for tree::Literal {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let ctx = compiler.ctx;
         match self {
-            tree::Literal::Int(i)   => todo!(),
+            tree::Literal::Int(_)   => todo!("int literal"),
             tree::Literal::Float(f) => Ok(ctx.f64_type().const_float(*f)),
-            tree::Literal::Char(_)  => todo!(),
-            tree::Literal::Str(_)   => todo!(),
-            tree::Literal::Bool(b)  => todo!(),
+            tree::Literal::Char(_)  => todo!("char literal"),
+            tree::Literal::Str(_)   => todo!("str literal"),
+            tree::Literal::Bool(_)  => todo!("bool literal"),
         }
     }
 }
@@ -330,7 +387,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
 
         // store params
         for (param, arg) in std::iter::zip(params, fun.get_param_iter()) {
-            vars.insert(param.ident.clone(), arg);
+            compiler.alloca_and_store(&param.ident, arg);
         }
 
         let ret_value = block.write_ir(compiler)?;
@@ -506,6 +563,24 @@ mod tests {
             while a {
                 main(a);
             };
+        }").unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
+            let fun = compiler.compile(fdcl).unwrap();
+            fun.print_to_stderr();
+        } else {
+            panic!(":(");
+        };
+    }
+
+    #[test]
+    fn var_test() {
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed = lexer::tokenize("fun main(a) {
+            a = 2.;
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
         
