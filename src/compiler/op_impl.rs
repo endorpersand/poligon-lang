@@ -53,7 +53,7 @@ pub(super) trait Cmp<'ctx, Rhs=Self> {
     fn apply_cmp(self, op: &op::Cmp, right: Rhs, c: &mut Compiler<'ctx>) -> Self::Output;
 }
 
-impl<'ctx> Binary<'ctx> for tree::Expr {
+impl<'ctx> Binary<'ctx> for &tree::Expr {
     type Output = super::IRResult<FloatValue<'ctx>>;
 
     fn apply_binary(self, b: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {

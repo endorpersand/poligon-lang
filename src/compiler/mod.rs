@@ -157,11 +157,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(_) => todo!(),
             tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
-                // todo, make lazy
-                let lval = left.write_ir(compiler)?;
-                let rval = right.write_ir(compiler)?;
-
-                Ok(op_impl::Binary::apply_binary(lval, op, rval, compiler))
+                op_impl::Binary::apply_binary(&**left, op, &**right, compiler)
             },
             tree::Expr::Comparison { left, rights } => todo!(),
             tree::Expr::Range { left, right, step } => todo!(),
