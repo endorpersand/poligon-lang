@@ -3,12 +3,15 @@ mod op_impl;
 use std::collections::HashMap;
 
 use inkwell::FloatPredicate;
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, BasicValueEnum};
 
 use crate::tree;
+
+use self::op_impl::GonValue;
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
@@ -30,6 +33,17 @@ impl<'ctx> Compiler<'ctx> {
 
     fn compile<T: TraverseIR<'ctx>>(&mut self, t: &T) -> T::Return {
         t.traverse_ir(self)
+    }
+
+    fn insert_block(&self) -> BasicBlock<'ctx> {
+        self.builder.get_insert_block()
+            .expect("No insert block found")
+    }
+
+    fn parent_fn(&self) -> FunctionValue<'ctx> {
+        self.builder.get_insert_block()
+            .and_then(BasicBlock::get_parent)
+            .expect("No insert block found")
     }
 }
 
@@ -153,7 +167,31 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::Comparison { left, rights } => todo!(),
             tree::Expr::Range { left, right, step } => todo!(),
             tree::Expr::If(e) => e.traverse_ir(compiler),
-            tree::Expr::While { condition, block } => todo!(),
+            tree::Expr::While { condition, block } => {
+                let bb = compiler.insert_block();
+                let fun = compiler.parent_fn();
+
+                let cond_bb = compiler.ctx.append_basic_block(fun, "while_cond");
+                let loop_bb = compiler.ctx.append_basic_block(fun, "while");
+                let exit_loop_bb = compiler.ctx.append_basic_block(fun, "after_while");
+
+                // end BB by going into loop
+                compiler.builder.position_at_end(bb);
+                compiler.builder.build_unconditional_branch(cond_bb);
+
+                // if cond is true, go into the loop. otherwise, exit
+                compiler.builder.position_at_end(cond_bb);
+                let cond = condition.traverse_ir(compiler)?.truth(compiler);
+                compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);
+
+                compiler.builder.position_at_end(loop_bb);
+                block.traverse_ir(compiler)?; // todo, use value
+                compiler.builder.build_unconditional_branch(cond_bb);
+
+                compiler.builder.position_at_end(exit_loop_bb);
+                Ok(compiler.ctx.f64_type().const_zero()) // TODO
+
+            },
             tree::Expr::For { ident, iterator, block } => todo!(),
             tree::Expr::Call { funct, params } => {
                 if let tree::Expr::Ident(ident) = &**funct {
@@ -208,8 +246,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
 
     fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let tree::If { conditionals, last } = self;
-        let parent = compiler.builder.get_insert_block().and_then(|bb| bb.get_parent())
-            .expect("Expected if to be generated in function");
+        let parent = compiler.parent_fn();
         
         let mut incoming = vec![];
         let mut prev_else = None;
@@ -222,9 +259,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
             }
             // comparison value
             // TODO, handle non-float
-            let cmp_fval = cmp.traverse_ir(compiler)?;
-            let zero = compiler.ctx.f64_type().const_zero();
-            let cmp_val = compiler.builder.build_float_compare(FloatPredicate::ONE, cmp_fval, zero, "cond_cmp");
+            let cmp_val = cmp.traverse_ir(compiler)?.truth(compiler);
                 
             // create blocks and branch
             let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
@@ -459,6 +494,26 @@ mod tests {
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
 
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
+            let fun = compiler.compile(fdcl).unwrap();
+            fun.print_to_stderr();
+        } else {
+            panic!(":(");
+        };
+    }
+
+    #[test]
+    fn while_ir() {
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed = lexer::tokenize("fun main(a) {
+            while a {
+                main(a);
+            };
+        }").unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        
         if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
             let fun = compiler.compile(fdcl).unwrap();
             fun.print_to_stderr();
