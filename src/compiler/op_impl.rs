@@ -72,8 +72,8 @@ impl<'ctx> Binary<'ctx> for tree::Expr {
 
             // eager eval
             b => {
-                let left = self.traverse_ir(c)?;
-                let right = right.traverse_ir(c)?;
+                let left = self.write_ir(c)?;
+                let right = right.write_ir(c)?;
 
                 Ok(left.apply_binary(b, right, c))
             }

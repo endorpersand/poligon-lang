@@ -2,12 +2,11 @@ mod op_impl;
 
 use std::collections::HashMap;
 
-use inkwell::FloatPredicate;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, BasicValueEnum};
+use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, BasicValueEnum, PointerValue};
 
 use crate::tree;
 
@@ -32,7 +31,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile<T: TraverseIR<'ctx>>(&mut self, t: &T) -> T::Return {
-        t.traverse_ir(self)
+        t.write_ir(self)
     }
 
     fn insert_block(&self) -> BasicBlock<'ctx> {
@@ -76,15 +75,15 @@ type IRResult<T> = Result<T, IRErr>;
 
 trait TraverseIR<'ctx> {
     type Return;
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Block {
     type Return = IRResult<Option<FloatValue<'ctx>>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         if let [tree::Stmt::Expr(e)] = &self.0[..] {
-            Ok(Some(e.traverse_ir(compiler)?))
+            Ok(Some(e.write_ir(compiler)?))
         } else {
             todo!()
         }
@@ -114,7 +113,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Block {
 impl<'ctx> TraverseIR<'ctx> for tree::Program {
     type Return = IRResult<FloatValue<'ctx>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         todo!()
     }
 }
@@ -122,15 +121,15 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
 impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
     type Return = IRResult<()>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR>::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR>::Return {
         match self {
             tree::Stmt::Decl(_) => todo!(),
             tree::Stmt::Return(_) => todo!(),
             tree::Stmt::Break => todo!(),
             tree::Stmt::Continue => todo!(),
-            tree::Stmt::FunDecl(d) => { d.traverse_ir(compiler)?; },
+            tree::Stmt::FunDecl(d) => { d.write_ir(compiler)?; },
             tree::Stmt::Expr(e) => {
-                let expr = e.traverse_ir(compiler)?;
+                let expr = e.write_ir(compiler)?;
                 todo!()
                 // compiler.builder.insert_instruction(&expr.as_instruction().unwrap(), None);
             },
@@ -143,14 +142,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
 impl<'ctx> TraverseIR<'ctx> for tree::Expr {
     type Return = IRResult<FloatValue<'ctx>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
             tree::Expr::Ident(ident) => match compiler.vars.get(ident) {
                 Some(var) => Ok(var.into_float_value()),
                 None => Err(IRErr::UndefinedVariable(ident.clone())),
             },
             tree::Expr::Block(_) => todo!(),
-            tree::Expr::Literal(literal) => literal.traverse_ir(compiler),
+            tree::Expr::Literal(literal) => literal.write_ir(compiler),
             tree::Expr::ListLiteral(_) => todo!(),
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
@@ -159,14 +158,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::UnaryOps(_) => todo!(),
             tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
                 // todo, make lazy
-                let lval = left.traverse_ir(compiler)?;
-                let rval = right.traverse_ir(compiler)?;
+                let lval = left.write_ir(compiler)?;
+                let rval = right.write_ir(compiler)?;
 
                 Ok(op_impl::Binary::apply_binary(lval, op, rval, compiler))
             },
             tree::Expr::Comparison { left, rights } => todo!(),
             tree::Expr::Range { left, right, step } => todo!(),
-            tree::Expr::If(e) => e.traverse_ir(compiler),
+            tree::Expr::If(e) => e.write_ir(compiler),
             tree::Expr::While { condition, block } => {
                 let bb = compiler.insert_block();
                 let fun = compiler.parent_fn();
@@ -181,11 +180,11 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 
                 // if cond is true, go into the loop. otherwise, exit
                 compiler.builder.position_at_end(cond_bb);
-                let cond = condition.traverse_ir(compiler)?.truth(compiler);
+                let cond = condition.write_ir(compiler)?.truth(compiler);
                 compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);
 
                 compiler.builder.position_at_end(loop_bb);
-                block.traverse_ir(compiler)?; // todo, use value
+                block.write_ir(compiler)?; // todo, use value
                 compiler.builder.build_unconditional_branch(cond_bb);
 
                 compiler.builder.position_at_end(exit_loop_bb);
@@ -201,7 +200,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                             let expr_params = params.len();
                             if fun_params == expr_params {
                                 let resolved_params: Vec<_> = params.iter()
-                                    .map(|p| p.traverse_ir(compiler).map(Into::into))
+                                    .map(|p| p.write_ir(compiler).map(Into::into))
                                     .collect::<Result<_, _>>()?;
 
                                 let call = compiler.builder.build_call(fun, &resolved_params, "call");
@@ -229,7 +228,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 impl<'ctx> TraverseIR<'ctx> for tree::Literal {
     type Return = IRResult<FloatValue<'ctx>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let ctx = compiler.ctx;
         match self {
             tree::Literal::Int(i)   => todo!(),
@@ -244,7 +243,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Literal {
 impl<'ctx> TraverseIR<'ctx> for tree::If {
     type Return = IRResult<FloatValue<'ctx>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let tree::If { conditionals, last } = self;
         let parent = compiler.parent_fn();
         
@@ -259,7 +258,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
             }
             // comparison value
             // TODO, handle non-float
-            let cmp_val = cmp.traverse_ir(compiler)?.truth(compiler);
+            let cmp_val = cmp.write_ir(compiler)?.truth(compiler);
                 
             // create blocks and branch
             let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
@@ -269,7 +268,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
 
             // build then block
             compiler.builder.position_at_end(then_bb);
-            let then_result = block.traverse_ir(compiler)?
+            let then_result = block.write_ir(compiler)?
                 .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
             compiler.builder.build_unconditional_branch(merge_bb);
             //update then block
@@ -284,7 +283,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
             (Some(mut else_bb), Some(block)) => {
                 // build else block
                 compiler.builder.position_at_end(else_bb);
-                let else_result = block.traverse_ir(compiler)?
+                let else_result = block.write_ir(compiler)?
                     .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
                 compiler.builder.build_unconditional_branch(merge_bb);
                 //update else block
@@ -312,7 +311,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
 impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
     type Return = IRResult<FunctionValue<'ctx>>;
 
-    fn traverse_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let tree::FunDecl { ident, params, ret: _, block } = self;
         let Compiler { ctx, builder, module, vars } = compiler;
 
@@ -338,7 +337,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
             vars.insert(param.ident.clone(), arg);
         }
 
-        let ret_value = block.traverse_ir(compiler)?;
+        let ret_value = block.write_ir(compiler)?;
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         
         if fun.verify(true) {
