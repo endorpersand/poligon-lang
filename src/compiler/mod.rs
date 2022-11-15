@@ -170,7 +170,18 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR>::Return {
         match self {
-            tree::Stmt::Decl(_) => todo!(),
+            tree::Stmt::Decl(d) => {
+                let tree::Decl { rt, pat, ty, val } = d;
+                    pattern_or_todo! {
+                        let tree::Pat::Unit(tree::DeclUnit::Ident(ident, mt)) = pat {
+                            let val = val.write_ir(compiler)?;
+                            compiler.alloca_and_store(ident, val);
+                            
+                    } else {
+                        "pattern destructuring not implemented"
+                    }
+                }
+            },
             tree::Stmt::Return(_) => todo!(),
             tree::Stmt::Break => todo!(),
             tree::Stmt::Continue => todo!(),
@@ -204,7 +215,8 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 pattern_or_todo! {
                     let tree::Pat::Unit(tree::AsgUnit::Ident(ident)) = pat {
                         let val = expr.write_ir(compiler)?;
-                        compiler.store_val(ident, val);
+                        compiler.store_val(ident, val)
+                            .ok_or_else(|| IRErr::UndefinedVariable(ident.clone()))?;
                         Ok(val)
                     } else {
                         "pattern destructuring not implemented"
@@ -459,16 +471,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn what_am_i_doing_4() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
+    // #[test]
+    // fn what_am_i_doing_4() {
+    //     let ctx = Context::create();
+    //     let mut compiler = Compiler::from_ctx(&ctx);
 
-        let lexed = lexer::tokenize("2. * 2.;").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        let fun = compiler.compile(&parsed).unwrap();
-        fun.print_to_stderr();
-    }
+    //     let lexed = lexer::tokenize("2. * 2.;").unwrap();
+    //     let parsed = parser::parse(lexed).unwrap();
+    //     let fun = compiler.compile(&parsed).unwrap();
+    //     fun.print_to_stderr();
+    // }
 
     #[test]
     fn what_am_i_doing_5() {
@@ -581,6 +593,21 @@ mod tests {
 
         let lexed = lexer::tokenize("fun main(a) {
             a = 2.;
+        }").unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        
+        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
+            let fun = compiler.compile(fdcl).unwrap();
+            fun.print_to_stderr();
+        } else {
+            panic!(":(");
+        };
+
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed = lexer::tokenize("fun main(a) {
+            let b = 2.;
         }").unwrap();
         let parsed = parser::parse(lexed).unwrap();
         

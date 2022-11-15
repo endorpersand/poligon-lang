@@ -1,0 +1,15 @@
+for i in 1..20 {
+    let result = "";
+    
+    if i % 3 == 0 {
+        result = result | "Fizz";
+    }
+    if i % 5 == 0 {
+        result = result | "Buzz";
+    }
+    if result == "" {
+        print(i);
+    } else {
+        print(result);
+    }
+}
