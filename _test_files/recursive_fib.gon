@@ -4,6 +4,9 @@ fun fib(n) {
 }
 
 let before = time();
+print("20th Fibonacci number:");
 print(fib(20));
 let after = time();
+
+print("time in ms:");
 print(after - before);
