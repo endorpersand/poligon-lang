@@ -3,7 +3,7 @@ fun fib(n: int) -> list<int> {
     let b = 1;
 
     while n > 0 {
-        n = n - 1; // with asg ops: make into n -= 1
+        n = n - 1;
 
         [a, b] = [b, a + b];
         b;
