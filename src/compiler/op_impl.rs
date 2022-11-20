@@ -105,8 +105,10 @@ impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
                 })?;
 
                 c.builder.position_at_end(merge_bb);
-                c.builder.build_phi(self.typed().basic_enum(c), "logand_eager_result");
-                todo!()
+                // TODO: proper typing
+                let phi = c.builder.build_phi(self.typed().basic_enum(c), "logand_eager_result");
+                
+                Ok(GonValueEnum::reconstruct(self.typed(), phi.as_basic_value()))
             },
 
             // logical or
@@ -126,8 +128,10 @@ impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
                 })?;
 
                 c.builder.position_at_end(merge_bb);
-                c.builder.build_phi(self.typed().basic_enum(c), "logor_eager_result");
-                todo!()
+                // TODO: proper typing
+                let phi = c.builder.build_phi(self.typed().basic_enum(c), "logor_eager_result");
+                
+                Ok(GonValueEnum::reconstruct(self.typed(), phi.as_basic_value()))
             },
         }
     }
