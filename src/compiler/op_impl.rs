@@ -32,17 +32,60 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
-            // TODO: lazy LogAnd, LogOr
-            // op::Binary::LogAnd => {
-            //     let parent = c.parent_fn();
+            op::Binary::LogAnd => {
+                let parent = c.parent_fn();
+                let bb = c.insert_block();
 
-            //     let lhs = c.;
-            // },
-            // op::Binary::LogOr  => {
-            //     let parent = c.parent_fn();
+                let lhs = self.write_ir(c)?;
 
-            //     let lhs = c.;
-            // },
+                // lhs ? rhs : lhs
+                let mut then_bb = c.ctx.append_basic_block(parent, "logand_true");
+                let merge_bb = c.ctx.append_basic_block(parent, "logand_merge");
+                c.builder.build_conditional_branch(lhs.truth(c), then_bb, merge_bb);
+                
+                c.builder.position_at_end(then_bb);
+                let rhs = right.write_ir(c)?;
+                c.builder.build_unconditional_branch(merge_bb);
+                then_bb = c.builder.get_insert_block().unwrap();
+
+                c.builder.position_at_end(merge_bb);
+                let phi = c.builder.build_phi(c.ctx.f64_type(), "logand_result");
+                phi.add_incoming(&[
+                    // if LHS was true
+                    (&rhs, then_bb),
+                    // if LHS was false
+                    (&lhs, bb),
+                ]);
+
+                Ok(phi.as_basic_value().into_float_value())
+            },
+            op::Binary::LogOr  => {
+                let parent = c.parent_fn();
+                let bb = c.insert_block();
+
+                let lhs = self.write_ir(c)?;
+
+                // lhs ? lhs : rhs
+                let mut else_bb = c.ctx.append_basic_block(parent, "logor_false");
+                let merge_bb = c.ctx.append_basic_block(parent, "logor_merge");
+                c.builder.build_conditional_branch(lhs.truth(c), merge_bb, else_bb);
+                
+                c.builder.position_at_end(else_bb);
+                let rhs = right.write_ir(c)?;
+                c.builder.build_unconditional_branch(merge_bb);
+                else_bb = c.builder.get_insert_block().unwrap();
+
+                c.builder.position_at_end(merge_bb);
+                let phi = c.builder.build_phi(c.ctx.f64_type(), "logor_result");
+                phi.add_incoming(&[
+                    // if LHS was true
+                    (&lhs, bb),
+                    // if LHS was false
+                    (&rhs, else_bb)
+                ]);
+
+                Ok(phi.as_basic_value().into_float_value())
+            },
 
             // eager eval
             b => {
