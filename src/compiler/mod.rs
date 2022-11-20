@@ -6,11 +6,11 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, PointerValue};
+use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, PointerValue, PhiValue};
 
 use crate::tree;
 
-use self::op_impl::GonValue;
+use self::op_impl::{GonValue, Cmp};
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
@@ -42,6 +42,15 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.get_insert_block()
             .and_then(BasicBlock::get_parent)
             .expect("No insert block found")
+    }
+
+    fn update_block<F, T>(&mut self, bb: &mut BasicBlock<'ctx>, mut f: F) -> IRResult<T>
+        where F: FnMut(&mut BasicBlock<'ctx>, &mut Self) -> IRResult<T>
+    {
+        self.builder.position_at_end(*bb);
+        let t = f(bb, self)?;
+        *bb = self.builder.get_insert_block().unwrap();
+        Ok(t)
     }
 
     /// Create an alloca instruction in the entry block of
@@ -84,6 +93,21 @@ impl<'ctx> Compiler<'ctx> {
     }
 }
 
+fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
+        phi: PhiValue<'ctx>,
+        incoming: &'a [(B, BasicBlock<'ctx>)]
+    ) {
+    let (incoming_results, incoming_blocks): (Vec<&B>, Vec<_>) = incoming.iter()
+        .map(|(a, b)| (a, *b))
+        .unzip();
+
+    let vec: Vec<_> = std::iter::zip(incoming_results, incoming_blocks)
+        .map(|(a, b)| (a as _, b))
+        .collect();
+    
+    phi.add_incoming(&vec);
+}
+
 enum Value<'ctx> {
     Float(FloatValue<'ctx>),
     Int(IntValue<'ctx>),
@@ -107,7 +131,8 @@ enum IRErr {
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
     CallWasInstruction,
-    InvalidFunction
+    InvalidFunction,
+    BlockHadFloatValue // TODO: remove
 }
 type IRResult<T> = Result<T, IRErr>;
 
@@ -120,31 +145,20 @@ impl<'ctx> TraverseIR<'ctx> for tree::Block {
     type Return = IRResult<Option<FloatValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        if let [tree::Stmt::Expr(e)] = &self.0[..] {
-            Ok(Some(e.write_ir(compiler)?))
-        } else {
-            todo!()
+        let mut stmts = self.0.iter();
+        let maybe_last = stmts.next_back();
+
+        match maybe_last {
+            Some(last) => {
+                for stmt in stmts {
+                    stmt.write_ir(compiler)?;
+                }
+                last.write_ir(compiler)
+            },
+            None => {
+                Ok(None)
+            }
         }
-        // let Compiler { ctx, module, .. } = compiler;
-        
-        // let main_ret = ctx.void_type().fn_type(&[], false);
-        // let fun = module.add_function("main", main_ret, None);
-        // let block = ctx.append_basic_block(fun, "main_block");
-
-        // for stmt in &self.0 {
-        //     compiler.builder.position_at_end(block);
-        //     stmt.traverse_ir(compiler)?;
-        // }
-        // compiler.builder.position_at_end(block);
-        // compiler.builder.build_return(None);
-
-        // if fun.verify(true) {
-        //     Ok(fun)
-        // } else {
-        //     // SAFETY: Not used after.
-        //     unsafe { fun.delete() }
-        //     Err(IRErr::InvalidFunction)
-        // }
     }
 }
 
@@ -157,9 +171,9 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
-    type Return = IRResult<()>;
+    type Return = IRResult<Option<FloatValue<'ctx>>>;
 
-    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR>::Return {
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
             tree::Stmt::Decl(d) => {
                 let tree::Decl { rt, pat, ty, val } = d;
@@ -167,23 +181,29 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
                     tree::Pat::Unit(tree::DeclUnit::Ident(ident, mt)) => {
                         let val = val.write_ir(compiler)?;
                         compiler.alloca_and_store(ident, val);
-                        
+                        Ok(None)
                     },
                     _ => todo!("pattern destructuring not implemented")
                 }
             },
-            tree::Stmt::Return(_) => todo!(),
+            tree::Stmt::Return(me) => {
+                let expr = match me {
+                    Some(e) => Some(e.write_ir(compiler)?),
+                    None => None,
+                };
+                compiler.builder.build_return(expr.as_ref().map(|r| r as _));
+                Ok(None)
+            },
             tree::Stmt::Break => todo!(),
             tree::Stmt::Continue => todo!(),
-            tree::Stmt::FunDecl(d) => { d.write_ir(compiler)?; },
-            tree::Stmt::Expr(e) => {
-                let expr = e.write_ir(compiler)?;
-                todo!()
-                // compiler.builder.insert_instruction(&expr.as_instruction().unwrap(), None);
+            tree::Stmt::FunDecl(d) => {
+                d.write_ir(compiler)?;
+                Ok(None)
             },
-        };
-
-        Ok(())
+            tree::Stmt::Expr(e) => {
+                e.write_ir(compiler).map(|e| Some(e))
+            },
+        }
     }
 }
 
@@ -196,7 +216,25 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 Some(&ptr) => Ok(compiler.builder.build_load(ptr, "load").into_float_value()),
                 None => Err(IRErr::UndefinedVariable(ident.clone())),
             },
-            tree::Expr::Block(_) => todo!(),
+            tree::Expr::Block(block) => {
+                // wrap in block for clarity
+                let fun = compiler.parent_fn();
+                let orig_bb = compiler.insert_block();
+                let mut expr_bb = compiler.ctx.append_basic_block(fun, "block");
+                let exit_bb = compiler.ctx.append_basic_block(fun, "post_block");
+
+                compiler.builder.position_at_end(orig_bb);
+                compiler.builder.build_unconditional_branch(expr_bb);
+
+                let t = compiler.update_block(&mut expr_bb, |_, c| {
+                    let t = block.write_ir(c)?;
+                    c.builder.build_unconditional_branch(exit_bb);
+                    t.ok_or(IRErr::BlockHadFloatValue)
+                })?;
+
+                compiler.builder.position_at_end(exit_bb);
+                Ok(t)
+            },
             tree::Expr::Literal(literal) => literal.write_ir(compiler),
             tree::Expr::ListLiteral(_) => todo!(),
             tree::Expr::SetLiteral(_) => todo!(),
@@ -217,7 +255,55 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
                 op_impl::Binary::apply_binary(&**left, op, &**right, compiler)
             },
-            tree::Expr::Comparison { left, rights } => todo!(),
+            tree::Expr::Comparison { left, rights } => {
+                let fun = compiler.parent_fn();
+                let mut lval = left.write_ir(compiler)?;
+                
+                let mut riter = rights.iter();
+                let last = riter.next_back();
+                
+                match last {
+                    Some((last_cmp, last_rexpr)) => {
+                        let mut incoming = vec![];
+                        let post_bb = compiler.ctx.append_basic_block(fun, "post_cmp");
+
+                        for (cmp, rexpr) in riter {
+                            // eval comparison
+                            let rval = rexpr.write_ir(compiler)?;
+                            let result = lval.apply_cmp(cmp, rval, compiler);
+                            
+                            // branch depending on T/F
+                            let then_bb = compiler.ctx.prepend_basic_block(post_bb, "cmp_true");
+                            compiler.builder.build_conditional_branch(result, then_bb, post_bb);
+                            
+                            // update phi
+                            incoming.push((result, compiler.insert_block()));
+
+                            // prepare for next comparison
+                            compiler.builder.position_at_end(then_bb);
+                            lval = rval;
+                        }
+                        
+                        // last block
+                        let rval = last_rexpr.write_ir(compiler)?;
+                        let result = lval.apply_cmp(last_cmp, rval, compiler);
+                        // go to post block
+                        compiler.builder.build_unconditional_branch(post_bb);
+                        // add to phi
+                        incoming.push((result, compiler.insert_block()));
+
+                        compiler.builder.position_at_end(post_bb);
+                        let phi = compiler.builder.build_phi(compiler.ctx.bool_type(), "cmp_result");
+                        add_incoming(phi, &incoming);
+
+                        let result = phi.as_basic_value().into_int_value();
+                        let fresult = compiler.builder
+                            .build_signed_int_to_float(result, compiler.ctx.f64_type(), "cmp_cast");
+                        Ok(fresult)
+                    },
+                    None => Ok(lval),
+                }
+            },
             tree::Expr::Range { left, right, step } => todo!(),
             tree::Expr::If(e) => e.write_ir(compiler),
             tree::Expr::While { condition, block } => {
@@ -226,7 +312,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 
                 let cond_bb = compiler.ctx.append_basic_block(fun, "while_cond");
                 let loop_bb = compiler.ctx.append_basic_block(fun, "while");
-                let exit_loop_bb = compiler.ctx.append_basic_block(fun, "after_while");
+                let exit_loop_bb = compiler.ctx.append_basic_block(fun, "post_while");
 
                 // end BB by going into loop
                 compiler.builder.position_at_end(bb);
@@ -352,12 +438,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
         compiler.builder.position_at_end(merge_bb);
         let phi = compiler.builder.build_phi(compiler.ctx.f64_type(), "ifval");
         
-        let (incoming_results, incoming_blocks): (Vec<_>, Vec<_>) = incoming.into_iter().unzip();
-        let incoming: Vec<_> = std::iter::zip(incoming_results.iter(), incoming_blocks)
-            .map(|(a, b)| (a as &dyn BasicValue, b))
-            .collect();
-        phi.add_incoming(&incoming);
-
+        add_incoming(phi, &incoming);
         Ok(phi.as_basic_value().into_float_value())
     }
 }
@@ -383,7 +464,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
         }
 
         // Body
-        let bb = ctx.append_basic_block(fun, "block");
+        let bb = ctx.append_basic_block(fun, &format!("{ident}_body"));
         builder.position_at_end(bb);
 
         // store params
@@ -392,6 +473,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
         }
 
         let ret_value = block.write_ir(compiler)?;
+        // write the last value in block as return
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         
         if fun.verify(true) {
@@ -517,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn log_and_or_test() {
+    fn log_and_log_or_test() {
         assert_fun_pass("fun main(a, b) {
             a && b;
         }");
@@ -525,5 +607,59 @@ mod tests {
         assert_fun_pass("fun main(a, b) {
             a || b;
         }");
+    }
+
+    #[test]
+    fn cmp_test() {
+        assert_fun_pass("fun main(a, b) {
+            a < b;
+        }");
+        
+        assert_fun_pass("fun main(a, b, c) {
+            a < b < c;
+        }");
+
+        assert_fun_pass("fun main(a, b, c, d, e, f, g) {
+            a < b < c < d == e < f > g;
+        }");
+    }
+
+    #[test]
+    fn fun_multi_stmt_test() {
+        // test multiple declarations
+        assert_fun_pass("fun main() {
+            let a = 1.;
+            let b = 2.;
+            let c = 3.;
+            a + b + c;
+        }");
+
+        // block test
+        assert_fun_pass("fun main() {
+            let b = {
+                let a = 1.;
+                a + 2.;
+            };
+
+            b;
+        }");
+
+        // multi expression
+        assert_fun_pass("fun main() {
+            1. + 2. + 3.;
+            4. + 5. + 6.;
+            7. + 8. + 9.;
+        }");
+
+        // // fast return
+        // assert_fun_pass("fun main(a) {
+        //     let b = if a {
+        //         return 2.;
+        //     } else {
+        //         2. + 15.;
+        //     };
+
+        //     b;
+        // }");
     }
 }
