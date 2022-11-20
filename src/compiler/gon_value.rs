@@ -1,0 +1,102 @@
+use inkwell::types::BasicTypeEnum;
+use inkwell::{FloatPredicate, IntPredicate};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
+
+use crate::tree;
+
+use super::Compiler;
+
+#[derive(Clone, Copy)]
+pub enum GonValueEnum<'ctx> {
+    Float(FloatValue<'ctx> /* f64 */),
+    Int(IntValue<'ctx> /* i? */),
+    Bool(IntValue<'ctx> /* i1 */)
+}
+
+impl<'ctx> GonValueEnum<'ctx> {
+    pub fn typed(&self) -> GonValueType {
+        match self {
+            GonValueEnum::Float(_) => GonValueType::Float,
+            GonValueEnum::Int(_)   => GonValueType::Int,
+            GonValueEnum::Bool(_)  => GonValueType::Bool,
+        }
+    }
+
+    pub fn new_int(c: &Compiler<'ctx>, v: isize) -> Self {
+        Self::Int(c.ctx.i64_type().const_int(v as u64, true))
+    }
+    pub fn new_bool(c: &Compiler<'ctx>, v: bool) -> Self {
+        Self::Bool(c.ctx.bool_type().const_int(v as u64, true))
+    }
+    pub fn new_float(c: &Compiler<'ctx>, f: f64) -> Self {
+        Self::Float(c.ctx.f64_type().const_float(f))
+    }
+
+    pub fn basic_enum(self) -> BasicValueEnum<'ctx> {
+        match self {
+            GonValueEnum::Float(f) => f.as_basic_value_enum(),
+            GonValueEnum::Int(i)   => i.as_basic_value_enum(),
+            GonValueEnum::Bool(b)  => b.as_basic_value_enum(),
+        }
+    }
+
+    pub fn reconstruct(t: GonValueType, v: BasicValueEnum<'ctx>) -> Self {
+        match t {
+            GonValueType::Float => Self::Float(v.into_float_value()),
+            GonValueType::Int   => Self::Int(v.into_int_value()),
+            GonValueType::Bool  => Self::Bool(v.into_int_value()),
+        }
+    }
+
+    pub fn truth(self, compiler: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */ {
+        match self {
+            GonValueEnum::Float(f) => 
+                compiler.builder.build_float_compare(
+                    FloatPredicate::ONE, f, compiler.ctx.f64_type().const_zero(), "truth"
+                ),
+            GonValueEnum::Int(i) => 
+                compiler.builder.build_int_compare(
+                    IntPredicate::NE, i, compiler.ctx.i64_type().const_zero(), "truth"
+                ),
+            GonValueEnum::Bool(b) => b,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GonValueType {
+    Float, Int, Bool
+}
+
+impl GonValueType {
+    pub fn lookup(ty: &tree::Type) -> Option<Self> {
+        match ty.0.as_str() {
+            "float" => Some(GonValueType::Float),
+            "int"   => Some(GonValueType::Int),
+            "bool"  => Some(GonValueType::Bool),
+            _       => None
+        }
+    }
+
+    pub fn basic_enum<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
+        match self {
+            GonValueType::Float => c.ctx.f64_type().into(),
+            GonValueType::Int   => c.ctx.i64_type().into(),
+            GonValueType::Bool  => c.ctx.bool_type().into(),
+        }
+    }
+}
+
+macro_rules! apply_bv {
+    ($i:ident as $e:expr => $fn:expr) => {
+        match $e {
+            BasicValueEnum::ArrayValue($i)   => $fn,
+            BasicValueEnum::IntValue($i)     => $fn,
+            BasicValueEnum::FloatValue($i)   => $fn,
+            BasicValueEnum::PointerValue($i) => $fn,
+            BasicValueEnum::StructValue($i)  => $fn,
+            BasicValueEnum::VectorValue($i)  => $fn,
+        }
+    }
+}
+pub(crate) use apply_bv;

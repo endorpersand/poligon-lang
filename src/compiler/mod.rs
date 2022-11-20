@@ -1,22 +1,26 @@
 mod op_impl;
+pub mod gon_value;
 
 use std::collections::HashMap;
+use std::iter;
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, FunctionValue, BasicValue, PointerValue, PhiValue};
+use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
 use crate::tree;
 
-use self::op_impl::{GonValue, Cmp};
+use self::gon_value::{GonValueType, GonValueEnum, apply_bv};
+use self::op_impl::Cmp;
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
 
-    vars: HashMap<String, PointerValue<'ctx>>
+    vars: HashMap<String, (GonValueType, PointerValue<'ctx>)>,
+    fn_ret: HashMap<String, GonValueType>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -25,7 +29,8 @@ impl<'ctx> Compiler<'ctx> {
             ctx,
             builder: ctx.create_builder(),
             module: ctx.create_module("eval"),
-            vars: HashMap::new()
+            vars: HashMap::new(),
+            fn_ret: HashMap::new()
         }
     }
 
@@ -33,7 +38,7 @@ impl<'ctx> Compiler<'ctx> {
         t.write_ir(self)
     }
 
-    fn insert_block(&self) -> BasicBlock<'ctx> {
+    fn get_insert_block(&self) -> BasicBlock<'ctx> {
         self.builder.get_insert_block()
             .expect("No insert block found")
     }
@@ -55,7 +60,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Create an alloca instruction in the entry block of
     /// the function.  This is used for mutable variables etc.
-    fn create_entry_block_alloca(&mut self, ident: &str) -> PointerValue<'ctx> {
+    fn create_entry_block_alloca(&mut self, ident: &str, ty: GonValueType) -> PointerValue<'ctx> {
         let builder = self.ctx.create_builder();
 
         let fun_bb = self.parent_fn().get_first_basic_block().expect("Expected function to have block");
@@ -67,36 +72,44 @@ impl<'ctx> Compiler<'ctx> {
 
         // create alloca
         let alloca = builder.build_alloca(self.ctx.f64_type(), ident);
-        self.vars.insert(String::from(ident), alloca);
+        self.vars.insert(String::from(ident), (ty, alloca));
         alloca
     }
 
     /// Store the value in the allocated position or return None if there is no allocated position
-    fn store_val<V>(&mut self, ident: &str, val: V) -> Option<PointerValue<'ctx>> 
-        where V: BasicValue<'ctx>
+    fn store_val(&mut self, ident: &str, val: GonValueEnum<'ctx>) -> Option<PointerValue<'ctx>>
     {
         self.vars.get(ident)
-            .map(|&alloca| {
-                self.builder.build_store(alloca, val);
+            .map(|&(_, alloca)| {
+                self.builder.build_store(alloca, val.basic_enum());
                 alloca
             })
     }
 
     /// Create an alloca instruction at the top and also store the value at the current insert point
-    fn alloca_and_store<V>(&mut self, ident: &str, val: V) -> PointerValue<'ctx> 
-        where V: BasicValue<'ctx>
+    fn alloca_and_store(&mut self, ident: &str, val: GonValueEnum<'ctx>) -> PointerValue<'ctx>
     {
-        let alloca = self.create_entry_block_alloca(ident);
+        let alloca = self.create_entry_block_alloca(ident, val.typed());
 
-        self.builder.build_store(alloca, val);
+        self.builder.build_store(alloca, val.basic_enum());
         alloca
+    }
+
+    fn get_val(&mut self, ident: &str) -> IRResult<GonValueEnum<'ctx>> {
+        match self.vars.get(ident) {
+            Some(&(ty, ptr)) => {
+                let val = self.builder.build_load(ptr, "load");
+                Ok(GonValueEnum::reconstruct(ty, val))
+            },
+            None => Err(IRErr::UndefinedVariable(String::from(ident))),
+        }
     }
 }
 
 fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
-        phi: PhiValue<'ctx>,
-        incoming: &'a [(B, BasicBlock<'ctx>)]
-    ) {
+    phi: PhiValue<'ctx>,
+    incoming: &'a [(B, BasicBlock<'ctx>)]
+) {
     let (incoming_results, incoming_blocks): (Vec<&B>, Vec<_>) = incoming.iter()
         .map(|(a, b)| (a, *b))
         .unzip();
@@ -108,21 +121,16 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
     phi.add_incoming(&vec);
 }
 
-enum Value<'ctx> {
-    Float(FloatValue<'ctx>),
-    Int(IntValue<'ctx>),
-    Bool(IntValue<'ctx>)
-}
-impl<'ctx> Value<'ctx> {
-    fn new_int(c: &Compiler<'ctx>, v: isize) -> Self {
-        Self::Int(c.ctx.i64_type().const_int(v as u64, true))
-    }
-    fn new_bool(c: &Compiler<'ctx>, v: bool) -> Self {
-        Self::Bool(c.ctx.bool_type().const_int(v as u64, true))
-    }
-    fn new_float(c: &Compiler<'ctx>, f: f64) -> Self {
-        Self::Float(c.ctx.f64_type().const_float(f))
-    }
+fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValueEnum<'ctx>, BasicBlock<'ctx>)]) {
+    let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
+        .map(|(a, b)| (a.basic_enum(), *b))
+        .unzip();
+
+    let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
+        .map(|(a, b)| (a as _, b))
+        .collect();
+    
+    phi.add_incoming(&vec);
 }
 
 #[derive(Debug)]
@@ -131,8 +139,10 @@ enum IRErr {
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
     CallWasInstruction,
+    CallDidNotHaveType,
     InvalidFunction,
-    BlockHadFloatValue // TODO: remove
+    BlockHadFloatValue, // TODO: remove
+    UnresolvedType(String)
 }
 type IRResult<T> = Result<T, IRErr>;
 
@@ -142,7 +152,7 @@ trait TraverseIR<'ctx> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Block {
-    type Return = IRResult<Option<FloatValue<'ctx>>>;
+    type Return = IRResult<Option<GonValueEnum<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let mut stmts = self.0.iter();
@@ -171,7 +181,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
-    type Return = IRResult<Option<FloatValue<'ctx>>>;
+    type Return = IRResult<Option<GonValueEnum<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
@@ -187,11 +197,16 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
                 }
             },
             tree::Stmt::Return(me) => {
-                let expr = match me {
+                let maybe_expr = match me {
                     Some(e) => Some(e.write_ir(compiler)?),
                     None => None,
                 };
-                compiler.builder.build_return(expr.as_ref().map(|r| r as _));
+
+                match maybe_expr {
+                    Some(e) => compiler.builder.build_return(Some(&e.basic_enum())),
+                    None    => compiler.builder.build_return(None),
+                };
+
                 Ok(None)
             },
             tree::Stmt::Break => todo!(),
@@ -201,25 +216,22 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
                 Ok(None)
             },
             tree::Stmt::Expr(e) => {
-                e.write_ir(compiler).map(|e| Some(e))
+                e.write_ir(compiler).map(Some)
             },
         }
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Expr {
-    type Return = IRResult<FloatValue<'ctx>>;
+    type Return = IRResult<GonValueEnum<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
-            tree::Expr::Ident(ident) => match compiler.vars.get(ident) {
-                Some(&ptr) => Ok(compiler.builder.build_load(ptr, "load").into_float_value()),
-                None => Err(IRErr::UndefinedVariable(ident.clone())),
-            },
+            tree::Expr::Ident(ident) => compiler.get_val(ident),
             tree::Expr::Block(block) => {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
-                let orig_bb = compiler.insert_block();
+                let orig_bb = compiler.get_insert_block();
                 let mut expr_bb = compiler.ctx.append_basic_block(fun, "block");
                 let exit_bb = compiler.ctx.append_basic_block(fun, "post_block");
 
@@ -277,7 +289,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                             compiler.builder.build_conditional_branch(result, then_bb, post_bb);
                             
                             // update phi
-                            incoming.push((result, compiler.insert_block()));
+                            incoming.push((result, compiler.get_insert_block()));
 
                             // prepare for next comparison
                             compiler.builder.position_at_end(then_bb);
@@ -290,16 +302,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                         // go to post block
                         compiler.builder.build_unconditional_branch(post_bb);
                         // add to phi
-                        incoming.push((result, compiler.insert_block()));
+                        incoming.push((result, compiler.get_insert_block()));
 
                         compiler.builder.position_at_end(post_bb);
                         let phi = compiler.builder.build_phi(compiler.ctx.bool_type(), "cmp_result");
                         add_incoming(phi, &incoming);
 
                         let result = phi.as_basic_value().into_int_value();
-                        let fresult = compiler.builder
-                            .build_signed_int_to_float(result, compiler.ctx.f64_type(), "cmp_cast");
-                        Ok(fresult)
+                        Ok(GonValueEnum::Bool(result))
                     },
                     None => Ok(lval),
                 }
@@ -307,7 +317,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::Range { left, right, step } => todo!(),
             tree::Expr::If(e) => e.write_ir(compiler),
             tree::Expr::While { condition, block } => {
-                let bb = compiler.insert_block();
+                let bb = compiler.get_insert_block();
                 let fun = compiler.parent_fn();
 
                 let cond_bb = compiler.ctx.append_basic_block(fun, "while_cond");
@@ -328,7 +338,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 compiler.builder.build_unconditional_branch(cond_bb);
 
                 compiler.builder.position_at_end(exit_loop_bb);
-                Ok(compiler.ctx.f64_type().const_zero()) // TODO
+                Ok(GonValueEnum::new_bool(compiler, true)) // TODO
 
             },
             tree::Expr::For { ident, iterator, block } => todo!(),
@@ -340,13 +350,17 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                             let expr_params = params.len();
                             if fun_params == expr_params {
                                 let resolved_params: Vec<_> = params.iter()
-                                    .map(|p| p.write_ir(compiler).map(Into::into))
+                                    .map(|p| p.write_ir(compiler).map(|gv| gv.basic_enum().into()))
                                     .collect::<Result<_, _>>()?;
 
                                 let call = compiler.builder.build_call(fun, &resolved_params, "call");
-                                
                                 match call.try_as_basic_value().left() {
-                                    Some(basic) => Ok(basic.into_float_value()),
+                                    Some(basic) => {
+                                        let ret = compiler.fn_ret.get(ident)
+                                            .ok_or(IRErr::CallDidNotHaveType)?;
+                                        
+                                        Ok(GonValueEnum::reconstruct(*ret, basic))
+                                    },
                                     None => Err(IRErr::CallWasInstruction),
                                 }
                             } else {
@@ -366,22 +380,23 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Literal {
-    type Return = IRResult<FloatValue<'ctx>>;
+    type Return = IRResult<GonValueEnum<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let ctx = compiler.ctx;
-        match self {
-            tree::Literal::Int(_)   => todo!("int literal"),
-            tree::Literal::Float(f) => Ok(ctx.f64_type().const_float(*f)),
+        let value = match self {
+            tree::Literal::Int(i)   => GonValueEnum::new_int(compiler,   *i),
+            tree::Literal::Float(f) => GonValueEnum::new_float(compiler, *f),
             tree::Literal::Char(_)  => todo!("char literal"),
             tree::Literal::Str(_)   => todo!("str literal"),
-            tree::Literal::Bool(_)  => todo!("bool literal"),
-        }
+            tree::Literal::Bool(b)  => GonValueEnum::new_bool(compiler,  *b),
+        };
+
+        Ok(value)
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::If {
-    type Return = IRResult<FloatValue<'ctx>>;
+    type Return = IRResult<GonValueEnum<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let tree::If { conditionals, last } = self;
@@ -409,7 +424,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
             // build then block
             compiler.builder.position_at_end(then_bb);
             let then_result = block.write_ir(compiler)?
-                .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
+                .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
             compiler.builder.build_unconditional_branch(merge_bb);
             //update then block
             then_bb = compiler.builder.get_insert_block().unwrap();
@@ -424,7 +439,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
                 // build else block
                 compiler.builder.position_at_end(else_bb);
                 let else_result = block.write_ir(compiler)?
-                    .unwrap_or_else(|| todo!("Accept blocks that do not return float"));
+                    .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
                 compiler.builder.build_unconditional_branch(merge_bb);
                 //update else block
                 else_bb = compiler.builder.get_insert_block().unwrap();
@@ -436,10 +451,13 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
         }
 
         compiler.builder.position_at_end(merge_bb);
-        let phi = compiler.builder.build_phi(compiler.ctx.f64_type(), "ifval");
+        // TODO type properly
+
+        let gty = incoming.first().unwrap().0.typed();
+        let phi = compiler.builder.build_phi(gty.basic_enum(compiler), "if_result");
+        add_incoming_gv(phi, &incoming);
         
-        add_incoming(phi, &incoming);
-        Ok(phi.as_basic_value().into_float_value())
+        Ok(GonValueEnum::reconstruct(gty, phi.as_basic_value()))
     }
 }
 
@@ -447,32 +465,52 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
     type Return = IRResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let tree::FunDecl { ident, params, ret: _, block } = self;
-        let Compiler { ctx, builder, module, vars } = compiler;
+        let tree::FunDecl { ident, params, ret, block } = self;
 
         // Function signature
-        let arg_types = params.iter()
-            .map(|_| ctx.f64_type().into())
-            .collect::<Vec<_>>();
-        let fun_type = ctx.f64_type().fn_type(&arg_types, false);
+        let arg_gty: Vec<_> = params.iter()
+            .map(|p| {
+                match &p.ty {
+                    Some(ty) => GonValueType::lookup(ty)
+                        .ok_or_else(|| IRErr::UnresolvedType(ty.to_string())),
+                    None => Ok(GonValueType::Float), // TODO properly type
+                }
+            })
+            .collect::<Result<_, _>>()?;
+        
+        let arg_types: Vec<_> = arg_gty.iter().map(|ty| ty.basic_enum(compiler).into()).collect();
+        let ret_type = match ret {
+            Some(ty) => GonValueType::lookup(ty)
+                .ok_or_else(|| IRErr::UnresolvedType(ty.to_string())),
+            None => Ok(GonValueType::Float), // TODO properly type
+        }?;
 
-        let fun = module.add_function(ident, fun_type, None);
+        let fun_type = match ret_type {
+            GonValueType::Float => compiler.ctx.f64_type().fn_type(&arg_types, false),
+            GonValueType::Int   => compiler.ctx.i64_type().fn_type(&arg_types, false),
+            GonValueType::Bool  => compiler.ctx.bool_type().fn_type(&arg_types, false),
+        };
+        // HACK
+        compiler.fn_ret.insert(String::from(ident), ret_type);
+
+        let fun = compiler.module.add_function(ident, fun_type, None);
 
         // set arguments names
-        for (param, arg) in std::iter::zip(params, fun.get_param_iter()) {
-            arg.into_float_value().set_name(&param.ident);
+        for (param, arg) in iter::zip(params, fun.get_param_iter()) {
+            apply_bv!(v as arg => v.set_name(&param.ident));
         }
 
         // Body
-        let bb = ctx.append_basic_block(fun, &format!("{ident}_body"));
-        builder.position_at_end(bb);
+        let bb = compiler.ctx.append_basic_block(fun, &format!("{ident}_body"));
+        compiler.builder.position_at_end(bb);
 
         // store params
-        for (param, arg) in std::iter::zip(params, fun.get_param_iter()) {
-            compiler.alloca_and_store(&param.ident, arg);
+        for (param, (val, gty)) in iter::zip(params, iter::zip(fun.get_param_iter(), arg_gty)) {
+            compiler.alloca_and_store(&param.ident, GonValueEnum::reconstruct(gty, val));
         }
 
-        let ret_value = block.write_ir(compiler)?;
+        let ret_value = block.write_ir(compiler)?
+            .map(GonValueEnum::basic_enum);
         // write the last value in block as return
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         

@@ -3,7 +3,7 @@ use inkwell::values::{FloatValue, IntValue};
 
 use crate::tree::{op, self};
 
-use super::{Compiler, Value, TraverseIR};
+use super::{Compiler, GonValueEnum, TraverseIR, IRResult};
 
 pub(super) trait GonValue<'ctx>: Unary<'ctx> + Binary<'ctx> + Cmp<'ctx> 
     where Self: Sized
@@ -28,13 +28,13 @@ pub(super) trait Cmp<'ctx, Rhs=Self> {
 }
 
 impl<'ctx> Binary<'ctx> for &tree::Expr {
-    type Output = super::IRResult<FloatValue<'ctx>>;
+    type Output = super::IRResult<GonValueEnum<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
             op::Binary::LogAnd => {
                 let parent = c.parent_fn();
-                let bb = c.insert_block();
+                let bb = c.get_insert_block();
 
                 let lhs = self.write_ir(c)?;
 
@@ -49,19 +49,19 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
                 then_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(c.ctx.f64_type(), "logand_result");
+                let phi = c.builder.build_phi(lhs.typed().basic_enum(c), "logand_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&rhs, then_bb),
+                    (&rhs.basic_enum(), then_bb),
                     // if LHS was false
-                    (&lhs, bb),
+                    (&lhs.basic_enum(), bb),
                 ]);
 
-                Ok(phi.as_basic_value().into_float_value())
+                Ok(GonValueEnum::reconstruct(lhs.typed(), phi.as_basic_value()))
             },
             op::Binary::LogOr  => {
                 let parent = c.parent_fn();
-                let bb = c.insert_block();
+                let bb = c.get_insert_block();
 
                 let lhs = self.write_ir(c)?;
 
@@ -76,15 +76,15 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
                 else_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(c.ctx.f64_type(), "logor_result");
+                let phi = c.builder.build_phi(lhs.typed().basic_enum(c), "logor_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&lhs, bb),
+                    (&lhs.basic_enum(), bb),
                     // if LHS was false
-                    (&rhs, else_bb)
+                    (&rhs.basic_enum(), else_bb)
                 ]);
 
-                Ok(phi.as_basic_value().into_float_value())
+                Ok(GonValueEnum::reconstruct(lhs.typed(), phi.as_basic_value()))
             },
 
             // eager eval
@@ -92,19 +92,126 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
                 let left = self.write_ir(c)?;
                 let right = right.write_ir(c)?;
 
-                Ok(left.apply_binary(b, right, c))
+                left.apply_binary(b, right, c)
             }
         }
     }
 }
 
-impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
-    type Output = FloatValue<'ctx>;
+impl<'ctx> Unary<'ctx> for GonValueEnum<'ctx> {
+    type Output = IRResult<Self>;
 
     fn apply_unary(self, op: &op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
-            op::Unary::Plus   => self,
-            op::Unary::Minus  => c.builder.build_float_neg(self, "f_neg"),
+            op::Unary::Plus => todo!(),
+            op::Unary::Minus => todo!(),
+            op::Unary::LogNot => todo!(),
+            op::Unary::BitNot => todo!(),
+        }
+    }
+}
+impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
+    type Output = IRResult<Self>;
+
+    fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            // numeric add
+            op::Binary::Add => todo!(),
+
+            // numeric sub
+            op::Binary::Sub => todo!(),
+
+            // numeric mul, collection repeat
+            op::Binary::Mul => todo!(),
+
+            // numeric div
+            op::Binary::Div => todo!(),
+
+            // numeric modulo
+            op::Binary::Mod => todo!(),
+
+            // int shift left
+            op::Binary::Shl => todo!(),
+
+            // int shift right
+            op::Binary::Shr => todo!(),
+
+            // bitwise or, collection concat
+            op::Binary::BitOr => todo!(),
+
+            // bitwise and
+            op::Binary::BitAnd => todo!(),
+
+            // bitwise xor
+            op::Binary::BitXor => todo!(),
+
+            // logical and
+            op::Binary::LogAnd => {
+                let fun = c.parent_fn();
+                let mut bb = c.get_insert_block();
+                let merge_bb = c.ctx.append_basic_block(fun, "post_logand_eager");
+
+                let mut rhs_bb = c.ctx.append_basic_block(fun, "logand_eager_true");
+                c.update_block(&mut rhs_bb, |_, c| {
+                    c.builder.build_unconditional_branch(merge_bb);
+                    Ok(())
+                })?;
+                c.update_block(&mut bb, |_, c| {
+                    c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
+                    Ok(())
+                })?;
+
+                c.builder.position_at_end(merge_bb);
+                c.builder.build_phi(self.typed().basic_enum(c), "logand_eager_result");
+                todo!()
+            },
+
+            // logical or
+            op::Binary::LogOr => {
+                let fun = c.parent_fn();
+                let mut bb = c.get_insert_block();
+                let merge_bb = c.ctx.append_basic_block(fun, "post_logor_eager");
+
+                let mut rhs_bb = c.ctx.append_basic_block(fun, "logor_eager_false");
+                c.update_block(&mut rhs_bb, |_, c| {
+                    c.builder.build_unconditional_branch(merge_bb);
+                    Ok(())
+                })?;
+                c.update_block(&mut bb, |_, c| {
+                    c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
+                    Ok(())
+                })?;
+
+                c.builder.position_at_end(merge_bb);
+                c.builder.build_phi(self.typed().basic_enum(c), "logor_eager_result");
+                todo!()
+            },
+        }
+    }
+}
+
+impl<'ctx> Cmp<'ctx> for GonValueEnum<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_cmp(self, op: &op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Cmp::Lt => todo!(),
+            op::Cmp::Gt => todo!(),
+            op::Cmp::Le => todo!(),
+            op::Cmp::Ge => todo!(),
+            op::Cmp::Eq => todo!(),
+            op::Cmp::Ne => todo!(),
+        }
+    }
+}
+
+impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
+    type Output = IRResult<Self>;
+
+    fn apply_unary(self, op: &op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Unary::Plus   => Ok(self),
+            op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
             op::Unary::LogNot => todo!(),
             op::Unary::BitNot => todo!(),
         }
@@ -112,15 +219,15 @@ impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
 }
 
 impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
-    type Output = FloatValue<'ctx>;
+    type Output = IRResult<Self>;
 
     fn apply_binary(self, op: &op::Binary, right: FloatValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
-            op::Binary::Add => c.builder.build_float_add(self, right, "f_add"),
-            op::Binary::Sub => c.builder.build_float_sub(self, right, "f_sub"),
-            op::Binary::Mul => c.builder.build_float_mul(self, right, "f_mul"),
-            op::Binary::Div => c.builder.build_float_div(self, right, "f_div"),
-            op::Binary::Mod => c.builder.build_float_rem(self, right, "f_rem"),
+            op::Binary::Add => Ok(c.builder.build_float_add(self, right, "f_add")),
+            op::Binary::Sub => Ok(c.builder.build_float_sub(self, right, "f_sub")),
+            op::Binary::Mul => Ok(c.builder.build_float_mul(self, right, "f_mul")),
+            op::Binary::Div => Ok(c.builder.build_float_div(self, right, "f_div")),
+            op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_rem")),
             op::Binary::Shl => todo!(),
             op::Binary::Shr => todo!(),
             op::Binary::BitOr => todo!(),
