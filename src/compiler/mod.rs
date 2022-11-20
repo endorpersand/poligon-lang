@@ -13,7 +13,7 @@ use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiVa
 use crate::tree;
 
 use self::gon_value::{GonValueType, GonValueEnum, apply_bv};
-use self::op_impl::Cmp;
+
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
@@ -134,7 +134,7 @@ fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValueEnum<'
 }
 
 #[derive(Debug)]
-enum IRErr {
+pub enum IRErr {
     UndefinedVariable(String),
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
@@ -265,7 +265,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps(_) => todo!(),
             tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
-                op_impl::Binary::apply_binary(&**left, op, &**right, compiler)
+                compiler.apply_binary(&**left, op, &**right)
             },
             tree::Expr::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
@@ -282,7 +282,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                         for (cmp, rexpr) in riter {
                             // eval comparison
                             let rval = rexpr.write_ir(compiler)?;
-                            let result = lval.apply_cmp(cmp, rval, compiler);
+                            let result = compiler.apply_cmp(lval, cmp, rval)?;
                             
                             // branch depending on T/F
                             let then_bb = compiler.ctx.prepend_basic_block(post_bb, "cmp_true");
@@ -298,7 +298,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                         
                         // last block
                         let rval = last_rexpr.write_ir(compiler)?;
-                        let result = lval.apply_cmp(last_cmp, rval, compiler);
+                        let result = compiler.apply_cmp(lval, last_cmp, rval)?;
                         // go to post block
                         compiler.builder.build_unconditional_branch(post_bb);
                         // add to phi
@@ -330,7 +330,9 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 
                 // if cond is true, go into the loop. otherwise, exit
                 compiler.builder.position_at_end(cond_bb);
-                let cond = condition.write_ir(compiler)?.truth(compiler);
+                
+                let condval = condition.write_ir(compiler)?;
+                let cond = compiler.truth(condval);
                 compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);
 
                 compiler.builder.position_at_end(loop_bb);
@@ -412,8 +414,8 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
                 compiler.builder.position_at_end(bb);
             }
             // comparison value
-            // TODO, handle non-float
-            let cmp_val = cmp.write_ir(compiler)?.truth(compiler);
+            let cmp_val = cmp.write_ir(compiler)?;
+            let cmp_val = compiler.truth(cmp_val);
                 
             // create blocks and branch
             let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");

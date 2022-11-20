@@ -1,5 +1,4 @@
 use inkwell::types::BasicTypeEnum;
-use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 
 use crate::tree;
@@ -47,20 +46,6 @@ impl<'ctx> GonValueEnum<'ctx> {
             GonValueType::Bool  => Self::Bool(v.into_int_value()),
         }
     }
-
-    pub fn truth(self, compiler: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */ {
-        match self {
-            GonValueEnum::Float(f) => 
-                compiler.builder.build_float_compare(
-                    FloatPredicate::ONE, f, compiler.ctx.f64_type().const_zero(), "truth"
-                ),
-            GonValueEnum::Int(i) => 
-                compiler.builder.build_int_compare(
-                    IntPredicate::NE, i, compiler.ctx.i64_type().const_zero(), "truth"
-                ),
-            GonValueEnum::Bool(b) => b,
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,6 +71,17 @@ impl GonValueType {
         }
     }
 }
+
+// macro_rules! apply_gv {
+//     ($i:ident as $e:expr => $fn:expr) => {
+//         match $e {
+//             GonValueEnum::Int($i)   => $fn,
+//             GonValueEnum::Float($i) => $fn,
+//             GonValueEnum::Bool($i)  => $fn,
+//         }
+//     }
+// }
+// pub(crate) use apply_gv;
 
 macro_rules! apply_bv {
     ($i:ident as $e:expr => $fn:expr) => {
