@@ -414,88 +414,48 @@ mod tests {
 
     use super::Compiler;
 
-    #[test]
-    fn what_am_i_doing() {
+    /// Assert that a function declaration with an expression in it passes.
+    /// Also prints the function to STDERR.
+    fn assert_fun_pass(input: &str) {
         let ctx = Context::create();
-        let compiler = Compiler::from_ctx(&ctx);
+        let mut compiler = Compiler::from_ctx(&ctx);
 
-        let i99 = ctx.i64_type().const_int(999, true);
-        let btrue = ctx.bool_type().const_int(1, true);
-        compiler.builder.build_int_add(i99, btrue, "add");
+        let lexed  = lexer::tokenize(input).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+
+        match &parsed.0.0[..] {
+            [tree::Stmt::FunDecl(fdcl)] => {
+                let fun = compiler.compile(fdcl).unwrap();
+                fun.print_to_stderr();
+            }
+            _ => {
+                panic!("Program is not a singular function declaration");
+            }
+        }
     }
 
     #[test]
     fn what_am_i_doing_2() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun hello() {
+        assert_fun_pass("fun hello() {
             2. + 3.;
-        }").unwrap();
-        
-        let parsed = parser::parse(lexed).unwrap();
+        }");
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
-    }
-
-    #[test]
-    fn what_am_i_doing_3() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun double(a) {
+        assert_fun_pass("fun double(a) {
             a * 2.;
-        }").unwrap();
-        
-        let parsed = parser::parse(lexed).unwrap();
-
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        }
+        }");
     }
-
-    // #[test]
-    // fn what_am_i_doing_4() {
-    //     let ctx = Context::create();
-    //     let mut compiler = Compiler::from_ctx(&ctx);
-
-    //     let lexed = lexer::tokenize("2. * 2.;").unwrap();
-    //     let parsed = parser::parse(lexed).unwrap();
-    //     let fun = compiler.compile(&parsed).unwrap();
-    //     fun.print_to_stderr();
-    // }
 
     #[test]
     fn if_else_compile_test() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        assert_fun_pass("fun main(a) {
             if a {
                 main(0.); 
             } else {
                 main(0.) + 1.;
             }
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
+        }");
 
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
-
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        assert_fun_pass("fun main(a) {
             if a {
                 main(0.); 
             } else if a {
@@ -503,20 +463,9 @@ mod tests {
             } else {
                 main(0.) + 2.;
             }
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
-
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        }");
+        
+        assert_fun_pass("fun main(a) {
             if a {
                 main(0.); 
             } else if a {
@@ -544,100 +493,37 @@ mod tests {
             } else {
                 main(0.) + 12.;
             }
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
+        }");
     }
 
     #[test]
     fn while_ir() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        assert_fun_pass("fun main(a) {
             while a {
                 main(a);
             };
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
+        }");
     }
 
     #[test]
     fn var_test() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        assert_fun_pass("fun main(a) {
             a = 2.;
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
+        }");
 
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a) {
+        assert_fun_pass("fun main(a) {
             let b = 2.;
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
+        }");
     }
 
     #[test]
     fn log_and_or_test() {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a, b) {
+        assert_fun_pass("fun main(a, b) {
             a && b;
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
+        }");
         
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
-
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed = lexer::tokenize("fun main(a, b) {
+        assert_fun_pass("fun main(a, b) {
             a || b;
-        }").unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        
-        if let [tree::Stmt::FunDecl(fdcl)] = &parsed.0.0[..] {
-            let fun = compiler.compile(fdcl).unwrap();
-            fun.print_to_stderr();
-        } else {
-            panic!(":(");
-        };
+        }");
     }
 }
