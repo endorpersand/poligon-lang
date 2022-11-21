@@ -9,11 +9,106 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
 }
 
 pub enum PLIRErr {
-    ExpectedType(plir::Type /* expected */, plir::Type /* found */)
+    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
+    CannotBreak,
+    CannotContinue,
+    CannotReturn,
+    CannotResolveType
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
-type InsertBlock = Vec<plir::Stmt>;
 type PartialDecl = (tree::ReasgType, Option<tree::Type>);
+
+enum BlockExit {
+    Return(plir::Type),
+    Break,
+    Continue,
+    Exit(plir::Type)
+}
+enum BlockBehavior {
+    Function,
+    Loop,
+    Bare
+}
+enum BlockExitHandle {
+    /// Continue running in the upper loop.
+    /// 
+    /// If a block exits here, it has a known value type.
+    Continue(plir::Type),
+    
+    /// This is either an `break` or `continue`.
+    /// 
+    /// If a block exits here, there is no type.
+    LoopExit,
+
+    /// Propagate the exit to the upper loop.
+    Propagate(BlockExit)
+}
+
+impl BlockBehavior {
+    fn unpack_exit(&self, exit: BlockExit) -> PLIRResult<BlockExitHandle> {
+        match self {
+            BlockBehavior::Function => match exit {
+                BlockExit::Return(t) => Ok(BlockExitHandle::Continue(t)),
+                BlockExit::Break     => Err(PLIRErr::CannotBreak),
+                BlockExit::Continue  => Err(PLIRErr::CannotContinue),
+                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+            },
+            BlockBehavior::Loop => match exit {
+                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Break     => Ok(BlockExitHandle::LoopExit),
+                BlockExit::Continue  => Ok(BlockExitHandle::LoopExit),
+                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+            },
+            BlockBehavior::Bare => match exit {
+                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+            },
+        }
+    }
+}
+
+struct InsertBlock {
+    block: Vec<plir::Stmt>,
+    exits: Vec<BlockExit>
+}
+impl InsertBlock {
+    fn new() -> Self {
+        Self {
+            block: vec![],
+            exits: vec![]
+        }
+    }
+
+    fn push_stmt(&mut self, stmt: plir::Stmt) {
+        match stmt {
+            plir::Stmt::Return(e) => self.push_return(e),
+            plir::Stmt::Break => self.push_break(),
+            plir::Stmt::Continue => self.push_cont(),
+            st => self.block.push(st)
+        }
+    }
+
+    fn push_return(&mut self, me: Option<plir::Expr>) {
+        let ty = match me {
+            Some(ref e) => e.ty.clone(),
+            None => plir::Type::void(),
+        };
+        self.block.push(plir::Stmt::Return(me));
+        self.exits.push(BlockExit::Return(ty));
+    }
+
+    fn push_break(&mut self) {
+        self.block.push(plir::Stmt::Break);
+        self.exits.push(BlockExit::Break);
+    }
+
+    fn push_cont(&mut self) {
+        self.block.push(plir::Stmt::Continue);
+        self.exits.push(BlockExit::Continue);
+    }
+}
 
 struct CodeGenerator {
     program: InsertBlock,
@@ -22,23 +117,21 @@ struct CodeGenerator {
 
 impl CodeGenerator {
     fn new() -> Self {
-        Self { program: vec![], blocks: vec![] }
+        Self { program: InsertBlock::new(), blocks: vec![] }
     }
     fn unwrap(self) -> plir::Program {
-        plir::Program(self.program)
+        // TODO: handle return, break, etc
+        plir::Program(self.program.block)
     }
 
     fn push_block(&mut self) {
-        self.blocks.push(vec![])
+        self.blocks.push(InsertBlock::new())
     }
     fn pop_block(&mut self) -> Option<InsertBlock> {
         self.blocks.pop()
     }
     fn peek_block(&mut self) -> &mut InsertBlock {
         self.blocks.last_mut().unwrap_or(&mut self.program)
-    }
-    fn push_stmt(&mut self, stmt: plir::Stmt) {
-        self.peek_block().push(stmt);
     }
 
     fn consume_program(&mut self, prog: tree::Program) -> PLIRResult<()> {
@@ -57,23 +150,76 @@ impl CodeGenerator {
                     Some(e) => Some(self.consume_expr(e)?),
                     None => None,
                 };
-                self.push_stmt(plir::Stmt::Return(maybe_expr));
+                self.peek_block().push_return(maybe_expr);
                 Ok(())
             },
             tree::Stmt::Break => {
-                self.push_stmt(plir::Stmt::Break);
+                self.peek_block().push_break();
                 Ok(())
             },
             tree::Stmt::Continue => {
-                self.push_stmt(plir::Stmt::Continue);
+                self.peek_block().push_cont();
                 Ok(())
             },
             tree::Stmt::FunDecl(f) => self.consume_fun_decl(f),
             tree::Stmt::Expr(e) => {
                 let e = self.consume_expr(e)?;
-                self.push_stmt(plir::Stmt::Expr(e));
+                self.peek_block().push_stmt(plir::Stmt::Expr(e));
                 Ok(())
             },
+        }
+    }
+
+    fn consume_block(&mut self, block: tree::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
+        // collect all the statements from this block
+        self.push_block();
+        for stmt in block.0 {
+            self.consume_stmt(stmt)?;
+        }
+        let mut insert_block = self.pop_block().unwrap();
+        
+        // check the last statement and add BlockExit::Exit if necessary
+        let maybe_exit_type = match insert_block.block.last() {
+            Some(stmt) => match stmt {
+                plir::Stmt::Decl(_)    => Some(plir::Type::void()),
+                plir::Stmt::Return(_)  => None,
+                plir::Stmt::Break      => None,
+                plir::Stmt::Continue   => None,
+                plir::Stmt::FunDecl(_) => Some(plir::Type::void()),
+                plir::Stmt::Expr(e)    => Some(e.ty.clone()),
+            },
+            None => Some(plir::Type::void()),
+        };
+
+        if let Some(exit_type) = maybe_exit_type {
+            insert_block.exits.push(BlockExit::Exit(exit_type));
+        };
+
+        // resolve block's type
+        let InsertBlock { block, exits } = insert_block;
+
+        let mut block_type = None;
+        for exit in exits {
+            match btype.unpack_exit(exit)? {
+                BlockExitHandle::Continue(ty) => match block_type.as_ref() {
+                    Some(t1) => if t1 != &ty {
+                        // TODO: union?
+                        Err(PLIRErr::CannotResolveType)?
+                    },
+                    None => {
+                        block_type.replace(ty);
+                    },
+                },
+                BlockExitHandle::LoopExit => {},
+                BlockExitHandle::Propagate(p) => {
+                    self.peek_block().exits.push(p);
+                },
+            }
+        }
+        
+        match block_type {
+            Some(bty) => Ok(plir::Block(bty, block)),
+            None => Err(PLIRErr::CannotResolveType),
         }
     }
 
@@ -82,7 +228,7 @@ impl CodeGenerator {
         match pat {
             tree::Pat::Unit(unit) => match unit {
                 tree::DeclUnit::Ident(ident, mt) => {
-                    self.push_stmt(plir::Stmt::Decl(plir::Decl {
+                    self.peek_block().push_stmt(plir::Stmt::Decl(plir::Decl {
                         rt,
                         mt,
                         ident,
