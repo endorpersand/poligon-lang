@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 pub mod op;
+pub mod display;
 
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Block);
@@ -41,20 +42,6 @@ pub enum MutType { Mut, Immut }
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type(pub String, pub Vec<Type>);
 
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)?;
-
-        if let Some((tail, head)) = self.1.split_last() {
-            for ty in head {
-                write!(f, "{ty}, ")?;
-            }
-            write!(f, "{tail}")?;
-        }
-
-        Ok(())
-    }
-}
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
     pub ident: String,

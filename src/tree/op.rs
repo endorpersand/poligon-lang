@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::lexer::token::{Token, token};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -99,5 +101,48 @@ impl TryFrom<Token> for Cmp {
             token![!=] => Ok(Cmp::Ne),
             _ => Err(TokenOpCastErr("Token cannot be converted into a comparison operator"))
         }
+    }
+}
+
+impl Display for Unary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Unary::Plus   => "+",
+            Unary::Minus  => "-",
+            Unary::LogNot => "!",
+            Unary::BitNot => "~",
+        })
+    }
+}
+
+impl Display for Binary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Binary::Add => "+",
+            Binary::Sub => "-",
+            Binary::Mul => "*",
+            Binary::Div => "/",
+            Binary::Mod => "%",
+            Binary::Shl => "<<",
+            Binary::Shr => ">>",
+            Binary::BitOr => "|",
+            Binary::BitAnd => "&",
+            Binary::BitXor => "^",
+            Binary::LogAnd => "&&",
+            Binary::LogOr => "||",
+        })
+    }
+}
+
+impl Display for Cmp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Cmp::Lt => "<",
+            Cmp::Gt => ">",
+            Cmp::Le => "<=",
+            Cmp::Ge => ">=",
+            Cmp::Eq => "==",
+            Cmp::Ne => "!=",
+        })
     }
 }
