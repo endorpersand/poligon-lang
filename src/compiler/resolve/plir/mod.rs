@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::tree::{ReasgType, MutType, op};
+use crate::tree::{op, self};
 
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Block);
@@ -20,15 +20,16 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq)]
 pub struct Decl {
-    pub rt: ReasgType,
+    pub rt: tree::ReasgType,
+    pub mt: tree::MutType, // No pattern matching
     pub ident: String, // No pattern matching
     pub ty: Type, // Explicit type
     pub val: Expr
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct Param {
-    pub rt: ReasgType,
-    pub mt: MutType,
+    pub rt: tree::ReasgType,
+    pub mt: tree::MutType,
     pub ident: String,
     pub ty: Type // Explicit type
 }
@@ -54,7 +55,7 @@ pub struct Expr {
 pub enum ExprType {
     Ident(String), // a variable
     Block(Block), // a block
-    Literal(Literal), // int, float, char, str literal
+    Literal(tree::Literal), // int, float, char, str literal
     ListLiteral(Vec<Expr>), // [1, 2, 3, 4]
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
@@ -62,7 +63,8 @@ pub enum ExprType {
     Assign(AsgUnit, Box<Expr>),
     Path(Path),
     UnaryOps {
-        ops: Vec<(op::Unary, Type)>, // Type provides the type after applying the operator
+        // Type provides the value's type after applying the operator of subexpression
+        ops: Vec<(op::Unary, Type)>,
         expr: Box<Expr>
     },
     BinaryOp {
@@ -94,28 +96,6 @@ pub enum ExprType {
     },
     Index(Index),
     Spread(Option<Box<Expr>>)
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Literal {
-    Int(isize),
-    Float(f64),
-    Char(char),
-    Str(String),
-    Bool(bool)
-}
-
-impl Literal {
-    pub fn from_numeric(s: &str) -> Option<Self> {
-        s.parse::<isize>()
-            .map(Literal::Int)
-            .ok()
-            .or_else(|| s.parse::<f64>()
-                .map(Literal::Float)
-                .ok()
-            )
-        
-    }
 }
 
 #[derive(Debug, PartialEq)]
