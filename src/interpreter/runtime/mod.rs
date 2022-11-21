@@ -497,16 +497,14 @@ impl TraverseRt for tree::Program {
 
 impl TraverseRt for tree::Block {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let mut stmts = self.0.iter();
-        let maybe_last = stmts.next_back();
-
-        if let Some(last) = maybe_last {
-            for stmt in stmts {
-                stmt.traverse_rt(ctx)?;
+        match self.0.split_last() {
+            Some((tail, head)) => {
+                for stmt in head {
+                    stmt.traverse_rt(ctx)?;
+                }
+                tail.traverse_rt(ctx)
             }
-            last.traverse_rt(ctx)
-        } else {
-            Ok(Value::Unit)
+            None => Ok(Value::Unit),
         }
     }
 }

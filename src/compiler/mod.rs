@@ -158,19 +158,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::Block {
     type Return = IRResult<Option<GonValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let mut stmts = self.0.iter();
-        let maybe_last = stmts.next_back();
-
-        match maybe_last {
-            Some(last) => {
-                for stmt in stmts {
+        match self.0.split_last() {
+            Some((tail, head)) => {
+                for stmt in head {
                     stmt.write_ir(compiler)?;
                 }
-                last.write_ir(compiler)
-            },
-            None => {
-                Ok(None)
+                tail.write_ir(compiler)
             }
+            None => Ok(None),
         }
     }
 }
@@ -274,15 +269,12 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 let fun = compiler.parent_fn();
                 let mut lval = left.write_ir(compiler)?;
                 
-                let mut riter = rights.iter();
-                let last = riter.next_back();
-                
-                match last {
-                    Some((last_cmp, last_rexpr)) => {
+                match rights.split_last() {
+                    Some(((last_cmp, last_rexpr), head)) => {
                         let mut incoming = vec![];
                         let post_bb = compiler.ctx.append_basic_block(fun, "post_cmp");
 
-                        for (cmp, rexpr) in riter {
+                        for (cmp, rexpr) in head {
                             // eval comparison
                             let rval = rexpr.write_ir(compiler)?;
                             let result = compiler.apply_cmp(lval, cmp, rval)?;
