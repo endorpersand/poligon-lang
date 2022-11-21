@@ -266,8 +266,8 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 }
             },
             tree::Expr::Path(_) => todo!(),
-            tree::Expr::UnaryOps(_) => todo!(),
-            tree::Expr::BinaryOp(tree::BinaryOp { op, left, right }) => {
+            tree::Expr::UnaryOps { ops, expr } => todo!(),
+            tree::Expr::BinaryOp { op, left, right } => {
                 compiler.apply_binary(&**left, op, &**right)
             },
             tree::Expr::Comparison { left, rights } => {
@@ -318,7 +318,66 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 }
             },
             tree::Expr::Range { left, right, step } => todo!(),
-            tree::Expr::If(e) => e.write_ir(compiler),
+            tree::Expr::If { conditionals, last } => {
+                let parent = compiler.parent_fn();
+        
+                let mut incoming = vec![];
+                let mut prev_else = None;
+                let merge_bb = compiler.ctx.append_basic_block(parent, "merge");
+
+                for (cmp, block) in conditionals {
+                    // if there was a previous else, reposition us there
+                    if let Some(bb) = prev_else.take() {
+                        compiler.builder.position_at_end(bb);
+                    }
+                    // comparison value
+                    let cmp_val = cmp.write_ir(compiler)?;
+                    let cmp_val = compiler.truth(cmp_val);
+                        
+                    // create blocks and branch
+                    let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
+                    let else_bb     = compiler.ctx.prepend_basic_block(merge_bb, "else");
+            
+                    compiler.builder.build_conditional_branch(cmp_val, then_bb, else_bb);
+
+                    // build then block
+                    compiler.builder.position_at_end(then_bb);
+                    let then_result = block.write_ir(compiler)?
+                        .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
+                    compiler.builder.build_unconditional_branch(merge_bb);
+                    //update then block
+                    then_bb = compiler.builder.get_insert_block().unwrap();
+
+                    incoming.push((then_result, then_bb));
+                    prev_else.replace(else_bb);
+                }
+
+                // handle last
+                match (prev_else, last) {
+                    (Some(mut else_bb), Some(block)) => {
+                        // build else block
+                        compiler.builder.position_at_end(else_bb);
+                        let else_result = block.write_ir(compiler)?
+                            .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
+                        compiler.builder.build_unconditional_branch(merge_bb);
+                        //update else block
+                        else_bb = compiler.builder.get_insert_block().unwrap();
+
+                        incoming.push((else_result, else_bb));
+                    },
+                    (None, Some(_)) => unreachable!(),
+                    (_, None)       => todo!("Support if with no else"),
+                }
+
+                compiler.builder.position_at_end(merge_bb);
+                // TODO type properly
+
+                let gty = incoming.first().unwrap().0.typed();
+                let phi = compiler.builder.build_phi(gty.basic_enum(compiler), "if_result");
+                add_incoming_gv(phi, &incoming);
+                
+                Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
+            },
             tree::Expr::While { condition, block } => {
                 let bb = compiler.get_insert_block();
                 let fun = compiler.parent_fn();
@@ -397,72 +456,6 @@ impl<'ctx> TraverseIR<'ctx> for tree::Literal {
         };
 
         Ok(value)
-    }
-}
-
-impl<'ctx> TraverseIR<'ctx> for tree::If {
-    type Return = IRResult<GonValue<'ctx>>;
-
-    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let tree::If { conditionals, last } = self;
-        let parent = compiler.parent_fn();
-        
-        let mut incoming = vec![];
-        let mut prev_else = None;
-        let merge_bb = compiler.ctx.append_basic_block(parent, "merge");
-
-        for (cmp, block) in conditionals {
-            // if there was a previous else, reposition us there
-            if let Some(bb) = prev_else.take() {
-                compiler.builder.position_at_end(bb);
-            }
-            // comparison value
-            let cmp_val = cmp.write_ir(compiler)?;
-            let cmp_val = compiler.truth(cmp_val);
-                
-            // create blocks and branch
-            let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
-            let else_bb     = compiler.ctx.prepend_basic_block(merge_bb, "else");
-    
-            compiler.builder.build_conditional_branch(cmp_val, then_bb, else_bb);
-
-            // build then block
-            compiler.builder.position_at_end(then_bb);
-            let then_result = block.write_ir(compiler)?
-                .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
-            compiler.builder.build_unconditional_branch(merge_bb);
-            //update then block
-            then_bb = compiler.builder.get_insert_block().unwrap();
-
-            incoming.push((then_result, then_bb));
-            prev_else.replace(else_bb);
-        }
-
-        // handle last
-        match (prev_else, last) {
-            (Some(mut else_bb), Some(block)) => {
-                // build else block
-                compiler.builder.position_at_end(else_bb);
-                let else_result = block.write_ir(compiler)?
-                    .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
-                compiler.builder.build_unconditional_branch(merge_bb);
-                //update else block
-                else_bb = compiler.builder.get_insert_block().unwrap();
-
-                incoming.push((else_result, else_bb));
-            },
-            (None, Some(_)) => unreachable!(),
-            (_, None)       => todo!("Support if with no else"),
-        }
-
-        compiler.builder.position_at_end(merge_bb);
-        // TODO type properly
-
-        let gty = incoming.first().unwrap().0.typed();
-        let phi = compiler.builder.build_phi(gty.basic_enum(compiler), "if_result");
-        add_incoming_gv(phi, &incoming);
-        
-        Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
     }
 }
 

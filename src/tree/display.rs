@@ -8,7 +8,7 @@ fn fmt_stmt_list(f: &mut std::fmt::Formatter<'_>, stmts: &[Stmt]) -> std::fmt::R
         match stmt {
             | Stmt::FunDecl(_)
             | Stmt::Expr(Expr::Block(_))
-            | Stmt::Expr(Expr::If(_))
+            | Stmt::Expr(Expr::If { .. })
             | Stmt::Expr(Expr::While { .. })
             | Stmt::Expr(Expr::For { .. }) => {}
             _ => write!(f, ";")?
@@ -205,8 +205,16 @@ impl Display for Expr {
             },
             Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             Expr::Path(p) => write!(f, "{p}"),
-            Expr::UnaryOps(uops) => write!(f, "{uops}"),
-            Expr::BinaryOp(bop) => write!(f, "{bop}"),
+            Expr::UnaryOps { ops, expr } => {
+                for op in ops {
+                    write!(f, "{op}")?;
+                }
+        
+                write!(f, "{expr}")
+            },
+            Expr::BinaryOp { op, left, right } => {
+                write!(f, "{left} {op} {right}")
+            },
             Expr::Comparison { left, rights } => {
                 write!(f, "{left}")?;
 
@@ -223,7 +231,25 @@ impl Display for Expr {
                     None => Ok(()),
                 }
             },
-            Expr::If(e) => write!(f, "{e}"),
+            Expr::If { conditionals, last } => {
+                if let Some(((penult_cond, penult_block), rest)) = conditionals.split_last() {
+                    for (cond, block) in rest {
+                        write!(f, "if {cond} {block} else")?;
+                    }
+                    
+                    write!(f, "if {penult_cond} {penult_block}")?;
+                    match last {
+                        Some(b) => write!(f, "else {b}"),
+                        None => Ok(()),
+                    }
+                } else {
+                    // fallback which should not occur
+                    match last {
+                        Some(b) => write!(f, "{b}"),
+                        None => Ok(()),
+                    }
+                }
+            },
             Expr::While { condition, block } => write!(f, "while {condition} {block}"),
             Expr::For { ident, iterator, block } => write!(f, "for {ident} in {iterator} {block}"),
             Expr::Call { funct, params } => {
@@ -298,49 +324,6 @@ impl Display for Path {
         }
 
         Ok(())
-    }
-}
-
-impl Display for UnaryOps {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let UnaryOps { ops, expr } = self;
-        for op in ops {
-            write!(f, "{op}")?;
-        }
-
-        write!(f, "{expr}")
-    }
-}
-
-impl Display for BinaryOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let BinaryOp { op, left, right } = self;
-
-        write!(f, "{left} {op} {right}")
-    }
-}
-
-impl Display for If {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let If { conditionals, last } = self;
-        
-        if let Some(((penult_cond, penult_block), rest)) = conditionals.split_last() {
-            for (cond, block) in rest {
-                write!(f, "if {cond} {block} else")?;
-            }
-            
-            write!(f, "if {penult_cond} {penult_block}")?;
-            match last {
-                Some(b) => write!(f, "else {b}"),
-                None => Ok(()),
-            }
-        } else {
-            // fallback which should not occur
-            match last {
-                Some(b) => write!(f, "{b}"),
-                None => Ok(()),
-            }
-        }
     }
 }
 

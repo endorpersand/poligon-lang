@@ -224,8 +224,25 @@ impl TraverseRt for tree::Expr {
                     .map_err(TermOp::Err)
             },
             tree::Expr::Path(_) => Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?,
-            tree::Expr::UnaryOps(o) => o.traverse_rt(ctx),
-            tree::Expr::BinaryOp(o) => o.traverse_rt(ctx),
+            tree::Expr::UnaryOps { ops, expr } => {
+                let mut ops_iter = ops.iter().rev();
+        
+                // ops should always have at least 1 unary op, so this should always be true
+                let mut e = if let Some(op) = ops_iter.next() {
+                    expr.apply_unary(op, ctx)
+                } else {
+                    // should never happen, but in case it does
+                    expr.traverse_rt(ctx)
+                }?;
+
+                // apply the rest:
+                for op in ops_iter {
+                    e = e.apply_unary(op)?;
+                }
+
+                Ok(e)
+            },
+            tree::Expr::BinaryOp { op, left, right } => left.apply_binary(op, right, ctx),
             tree::Expr::Comparison { left, rights } => {
                 let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
@@ -283,7 +300,18 @@ impl TraverseRt for tree::Expr {
                     _ => Err(RuntimeErr::CannotApplyRange(l.ty(), r.ty()))?
                 }
             },
-            tree::Expr::If(e) => e.traverse_rt(ctx),
+            tree::Expr::If { conditionals, last } => {
+                for (cond, block) in conditionals {
+                    if cond.traverse_rt(ctx)?.truth() {
+                        return block.traverse_rt(&mut ctx.child());
+                    }
+                }
+        
+                last.as_ref().map_or(
+                    Ok(Value::Unit),
+                    |block| block.traverse_rt(&mut ctx.child())
+                )
+            },
             tree::Expr::While { condition, block } => {
                 let mut values = vec![];
                 while condition.traverse_rt(ctx)?.truth() {
@@ -458,52 +486,6 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
 impl TraverseRt for tree::Literal {
     fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtTraversal<Value> {
         Ok(self.clone().into())
-    }
-}
-
-impl TraverseRt for tree::UnaryOps {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let tree::UnaryOps {ops, expr} = self;
-
-        let mut ops_iter = ops.iter().rev();
-        
-        // ops should always have at least 1 unary op, so this should always be true
-        let mut e = if let Some(op) = ops_iter.next() {
-            expr.apply_unary(op, ctx)
-        } else {
-            // should never happen, but in case it does
-            expr.traverse_rt(ctx)
-        }?;
-
-        // apply the rest:
-        for op in ops_iter {
-            e = e.apply_unary(op)?;
-        }
-
-        Ok(e)
-    }
-}
-
-impl TraverseRt for tree::BinaryOp {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let tree::BinaryOp { op, left, right } = self;
-
-        left.apply_binary(op, right, ctx)
-    }
-}
-
-impl TraverseRt for tree::If {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        for (cond, block) in &self.conditionals {
-            if cond.traverse_rt(ctx)?.truth() {
-                return block.traverse_rt(&mut ctx.child());
-            }
-        }
-
-        self.last.as_ref().map_or(
-            Ok(Value::Unit),
-            |block| block.traverse_rt(&mut ctx.child())
-        )
     }
 }
 

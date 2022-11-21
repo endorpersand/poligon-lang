@@ -61,8 +61,15 @@ pub enum Expr {
     
     Assign(AsgPat, Box<Expr>),
     Path(Path),
-    UnaryOps(UnaryOps),
-    BinaryOp(BinaryOp),
+    UnaryOps {
+        ops: Vec<op::Unary>,
+        expr: Box<Expr>
+    },
+    BinaryOp {
+        op: op::Binary,
+        left: Box<Expr>,
+        right: Box<Expr>
+    },
     Comparison {
         left: Box<Expr>,
         rights: Vec<(op::Cmp, Expr)>
@@ -72,7 +79,10 @@ pub enum Expr {
         right: Box<Expr>,
         step: Option<Box<Expr>>
     },
-    If(If),
+    If {
+        conditionals: Vec<(Expr, Block)>,
+        last: Option<Block>
+    },
     While {
         condition: Box<Expr>,
         block: Block
@@ -122,25 +132,6 @@ pub struct Path {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct UnaryOps {
-    pub ops: Vec<op::Unary>,
-    pub expr: Box<Expr>
-}
-
-#[derive(Debug, PartialEq)]
-pub struct BinaryOp {
-    pub op: op::Binary,
-    pub left: Box<Expr>,
-    pub right: Box<Expr>
-}
-
-#[derive(Debug, PartialEq)]
-pub struct If {
-    pub conditionals: Vec<(Expr, Block)>,
-    pub last: Option<Block>
-}
-
-#[derive(Debug, PartialEq)]
 pub struct Index {
     pub expr: Box<Expr>,
     pub index: Box<Expr>
@@ -157,7 +148,6 @@ pub enum DeclUnit {
     Ident(String, MutType),
     Expr(Expr)
 }
-
 
 #[derive(Debug, PartialEq)]
 pub enum Pat<T> {

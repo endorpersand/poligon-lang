@@ -274,8 +274,11 @@ impl TraverseResolve for tree::Expr {
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
             tree::Expr::Path(p) => p.obj.traverse_rs(map),
-            tree::Expr::UnaryOps(op) => op.traverse_rs(map),
-            tree::Expr::BinaryOp(op) => op.traverse_rs(map),
+            tree::Expr::UnaryOps { ops, expr } => expr.traverse_rs(map),
+            tree::Expr::BinaryOp { op, left, right } => {
+                left.traverse_rs(map)?;
+                right.traverse_rs(map)
+            },
             tree::Expr::Comparison { left, rights } => {
                 left.traverse_rs(map)?;
                 for (_, e) in rights {
@@ -291,7 +294,14 @@ impl TraverseResolve for tree::Expr {
                 }
                 Ok(())
             },
-            tree::Expr::If(e) => e.traverse_rs(map),
+            tree::Expr::If { conditionals, last } => {
+                for (e, p) in conditionals {
+                    e.traverse_rs(map)?;
+                    p.traverse_rs(map)?;
+                }
+        
+                last.traverse_rs(map)
+            },
             tree::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
                 map.typed_scope(BlockType::Loop, |map| {
@@ -346,29 +356,6 @@ impl TraverseResolve for tree::FunDecl {
     
             self.block.0.traverse_rs(map)
         })
-    }
-}
-
-impl TraverseResolve for tree::UnaryOps {
-    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        self.expr.traverse_rs(map)
-    }
-}
-impl TraverseResolve for tree::BinaryOp {
-    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        self.left.traverse_rs(map)?;
-        self.right.traverse_rs(map)
-    }
-}
-
-impl TraverseResolve for tree::If {
-    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        for (e, p) in &self.conditionals {
-            e.traverse_rs(map)?;
-            p.traverse_rs(map)?;
-        }
-
-        self.last.traverse_rs(map)
     }
 }
 

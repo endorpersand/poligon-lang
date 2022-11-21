@@ -84,13 +84,13 @@ macro_rules! left_assoc_op {
         fn $n(&mut self) -> ParseResult<Option<tree::Expr>> {
             if let Some(mut e) = self.$ds()? {
                 while let Some(op) = self.match_n(&[$(token![$op]),+]) {
-                    e = tree::Expr::BinaryOp(tree::BinaryOp {
+                    e = tree::Expr::BinaryOp {
                         op: op.tt.try_into().unwrap(),
                         left: Box::new(e),
                         right: self.$ds()?
                             .map(Box::new)
                             .ok_or(ParseErr::ExpectedExpr.at_range(self.peek_loc()))?
-                    });
+                    };
                 }
 
                 Ok(Some(e))
@@ -294,9 +294,9 @@ impl Parser {
                     // it does not need a semi if it is a block, if, while, for
                     tree::Stmt::Expr(e) if matches!(e,
                         | tree::Expr::Block(_)
-                        | tree::Expr::If(_)
-                        | tree::Expr::While { condition: _, block: _ }
-                        | tree::Expr::For { ident: _, iterator: _, block: _ }
+                        | tree::Expr::If { .. }
+                        | tree::Expr::While { .. }
+                        | tree::Expr::For { .. }
                     ) => { self.match1(token![;]); },
 
                     // also for function declarations
@@ -790,22 +790,18 @@ impl Parser {
     /// (so that we don't have a unary operators node wrapping another one)
     fn wrap_unary_op(mut ops: Vec<tree::op::Unary>, inner: tree::Expr) -> tree::Expr {
         // flatten if unary ops inside
-        let uops = if let tree::Expr::UnaryOps(uops) = inner {
-            let tree::UnaryOps { ops: ops2, expr } = uops;
-
+        if let tree::Expr::UnaryOps { ops: ops2, expr } = inner {
             ops.extend(ops2);
-            tree::UnaryOps {
+            tree::Expr::UnaryOps {
                 ops, expr
             }
         } else {
             // wrap otherwise
-            tree::UnaryOps {
+            tree::Expr::UnaryOps {
                 ops,
                 expr: Box::new(inner)
             }
-        };
-
-        tree::Expr::UnaryOps(uops)
+        }
     }
 
     /// Match a function call OR index. (f(1, 2, 3, 4), a[1])
@@ -1042,12 +1038,10 @@ impl Parser {
             }
         }
 
-        let expr = tree::If {
+        Ok(tree::Expr::If {
             conditionals,
             last
-        };
-        
-        Ok(tree::Expr::If(expr))
+        })
     }
 
     // Expect a while loop.
@@ -1119,23 +1113,23 @@ mod tests {
     #[test]
     fn expression_test() {
         assert_parse!("2 + 3;" => program![
-            Stmt::Expr(Expr::BinaryOp(BinaryOp {
+            Stmt::Expr(Expr::BinaryOp {
                 op: op::Binary::Add, 
                 left: Box::new(Expr::Literal(Literal::Int(2))), 
                 right: Box::new(Expr::Literal(Literal::Int(3)))
-            }))
+            })
         ]);
 
         assert_parse!("2 + 3 * 4;" => program![
-            Stmt::Expr(Expr::BinaryOp(BinaryOp {
+            Stmt::Expr(Expr::BinaryOp {
                 op: op::Binary::Add, 
                 left: Box::new(Expr::Literal(Literal::Int(2))), 
-                right: Box::new(Expr::BinaryOp(BinaryOp {
+                right: Box::new(Expr::BinaryOp {
                     op: op::Binary::Mul, 
                     left: Box::new(Expr::Literal(Literal::Int(3))), 
                     right: Box::new(Expr::Literal(Literal::Int(4)))
-                }))
-            }))
+                })
+            })
         ]);
 
         assert_parse!("{}" => program![
@@ -1148,12 +1142,12 @@ mod tests {
         assert_parse!("if true {
             // :)
         }" => program![
-            Stmt::Expr(Expr::If(If {
+            Stmt::Expr(Expr::If {
                 conditionals: vec![
                     ((Expr::Literal(Literal::Bool(true)), Block(vec![])))
                 ],
                 last: None
-            }))
+            })
         ]);
 
         assert_parse!("if true {
@@ -1161,12 +1155,12 @@ mod tests {
         } else {
             // :(
         }" => program![
-            Stmt::Expr(Expr::If(If { 
+            Stmt::Expr(Expr::If { 
                 conditionals: vec![
                     (Expr::Literal(Literal::Bool(true)), Block(vec![]))
                 ],
                 last: Some(Block(vec![]))
-            }))
+            })
         ]);
 
         assert_parse!("if true {
@@ -1176,13 +1170,13 @@ mod tests {
         } else {
             // :(
         }" => program![
-            Stmt::Expr(Expr::If(If { 
+            Stmt::Expr(Expr::If { 
                 conditionals: vec![
                     (Expr::Literal(Literal::Bool(true)), Block(vec![])),
                     (Expr::Ident("condition".to_string()), Block(vec![]))
                 ],
                 last: Some(Block(vec![]))
-            }))
+            })
         ]);
 
         assert_parse!("if true {
@@ -1198,7 +1192,7 @@ mod tests {
         } else {
             // :(
         }" => program![
-            Stmt::Expr(Expr::If(If { 
+            Stmt::Expr(Expr::If { 
                 conditionals: vec![
                     (Expr::Literal(Literal::Bool(true)), Block(vec![])),
                     (Expr::Ident("condition".to_string()), Block(vec![])),
@@ -1207,7 +1201,7 @@ mod tests {
                     (Expr::Ident("condition".to_string()), Block(vec![])),
                 ],
                 last: Some(Block(vec![]))
-            }))
+            })
         ]);
     }
 
@@ -1215,18 +1209,18 @@ mod tests {
     fn semicolon_test() {
         assert_parse_fail_basic!("2 2" => expected_tokens![;]);
 
-        assert_parse!("if cond {}" => program![Stmt::Expr(Expr::If(If {
+        assert_parse!("if cond {}" => program![Stmt::Expr(Expr::If {
             conditionals: vec![
                 (Expr::Ident("cond".to_string()), Block(vec![]))
             ],
             last: None
-        }))]);
-        assert_parse!("if cond {};" => program![Stmt::Expr(Expr::If(If {
+        })]);
+        assert_parse!("if cond {};" => program![Stmt::Expr(Expr::If {
             conditionals: vec![
                 (Expr::Ident("cond".to_string()), Block(vec![]))
             ],
             last: None
-        }))]);
+        })]);
 
         assert_parse!("
         let a = 0;
@@ -1254,7 +1248,7 @@ mod tests {
                 ty: None, 
                 val: Expr::Literal(Literal::Int(2))
             }),
-            Stmt::Expr(Expr::If(If {
+            Stmt::Expr(Expr::If {
                 conditionals: vec![(
                     Expr::Ident("cond".to_string()),
                     Block(vec![
@@ -1267,7 +1261,7 @@ mod tests {
                     ])
                 )],
                 last: None
-            }))
+            })
         ])
     }
 
@@ -1306,34 +1300,34 @@ mod tests {
         assert_parse!("
         +3;
         " => program![
-            Stmt::Expr(Expr::UnaryOps(UnaryOps {
+            Stmt::Expr(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()],
                 expr: Box::new(Expr::Literal(Literal::Int(3)))
-            }))
+            })
         ]);
 
         assert_parse!("
         +++++++3;
         " => program![
-            Stmt::Expr(Expr::UnaryOps(UnaryOps {
+            Stmt::Expr(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(7),
                 expr: Box::new(Expr::Literal(Literal::Int(3)))
-            }))
+            })
         ]);
 
         assert_parse!("
         +-+-+-+-3;
         " => program![
-            Stmt::Expr(Expr::UnaryOps(UnaryOps {
+            Stmt::Expr(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
                 expr: Box::new(Expr::Literal(Literal::Int(3)))
-            }))
+            })
         ]);
 
         assert_parse!("
         !+-+-+-+-3;
         " => program![
-            Stmt::Expr(Expr::UnaryOps(UnaryOps {
+            Stmt::Expr(Expr::UnaryOps {
                 ops: vec![
                     token![!].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
@@ -1345,14 +1339,14 @@ mod tests {
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap()],
                 expr: Box::new(Expr::Literal(Literal::Int(3)))
-            }))
+            })
         ]);
 
         assert_parse!("+(+2);" => program![
-            Stmt::Expr(Expr::UnaryOps(UnaryOps {
+            Stmt::Expr(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(2),
                 expr: Box::new(Expr::Literal(Literal::Int(2)))
-            }))
+            })
         ])
     }
 }
