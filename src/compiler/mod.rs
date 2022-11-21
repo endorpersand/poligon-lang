@@ -12,7 +12,7 @@ use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiVa
 
 use crate::tree::{self, op};
 
-use self::gon_value::{GonValueType, GonValueEnum, apply_bv};
+use self::gon_value::{GonValueType, GonValue, apply_bv};
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
@@ -77,7 +77,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Store the value in the allocated position or return None if there is no allocated position
-    fn store_val(&mut self, ident: &str, val: GonValueEnum<'ctx>) -> Option<PointerValue<'ctx>>
+    fn store_val(&mut self, ident: &str, val: GonValue<'ctx>) -> Option<PointerValue<'ctx>>
     {
         self.vars.get(ident)
             .map(|&(_, alloca)| {
@@ -87,7 +87,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Create an alloca instruction at the top and also store the value at the current insert point
-    fn alloca_and_store(&mut self, ident: &str, val: GonValueEnum<'ctx>) -> PointerValue<'ctx>
+    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> PointerValue<'ctx>
     {
         let alloca = self.create_entry_block_alloca(ident, val.typed());
 
@@ -95,11 +95,11 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    fn get_val(&mut self, ident: &str) -> IRResult<GonValueEnum<'ctx>> {
+    fn get_val(&mut self, ident: &str) -> IRResult<GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&(ty, ptr)) => {
                 let val = self.builder.build_load(ptr, "load");
-                Ok(GonValueEnum::reconstruct(ty, val))
+                Ok(GonValue::reconstruct(ty, val))
             },
             None => Err(IRErr::UndefinedVariable(String::from(ident))),
         }
@@ -121,7 +121,7 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
     phi.add_incoming(&vec);
 }
 
-fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValueEnum<'ctx>, BasicBlock<'ctx>)]) {
+fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
     let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
         .map(|(a, b)| (a.basic_enum(), *b))
         .unzip();
@@ -155,7 +155,7 @@ trait TraverseIR<'ctx> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Block {
-    type Return = IRResult<Option<GonValueEnum<'ctx>>>;
+    type Return = IRResult<Option<GonValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let mut stmts = self.0.iter();
@@ -184,7 +184,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
-    type Return = IRResult<Option<GonValueEnum<'ctx>>>;
+    type Return = IRResult<Option<GonValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
@@ -226,7 +226,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Expr {
-    type Return = IRResult<GonValueEnum<'ctx>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
@@ -312,7 +312,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                         add_incoming(phi, &incoming);
 
                         let result = phi.as_basic_value().into_int_value();
-                        Ok(GonValueEnum::Bool(result))
+                        Ok(GonValue::Bool(result))
                     },
                     None => Ok(lval),
                 }
@@ -343,7 +343,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 compiler.builder.build_unconditional_branch(cond_bb);
 
                 compiler.builder.position_at_end(exit_loop_bb);
-                Ok(GonValueEnum::new_bool(compiler, true)) // TODO
+                Ok(GonValue::new_bool(compiler, true)) // TODO
 
             },
             tree::Expr::For { ident, iterator, block } => todo!(),
@@ -364,7 +364,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                                         let ret = compiler.fn_ret.get(ident)
                                             .ok_or(IRErr::CallNoType)?;
                                         
-                                        Ok(GonValueEnum::reconstruct(*ret, basic))
+                                        Ok(GonValue::reconstruct(*ret, basic))
                                     },
                                     None => Err(IRErr::CallWasInstruction),
                                 }
@@ -385,15 +385,15 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::Literal {
-    type Return = IRResult<GonValueEnum<'ctx>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let value = match self {
-            tree::Literal::Int(i)   => GonValueEnum::new_int(compiler,   *i),
-            tree::Literal::Float(f) => GonValueEnum::new_float(compiler, *f),
+            tree::Literal::Int(i)   => GonValue::new_int(compiler,   *i),
+            tree::Literal::Float(f) => GonValue::new_float(compiler, *f),
             tree::Literal::Char(_)  => todo!("char literal"),
             tree::Literal::Str(_)   => todo!("str literal"),
-            tree::Literal::Bool(b)  => GonValueEnum::new_bool(compiler,  *b),
+            tree::Literal::Bool(b)  => GonValue::new_bool(compiler,  *b),
         };
 
         Ok(value)
@@ -401,7 +401,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Literal {
 }
 
 impl<'ctx> TraverseIR<'ctx> for tree::If {
-    type Return = IRResult<GonValueEnum<'ctx>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let tree::If { conditionals, last } = self;
@@ -462,7 +462,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::If {
         let phi = compiler.builder.build_phi(gty.basic_enum(compiler), "if_result");
         add_incoming_gv(phi, &incoming);
         
-        Ok(GonValueEnum::reconstruct(gty, phi.as_basic_value()))
+        Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
     }
 }
 
@@ -511,11 +511,11 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
 
         // store params
         for (param, (val, gty)) in iter::zip(params, iter::zip(fun.get_param_iter(), arg_gty)) {
-            compiler.alloca_and_store(&param.ident, GonValueEnum::reconstruct(gty, val));
+            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(gty, val));
         }
 
         let ret_value = block.write_ir(compiler)?
-            .map(GonValueEnum::basic_enum);
+            .map(GonValue::basic_enum);
         // write the last value in block as return
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         

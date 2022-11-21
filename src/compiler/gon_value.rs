@@ -6,18 +6,18 @@ use crate::tree;
 use super::Compiler;
 
 #[derive(Clone, Copy, Debug)]
-pub enum GonValueEnum<'ctx> {
+pub enum GonValue<'ctx> {
     Float(FloatValue<'ctx> /* f64 */),
     Int(IntValue<'ctx> /* i? */),
     Bool(IntValue<'ctx> /* i1 */)
 }
 
-impl<'ctx> GonValueEnum<'ctx> {
+impl<'ctx> GonValue<'ctx> {
     pub fn typed(&self) -> GonValueType {
         match self {
-            GonValueEnum::Float(_) => GonValueType::Float,
-            GonValueEnum::Int(_)   => GonValueType::Int,
-            GonValueEnum::Bool(_)  => GonValueType::Bool,
+            GonValue::Float(_) => GonValueType::Float,
+            GonValue::Int(_)   => GonValueType::Int,
+            GonValue::Bool(_)  => GonValueType::Bool,
         }
     }
 
@@ -33,9 +33,9 @@ impl<'ctx> GonValueEnum<'ctx> {
 
     pub fn basic_enum(self) -> BasicValueEnum<'ctx> {
         match self {
-            GonValueEnum::Float(f) => f.as_basic_value_enum(),
-            GonValueEnum::Int(i)   => i.as_basic_value_enum(),
-            GonValueEnum::Bool(b)  => b.as_basic_value_enum(),
+            GonValue::Float(f) => f.as_basic_value_enum(),
+            GonValue::Int(i)   => i.as_basic_value_enum(),
+            GonValue::Bool(b)  => b.as_basic_value_enum(),
         }
     }
 

@@ -2,7 +2,7 @@ use inkwell::values::{IntValue, FloatValue};
 
 use crate::tree::{op, self};
 
-use super::{Compiler, GonValueEnum, TraverseIR, IRResult, IRErr};
+use super::{Compiler, GonValue, TraverseIR, IRResult, IRErr};
 use internal::*;
 
 pub trait Unary<'ctx> {
@@ -42,58 +42,58 @@ impl<'ctx> Compiler<'ctx> {
 enum NumericArgs<'ctx> {
     Float(FloatValue<'ctx>, FloatValue<'ctx>),
     Int(IntValue<'ctx>, IntValue<'ctx>),
-    Other(GonValueEnum<'ctx>, GonValueEnum<'ctx>)
+    Other(GonValue<'ctx>, GonValue<'ctx>)
 }
 
 impl<'ctx> NumericArgs<'ctx> {
-    fn new(c: &Compiler<'ctx>, lhs: GonValueEnum<'ctx>, rhs: GonValueEnum<'ctx>) -> Self {
+    fn new(c: &Compiler<'ctx>, lhs: GonValue<'ctx>, rhs: GonValue<'ctx>) -> Self {
         match (lhs, rhs) {
-            (GonValueEnum::Float(f1), GonValueEnum::Float(f2)) => Self::Float(f1, f2),
+            (GonValue::Float(f1), GonValue::Float(f2)) => Self::Float(f1, f2),
             
-            (GonValueEnum::Float(f1), GonValueEnum::Int(i2)) => {
+            (GonValue::Float(f1), GonValue::Int(i2)) => {
                 let f2 = c.builder.build_signed_int_to_float(i2, f1.get_type(), "num_op_cast_implicit");
                 Self::Float(f1, f2)
             },
-            (GonValueEnum::Int(i1), GonValueEnum::Float(f2)) => {
+            (GonValue::Int(i1), GonValue::Float(f2)) => {
                 let f1 = c.builder.build_signed_int_to_float(i1, f2.get_type(), "num_op_cast_implicit");
                 Self::Float(f1, f2)
             },
             
-            (GonValueEnum::Int(i1), GonValueEnum::Int(i2)) => Self::Int(i1, i2),
+            (GonValue::Int(i1), GonValue::Int(i2)) => Self::Int(i1, i2),
             (a, b) => Self::Other(a, b)
         }
     }
 }
-impl<'ctx> Unary<'ctx> for GonValueEnum<'ctx> {
-    type Output = IRResult<GonValueEnum<'ctx>>;
+impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
+    type Output = IRResult<GonValue<'ctx>>;
 
     fn apply_unary(self, op: &op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
-            op::Unary::LogNot => Ok(GonValueEnum::Bool(c.builder.build_not(self.truth(c), "log_not"))),
+            op::Unary::LogNot => Ok(GonValue::Bool(c.builder.build_not(self.truth(c), "log_not"))),
             op => match self {
-                GonValueEnum::Float(v) => match v.unary_internal(op, c) {
-                    Ok(f) => Ok(GonValueEnum::Float(f)),
+                GonValue::Float(v) => match v.unary_internal(op, c) {
+                    Ok(f) => Ok(GonValue::Float(f)),
                     Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(*op, self.typed())),
                 },
-                GonValueEnum::Int(v)   => Ok(GonValueEnum::Int(v.unary_internal(op, c))),
-                GonValueEnum::Bool(v)  => Ok(GonValueEnum::Int(v.unary_internal(op, c))), // TODO: separate bool int
+                GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
+                GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate bool int
             }
         }
     }
 }
-impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
-    type Output = IRResult<GonValueEnum<'ctx>>;
+impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
+    type Output = IRResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         macro_rules! num_args_else {
             ($($p:pat => $e:expr),*) => {
                 match NumericArgs::new(c, self, right) {
                     NumericArgs::Float(f1, f2) => match f1.binary_internal(op, f2, c) {
-                        Ok(t) => Ok(GonValueEnum::Float(t)),
+                        Ok(t) => Ok(GonValue::Float(t)),
                         Err(IOpErr::WrongType) => Err(IRErr::CannotBinary(*op, self.typed(), right.typed())),
                     },
                     NumericArgs::Int(i1, i2) => {
-                        Ok(GonValueEnum::Int(i1.binary_internal(op, i2, c)))
+                        Ok(GonValue::Int(i1.binary_internal(op, i2, c)))
                     },
                     $($p => $e),*
                 }
@@ -151,7 +151,7 @@ impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
                 // TODO: proper typing
                 let phi = c.builder.build_phi(self.typed().basic_enum(c), "logand_eager_result");
                 
-                Ok(GonValueEnum::reconstruct(self.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(self.typed(), phi.as_basic_value()))
             },
 
             // logical or
@@ -174,12 +174,12 @@ impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
                 // TODO: proper typing
                 let phi = c.builder.build_phi(self.typed().basic_enum(c), "logor_eager_result");
                 
-                Ok(GonValueEnum::reconstruct(self.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(self.typed(), phi.as_basic_value()))
             },
         }
     }
 }
-impl<'ctx> Cmp<'ctx> for GonValueEnum<'ctx> {
+impl<'ctx> Cmp<'ctx> for GonValue<'ctx> {
     type Output = IRResult<IntValue<'ctx> /* bool */>;
 
     fn apply_cmp(self, op: &op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
@@ -190,17 +190,17 @@ impl<'ctx> Cmp<'ctx> for GonValueEnum<'ctx> {
         }
     }
 }
-impl<'ctx> Truth<'ctx> for GonValueEnum<'ctx> {
+impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */ {
         match self {
-            GonValueEnum::Float(f) => f.truth_internal(c),
-            GonValueEnum::Int(i)   => i.truth_internal(c),
-            GonValueEnum::Bool(b)  => b,
+            GonValue::Float(f) => f.truth_internal(c),
+            GonValue::Int(i)   => i.truth_internal(c),
+            GonValue::Bool(b)  => b,
         }
     }
 }
 impl<'ctx> Binary<'ctx> for &tree::Expr {
-    type Output = super::IRResult<GonValueEnum<'ctx>>;
+    type Output = super::IRResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
@@ -229,7 +229,7 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
                     (&lhs.basic_enum(), bb),
                 ]);
 
-                Ok(GonValueEnum::reconstruct(lhs.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(lhs.typed(), phi.as_basic_value()))
             },
             op::Binary::LogOr  => {
                 let parent = c.parent_fn();
@@ -256,7 +256,7 @@ impl<'ctx> Binary<'ctx> for &tree::Expr {
                     (&rhs.basic_enum(), else_bb)
                 ]);
 
-                Ok(GonValueEnum::reconstruct(lhs.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(lhs.typed(), phi.as_basic_value()))
             },
 
             // eager eval
