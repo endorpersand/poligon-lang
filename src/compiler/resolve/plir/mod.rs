@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::tree::{op, self};
 
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Block);
+pub struct Program(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub struct Block(Type, pub Vec<Stmt>);

@@ -2,64 +2,82 @@ use crate::tree;
 
 pub mod plir;
 
-trait TraversePLIR {
-    type Output;
+enum PLIRErr {}
+type PLIRResult<T> = Result<T, PLIRErr>;
+type InsertBlock = Vec<plir::Stmt>;
 
-    fn traverse_plir(self) -> Self::Output;
+struct CodeGenerator {
+    program: InsertBlock,
+    blocks: Vec<InsertBlock>
 }
 
-impl TraversePLIR for tree::Program {
-    type Output = plir::Program;
-
-    fn traverse_plir(self) -> Self::Output {
-        plir::Program(self.0.traverse_plir())
+impl CodeGenerator {
+    fn new() -> Self {
+        Self { program: vec![], blocks: vec![] }
     }
-}
-
-impl TraversePLIR for tree::Block {
-    type Output = plir::Block;
-
-    fn traverse_plir(self) -> Self::Output {
-        todo!()
+    fn unwrap(self) -> plir::Program {
+        plir::Program(self.program)
     }
-}
 
-impl TraversePLIR for tree::Stmt {
-    type Output = plir::Stmt;
+    fn push_block(&mut self) {
+        self.blocks.push(vec![])
+    }
+    fn pop_block(&mut self) -> Option<InsertBlock> {
+        self.blocks.pop()
+    }
+    fn peek_block(&mut self) -> &mut InsertBlock {
+        self.blocks.last_mut().unwrap_or(&mut self.program)
+    }
+    fn push_stmt(&mut self, stmt: plir::Stmt) {
+        self.peek_block().push(stmt);
+    }
 
-    fn traverse_plir(self) -> Self::Output {
-        match self {
-            tree::Stmt::Decl(d)    => plir::Stmt::Decl(d.traverse_plir()),
-            tree::Stmt::Return(me) => plir::Stmt::Return(me.map(TraversePLIR::traverse_plir)),
-            tree::Stmt::Break      => plir::Stmt::Break,
-            tree::Stmt::Continue   => plir::Stmt::Continue,
-            tree::Stmt::FunDecl(f) => plir::Stmt::FunDecl(f.traverse_plir()),
-            tree::Stmt::Expr(e)    => plir::Stmt::Expr(e.traverse_plir()),
+    fn consume_program(&mut self, prog: tree::Program) -> PLIRResult<()> {
+        for stmt in prog.0.0 {
+            self.consume_stmt(stmt)?;
+        }
+
+        Ok(())
+    }
+
+    fn consume_stmt(&mut self, stmt: tree::Stmt) -> PLIRResult<()> {
+        match stmt {
+            tree::Stmt::Decl(d) => self.consume_decl(d),
+            tree::Stmt::Return(me) => {
+                let maybe_expr = match me {
+                    Some(e) => Some(self.consume_expr(e)?),
+                    None => None,
+                };
+                self.push_stmt(plir::Stmt::Return(maybe_expr));
+                Ok(())
+            },
+            tree::Stmt::Break => {
+                self.push_stmt(plir::Stmt::Break);
+                Ok(())
+            },
+            tree::Stmt::Continue => {
+                self.push_stmt(plir::Stmt::Continue);
+                Ok(())
+            },
+            tree::Stmt::FunDecl(f) => self.consume_fun_decl(f),
+            tree::Stmt::Expr(e) => {
+                let e = self.consume_expr(e)?;
+                self.push_stmt(plir::Stmt::Expr(e));
+                Ok(())
+            },
         }
     }
-}
 
-impl TraversePLIR for tree::Decl {
-    type Output = plir::Decl;
-
-    fn traverse_plir(self) -> Self::Output {
+    fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
         todo!()
     }
-}
 
-impl TraversePLIR for tree::FunDecl {
-    type Output = plir::FunDecl;
-
-    fn traverse_plir(self) -> Self::Output {
+    fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
         todo!()
     }
-}
 
-impl TraversePLIR for tree::Expr {
-    type Output = plir::Expr;
-
-    fn traverse_plir(self) -> Self::Output {
-        match self {
+    fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
+        match expr {
             tree::Expr::Ident(_) => todo!(),
             tree::Expr::Block(_) => todo!(),
             tree::Expr::Literal(_) => todo!(),
