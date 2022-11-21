@@ -1,3 +1,5 @@
+mod op_impl;
+
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 

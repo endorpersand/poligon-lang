@@ -1,9 +1,11 @@
 use inkwell::values::{IntValue, FloatValue};
 
+use crate::compiler::{Compiler, IRResult, IRErr, TraverseIR};
 use crate::tree::{op, self};
 
-use super::{Compiler, GonValue, TraverseIR, IRResult, IRErr};
-use internal::*;
+use self::internal::*;
+
+use super::GonValue;
 
 pub trait Unary<'ctx> {
     type Output;
@@ -200,7 +202,7 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
     }
 }
 impl<'ctx> Binary<'ctx> for &tree::Expr {
-    type Output = super::IRResult<GonValue<'ctx>>;
+    type Output = IRResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {

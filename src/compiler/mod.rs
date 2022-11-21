@@ -1,5 +1,4 @@
-mod op_impl;
-pub mod gon_value;
+pub mod value;
 
 use std::collections::HashMap;
 use std::iter;
@@ -12,7 +11,7 @@ use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiVa
 
 use crate::tree::{self, op};
 
-use self::gon_value::{GonValueType, GonValue, apply_bv};
+use self::value::{GonValueType, GonValue, apply_bv};
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
