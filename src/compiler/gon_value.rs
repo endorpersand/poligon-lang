@@ -9,7 +9,7 @@ use super::Compiler;
 pub enum GonValue<'ctx> {
     Float(FloatValue<'ctx> /* f64 */),
     Int(IntValue<'ctx> /* i? */),
-    Bool(IntValue<'ctx> /* i1 */)
+    Bool(IntValue<'ctx> /* i1 */),
 }
 
 impl<'ctx> GonValue<'ctx> {
@@ -44,13 +44,14 @@ impl<'ctx> GonValue<'ctx> {
             GonValueType::Float => Self::Float(v.into_float_value()),
             GonValueType::Int   => Self::Int(v.into_int_value()),
             GonValueType::Bool  => Self::Bool(v.into_int_value()),
+            GonValueType::Unit  => todo!("construct a value out of Unit"),
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GonValueType {
-    Float, Int, Bool
+    Float, Int, Bool, Unit
 }
 
 impl GonValueType {
@@ -59,6 +60,7 @@ impl GonValueType {
             "float" => Some(GonValueType::Float),
             "int"   => Some(GonValueType::Int),
             "bool"  => Some(GonValueType::Bool),
+            "unit"  => Some(GonValueType::Unit),
             _       => None
         }
     }
@@ -68,6 +70,7 @@ impl GonValueType {
             GonValueType::Float => c.ctx.f64_type().into(),
             GonValueType::Int   => c.ctx.i64_type().into(),
             GonValueType::Bool  => c.ctx.bool_type().into(),
+            GonValueType::Unit  => todo!("get basic enum value out of Unit"),
         }
     }
 }

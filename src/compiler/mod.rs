@@ -487,13 +487,14 @@ impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
         let ret_type = match ret {
             Some(ty) => GonValueType::lookup(ty)
                 .ok_or_else(|| IRErr::UnresolvedType(ty.to_string())),
-            None => Ok(GonValueType::Float), // TODO properly type
+            None => Ok(GonValueType::Unit),
         }?;
 
         let fun_type = match ret_type {
-            GonValueType::Float => compiler.ctx.f64_type().fn_type(&arg_types, false),
-            GonValueType::Int   => compiler.ctx.i64_type().fn_type(&arg_types, false),
+            GonValueType::Float => compiler.ctx.f64_type().fn_type(&arg_types,  false),
+            GonValueType::Int   => compiler.ctx.i64_type().fn_type(&arg_types,  false),
             GonValueType::Bool  => compiler.ctx.bool_type().fn_type(&arg_types, false),
+            GonValueType::Unit  => compiler.ctx.void_type().fn_type(&arg_types, false),
         };
         // HACK
         compiler.fn_ret.insert(String::from(ident), ret_type);
@@ -561,18 +562,18 @@ mod tests {
 
     #[test]
     fn what_am_i_doing_2() {
-        assert_fun_pass("fun hello() {
+        assert_fun_pass("fun hello() -> float {
             2. + 3.;
         }");
 
-        assert_fun_pass("fun double(a) {
+        assert_fun_pass("fun double(a) -> float {
             a * 2.;
         }");
     }
 
     #[test]
     fn if_else_compile_test() {
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main(a) -> float {
             if a {
                 main(0.); 
             } else {
@@ -580,7 +581,7 @@ mod tests {
             }
         }");
 
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main(a) -> float {
             if a {
                 main(0.); 
             } else if a {
@@ -590,7 +591,7 @@ mod tests {
             }
         }");
         
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main(a) -> float {
             if a {
                 main(0.); 
             } else if a {
@@ -623,7 +624,7 @@ mod tests {
 
     #[test]
     fn while_ir() {
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main(a) -> float {
             while a {
                 main(a);
             };
@@ -634,23 +635,22 @@ mod tests {
 
     #[test]
     fn var_test() {
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main(a) -> float {
             a = 2.;
         }");
 
         assert_fun_pass("fun main(a) {
             let b = 2.;
-            2.0;
         }");
     }
 
     #[test]
     fn log_and_log_or_test() {
-        assert_fun_pass("fun main(a, b) {
+        assert_fun_pass("fun main(a, b) -> float {
             a && b;
         }");
         
-        assert_fun_pass("fun main(a, b) {
+        assert_fun_pass("fun main(a, b) -> float {
             a || b;
         }");
     }
@@ -691,7 +691,7 @@ mod tests {
         }");
 
         // multi expression
-        assert_fun_pass("fun main() {
+        assert_fun_pass("fun main() -> float {
             1. + 2. + 3.;
             4. + 5. + 6.;
             7. + 8. + 9.;
@@ -708,4 +708,11 @@ mod tests {
         //     b;
         // }");
     }
+
+    // #[test]
+    // fn void_add() {
+    //     assert_fun_pass("fun main() {
+    //         main() + 1;
+    //     }")
+    // }
 }
