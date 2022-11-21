@@ -8,6 +8,19 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
     Ok(cg.unwrap())
 }
 
+// Generic over &Type and Type
+fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
+    let mut it = into_it.into_iter();
+    
+    let ty = it.next()?;
+    // TODO: union?
+    if it.all(|u| ty == u) {
+        Some(ty)
+    } else {
+        None
+    }
+}
+
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotBreak,
@@ -198,18 +211,10 @@ impl CodeGenerator {
         // resolve block's type
         let InsertBlock { block, exits } = insert_block;
 
-        let mut block_type = None;
+        let mut branch_types = vec![];
         for exit in exits {
             match btype.unpack_exit(exit)? {
-                BlockExitHandle::Continue(ty) => match block_type.as_ref() {
-                    Some(t1) => if t1 != &ty {
-                        // TODO: union?
-                        Err(PLIRErr::CannotResolveType)?
-                    },
-                    None => {
-                        block_type.replace(ty);
-                    },
-                },
+                BlockExitHandle::Continue(ty) => branch_types.push(ty),
                 BlockExitHandle::LoopExit => {},
                 BlockExitHandle::Propagate(p) => {
                     self.peek_block().exits.push(p);
@@ -217,7 +222,7 @@ impl CodeGenerator {
             }
         }
         
-        match block_type {
+        match resolve_type(branch_types) {
             Some(bty) => Ok(plir::Block(bty, block)),
             None => Err(PLIRErr::CannotResolveType),
         }
@@ -261,7 +266,11 @@ impl CodeGenerator {
     fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
         match expr {
             tree::Expr::Ident(_) => todo!(),
-            tree::Expr::Block(_) => todo!(),
+            tree::Expr::Block(b) => {
+                let block = self.consume_block(b, BlockBehavior::Bare)?;
+                
+                Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
+            },
             tree::Expr::Literal(literal) => {
                 let expr = match literal {
                     tree::Literal::Int(_)   => plir::Expr::new(plir::Type::int(),   plir::ExprType::Literal(literal)),
@@ -279,8 +288,6 @@ impl CodeGenerator {
                     .collect::<Result<_, _>>()?;
 
                 // type resolution
-                // TODO: union?
-                // TODO: resolve this:
                 match newlst.split_first() {
                     Some((head, tail)) => {
                         if tail.iter().all(|e| e.ty == head.ty) {
@@ -290,9 +297,11 @@ impl CodeGenerator {
                             );
                             Ok(e)
                         } else {
+                            // TODO: union?
                             todo!()
                         }
                     },
+                    // TODO: resolve type of []
                     None => todo!(),
                 }
             },
@@ -304,8 +313,42 @@ impl CodeGenerator {
             tree::Expr::BinaryOp { op, left, right } => todo!(),
             tree::Expr::Comparison { left, rights } => todo!(),
             tree::Expr::Range { left, right, step } => todo!(),
-            tree::Expr::If { conditionals, last } => todo!(),
-            tree::Expr::While { condition, block } => todo!(),
+            tree::Expr::If { conditionals, last } => {
+                let conditionals: Vec<_> = conditionals.into_iter()
+                    .map(|(cond, block)| {
+                        let c = self.consume_expr(cond)?;
+                        let b = self.consume_block(block, BlockBehavior::Bare)?;
+                        Ok((c, b))
+                    })
+                    .collect::<Result<_, _>>()?;
+                
+                let last = match last {
+                    Some(blk) => Some(self.consume_block(blk, BlockBehavior::Bare)?),
+                    None => None,
+                };
+
+                let type_iter = conditionals.iter()
+                    .map(|(_, block)| &block.0)
+                    .chain(last.iter().map(|b| &b.0));
+
+                let if_type = resolve_type(type_iter)
+                    .ok_or(PLIRErr::CannotResolveType)?
+                    .clone();
+
+                Ok(plir::Expr::new(
+                    if_type,
+                    plir::ExprType::If { conditionals, last }
+                ))
+            },
+            tree::Expr::While { condition, block } => {
+                let condition = self.consume_expr(*condition)?;
+                let block = self.consume_block(block, BlockBehavior::Loop)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::list(block.0.clone()), 
+                    plir::ExprType::While { condition: Box::new(condition), block }
+                ))
+            },
             tree::Expr::For { ident, iterator, block } => todo!(),
             tree::Expr::Call { funct, params } => todo!(),
             tree::Expr::Index(_) => todo!(),
