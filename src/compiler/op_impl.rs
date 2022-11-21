@@ -1,8 +1,8 @@
-use inkwell::values::IntValue;
+use inkwell::values::{IntValue, FloatValue};
 
 use crate::tree::{op, self};
 
-use super::{Compiler, GonValueEnum, TraverseIR, IRResult};
+use super::{Compiler, GonValueEnum, TraverseIR, IRResult, IRErr};
 use internal::*;
 
 pub trait Unary<'ctx> {
@@ -39,6 +39,31 @@ impl<'ctx> Compiler<'ctx> {
     }
 }
 
+enum NumericArgs<'ctx> {
+    Float(FloatValue<'ctx>, FloatValue<'ctx>),
+    Int(IntValue<'ctx>, IntValue<'ctx>),
+    Other(GonValueEnum<'ctx>, GonValueEnum<'ctx>)
+}
+
+impl<'ctx> NumericArgs<'ctx> {
+    fn new(c: &Compiler<'ctx>, lhs: GonValueEnum<'ctx>, rhs: GonValueEnum<'ctx>) -> Self {
+        match (lhs, rhs) {
+            (GonValueEnum::Float(f1), GonValueEnum::Float(f2)) => Self::Float(f1, f2),
+            
+            (GonValueEnum::Float(f1), GonValueEnum::Int(i2)) => {
+                let f2 = c.builder.build_signed_int_to_float(i2, f1.get_type(), "num_op_cast_implicit");
+                Self::Float(f1, f2)
+            },
+            (GonValueEnum::Int(i1), GonValueEnum::Float(f2)) => {
+                let f1 = c.builder.build_signed_int_to_float(i1, f2.get_type(), "num_op_cast_implicit");
+                Self::Float(f1, f2)
+            },
+            
+            (GonValueEnum::Int(i1), GonValueEnum::Int(i2)) => Self::Int(i1, i2),
+            (a, b) => Self::Other(a, b)
+        }
+    }
+}
 impl<'ctx> Unary<'ctx> for GonValueEnum<'ctx> {
     type Output = IRResult<GonValueEnum<'ctx>>;
 
@@ -46,7 +71,10 @@ impl<'ctx> Unary<'ctx> for GonValueEnum<'ctx> {
         match op {
             op::Unary::LogNot => Ok(GonValueEnum::Bool(c.builder.build_not(self.truth(c), "log_not"))),
             op => match self {
-                GonValueEnum::Float(v) => v.unary_internal(op, c).map(GonValueEnum::Float),
+                GonValueEnum::Float(v) => match v.unary_internal(op, c) {
+                    Ok(f) => Ok(GonValueEnum::Float(f)),
+                    Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(*op, self.typed())),
+                },
                 GonValueEnum::Int(v)   => Ok(GonValueEnum::Int(v.unary_internal(op, c))),
                 GonValueEnum::Bool(v)  => Ok(GonValueEnum::Int(v.unary_internal(op, c))), // TODO: separate bool int
             }
@@ -57,36 +85,51 @@ impl<'ctx> Binary<'ctx> for GonValueEnum<'ctx> {
     type Output = IRResult<GonValueEnum<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        macro_rules! num_args_else {
+            ($($p:pat => $e:expr),*) => {
+                match NumericArgs::new(c, self, right) {
+                    NumericArgs::Float(f1, f2) => match f1.binary_internal(op, f2, c) {
+                        Ok(t) => Ok(GonValueEnum::Float(t)),
+                        Err(IOpErr::WrongType) => Err(IRErr::CannotBinary(*op, self.typed(), right.typed())),
+                    },
+                    NumericArgs::Int(i1, i2) => {
+                        Ok(GonValueEnum::Int(i1.binary_internal(op, i2, c)))
+                    },
+                    $($p => $e),*
+                }
+            }
+        }
         match op {
             // numeric add
-            op::Binary::Add => todo!(),
-
-            // numeric sub
-            op::Binary::Sub => todo!(),
+            | op::Binary::Add 
+            | op::Binary::Sub
+            | op::Binary::Div
+            | op::Binary::Mod
+            | op::Binary::Shl
+            | op::Binary::Shr
+            => num_args_else!{
+                NumericArgs::Other(o1, o2) => Err(IRErr::CannotBinary(*op, o1.typed(), o2.typed()))
+            },
 
             // numeric mul, collection repeat
-            op::Binary::Mul => todo!(),
-
-            // numeric div
-            op::Binary::Div => todo!(),
-
-            // numeric modulo
-            op::Binary::Mod => todo!(),
-
-            // int shift left
-            op::Binary::Shl => todo!(),
-
-            // int shift right
-            op::Binary::Shr => todo!(),
+            op::Binary::Mul => num_args_else! {
+                NumericArgs::Other(_, _) => todo!()
+            },
 
             // bitwise or, collection concat
-            op::Binary::BitOr => todo!(),
+            op::Binary::BitOr => num_args_else! {
+                NumericArgs::Other(_, _) => todo!()
+            },
 
             // bitwise and
-            op::Binary::BitAnd => todo!(),
+            op::Binary::BitAnd => num_args_else! {
+                NumericArgs::Other(_, _) => todo!()
+            },
 
             // bitwise xor
-            op::Binary::BitXor => todo!(),
+            op::Binary::BitXor => num_args_else! {
+                NumericArgs::Other(_, _) => todo!()
+            },
 
             // logical and
             op::Binary::LogAnd => {
@@ -140,13 +183,10 @@ impl<'ctx> Cmp<'ctx> for GonValueEnum<'ctx> {
     type Output = IRResult<IntValue<'ctx> /* bool */>;
 
     fn apply_cmp(self, op: &op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-        match op {
-            op::Cmp::Lt => todo!(),
-            op::Cmp::Gt => todo!(),
-            op::Cmp::Le => todo!(),
-            op::Cmp::Ge => todo!(),
-            op::Cmp::Eq => todo!(),
-            op::Cmp::Ne => todo!(),
+        match NumericArgs::new(c, self, right) {
+            NumericArgs::Float(f1, f2) => Ok(f1.cmp_internal(op, f2, c)),
+            NumericArgs::Int(i1, i2)   => Ok(i1.cmp_internal(op, i2, c)),
+            NumericArgs::Other(_, _)   => todo!(),
         }
     }
 }
@@ -234,8 +274,14 @@ mod internal {
     use inkwell::{FloatPredicate, IntPredicate};
     use inkwell::values::{FloatValue, IntValue};
 
-    use crate::compiler::{Compiler, IRResult};
+    use crate::compiler::Compiler;
     use crate::tree::op;
+
+    pub(super) enum IOpErr {
+        WrongType
+    }
+
+    type IOpResult<T> = Result<T, IOpErr>;
 
     pub(super) trait ValueUnary<'ctx> {
         type Output;
@@ -257,20 +303,20 @@ mod internal {
     }
 
     impl<'ctx> ValueUnary<'ctx> for FloatValue<'ctx> {
-        type Output = IRResult<Self>;
+        type Output = IOpResult<Self>;
     
         fn unary_internal(self, op: &op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
             match op {
                 op::Unary::Plus   => Ok(self),
                 op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
                 op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-                op::Unary::BitNot => todo!(),
+                op::Unary::BitNot => Err(IOpErr::WrongType),
             }
         }
     }
     
     impl<'ctx> ValueBinary<'ctx> for FloatValue<'ctx> {
-        type Output = IRResult<Self>;
+        type Output = IOpResult<Self>;
     
         fn binary_internal(self, op: &op::Binary, right: FloatValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
             match op {
@@ -278,12 +324,12 @@ mod internal {
                 op::Binary::Sub => Ok(c.builder.build_float_sub(self, right, "f_sub")),
                 op::Binary::Mul => Ok(c.builder.build_float_mul(self, right, "f_mul")),
                 op::Binary::Div => Ok(c.builder.build_float_div(self, right, "f_div")),
-                op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_rem")),
-                op::Binary::Shl => todo!(),
-                op::Binary::Shr => todo!(),
-                op::Binary::BitOr => todo!(),
-                op::Binary::BitAnd => todo!(),
-                op::Binary::BitXor => todo!(),
+                op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_mod")),
+                op::Binary::Shl => Err(IOpErr::WrongType),
+                op::Binary::Shr => Err(IOpErr::WrongType),
+                op::Binary::BitOr => Err(IOpErr::WrongType),
+                op::Binary::BitAnd => Err(IOpErr::WrongType),
+                op::Binary::BitXor => Err(IOpErr::WrongType),
                 op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
                 op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
             }
@@ -332,17 +378,25 @@ mod internal {
         type Output = IntValue<'ctx>;
     
         fn binary_internal(self, op: &op::Binary, right: IntValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
+            // TODO: _add vs _nsw_add vs _nuw_add
             match op {
-                op::Binary::Add => todo!(),
-                op::Binary::Sub => todo!(),
-                op::Binary::Mul => todo!(),
-                op::Binary::Div => todo!(),
-                op::Binary::Mod => todo!(),
-                op::Binary::Shl => todo!(),
-                op::Binary::Shr => todo!(),
-                op::Binary::BitOr => todo!(),
-                op::Binary::BitAnd => todo!(),
-                op::Binary::BitXor => todo!(),
+                op::Binary::Add => c.builder.build_int_add(self, right, "i_add"),
+                op::Binary::Sub => c.builder.build_int_sub(self, right, "i_sub"),
+                op::Binary::Mul => c.builder.build_int_mul(self, right, "i_mul"),
+                op::Binary::Div => {
+                    // TODO: deal with div by 0
+                    c.builder.build_int_signed_div(self, right, "i_div")
+                },
+                op::Binary::Mod => {
+                    // TODO: deal with div by 0
+                    c.builder.build_int_signed_rem(self, right, "i_mod")
+                },
+                op::Binary::Shl => c.builder.build_left_shift(self, right, "i_shl"),
+                // TODO, arith shr vs logical shr
+                op::Binary::Shr => c.builder.build_right_shift(self, right, true, "i_shr"),
+                op::Binary::BitOr => c.builder.build_or(self, right, "i_or"),
+                op::Binary::BitAnd => c.builder.build_and(self, right, "i_and"),
+                op::Binary::BitXor => c.builder.build_xor(self, right, "i_xor"),
                 op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
                 op::Binary::LogOr => unreachable!("logical or was directly computed on {}", self.get_type()),
             }

@@ -5,7 +5,7 @@ use crate::tree;
 
 use super::Compiler;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum GonValueEnum<'ctx> {
     Float(FloatValue<'ctx> /* f64 */),
     Int(IntValue<'ctx> /* i? */),
@@ -48,7 +48,7 @@ impl<'ctx> GonValueEnum<'ctx> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GonValueType {
     Float, Int, Bool
 }

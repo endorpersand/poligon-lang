@@ -10,7 +10,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
-use crate::tree;
+use crate::tree::{self, op};
 
 use self::gon_value::{GonValueType, GonValueEnum, apply_bv};
 
@@ -71,7 +71,7 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         // create alloca
-        let alloca = builder.build_alloca(self.ctx.f64_type(), ident);
+        let alloca = builder.build_alloca(ty.basic_enum(self), ident);
         self.vars.insert(String::from(ident), (ty, alloca));
         alloca
     }
@@ -139,10 +139,13 @@ pub enum IRErr {
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
     CallWasInstruction,
-    CallDidNotHaveType,
+    CallNoType,
     InvalidFunction,
-    BlockHadFloatValue, // TODO: remove
-    UnresolvedType(String)
+    BlockNoValue, // TODO: remove
+    UnresolvedType(String),
+    CannotUnary(op::Unary, GonValueType),
+    CannotBinary(op::Binary, GonValueType, GonValueType),
+    CannotCmp(op::Cmp, GonValueType, GonValueType),
 }
 type IRResult<T> = Result<T, IRErr>;
 
@@ -241,7 +244,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 let t = compiler.update_block(&mut expr_bb, |_, c| {
                     let t = block.write_ir(c)?;
                     c.builder.build_unconditional_branch(exit_bb);
-                    t.ok_or(IRErr::BlockHadFloatValue)
+                    t.ok_or(IRErr::BlockNoValue)
                 })?;
 
                 compiler.builder.position_at_end(exit_bb);
@@ -359,7 +362,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                                 match call.try_as_basic_value().left() {
                                     Some(basic) => {
                                         let ret = compiler.fn_ret.get(ident)
-                                            .ok_or(IRErr::CallDidNotHaveType)?;
+                                            .ok_or(IRErr::CallNoType)?;
                                         
                                         Ok(GonValueEnum::reconstruct(*ret, basic))
                                     },
@@ -624,6 +627,8 @@ mod tests {
             while a {
                 main(a);
             };
+
+            2.0;
         }");
     }
 
@@ -635,6 +640,7 @@ mod tests {
 
         assert_fun_pass("fun main(a) {
             let b = 2.;
+            2.0;
         }");
     }
 
@@ -651,34 +657,34 @@ mod tests {
 
     #[test]
     fn cmp_test() {
-        assert_fun_pass("fun main(a, b) {
+        assert_fun_pass("fun main(a, b) -> bool {
             a < b;
         }");
         
-        assert_fun_pass("fun main(a, b, c) {
+        assert_fun_pass("fun main(a, b, c) -> bool {
             a < b < c;
         }");
 
-        assert_fun_pass("fun main(a, b, c, d, e, f, g) {
+        assert_fun_pass("fun main(a, b, c, d, e, f, g) -> bool {
             a < b < c < d == e < f > g;
         }");
     }
 
     #[test]
-    fn fun_multi_stmt_test() {
+    fn multi_stmt_test() {
         // test multiple declarations
-        assert_fun_pass("fun main() {
-            let a = 1.;
-            let b = 2.;
-            let c = 3.;
+        assert_fun_pass("fun main() -> int {
+            let a = 1;
+            let b = 2;
+            let c = 3;
             a + b + c;
         }");
 
         // block test
-        assert_fun_pass("fun main() {
+        assert_fun_pass("fun main() -> int {
             let b = {
-                let a = 1.;
-                a + 2.;
+                let a = 1;
+                a + 2;
             };
 
             b;
