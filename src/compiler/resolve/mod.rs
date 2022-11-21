@@ -2,9 +2,18 @@ use crate::tree;
 
 pub mod plir;
 
-enum PLIRErr {}
-type PLIRResult<T> = Result<T, PLIRErr>;
+pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
+    let mut cg = CodeGenerator::new();
+    cg.consume_program(t)?;
+    Ok(cg.unwrap())
+}
+
+pub enum PLIRErr {
+    ExpectedType(plir::Type /* expected */, plir::Type /* found */)
+}
+pub type PLIRResult<T> = Result<T, PLIRErr>;
 type InsertBlock = Vec<plir::Stmt>;
+type PartialDecl = (tree::ReasgType, Option<tree::Type>);
 
 struct CodeGenerator {
     program: InsertBlock,
@@ -68,8 +77,35 @@ impl CodeGenerator {
         }
     }
 
+    fn create_decl(&mut self, pd: PartialDecl, pat: tree::DeclPat, e: plir::Expr) -> PLIRResult<()> {
+        let (rt, mty) = pd;
+        match pat {
+            tree::Pat::Unit(unit) => match unit {
+                tree::DeclUnit::Ident(ident, mt) => {
+                    self.push_stmt(plir::Stmt::Decl(plir::Decl {
+                        rt,
+                        mt,
+                        ident,
+                        ty: mty.map_or_else(|| e.ty.clone(), plir::Type::from),
+                        val: e,
+                    }));
+
+                    Ok(())
+                },
+                tree::DeclUnit::Expr(_) => todo!(),
+            },
+            tree::Pat::Spread(_) => todo!(),
+            tree::Pat::List(_) => todo!(),
+        }
+    }
     fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
-        todo!()
+        let tree::Decl { rt, pat, ty, val } = decl;
+
+        match pat {
+            tree::Pat::Unit(_) => todo!(),
+            tree::Pat::Spread(_) => todo!(),
+            tree::Pat::List(_) => todo!(),
+        }
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
@@ -80,8 +116,40 @@ impl CodeGenerator {
         match expr {
             tree::Expr::Ident(_) => todo!(),
             tree::Expr::Block(_) => todo!(),
-            tree::Expr::Literal(_) => todo!(),
-            tree::Expr::ListLiteral(_) => todo!(),
+            tree::Expr::Literal(literal) => {
+                let expr = match literal {
+                    tree::Literal::Int(_)   => plir::Expr::new(plir::Type::int(),   plir::ExprType::Literal(literal)),
+                    tree::Literal::Float(_) => plir::Expr::new(plir::Type::float(), plir::ExprType::Literal(literal)),
+                    tree::Literal::Char(_)  => plir::Expr::new(plir::Type::char(),  plir::ExprType::Literal(literal)),
+                    tree::Literal::Str(_)   => plir::Expr::new(plir::Type::str(),   plir::ExprType::Literal(literal)),
+                    tree::Literal::Bool(_)  => plir::Expr::new(plir::Type::bool(),  plir::ExprType::Literal(literal)),
+                };
+
+                Ok(expr)
+            },
+            tree::Expr::ListLiteral(lst) => {
+                let newlst: Vec<_> = lst.into_iter()
+                    .map(|e| self.consume_expr(e))
+                    .collect::<Result<_, _>>()?;
+
+                // type resolution
+                // TODO: union?
+                // TODO: resolve this:
+                match newlst.split_first() {
+                    Some((head, tail)) => {
+                        if tail.iter().all(|e| e.ty == head.ty) {
+                            let e = plir::Expr::new(
+                                plir::Type::list(head.ty.clone()),
+                                plir::ExprType::ListLiteral(newlst)
+                            );
+                            Ok(e)
+                        } else {
+                            todo!()
+                        }
+                    },
+                    None => todo!(),
+                }
+            },
             tree::Expr::SetLiteral(_) => todo!(),
             tree::Expr::DictLiteral(_) => todo!(),
             tree::Expr::Assign(_, _) => todo!(),

@@ -6,7 +6,7 @@ use crate::tree::{op, self};
 pub struct Program(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
-pub struct Block(Type, pub Vec<Stmt>);
+pub struct Block(pub Type, pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
@@ -35,7 +35,49 @@ pub struct Param {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type(pub String, pub Vec<Type>);
+pub enum Type {
+    Prim(String),
+    Generic(String, Vec<Type>),
+    Tuple(Vec<Type>)
+}
+impl Type {
+    pub fn int() -> Self {
+        Type::Prim(String::from("int"))
+    }
+    pub fn float() -> Self {
+        Type::Prim(String::from("float"))
+    }
+    pub fn bool() -> Self {
+        Type::Prim(String::from("bool"))
+    }
+    pub fn char() -> Self {
+        Type::Prim(String::from("char"))
+    }
+    pub fn str() -> Self {
+        Type::Prim(String::from("string"))
+    }
+    pub fn void() -> Self {
+        Type::Prim(String::from("void"))
+    }
+
+    pub fn list(t: Type) -> Self {
+        Type::Generic(String::from("list"), vec![t])
+    }
+}
+impl From<tree::Type> for Type {
+    fn from(ty: tree::Type) -> Self {
+        let tree::Type(ident, params) = ty;
+        
+        if params.is_empty() {
+            Type::Prim(ident)
+        } else {
+            let p = params.into_iter()
+                .map(Type::from)
+                .collect();
+            Type::Generic(ident, p)
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
@@ -47,10 +89,15 @@ pub struct FunDecl {
 
 #[derive(Debug, PartialEq)]
 pub struct Expr {
-    ty: Type, // Explicit type
-    expr: ExprType
+    pub ty: Type, // Explicit type
+    pub expr: ExprType
 }
 
+impl Expr {
+    pub fn new(ty: Type, expr: ExprType) -> Self {
+        Expr { ty, expr }
+    }
+}
 #[derive(Debug, PartialEq)]
 pub enum ExprType {
     Ident(String), // a variable
