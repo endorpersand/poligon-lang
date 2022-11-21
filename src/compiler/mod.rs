@@ -1,4 +1,5 @@
 pub mod value;
+pub mod resolve;
 
 use std::collections::HashMap;
 use std::iter;
