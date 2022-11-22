@@ -1,4 +1,8 @@
+use std::ops::Range;
+
 use crate::tree::{op, self};
+
+use super::{PLIRResult, PLIRErr};
 
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Vec<Stmt>);
@@ -13,7 +17,9 @@ pub enum Stmt {
     Break,
     Continue,
     FunDecl(FunDecl),
-    Expr(Expr)
+    Expr(Expr),
+    // HACK?
+    VerifyPresence(Expr, Split, bool)
 }
 
 #[derive(Debug, PartialEq)]
@@ -79,7 +85,44 @@ impl From<tree::Type> for Type {
         }
     }
 }
-
+impl Type {
+    // technically index but whatever
+    pub fn split(&self, sp: Split) -> PLIRResult<Type> {
+        match self {
+            Type::Prim(_) => Err(PLIRErr::CannotSplitType),
+            Type::Generic(ident, params) => {
+                if ident == "list" {
+                    if let Some(param) = params.first() {
+                        match sp {
+                            Split::Left(_)
+                            | Split::Right(_) => Ok(param.clone()),
+                            Split::Middle(_) => Ok(self.clone()),
+                        }
+                    } else {
+                        panic!("list cannot be defined without parameters")
+                    }
+                } else {
+                    todo!()
+                }
+            },
+            Type::Tuple(tpl) => match sp {
+                Split::Left(idx) => tpl.get(idx).cloned()
+                    .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
+                Split::Middle(Range { start, end }) => {
+                    let vec: Vec<_> = tpl.get((start as usize)..(tpl.len() - end as usize))
+                        .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp))?
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    
+                    Ok(Type::Tuple(vec))
+                },
+                Split::Right(idx) => tpl.get(tpl.len() - idx).cloned()
+                    .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
+            },
+        }
+    }
+}
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
     pub ident: String,
@@ -143,7 +186,8 @@ pub enum ExprType {
         params: Vec<Expr>
     },
     Index(Index),
-    Spread(Option<Box<Expr>>)
+    Spread(Option<Box<Expr>>),
+    Split(String, Split)
 }
 
 #[derive(Debug, PartialEq)]
@@ -159,6 +203,14 @@ pub struct Path {
 pub struct Index {
     pub expr: Box<Expr>,
     pub index: Box<Expr>
+}
+
+// TODO: can this be combined with Index?
+#[derive(Debug, PartialEq, Eq)]
+pub enum Split {
+    Left(usize),
+    Middle(Range<isize>),
+    Right(usize)
 }
 
 #[derive(Debug, PartialEq)]

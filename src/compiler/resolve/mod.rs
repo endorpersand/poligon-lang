@@ -1,4 +1,4 @@
-use crate::tree;
+use crate::tree::{self, ReasgType, MutType};
 
 pub mod plir;
 
@@ -11,7 +11,7 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
 // Generic over &Type and Type
 fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
     let mut it = into_it.into_iter();
-    
+
     let ty = it.next()?;
     // TODO: union?
     if it.all(|u| ty == u) {
@@ -21,6 +21,21 @@ fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
     }
 }
 
+fn split_var_expr(e: plir::Expr, splits: &[plir::Split]) -> PLIRResult<Vec<plir::Expr>> {
+    let plir::Expr { ty, expr: ety } = e;
+    match ety {
+        plir::ExprType::Ident(ident) => {
+            splits.into_iter().map(|sp| {
+                Ok(plir::Expr::new(
+                    ty.split(sp)?,
+                    plir::ExprType::Split(ident.clone(), sp)
+                ))
+            })
+            .collect()
+        }
+        _ => panic!("Cannot split this expression"),
+    }
+}
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotBreak,
@@ -28,10 +43,13 @@ pub enum PLIRErr {
     CannotReturn,
     CannotResolveType,
     PoisonedTree,
-    CannotSpread
+    CannotSpread,
+    CannotSpreadMultiple,
+    CannotSplitType,
+    InvalidSplit(plir::Type, plir::Split)
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
-type PartialDecl = (tree::ReasgType, Option<tree::Type>);
+type PartialDecl = (ReasgType, plir::Type);
 
 enum BlockExit {
     Return(plir::Type),
@@ -127,12 +145,13 @@ impl InsertBlock {
 
 struct CodeGenerator {
     program: InsertBlock,
-    blocks: Vec<InsertBlock>
+    blocks: Vec<InsertBlock>,
+    var_id: usize
 }
 
 impl CodeGenerator {
     fn new() -> Self {
-        Self { program: InsertBlock::new(), blocks: vec![] }
+        Self { program: InsertBlock::new(), blocks: vec![], var_id: 0 }
     }
     fn unwrap(self) -> plir::Program {
         // TODO: handle return, break, etc
@@ -147,6 +166,12 @@ impl CodeGenerator {
     }
     fn peek_block(&mut self) -> &mut InsertBlock {
         self.blocks.last_mut().unwrap_or(&mut self.program)
+    }
+
+    fn var_name(&mut self, ident: &str) -> String {
+        let string = format!("_{ident}_{}", self.var_id);
+        self.var_id += 1;
+        string
     }
 
     fn consume_program(&mut self, prog: tree::Program) -> PLIRResult<()> {
@@ -202,6 +227,7 @@ impl CodeGenerator {
                 plir::Stmt::Continue   => None,
                 plir::Stmt::FunDecl(_) => Some(plir::Type::void()),
                 plir::Stmt::Expr(e)    => Some(e.ty.clone()),
+                plir::Stmt::VerifyPresence(_, _, _) => Some(plir::Type::void()),
             },
             None => Some(plir::Type::void()),
         };
@@ -231,7 +257,7 @@ impl CodeGenerator {
     }
 
     fn create_decl(&mut self, pd: PartialDecl, pat: tree::DeclPat, e: plir::Expr) -> PLIRResult<()> {
-        let (rt, mty) = pd;
+        let (rt, ty) = pd;
         match pat {
             tree::Pat::Unit(unit) => match unit {
                 tree::DeclUnit::Ident(ident, mt) => {
@@ -239,7 +265,7 @@ impl CodeGenerator {
                         rt,
                         mt,
                         ident,
-                        ty: mty.map_or_else(|| e.ty.clone(), plir::Type::from),
+                        ty,
                         val: e,
                     }));
 
@@ -247,18 +273,52 @@ impl CodeGenerator {
                 },
                 tree::DeclUnit::Expr(_) => todo!(),
             },
-            tree::Pat::Spread(_) => todo!(),
-            tree::Pat::List(_) => todo!(),
+            tree::Pat::Spread(spread) => match spread {
+                // insert value into the pattern
+                Some(pat) => self.create_decl((rt, ty), *pat, e),
+                // drop value
+                None => Ok(()),
+            },
+            tree::Pat::List(pats) => {
+                let spread_pos = pats.iter().position(|p| matches!(p, tree::Pat::Spread(_)));
+                match spread_pos {
+                    Some(pos) => {
+                        let mut left = pats;
+                        let right = left.split_off(pos + 1);
+                        let spread = left.pop().expect("expected spread");
+                    },
+
+                    // NO SPREAD
+                    None => for (i, pat) in pats.iter().enumerate() {
+                        todo!()
+                    },
+                }
+                todo!()
+            },
         }
     }
     fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
         let tree::Decl { rt, pat, ty, val } = decl;
 
-        match pat {
-            tree::Pat::Unit(_) => todo!(),
-            tree::Pat::Spread(_) => todo!(),
-            tree::Pat::List(_) => todo!(),
-        }
+        let expr = self.consume_expr(val)?;
+        let ident = self.var_name("declare");
+
+        let expr_ty = expr.ty.clone();
+        let decl_ty = ty.map_or_else(
+            || expr_ty.clone(),
+            plir::Type::from 
+        );
+
+        self.peek_block().push_stmt(plir::Stmt::Decl(plir::Decl {
+            rt: ReasgType::Const, 
+            mt: MutType::Immut, 
+            ident: ident.clone(), 
+            ty: expr_ty.clone(), 
+            val: expr
+        }));
+
+        let var_access = plir::Expr::new(expr_ty, plir::ExprType::Ident(ident));
+        self.create_decl((rt, decl_ty), pat, var_access)
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
