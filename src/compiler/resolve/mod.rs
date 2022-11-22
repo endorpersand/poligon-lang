@@ -283,44 +283,44 @@ impl CodeGenerator {
             },
             tree::Pat::List(pats) => {
                 let spread_pos = pats.iter().position(|p| matches!(p, tree::Pat::Spread(_)));
-                match spread_pos {
+                let splits = match spread_pos {
+                    // SPREAD
                     Some(pos) => {
-                        let mut left = pats;
-                        let right = left.split_off(pos + 1);
-                        let spread = left.pop().expect("expected spread");
+                        let left = pos;
+                        let right = pats.len() - pos - 1;
 
                         let mut splits = vec![];
                         splits.extend(
-                        (0..(left.len()))
-                            .map(|idx| plir::Split::Left(idx))
+                            (0..left).map(|idx| plir::Split::Left(idx))
                         );
                         splits.push(
-                            plir::Split::Middle(left.len(), right.len())
+                            plir::Split::Middle(left, right)
                         );
                         splits.extend(
-                            (0..(left.len()))
-                                .map(|idx| plir::Split::Right(right.len() - idx))
+                            (0..right).map(|idx| plir::Split::Right(right - idx))
                         );
 
-                        todo!()
+                        splits
                     },
 
                     // NO SPREAD
                     None => {
-                        let splits: Vec<_> = (0..(pats.len()))
+                        (0..(pats.len()))
                             .map(|idx| plir::Split::Left(idx))
-                            .collect();
-                        let split_expr = split_var_expr(e, splits.clone())?;
-                        let split_ty: Vec<_> = splits.into_iter()
-                            .map(|sp| ty.split(sp))
-                            .collect::<Result<_, _>>()?;
-
-                        for (pat, (ty, e)) in zip(pats, zip(split_ty, split_expr)) {
-                            self.create_decl((rt, ty), pat, e)?;
-                        }
+                            .collect()
                     },
+                };
+
+                let split_expr = split_var_expr(e, splits.clone())?;
+                let split_ty: Vec<_> = splits.into_iter()
+                    .map(|sp| ty.split(sp))
+                    .collect::<Result<_, _>>()?;
+
+                for (pat, (ty, e)) in zip(pats, zip(split_ty, split_expr)) {
+                    self.create_decl((rt, ty), pat, e)?;
                 }
-                todo!()
+                
+                Ok(())
             },
         }
     }
