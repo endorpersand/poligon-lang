@@ -206,7 +206,7 @@ pub struct Index {
 }
 
 // TODO: can this be combined with Index?
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Split {
     Left(usize),
     Middle(Range<isize>),

@@ -21,13 +21,13 @@ fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
     }
 }
 
-fn split_var_expr(e: plir::Expr, splits: &[plir::Split]) -> PLIRResult<Vec<plir::Expr>> {
+fn split_var_expr(e: plir::Expr, splits: Vec<plir::Split>) -> PLIRResult<Vec<plir::Expr>> {
     let plir::Expr { ty, expr: ety } = e;
     match ety {
         plir::ExprType::Ident(ident) => {
             splits.into_iter().map(|sp| {
                 Ok(plir::Expr::new(
-                    ty.split(sp)?,
+                    ty.split(sp.clone())?,
                     plir::ExprType::Split(ident.clone(), sp)
                 ))
             })
