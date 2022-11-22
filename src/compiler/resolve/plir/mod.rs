@@ -161,6 +161,11 @@ pub enum ExprType {
         left: Box<Expr>,
         right: Box<Expr>
     },
+    Comparison {
+        op: op::Cmp,
+        left: Box<Expr>,
+        right: Box<Expr>
+    },
     Range {
         left: Box<Expr>,
         right: Box<Expr>,

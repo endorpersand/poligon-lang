@@ -145,6 +145,17 @@ impl InsertBlock {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct Var {
+    ident: String,
+    ty: plir::Type
+}
+impl Var {
+    fn as_expr(self) -> plir::Expr {
+        plir::Expr::new(self.ty, plir::ExprType::Ident(self.ident))
+    }
+}
+
 struct CodeGenerator {
     program: InsertBlock,
     blocks: Vec<InsertBlock>,
@@ -174,6 +185,26 @@ impl CodeGenerator {
         let string = format!("_{ident}_{}", self.var_id);
         self.var_id += 1;
         string
+    }
+
+    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr) -> Var {
+        let ident = self.var_name(ident);
+        let ety = e.ty.clone();
+
+        let decl = plir::Decl {
+            rt: ReasgType::Const,
+            mt: MutType::Immut,
+            ident: ident.clone(),
+            ty: ety.clone(),
+            val: e,
+        };
+
+        self.peek_block().push_stmt(plir::Stmt::Decl(decl));
+
+        Var {
+            ident,
+            ty: ety
+        }
     }
 
     fn consume_program(&mut self, prog: tree::Program) -> PLIRResult<()> {
@@ -328,24 +359,13 @@ impl CodeGenerator {
         let tree::Decl { rt, pat, ty, val } = decl;
 
         let expr = self.consume_expr(val)?;
-        let ident = self.var_name("declare");
-
-        let expr_ty = expr.ty.clone();
+        let var = self.push_tmp_decl("declare", expr);
+        
         let decl_ty = ty.map_or_else(
-            || expr_ty.clone(),
+            || var.ty.clone(),
             plir::Type::from 
         );
-
-        self.peek_block().push_stmt(plir::Stmt::Decl(plir::Decl {
-            rt: ReasgType::Const, 
-            mt: MutType::Immut, 
-            ident: ident.clone(), 
-            ty: expr_ty.clone(), 
-            val: expr
-        }));
-
-        let var_access = plir::Expr::new(expr_ty, plir::ExprType::Ident(ident));
-        self.create_decl((rt, decl_ty), pat, var_access)
+        self.create_decl((rt, decl_ty), pat, var.as_expr())
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
@@ -426,7 +446,16 @@ impl CodeGenerator {
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps { ops, expr } => todo!(),
             tree::Expr::BinaryOp { op, left, right } => todo!(),
-            tree::Expr::Comparison { left, rights } => todo!(),
+            tree::Expr::Comparison { left, rights } => {
+                let lval = self.consume_expr(*left)?;
+                let lvar = self.push_tmp_decl("cmp_val", lval);
+                for (cmp, right) in rights {
+                    let rval = self.consume_expr(right)?;
+                    let rvar = self.push_tmp_decl("cmp_val", rval);
+                }
+
+                todo!()
+            },
             tree::Expr::Range { left, right, step } => todo!(),
             tree::Expr::If { conditionals, last } => {
                 let conditionals: Vec<_> = conditionals.into_iter()
