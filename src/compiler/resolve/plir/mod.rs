@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::tree::{op, self};
 
 #[derive(Debug, PartialEq)]
@@ -59,6 +57,9 @@ impl Type {
     pub fn void() -> Self {
         Type::Prim(String::from("void"))
     }
+    pub fn unk() -> Self {
+        Type::Prim(String::from("unk"))
+    }
 
     pub fn list(t: Type) -> Self {
         Type::Generic(String::from("list"), vec![t])
@@ -84,7 +85,7 @@ pub struct FunDecl {
     pub ident: String,
     pub params: Vec<Param>,
     pub ret: Type, // Explicit type
-    pub block: Rc<Block>
+    pub block: Block
 }
 
 #[derive(Debug, PartialEq)]

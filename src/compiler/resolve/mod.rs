@@ -26,7 +26,9 @@ pub enum PLIRErr {
     CannotBreak,
     CannotContinue,
     CannotReturn,
-    CannotResolveType
+    CannotResolveType,
+    PoisonedTree,
+    CannotSpread
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 type PartialDecl = (tree::ReasgType, Option<tree::Type>);
@@ -260,7 +262,33 @@ impl CodeGenerator {
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
-        todo!()
+        let tree::FunDecl { ident, params, ret, block } = decl;
+
+        let params: Vec<_> = params.into_iter()
+            .map(|p| {
+                let tree::Param { rt, mt, ident, ty } = p;
+                let ty = ty.map_or(
+                    plir::Type::unk(),
+                    plir::Type::from
+                );
+
+                plir::Param { rt, mt, ident, ty }
+            })
+            .collect();
+        
+        let ret = ret.map_or(
+            plir::Type::void(),
+            plir::Type::from
+        );
+
+        let old_block = std::rc::Rc::try_unwrap(block)
+            .map_err(|_| PLIRErr::PoisonedTree)?;
+        let block = self.consume_block(old_block, BlockBehavior::Function)?;
+
+        // TODO, type check block
+        let fun_decl = plir::FunDecl { ident, params, ret, block };
+        self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl));
+        Ok(())
     }
 
     fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
@@ -352,7 +380,7 @@ impl CodeGenerator {
             tree::Expr::For { ident, iterator, block } => todo!(),
             tree::Expr::Call { funct, params } => todo!(),
             tree::Expr::Index(_) => todo!(),
-            tree::Expr::Spread(_) => todo!(),
+            tree::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
         }
     }
 }
