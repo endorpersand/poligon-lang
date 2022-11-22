@@ -1,3 +1,5 @@
+use std::iter::zip;
+
 use crate::tree::{self, ReasgType, MutType};
 
 pub mod plir;
@@ -27,7 +29,7 @@ fn split_var_expr(e: plir::Expr, splits: Vec<plir::Split>) -> PLIRResult<Vec<pli
         plir::ExprType::Ident(ident) => {
             splits.into_iter().map(|sp| {
                 Ok(plir::Expr::new(
-                    ty.split(sp.clone())?,
+                    ty.split(sp)?,
                     plir::ExprType::Split(ident.clone(), sp)
                 ))
             })
@@ -286,11 +288,36 @@ impl CodeGenerator {
                         let mut left = pats;
                         let right = left.split_off(pos + 1);
                         let spread = left.pop().expect("expected spread");
+
+                        let mut splits = vec![];
+                        splits.extend(
+                        (0..(left.len()))
+                            .map(|idx| plir::Split::Left(idx))
+                        );
+                        splits.push(
+                            plir::Split::Middle(left.len(), right.len())
+                        );
+                        splits.extend(
+                            (0..(left.len()))
+                                .map(|idx| plir::Split::Right(right.len() - idx))
+                        );
+
+                        todo!()
                     },
 
                     // NO SPREAD
-                    None => for (i, pat) in pats.iter().enumerate() {
-                        todo!()
+                    None => {
+                        let splits: Vec<_> = (0..(pats.len()))
+                            .map(|idx| plir::Split::Left(idx))
+                            .collect();
+                        let split_expr = split_var_expr(e, splits.clone())?;
+                        let split_ty: Vec<_> = splits.into_iter()
+                            .map(|sp| ty.split(sp))
+                            .collect::<Result<_, _>>()?;
+
+                        for (pat, (ty, e)) in zip(pats, zip(split_ty, split_expr)) {
+                            self.create_decl((rt, ty), pat, e)?;
+                        }
                     },
                 }
                 todo!()

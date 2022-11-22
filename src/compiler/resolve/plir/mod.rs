@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::tree::{op, self};
 
 use super::{PLIRResult, PLIRErr};
@@ -96,7 +94,7 @@ impl Type {
                         match sp {
                             Split::Left(_)
                             | Split::Right(_) => Ok(param.clone()),
-                            Split::Middle(_) => Ok(self.clone()),
+                            Split::Middle(_, _) => Ok(self.clone()),
                         }
                     } else {
                         panic!("list cannot be defined without parameters")
@@ -108,10 +106,10 @@ impl Type {
             Type::Tuple(tpl) => match sp {
                 Split::Left(idx) => tpl.get(idx).cloned()
                     .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
-                Split::Middle(Range { start, end }) => {
-                    let vec: Vec<_> = tpl.get((start as usize)..(tpl.len() - end as usize))
+                Split::Middle(start, end) => {
+                    let vec: Vec<_> = tpl.get(start..(tpl.len() - end))
                         .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp))?
-                        .into_iter()
+                        .iter()
                         .cloned()
                         .collect();
                     
@@ -206,10 +204,10 @@ pub struct Index {
 }
 
 // TODO: can this be combined with Index?
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Split {
     Left(usize),
-    Middle(Range<isize>),
+    Middle(usize, usize),
     Right(usize)
 }
 
