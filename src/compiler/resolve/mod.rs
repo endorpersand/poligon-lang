@@ -1,5 +1,3 @@
-use std::iter::zip;
-
 use crate::tree::{self, ReasgType, MutType};
 
 pub mod plir;
@@ -23,21 +21,6 @@ fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
     }
 }
 
-fn split_var_expr(e: plir::Expr, splits: Vec<plir::Split>) -> PLIRResult<Vec<plir::Expr>> {
-    let plir::Expr { ty, expr: ety } = e;
-    match ety {
-        plir::ExprType::Ident(ident) => {
-            splits.into_iter().map(|sp| {
-                Ok(plir::Expr::new(
-                    ty.split(sp)?,
-                    plir::ExprType::Split(ident.clone(), sp)
-                ))
-            })
-            .collect()
-        }
-        _ => panic!("Cannot split this expression"),
-    }
-}
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotBreak,
@@ -289,83 +272,8 @@ impl CodeGenerator {
         }
     }
 
-    fn create_decl(&mut self, pd: PartialDecl, pat: tree::DeclPat, e: plir::Expr) -> PLIRResult<()> {
-        let (rt, ty) = pd;
-        match pat {
-            tree::Pat::Unit(unit) => match unit {
-                tree::DeclUnit::Ident(ident, mt) => {
-                    self.peek_block().push_stmt(plir::Stmt::Decl(plir::Decl {
-                        rt,
-                        mt,
-                        ident,
-                        ty,
-                        val: e,
-                    }));
-
-                    Ok(())
-                },
-                tree::DeclUnit::Expr(_) => todo!(),
-            },
-            tree::Pat::Spread(spread) => match spread {
-                // insert value into the pattern
-                Some(pat) => self.create_decl((rt, ty), *pat, e),
-                // drop value
-                None => Ok(()),
-            },
-            tree::Pat::List(pats) => {
-                let spread_pos = pats.iter().position(|p| matches!(p, tree::Pat::Spread(_)));
-                let splits = match spread_pos {
-                    // SPREAD
-                    Some(pos) => {
-                        let left = pos;
-                        let right = pats.len() - pos - 1;
-
-                        let mut splits = vec![];
-                        splits.extend(
-                            (0..left).map(|idx| plir::Split::Left(idx))
-                        );
-                        splits.push(
-                            plir::Split::Middle(left, right)
-                        );
-                        splits.extend(
-                            (0..right).map(|idx| plir::Split::Right(right - idx))
-                        );
-
-                        splits
-                    },
-
-                    // NO SPREAD
-                    None => {
-                        (0..(pats.len()))
-                            .map(|idx| plir::Split::Left(idx))
-                            .collect()
-                    },
-                };
-
-                let split_expr = split_var_expr(e, splits.clone())?;
-                let split_ty: Vec<_> = splits.into_iter()
-                    .map(|sp| ty.split(sp))
-                    .collect::<Result<_, _>>()?;
-
-                for (pat, (ty, e)) in zip(pats, zip(split_ty, split_expr)) {
-                    self.create_decl((rt, ty), pat, e)?;
-                }
-                
-                Ok(())
-            },
-        }
-    }
     fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
-        let tree::Decl { rt, pat, ty, val } = decl;
-
-        let expr = self.consume_expr(val)?;
-        let var = self.push_tmp_decl("declare", expr);
-        
-        let decl_ty = ty.map_or_else(
-            || var.ty.clone(),
-            plir::Type::from 
-        );
-        self.create_decl((rt, decl_ty), pat, var.as_expr())
+        todo!()
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
