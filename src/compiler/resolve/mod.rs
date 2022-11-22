@@ -298,11 +298,11 @@ impl CodeGenerator {
                             Ok(e)
                         } else {
                             // TODO: union?
-                            todo!()
+                            Err(PLIRErr::CannotResolveType)
                         }
                     },
                     // TODO: resolve type of []
-                    None => todo!(),
+                    None => Err(PLIRErr::CannotResolveType),
                 }
             },
             tree::Expr::SetLiteral(_) => todo!(),
