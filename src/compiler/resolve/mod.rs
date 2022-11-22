@@ -137,6 +137,12 @@ impl Var {
     fn as_expr(self) -> plir::Expr {
         plir::Expr::new(self.ty, plir::ExprType::Ident(self.ident))
     }
+
+    fn split(self, sp: plir::Split) -> PLIRResult<plir::Expr> {
+        let t = self.ty.split(sp)?;
+        let e = plir::Expr::new(t, plir::ExprType::Split(self.ident, sp));
+        Ok(e)
+    }
 }
 
 struct CodeGenerator {
@@ -272,8 +278,81 @@ impl CodeGenerator {
         }
     }
 
+    fn unwrap_decl(&mut self, rt: ReasgType, pat: tree::DeclPat, ty: Option<plir::Type>, e: plir::Expr) -> PLIRResult<()> {
+        match pat {
+            tree::Pat::Unit(unit) => match unit {
+                tree::DeclUnit::Ident(ident, mt) => {
+                    let ty = ty.unwrap_or_else(|| e.ty.clone());
+                    let decl = plir::Decl { rt, mt, ident, ty, val: e };
+                    self.peek_block().push_stmt(plir::Stmt::Decl(decl));
+                    Ok(())
+                },
+                tree::DeclUnit::Expr(_) => todo!(),
+            },
+            tree::Pat::Spread(spread) => match spread {
+                Some(pat) => self.unwrap_decl(rt, *pat, ty, e),
+                None => Ok(()),
+            },
+            tree::Pat::List(pats) => {
+                let var = self.push_tmp_decl("decl", e);
+
+                match pats.iter().position(|p| matches!(p, tree::Pat::Spread(_))) {
+                    Some(pos) => {
+                        let len = pats.len();
+                        let left = pos;
+                        let right = len - pos - 1;
+
+                        // let [a0, a1, a2, a3, .., b4, b3, b2, b1, b0] 
+                        //      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+                        // pattern has 10 elements, spread at position 4
+                        // left: [0, 1, 2, 3], spread: [4, 4], right: [4, 3, 2, 1, 0]
+
+                        // LEFT--- M---- RIGHT------
+                        // 0 1 2 3 4 5 6 7 8 9 10 11
+                        // 0 1 2 3 4---4=4 3 2  1  0
+
+                        let indexes = (0..left).map(plir::Split::Left)
+                            .chain(std::iter::once(plir::Split::Middle(left, right - 1)))
+                            .chain((0..right).map(|i| plir::Split::Right(right - 1 - i /* last index - i */)));
+
+                        for (idx, pat) in std::iter::zip(indexes, pats) {
+                            let rhs = var.clone().split(idx)?;
+                            let ty  = match ty {
+                                Some(ref t) => Some(t.split(idx)?),
+                                None => None,
+                            };
+
+                            self.unwrap_decl(rt, pat, ty, rhs)?;
+                        }
+
+                        Ok(())
+                    },
+                    None => {
+                        for (i, pat) in pats.into_iter().enumerate() {
+                            let idx = plir::Split::Left(i);
+
+                            let rhs = var.clone().split(idx)?;
+                            let ty  = match ty {
+                                Some(ref t) => Some(t.split(idx)?),
+                                None => None,
+                            };
+
+                            self.unwrap_decl(rt, pat, ty, rhs)?;
+                        }
+
+                        Ok(())
+                    },
+                }
+            },
+        }
+    }
+
     fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
-        todo!()
+        let tree::Decl { rt, pat, ty, val } = decl;
+
+        let e = self.consume_expr(val)?;
+        let ty = ty.map(plir::Type::from);
+        self.unwrap_decl(rt, pat, ty, e)
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
