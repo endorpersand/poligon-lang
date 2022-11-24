@@ -107,11 +107,9 @@ impl Type {
                 Split::Left(idx) => tpl.get(idx).cloned()
                     .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
                 Split::Middle(start, end) => {
-                    let vec: Vec<_> = tpl.get(start..(tpl.len() - end))
+                    let vec = tpl.get(start..(tpl.len() - end))
                         .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp))?
-                        .iter()
-                        .cloned()
-                        .collect();
+                        .to_vec();
                     
                     Ok(Type::Tuple(vec))
                 },

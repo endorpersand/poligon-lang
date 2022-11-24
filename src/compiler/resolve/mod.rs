@@ -134,7 +134,7 @@ struct Var {
     ty: plir::Type
 }
 impl Var {
-    fn as_expr(self) -> plir::Expr {
+    fn to_expr(self) -> plir::Expr {
         plir::Expr::new(self.ty, plir::ExprType::Ident(self.ident))
     }
 
