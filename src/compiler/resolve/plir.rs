@@ -1,3 +1,5 @@
+pub mod display;
+
 use crate::tree::{op, self};
 
 use super::{PLIRResult, PLIRErr};
@@ -15,9 +17,7 @@ pub enum Stmt {
     Break,
     Continue,
     FunDecl(FunDecl),
-    Expr(Expr),
-    // HACK?
-    VerifyPresence(Expr, Split, bool)
+    Expr(Expr)
 }
 
 #[derive(Debug, PartialEq)]

@@ -248,8 +248,7 @@ impl CodeGenerator {
                 plir::Stmt::Break      => None,
                 plir::Stmt::Continue   => None,
                 plir::Stmt::FunDecl(_) => Some(plir::Type::void()),
-                plir::Stmt::Expr(e)    => Some(e.ty.clone()),
-                plir::Stmt::VerifyPresence(_, _, _) => Some(plir::Type::void()),
+                plir::Stmt::Expr(e)    => Some(e.ty.clone())
             },
             None => Some(plir::Type::void()),
         };
