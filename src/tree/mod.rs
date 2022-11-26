@@ -156,10 +156,7 @@ pub enum AsgUnit {
     Index(Index),
 }
 #[derive(Debug, PartialEq)]
-pub enum DeclUnit {
-    Ident(String, MutType),
-    Expr(Expr)
-}
+pub struct DeclUnit(pub String, pub MutType);
 
 #[derive(Debug, PartialEq)]
 pub enum Pat<T> {

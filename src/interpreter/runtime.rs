@@ -691,13 +691,10 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
 }
 
 fn declare_pat(pat: &tree::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: tree::ReasgType) -> RtResult<Value> {
-    pat.unpack(rhs, |unit, rhs| match unit {
-        tree::DeclUnit::Ident(ident, mt) => ctx.vars.declare_full(
-            String::from(ident), 
-            rhs,
-            rt,
-            *mt
-        ).cloned(),
-        tree::DeclUnit::Expr(_) => todo!(),
-    })
+    pat.unpack(rhs, |tree::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
+        String::from(ident), 
+        rhs,
+        rt,
+        *mt
+    ).cloned())
 }

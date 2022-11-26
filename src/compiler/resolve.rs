@@ -270,14 +270,11 @@ impl CodeGenerator {
 
     fn unwrap_decl(&mut self, rt: ReasgType, pat: tree::DeclPat, ty: Option<plir::Type>, e: plir::Expr) -> PLIRResult<()> {
         match pat {
-            tree::Pat::Unit(unit) => match unit {
-                tree::DeclUnit::Ident(ident, mt) => {
-                    let ty = ty.unwrap_or_else(|| e.ty.clone());
-                    let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                    self.peek_block().push_stmt(plir::Stmt::Decl(decl));
-                    Ok(())
-                },
-                tree::DeclUnit::Expr(_) => todo!(),
+            tree::Pat::Unit(tree::DeclUnit(ident, mt)) => {
+                let ty = ty.unwrap_or_else(|| e.ty.clone());
+                let decl = plir::Decl { rt, mt, ident, ty, val: e };
+                self.peek_block().push_stmt(plir::Stmt::Decl(decl));
+                Ok(())
             },
             tree::Pat::Spread(spread) => match spread {
                 Some(pat) => self.unwrap_decl(rt, *pat, ty, e),

@@ -391,7 +391,7 @@ impl Parser {
                         tree::MutType::Immut
                     };
 
-                    let node = tree::DeclUnit::Ident(self.expect_ident()?, mt);
+                    let node = tree::DeclUnit(self.expect_ident()?, mt);
                     tree::DeclPat::Unit(node)
                 },
                 _ => return Ok(None)
@@ -1222,19 +1222,19 @@ mod tests {
         " => program![
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
+                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit::Ident(String::from("b"), MutType::Immut)), 
+                pat: DeclPat::Unit(DeclUnit(String::from("b"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(1))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit::Ident(String::from("c"), MutType::Immut)), 
+                pat: DeclPat::Unit(DeclUnit(String::from("c"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(2))
             }),
@@ -1244,7 +1244,7 @@ mod tests {
                     Block(vec![
                         Stmt::Decl(Decl { 
                             rt: ReasgType::Let, 
-                            pat: DeclPat::Unit(DeclUnit::Ident(String::from("d"), MutType::Immut)), 
+                            pat: DeclPat::Unit(DeclUnit(String::from("d"), MutType::Immut)), 
                             ty: None, 
                             val: Expr::Literal(Literal::Int(3))
                         })

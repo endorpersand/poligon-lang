@@ -186,7 +186,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
             tree::Stmt::Decl(d) => {
                 let tree::Decl { rt, pat, ty, val } = d;
                 match pat {
-                    tree::Pat::Unit(tree::DeclUnit::Ident(ident, mt)) => {
+                    tree::Pat::Unit(tree::DeclUnit(ident, mt)) => {
                         let val = val.write_ir(compiler)?;
                         compiler.alloca_and_store(ident, val);
                         Ok(None)

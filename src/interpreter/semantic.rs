@@ -405,13 +405,8 @@ impl TRsDependent for tree::AsgUnit {
 }
 impl TraverseResolve for tree::DeclUnit {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        match self {
-            tree::DeclUnit::Ident(ident, _) => {
-                map.declare(ident);
-                Ok(())
-            },
-            tree::DeclUnit::Expr(_) => todo!(),
-        }
+        map.declare(&self.0);
+        Ok(())
     }
 }
 
@@ -466,7 +461,7 @@ mod test {
         let program = program![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
-                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
+                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
@@ -481,7 +476,7 @@ mod test {
         let program = program![
             Stmt::Decl(Decl {
                 rt: ReasgType::Const, 
-                pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
+                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
                 ty: None, 
                 val: Expr::Literal(Literal::Int(0)),
             }),
@@ -497,7 +492,7 @@ mod test {
             Stmt::Expr(Expr::Block(Block(vec![
                 Stmt::Decl(Decl {
                     rt: ReasgType::Const, 
-                    pat: DeclPat::Unit(DeclUnit::Ident(String::from("a"), MutType::Immut)), 
+                    pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
                     ty: None, 
                     val: Expr::Literal(Literal::Int(0)),
                 }),

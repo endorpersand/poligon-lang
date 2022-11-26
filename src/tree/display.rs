@@ -110,17 +110,14 @@ impl<T: Display> Display for Pat<T> {
 
 impl Display for DeclUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeclUnit::Ident(ident, mt) => {
-                match mt {
-                    MutType::Mut => write!(f, "mut ")?,
-                    MutType::Immut => {},
-                }
-
-                write!(f, "{ident}")
-            },
-            DeclUnit::Expr(e) => write!(f, "{e}"),
+        let DeclUnit(ident, mt) = self;
+        
+        match mt {
+            MutType::Mut => write!(f, "mut ")?,
+            MutType::Immut => {},
         }
+
+        write!(f, "{ident}")
     }
 }
 
