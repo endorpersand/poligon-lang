@@ -8,6 +8,42 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
     Ok(cg.unwrap())
 }
 
+fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
+    let mut splits = Vec::with_capacity(pats.len());
+    let mut pats = pats.iter();
+
+    let left = pats.by_ref()
+        .take_while(|pat| !matches!(pat, tree::Pat::Spread(_)))
+        .enumerate()
+        .map(|(i, _)| plir::Split::Left(i));
+    splits.extend(left);
+    
+    let mut right = pats.rev()
+        .enumerate()
+        .map(|(i, _)| plir::Split::Right(i))
+        .rev();
+    
+    match right.next() {
+        Some(first_right) => {
+            let lidx = splits.last().map_or(0, |split| match split {
+                plir::Split::Left(idx) => *idx + 1,
+                _ => unreachable!()
+            });
+            let ridx = match first_right {
+                plir::Split::Right(idx) => idx,
+                _ => unreachable!()
+            };
+
+            splits.push(plir::Split::Middle(lidx, ridx));
+            splits.push(first_right);
+            splits.extend(right);
+        },
+        None => {},
+    };
+
+    splits
+}
+
 #[derive(Debug)]
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
@@ -28,6 +64,7 @@ pub enum PLIRErr {
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 
+#[derive(Debug)]
 enum BlockExit {
     Return(plir::Type),
     Break,
@@ -79,6 +116,7 @@ impl BlockBehavior {
     }
 }
 
+#[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::Stmt>,
     exits: Vec<BlockExit>
@@ -224,16 +262,11 @@ impl CodeGenerator {
         }
     }
 
-    fn consume_block(&mut self, block: tree::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
-        // collect all the statements from this block
-        self.push_block();
-        for stmt in block.0 {
-            self.consume_stmt(stmt)?;
-        }
-        let mut insert_block = self.pop_block().unwrap();
+    fn consume_insert_block(&mut self, block: InsertBlock, btype: BlockBehavior) -> PLIRResult<plir::Block> {
+        let InsertBlock { block, mut exits } = block;
         
         // check the last statement and add BlockExit::Exit if necessary
-        let maybe_exit_type = match insert_block.block.last() {
+        let maybe_exit_type = match block.last() {
             Some(stmt) => match stmt {
                 plir::Stmt::Decl(_)    => Some(plir::ty!(plir::Type::S_VOID)),
                 plir::Stmt::Return(_)  => None,
@@ -246,12 +279,10 @@ impl CodeGenerator {
         };
 
         if let Some(exit_type) = maybe_exit_type {
-            insert_block.exits.push(BlockExit::Exit(exit_type));
+            exits.push(BlockExit::Exit(exit_type));
         };
 
         // resolve block's type
-        let InsertBlock { block, exits } = insert_block;
-
         let mut branch_types = vec![];
         for exit in exits {
             match btype.unpack_exit(exit)? {
@@ -267,69 +298,63 @@ impl CodeGenerator {
             .ok_or(PLIRErr::CannotResolveType)?;
         Ok(plir::Block(bty, block))
     }
+    fn consume_tree_block(&mut self, block: tree::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
+        // collect all the statements from this block
+        self.push_block();
+        for stmt in block.0 {
+            self.consume_stmt(stmt)?;
+        }
+        
+        let insert_block = self.pop_block().unwrap();
+        self.consume_insert_block(insert_block, btype)
+    }
 
-    fn unwrap_decl(&mut self, rt: ReasgType, pat: tree::DeclPat, ty: Option<plir::Type>, e: plir::Expr) -> PLIRResult<()> {
+    fn unpack_pat<T, U, FS, FM>(
+        &mut self, 
+        pat: tree::Pat<T>, 
+        e: plir::Expr, 
+        extra: U, 
+        mut split_extra: FS, 
+        mut map: FM,
+        consume_var: bool
+    ) -> PLIRResult<()> 
+        where FS: FnMut(&U, plir::Split) -> PLIRResult<U>,
+              FM: FnMut(&mut Self, T, plir::Expr, U) -> PLIRResult<()>,
+    {
+        self.unpack_pat_inner(pat, e, extra, &mut split_extra, &mut map, consume_var)
+    }
+
+    fn unpack_pat_inner<T, U, FS, FM>(
+        &mut self, 
+        pat: tree::Pat<T>, 
+        e: plir::Expr, 
+        extra: U, 
+        split_extra: &mut FS, 
+        map: &mut FM,
+        consume_var: bool
+    ) -> PLIRResult<()> 
+        where FS: FnMut(&U, plir::Split) -> PLIRResult<U>,
+              FM: FnMut(&mut Self, T, plir::Expr, U) -> PLIRResult<()>
+    {
         match pat {
-            tree::Pat::Unit(tree::DeclUnit(ident, mt)) => {
-                let ty = ty.unwrap_or_else(|| e.ty.clone());
-                let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                self.peek_block().push_stmt(plir::Stmt::Decl(decl));
-                Ok(())
-            },
+            tree::Pat::Unit(t) => map(self, t, e, extra),
             tree::Pat::Spread(spread) => match spread {
-                Some(pat) => self.unwrap_decl(rt, *pat, ty, e),
+                Some(pat) => self.unpack_pat_inner(*pat, e, extra, split_extra, map, consume_var),
                 None => Ok(()),
             },
             tree::Pat::List(pats) => {
                 let var = self.push_tmp_decl("decl", e);
 
-                match pats.iter().position(|p| matches!(p, tree::Pat::Spread(_))) {
-                    Some(pos) => {
-                        let len = pats.len();
-                        let left = pos;
-                        let right = len - pos - 1;
-
-                        // let [a0, a1, a2, a3, .., b4, b3, b2, b1, b0] 
-                        //      = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-                        // pattern has 10 elements, spread at position 4
-                        // left: [0, 1, 2, 3], spread: [4, 4], right: [4, 3, 2, 1, 0]
-
-                        // LEFT--- M---- RIGHT------
-                        // 0 1 2 3 4 5 6 7 8 9 10 11
-                        // 0 1 2 3 4---4=4 3 2  1  0
-
-                        let indexes = (0..left).map(plir::Split::Left)
-                            .chain(std::iter::once(plir::Split::Middle(left, right - 1)))
-                            .chain((0..right).map(|i| plir::Split::Right(right - 1 - i /* last index - i */)));
-
-                        for (idx, pat) in std::iter::zip(indexes, pats) {
-                            let rhs = var.clone().split(idx)?;
-                            let ty  = match ty {
-                                Some(ref t) => Some(t.split(idx)?),
-                                None => None,
-                            };
-
-                            self.unwrap_decl(rt, pat, ty, rhs)?;
-                        }
-
-                        Ok(())
-                    },
-                    None => {
-                        for (i, pat) in pats.into_iter().enumerate() {
-                            let idx = plir::Split::Left(i);
-
-                            let rhs = var.clone().split(idx)?;
-                            let ty  = match ty {
-                                Some(ref t) => Some(t.split(idx)?),
-                                None => None,
-                            };
-
-                            self.unwrap_decl(rt, pat, ty, rhs)?;
-                        }
-
-                        Ok(())
-                    },
+                for (idx, pat) in std::iter::zip(create_splits(&pats), pats) {
+                    let rhs = var.clone().split(idx)?;
+                    let extr = split_extra(&extra, idx)?;
+                    self.unpack_pat_inner(pat, rhs, extr, split_extra, map, false)?;
                 }
+
+                if consume_var {
+                    self.peek_block().push_stmt(plir::Stmt::Expr(var.into_expr()));
+                }
+                Ok(())
             },
         }
     }
@@ -339,7 +364,25 @@ impl CodeGenerator {
 
         let e = self.consume_expr(val)?;
         let ty = ty.map(plir::Type::from);
-        self.unwrap_decl(rt, pat, ty, e)
+
+        self.unpack_pat(pat, e, (rt, ty), 
+            |(rt, mty), idx| {
+                Ok((*rt, match mty {
+                    Some(t) => Some(t.split(idx)?),
+                    None => None,
+                }))
+            }, 
+            |this, unit, e, extra| {
+                let tree::DeclUnit(ident, mt) = unit;
+                let (rt, ty) = extra;
+
+                let ty = ty.unwrap_or_else(|| e.ty.clone());
+                let decl = plir::Decl { rt, mt, ident, ty, val: e };
+                this.peek_block().push_stmt(plir::Stmt::Decl(decl));
+                Ok(())
+            },
+            false
+        )
     }
 
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
@@ -364,7 +407,7 @@ impl CodeGenerator {
 
         let old_block = std::rc::Rc::try_unwrap(block)
             .map_err(|_| PLIRErr::PoisonedTree)?;
-        let block = self.consume_block(old_block, BlockBehavior::Function)?;
+        let block = self.consume_tree_block(old_block, BlockBehavior::Function)?;
 
         // TODO, type check block
         let fun_decl = plir::FunDecl { ident, params, ret, block };
@@ -376,7 +419,7 @@ impl CodeGenerator {
         match expr {
             tree::Expr::Ident(_) => todo!(),
             tree::Expr::Block(b) => {
-                let block = self.consume_block(b, BlockBehavior::Bare)?;
+                let block = self.consume_tree_block(b, BlockBehavior::Bare)?;
                 
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
@@ -440,9 +483,40 @@ impl CodeGenerator {
             tree::Expr::Assign(pat, expr) => {
                 let expr = self.consume_expr(*expr)?;
 
-                todo!()
+                self.push_block();
+                self.unpack_pat(pat, expr, (), |_, _| Ok(()),
+                    |this, unit, e, _| {
+                        let unit = match unit {
+                            tree::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
+                            tree::AsgUnit::Path(p) => {
+                                let (_, p) = this.consume_path(p)?;
+                                plir::AsgUnit::Path(p)
+                            },
+                            tree::AsgUnit::Index(idx) => {
+                                let (_, idx) = this.consume_index(idx)?;
+                                plir::AsgUnit::Index(idx)
+                            },
+                        };
+                        
+                        let asg = plir::Expr::new(
+                            e.ty.clone(),
+                            plir::ExprType::Assign(unit, Box::new(e))
+                        );
+
+                        this.peek_block().push_stmt(plir::Stmt::Expr(asg));
+                        Ok(())
+                    },
+                    true
+                )?;
+                
+                let insert_block = self.pop_block().unwrap();
+                self.consume_insert_block(insert_block, BlockBehavior::Bare)
+                    .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
             },
-            tree::Expr::Path(_) => todo!(),
+            tree::Expr::Path(p) => {
+                self.consume_path(p)
+                    .map(|(ty, path)| plir::Expr::new(ty, plir::ExprType::Path(path)))
+            },
             tree::Expr::UnaryOps { ops, expr } => {
                 let expr = self.consume_expr_and_box(*expr)?;
                 
@@ -505,13 +579,13 @@ impl CodeGenerator {
                 let conditionals: Vec<_> = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr(cond)?;
-                        let b = self.consume_block(block, BlockBehavior::Bare)?;
+                        let b = self.consume_tree_block(block, BlockBehavior::Bare)?;
                         Ok((c, b))
                     })
                     .collect::<Result<_, _>>()?;
                 
                 let last = match last {
-                    Some(blk) => Some(self.consume_block(blk, BlockBehavior::Bare)?),
+                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Bare)?),
                     None => None,
                 };
 
@@ -526,7 +600,7 @@ impl CodeGenerator {
             },
             tree::Expr::While { condition, block } => {
                 let condition = self.consume_expr(*condition)?;
-                let block = self.consume_block(block, BlockBehavior::Loop)?;
+                let block = self.consume_tree_block(block, BlockBehavior::Loop)?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
@@ -535,7 +609,7 @@ impl CodeGenerator {
             },
             tree::Expr::For { ident, iterator, block } => {
                 let iterator = self.consume_expr_and_box(*iterator)?;
-                let block = self.consume_block(block, BlockBehavior::Loop)?;
+                let block = self.consume_tree_block(block, BlockBehavior::Loop)?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
@@ -553,17 +627,9 @@ impl CodeGenerator {
                     plir::ExprType::Call { funct, params }
                 ))
             },
-            tree::Expr::Index(tree::Index { expr, index }) => {
-                let expr = self.consume_expr_and_box(*expr)?;
-                let index = self.consume_expr_and_box(*index)?;
-
-                let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)
-                    .ok_or_else(|| PLIRErr::CannotIndexWith(expr.ty.clone(), index.ty.clone()))?;
-                
-                Ok(plir::Expr::new(
-                    idx_ty,
-                    plir::ExprType::Index(plir::Index { expr, index })
-                ))
+            tree::Expr::Index(idx) => {
+                self.consume_index(idx)
+                    .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
             tree::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
         }
@@ -571,6 +637,20 @@ impl CodeGenerator {
 
     fn consume_expr_and_box(&mut self, expr: tree::Expr) -> PLIRResult<Box<plir::Expr>> {
         self.consume_expr(expr).map(Box::new)
+    }
+
+    fn consume_path(&mut self, p: tree::Path) -> PLIRResult<(plir::Type, plir::Path)> {
+        todo!()
+    }
+    fn consume_index(&mut self, idx: tree::Index) -> PLIRResult<(plir::Type, plir::Index)> {
+        let tree::Index { expr, index } = idx;
+        let expr = self.consume_expr_and_box(*expr)?;
+        let index = self.consume_expr_and_box(*index)?;
+
+        let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)
+            .ok_or_else(|| PLIRErr::CannotIndexWith(expr.ty.clone(), index.ty.clone()))?;
+        
+        Ok((idx_ty, plir::Index { expr, index }))
     }
 }
 
@@ -606,6 +686,10 @@ mod test {
 
         assert_plir_pass("
             let [a, .., b] = [1, 2, 3, 4];
+            let [a, ..b, c] = [1, 2, 3, 4];
+
+            a = 4;
+            [a, b, c, .., d, e, f] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
         ")
     }
 }
