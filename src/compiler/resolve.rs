@@ -1,4 +1,4 @@
-use crate::tree::{self, ReasgType, MutType, op};
+use crate::tree::{self, ReasgType, MutType};
 
 pub mod plir;
 
@@ -51,15 +51,15 @@ pub enum PLIRErr {
     PoisonedTree,
     CannotSpread,
     CannotSpreadMultiple,
-    CannotSplitType,
-    InvalidSplit(plir::Type, plir::Split),
-    CannotUnary(op::Unary, plir::Type),
-    CannotBinary(op::Binary, plir::Type, plir::Type),
-    CannotCmp(op::Cmp, plir::Type, plir::Type),
-    CannotIndex(plir::Type),
-    CannotIndexWith(plir::Type, plir::Type),
+    OpErr(plir::OpErr)
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
+
+impl From<plir::OpErr> for PLIRErr {
+    fn from(err: plir::OpErr) -> Self {
+        Self::OpErr(err)
+    }
+}
 
 #[derive(Debug)]
 enum BlockExit {
@@ -462,7 +462,7 @@ impl CodeGenerator {
             tree::Expr::DictLiteral(entries) => {
                 let new_inner: Vec<_> = entries.into_iter()
                     .map(|(k, v)| Ok((self.consume_expr(k)?, self.consume_expr(v)?)))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<PLIRResult<_>>()?;
 
                 let (key_tys, val_tys): (Vec<_>, Vec<_>) = new_inner.iter()
                     .map(|(k, v)| (&k.ty, &v.ty))
@@ -521,8 +521,7 @@ impl CodeGenerator {
                 let mut op_stack = vec![];
 
                 for op in ops.into_iter().rev() {
-                    top_ty = plir::Type::resolve_unary_type(&op, &top_ty)
-                        .ok_or_else(|| PLIRErr::CannotUnary(op, top_ty.clone()))?;
+                    top_ty = plir::Type::resolve_unary_type(&op, &top_ty)?;
                     op_stack.push((op, top_ty.clone()));
                 }
 
@@ -537,10 +536,8 @@ impl CodeGenerator {
                 let left = self.consume_expr_and_box(*left)?;
                 let right = self.consume_expr_and_box(*right)?;
 
-                let ty = plir::Type::resolve_binary_type(&op, &left.ty, &right.ty)
-                    .ok_or_else(|| PLIRErr::CannotBinary(op, left.ty.clone(), right.ty.clone()))?;
-                
-                    Ok(plir::Expr::new(
+                let ty = plir::Type::resolve_binary_type(&op, &left.ty, &right.ty)?;
+                Ok(plir::Expr::new(
                     ty,
                     plir::ExprType::BinaryOp { op, left, right }
                 ))
@@ -549,7 +546,7 @@ impl CodeGenerator {
                 let left = self.consume_expr_and_box(*left)?;
                 let rights = rights.into_iter()
                     .map(|(op, right)| Ok((op, self.consume_expr(right)?)))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<PLIRResult<_>>()?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_BOOL),
@@ -579,7 +576,7 @@ impl CodeGenerator {
                         let b = self.consume_tree_block(block, BlockBehavior::Bare)?;
                         Ok((c, b))
                     })
-                    .collect::<Result<_, _>>()?;
+                    .collect::<PLIRResult<_>>()?;
                 
                 let last = match last {
                     Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Bare)?),
@@ -644,9 +641,7 @@ impl CodeGenerator {
         let expr = self.consume_expr_and_box(*expr)?;
         let index = self.consume_expr_and_box(*index)?;
 
-        let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)
-            .ok_or_else(|| PLIRErr::CannotIndexWith(expr.ty.clone(), index.ty.clone()))?;
-        
+        let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)?;
         Ok((idx_ty, plir::Index { expr, index }))
     }
 }

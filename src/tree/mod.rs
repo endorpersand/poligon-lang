@@ -155,7 +155,7 @@ pub enum AsgUnit {
     Path(Path),
     Index(Index),
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DeclUnit(pub String, pub MutType);
 
 #[derive(Debug, PartialEq)]

@@ -1,15 +1,40 @@
-use crate::compiler::resolve::plir::ExprType;
-use crate::compiler::resolve::{PLIRResult, PLIRErr};
 use crate::tree::{op, self};
 
-use super::{Split, Expr};
+use super::{Split, Expr, ExprType};
 
+#[derive(Debug)]
+pub enum OpErr {
+    CannotUnary(op::Unary, Type),
+    CannotBinary(op::Binary, Type, Type),
+    CannotCmp(op::Cmp, Type, Type),
+    CannotIndex(Type),
+    CannotIndexWith(Type, Type),
+    
+    TupleIndexNonLiteral(Type),
+    TupleIndexOOB(Type, isize),
+    InvalidSplit(Type, Split)
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Prim(String),
     Generic(String, Vec<Type>),
     Tuple(Vec<Type>)
+}
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum TypeRef<'a> {
+    Prim(&'a str),
+    Generic(&'a str, &'a [Type]),
+    Tuple(&'a [Type])
+}
+impl TypeRef<'_> {
+    fn cloned(self) -> Type {
+        match self {
+            TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
+            TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
+            TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys))
+        }
+    }
 }
 
 enum TypeRezError {
@@ -30,21 +55,23 @@ impl Type {
     pub(crate) const S_NEVER: &'static str = "never";
     pub(crate) const S_UNK: &'static str   = "unk";
 
-    pub fn is_never(&self) -> bool {
+    fn referenced(&self) -> TypeRef {
         match self {
-            Type::Prim(ty) => ty == Type::S_NEVER,
-            _ => false,
+            Type::Prim(ident) => TypeRef::Prim(ident),
+            Type::Generic(ident, params) => TypeRef::Generic(ident, params),
+            Type::Tuple(params) => TypeRef::Tuple(params),
         }
     }
+
+    pub fn is_never(&self) -> bool {
+        matches!(self.referenced(), TypeRef::Prim(Type::S_NEVER))
+    }
     pub fn is_numeric(&self) -> bool {
-        match self {
-            Type::Prim(ty) => ty == Type::S_INT || ty == Type::S_FLOAT,
-            _ => false
-        }
+        matches!(self.referenced(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
     }
     #[inline]
     fn is_int(&self) -> bool {
-        matches!(self, Type::Prim(ty) if ty == Type::S_INT)
+        matches!(self.referenced(), TypeRef::Prim(Type::S_INT))
     }
 
     fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
@@ -72,79 +99,134 @@ impl Type {
     }
 
     // technically index but whatever
-    pub fn split(&self, sp: Split) -> PLIRResult<Type> {
-        match self {
-            Type::Prim(_) => Err(PLIRErr::CannotSplitType),
-            Type::Generic(ident, params) => {
-                if ident == Type::S_LIST {
-                    if let Some(param) = params.first() {
-                        match sp {
-                            Split::Left(_)
-                            | Split::Right(_) => Ok(param.clone()),
-                            Split::Middle(_, _) => Ok(self.clone()),
-                        }
-                    } else {
-                        panic!("list cannot be defined without parameters")
+    pub fn split(&self, sp: Split) -> Result<Type, OpErr> {
+        match self.referenced() {
+            TypeRef::Prim(Type::S_STR) => match sp {
+                Split::Left(_)
+                | Split::Right(_) 
+                => Ok(ty!(Type::S_CHAR)),
+                Split::Middle(_, _) => Ok(self.clone()),
+            },
+
+            TypeRef::Generic(Type::S_LIST, params) => {
+                if let Some(param) = params.first() {
+                    match sp {
+                        Split::Left(_)
+                        | Split::Right(_) => Ok(param.clone()),
+                        Split::Middle(_, _) => Ok(self.clone()),
                     }
                 } else {
-                    todo!()
+                    unreachable!("list cannot be defined without parameters")
                 }
             },
-            Type::Tuple(tpl) => match sp {
+
+            TypeRef::Tuple(tpl) => match sp {
                 Split::Left(idx) => tpl.get(idx).cloned()
-                    .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
+                    .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp)),
                 Split::Middle(start, end) => {
                     let vec = tpl.get(start..(tpl.len() - end))
-                        .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp))?
+                        .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp))?
                         .to_vec();
                     
                     Ok(Type::Tuple(vec))
                 },
                 Split::Right(idx) => tpl.get(tpl.len() - idx).cloned()
-                    .ok_or_else(|| PLIRErr::InvalidSplit(self.clone(), sp)),
+                    .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp)),
             },
+
+            _ => Err(OpErr::CannotIndex(self.clone()))
         }
     }
 
-    pub fn resolve_unary_type(op: &op::Unary, ty: &Type) -> Option<Type> {
+    pub fn resolve_unary_type(op: &op::Unary, ty: &Type) -> Result<Type, OpErr> {
         match op {
             op::Unary::Plus   => ty.is_numeric().then(|| ty.clone()),
             op::Unary::Minus  => ty.is_numeric().then(|| ty.clone()),
             op::Unary::LogNot => Some(ty!(Type::S_BOOL)),
             op::Unary::BitNot => ty.is_int().then(|| ty.clone()),
+        }.ok_or_else(|| OpErr::CannotUnary(*op, ty.clone()))
+    }
+
+    pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Result<Type, OpErr> {
+        #[inline]
+        fn bin_op(ty: TypeRef, left: &Type, right: &Type) -> Option<Type> {
+            (left.referenced() == ty && right.referenced() == ty).then(|| ty.cloned())
+        }
+
+        macro_rules! numeric_op_else {
+            ($left:expr, $right:expr, $(($a:pat, $b:pat) => $bl:expr),+) => {
+                match (left.referenced(), right.referenced()) {
+                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_FLOAT)) => Ok(ty!(Type::S_FLOAT)),
+                    (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT))   => Ok(ty!(Type::S_FLOAT)),
+                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT))   => Ok(ty!(Type::S_INT)),
+                    $(($a, $b) => $bl),+
+                }
+            }
+        }
+
+        match op {
+            op::Binary::Add 
+            | op::Binary::Sub
+            | op::Binary::Mul
+            | op::Binary::Div
+            | op::Binary::Mod
+            => numeric_op_else!(
+                left, right,
+                (_, _) => Err(OpErr::CannotBinary(*op, left.clone(), right.clone()))
+            ),
+
+            op::Binary::Shl
+            | op::Binary::Shr
+            | op::Binary::BitAnd
+            | op::Binary::BitOr
+            | op::Binary::BitXor
+            => bin_op(TypeRef::Prim(Type::S_INT), left, right)
+                .ok_or_else(|| OpErr::CannotBinary(*op, left.clone(), right.clone())),
+
+            // TODO: &&, || typing
+            op::Binary::LogAnd => Ok(ty!(Type::S_BOOL)),
+            op::Binary::LogOr  => Ok(ty!(Type::S_BOOL)),
         }
     }
-    pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Option<Type> {
-        todo!()
-    }
+
     // pub fn resolve_cmp_type(_: &op::Cmp, left: Type, right: Type) -> Option<Type> {
     //     let comparable = (left.is_numeric() && right.is_numeric()) || (left == right);
 
     //     comparable.then(|| Type::bool())
     // }
-    pub fn resolve_index_type(expr: &Type, idx: &Expr) -> Option<Type> {
+    pub fn resolve_index_type(expr: &Type, idx: &Expr) -> Result<Type, OpErr> {
         let idx_ty = &idx.ty;
 
-        match expr {
-            Type::Prim(expr_ty) => match expr_ty.as_ref() {
-                Type::S_STR => idx_ty.is_int().then(|| ty!(Type::S_CHAR)),
-                _ => None
-            },
-            Type::Generic(expr_ty, param_tys) => match expr_ty.as_ref() {
-                Type::S_LIST => idx_ty.is_int().then(|| param_tys[0].clone()),
-                Type::S_DICT => (idx_ty == &param_tys[0]).then(|| param_tys[1].clone()),
-                _ => None
-            },
-            Type::Tuple(tys) => match &idx.expr {
-                ExprType::Literal(literal) => match *literal {
-                    tree::Literal::Int(idx_literal) => usize::try_from(idx_literal)
+        match expr.referenced() {
+            TypeRef::Prim(Type::S_STR) => match idx_ty.is_int() {
+                true  => Ok(ty!(Type::S_CHAR)),
+                false => Err(OpErr::CannotIndexWith(expr.clone(), idx_ty.clone())),
+            }
+            TypeRef::Generic(Type::S_LIST, params) => match idx_ty.is_int() {
+                true  => Ok(params[0].clone()),
+                false => Err(OpErr::CannotIndexWith(expr.clone(), idx_ty.clone())),
+            }
+            TypeRef::Generic(Type::S_DICT, params) => {
+                let (key, val) = (&params[0], &params[1]);
+                match key == idx_ty {
+                    true  => Ok(val.clone()),
+                    false => Err(OpErr::CannotIndexWith(expr.clone(), idx_ty.clone())),
+                }
+            }
+            TypeRef::Tuple(tys) => match idx.expr {
+                ExprType::Literal(tree::Literal::Int(idx_lit)) => {
+                    usize::try_from(idx_lit)
                         .ok()
                         .and_then(|idx| tys.get(idx))
-                        .cloned(), // TODO: properly error handle
-                    _ => None
+                        .ok_or_else(|| OpErr::TupleIndexOOB(expr.clone(), idx_lit))
+                        .map(Clone::clone)
                 },
-                _ => None
-            },
+                _ => match idx_ty.is_int() {
+                    true  => Err(OpErr::TupleIndexNonLiteral(expr.clone())),
+                    false => Err(OpErr::CannotIndexWith(expr.clone(), idx_ty.clone()))
+                }
+            }
+            _ => Err(OpErr::CannotIndex(expr.clone()))
         }
     }
 }
