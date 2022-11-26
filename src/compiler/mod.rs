@@ -10,17 +10,18 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
-use crate::tree::{self, op};
+use crate::tree::{op, Literal};
 
-use self::value::{GonValueType, GonValue, apply_bv};
+use self::resolve::plir;
+use self::value::{TypeLayout, GonValue, apply_bv};
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
 
-    vars: HashMap<String, (GonValueType, PointerValue<'ctx>)>,
-    fn_ret: HashMap<String, GonValueType>
+    vars: HashMap<String, (TypeLayout, PointerValue<'ctx>)>,
+    fn_ret: HashMap<String, TypeLayout>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -60,7 +61,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Create an alloca instruction in the entry block of
     /// the function.  This is used for mutable variables etc.
-    fn create_entry_block_alloca(&mut self, ident: &str, ty: GonValueType) -> PointerValue<'ctx> {
+    fn create_entry_block_alloca(&mut self, ident: &str, ty: TypeLayout) -> PointerValue<'ctx> {
         let builder = self.ctx.create_builder();
 
         let fun_bb = self.parent_fn().get_first_basic_block().expect("Expected function to have block");
@@ -142,10 +143,10 @@ pub enum IRErr {
     CallNoType,
     InvalidFunction,
     BlockNoValue, // TODO: remove
-    UnresolvedType(String),
-    CannotUnary(op::Unary, GonValueType),
-    CannotBinary(op::Binary, GonValueType, GonValueType),
-    CannotCmp(op::Cmp, GonValueType, GonValueType),
+    UnresolvedType(plir::Type),
+    CannotUnary(op::Unary, TypeLayout),
+    CannotBinary(op::Binary, TypeLayout, TypeLayout),
+    CannotCmp(op::Cmp, TypeLayout, TypeLayout),
 }
 type IRResult<T> = Result<T, IRErr>;
 
@@ -154,11 +155,11 @@ trait TraverseIR<'ctx> {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Block {
+impl<'ctx> TraverseIR<'ctx> for plir::Block {
     type Return = IRResult<Option<GonValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        match self.0.split_last() {
+        match self.1.split_last() {
             Some((tail, head)) => {
                 for stmt in head {
                     stmt.write_ir(compiler)?;
@@ -170,7 +171,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Block {
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Program {
+impl<'ctx> TraverseIR<'ctx> for plir::Program {
     type Return = IRResult<FloatValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
@@ -178,23 +179,19 @@ impl<'ctx> TraverseIR<'ctx> for tree::Program {
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
+impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
     type Return = IRResult<Option<GonValue<'ctx>>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
-            tree::Stmt::Decl(d) => {
-                let tree::Decl { rt, pat, ty, val } = d;
-                match pat {
-                    tree::Pat::Unit(tree::DeclUnit(ident, mt)) => {
-                        let val = val.write_ir(compiler)?;
-                        compiler.alloca_and_store(ident, val);
-                        Ok(None)
-                    },
-                    _ => todo!("pattern destructuring not implemented")
-                }
+            plir::Stmt::Decl(d) => {
+                let plir::Decl { rt, mt, ident, ty, val } = d;
+
+                let val = val.write_ir(compiler)?;
+                compiler.alloca_and_store(ident, val);
+                Ok(None)
             },
-            tree::Stmt::Return(me) => {
+            plir::Stmt::Return(me) => {
                 let maybe_expr = match me {
                     Some(e) => Some(e.write_ir(compiler)?),
                     None => None,
@@ -207,26 +204,27 @@ impl<'ctx> TraverseIR<'ctx> for tree::Stmt {
 
                 Ok(None)
             },
-            tree::Stmt::Break => todo!(),
-            tree::Stmt::Continue => todo!(),
-            tree::Stmt::FunDecl(d) => {
+            plir::Stmt::Break => todo!(),
+            plir::Stmt::Continue => todo!(),
+            plir::Stmt::FunDecl(d) => {
                 d.write_ir(compiler)?;
                 Ok(None)
             },
-            tree::Stmt::Expr(e) => {
+            plir::Stmt::Expr(e) => {
                 e.write_ir(compiler).map(Some)
             },
         }
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Expr {
+impl<'ctx> TraverseIR<'ctx> for plir::Expr {
     type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        match self {
-            tree::Expr::Ident(ident) => compiler.get_val(ident),
-            tree::Expr::Block(block) => {
+        let plir::Expr { ty, expr } = self;
+        match expr {
+            plir::ExprType::Ident(ident) => compiler.get_val(ident),
+            plir::ExprType::Block(block) => {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
                 let orig_bb = compiler.get_insert_block();
@@ -245,27 +243,28 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 compiler.builder.position_at_end(exit_bb);
                 Ok(t)
             },
-            tree::Expr::Literal(literal) => literal.write_ir(compiler),
-            tree::Expr::ListLiteral(_) => todo!(),
-            tree::Expr::SetLiteral(_) => todo!(),
-            tree::Expr::DictLiteral(_) => todo!(),
-            tree::Expr::Assign(pat, expr) => {
-                match pat {
-                    tree::Pat::Unit(tree::AsgUnit::Ident(ident)) => {
+            plir::ExprType::Literal(literal) => literal.write_ir(compiler),
+            plir::ExprType::ListLiteral(_) => todo!(),
+            plir::ExprType::SetLiteral(_) => todo!(),
+            plir::ExprType::DictLiteral(_) => todo!(),
+            plir::ExprType::Assign(target, expr) => {
+                match target {
+                    plir::AsgUnit::Ident(ident) => {
                         let val = expr.write_ir(compiler)?;
                         compiler.store_val(ident, val)
                             .ok_or_else(|| IRErr::UndefinedVariable(ident.clone()))?;
                         Ok(val)
                     },
-                    _ => todo!("pattern destructuring not implemented")
+                    plir::AsgUnit::Path(_)  => todo!(),
+                    plir::AsgUnit::Index(_) => todo!(),
                 }
             },
-            tree::Expr::Path(_) => todo!(),
-            tree::Expr::UnaryOps { ops, expr } => todo!(),
-            tree::Expr::BinaryOp { op, left, right } => {
+            plir::ExprType::Path(_) => todo!(),
+            plir::ExprType::UnaryOps { ops, expr } => todo!(),
+            plir::ExprType::BinaryOp { op, left, right } => {
                 compiler.apply_binary(&**left, op, &**right)
             },
-            tree::Expr::Comparison { left, rights } => {
+            plir::ExprType::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
                 let mut lval = left.write_ir(compiler)?;
                 
@@ -309,8 +308,8 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                     None => Ok(lval),
                 }
             },
-            tree::Expr::Range { left, right, step } => todo!(),
-            tree::Expr::If { conditionals, last } => {
+            plir::ExprType::Range { left, right, step } => todo!(),
+            plir::ExprType::If { conditionals, last } => {
                 let parent = compiler.parent_fn();
         
                 let mut incoming = vec![];
@@ -370,7 +369,7 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 
                 Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
             },
-            tree::Expr::While { condition, block } => {
+            plir::ExprType::While { condition, block } => {
                 let bb = compiler.get_insert_block();
                 let fun = compiler.parent_fn();
 
@@ -397,9 +396,9 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                 Ok(GonValue::new_bool(compiler, true)) // TODO
 
             },
-            tree::Expr::For { ident, iterator, block } => todo!(),
-            tree::Expr::Call { funct, params } => {
-                if let tree::Expr::Ident(ident) = &**funct {
+            plir::ExprType::For { ident, iterator, block } => todo!(),
+            plir::ExprType::Call { funct, params } => {
+                if let plir::ExprType::Ident(ident) = &funct.expr {
                     match compiler.module.get_function(ident) {
                         Some(fun) => {
                             let fun_params = fun.count_params() as usize;
@@ -429,58 +428,52 @@ impl<'ctx> TraverseIR<'ctx> for tree::Expr {
                     todo!()
                 }
             },
-            tree::Expr::Index(_) => todo!(),
-            tree::Expr::Spread(_) => todo!(),
+            plir::ExprType::Index(_) => todo!(),
+            plir::ExprType::Spread(_) => todo!(),
+            plir::ExprType::Split(_, _) => todo!(),
         }
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::Literal {
+impl<'ctx> TraverseIR<'ctx> for Literal {
     type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let value = match self {
-            tree::Literal::Int(i)   => GonValue::new_int(compiler,   *i),
-            tree::Literal::Float(f) => GonValue::new_float(compiler, *f),
-            tree::Literal::Char(_)  => todo!("char literal"),
-            tree::Literal::Str(_)   => todo!("str literal"),
-            tree::Literal::Bool(b)  => GonValue::new_bool(compiler,  *b),
+            Literal::Int(i)   => GonValue::new_int(compiler,   *i),
+            Literal::Float(f) => GonValue::new_float(compiler, *f),
+            Literal::Char(_)  => todo!("char literal"),
+            Literal::Str(_)   => todo!("str literal"),
+            Literal::Bool(b)  => GonValue::new_bool(compiler,  *b),
         };
 
         Ok(value)
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for tree::FunDecl {
+impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     type Return = IRResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let tree::FunDecl { ident, params, ret, block } = self;
+        let plir::FunDecl { ident, params, ret, block } = self;
 
         // Function signature
         let arg_gty: Vec<_> = params.iter()
-            .map(|p| {
-                match &p.ty {
-                    Some(ty) => GonValueType::lookup(ty)
-                        .ok_or_else(|| IRErr::UnresolvedType(ty.to_string())),
-                    None => Ok(GonValueType::Float), // TODO properly type
-                }
+            .map(|p| &p.ty)
+            .map(|ty| {
+                TypeLayout::lookup(ty)
+                    .ok_or_else(|| IRErr::UnresolvedType(ty.clone()))
             })
             .collect::<Result<_, _>>()?;
         
-        let arg_types: Vec<_> = arg_gty.iter().map(|ty| ty.basic_enum(compiler).into()).collect();
-        let ret_type = match ret {
-            Some(ty) => GonValueType::lookup(ty)
-                .ok_or_else(|| IRErr::UnresolvedType(ty.to_string())),
-            None => Ok(GonValueType::Unit),
-        }?;
+        let arg_types: Vec<_> = arg_gty.iter()
+            .map(|ty| ty.basic_enum(compiler).into())
+            .collect();
 
-        let fun_type = match ret_type {
-            GonValueType::Float => compiler.ctx.f64_type().fn_type(&arg_types,  false),
-            GonValueType::Int   => compiler.ctx.i64_type().fn_type(&arg_types,  false),
-            GonValueType::Bool  => compiler.ctx.bool_type().fn_type(&arg_types, false),
-            GonValueType::Unit  => compiler.ctx.void_type().fn_type(&arg_types, false),
-        };
+        let ret_type = TypeLayout::lookup(ret)
+            .ok_or_else(|| IRErr::UnresolvedType(ret.clone()))?;
+
+        let fun_type = ret_type.fn_type(compiler, &arg_types, false);
         // HACK
         compiler.fn_ret.insert(String::from(ident), ret_type);
 
@@ -521,9 +514,10 @@ mod tests {
 
     use crate::lexer;
     use crate::parser;
-    use crate::tree;
 
     use super::Compiler;
+    use super::resolve;
+    use super::resolve::plir;
 
     /// Assert that a function declaration with an expression in it passes.
     /// Also prints the function to STDERR.
@@ -533,9 +527,10 @@ mod tests {
 
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
+        let plired = resolve::codegen(parsed).unwrap();
 
-        match &parsed.0.0[..] {
-            [tree::Stmt::FunDecl(fdcl)] => {
+        match &plired.0[..] {
+            [plir::Stmt::FunDecl(fdcl)] => {
                 let fun = compiler.compile(fdcl).unwrap();
                 fun.print_to_stderr();
             }

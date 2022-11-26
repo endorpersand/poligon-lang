@@ -103,7 +103,7 @@ impl InsertBlock {
     fn push_return(&mut self, me: Option<plir::Expr>) {
         let ty = match me {
             Some(ref e) => e.ty.clone(),
-            None => plir::Type::void(),
+            None => plir::ty!(plir::Type::S_VOID),
         };
         self.block.push(plir::Stmt::Return(me));
         self.exits.push(BlockExit::Return(ty));
@@ -235,14 +235,14 @@ impl CodeGenerator {
         // check the last statement and add BlockExit::Exit if necessary
         let maybe_exit_type = match insert_block.block.last() {
             Some(stmt) => match stmt {
-                plir::Stmt::Decl(_)    => Some(plir::Type::void()),
+                plir::Stmt::Decl(_)    => Some(plir::ty!(plir::Type::S_VOID)),
                 plir::Stmt::Return(_)  => None,
                 plir::Stmt::Break      => None,
                 plir::Stmt::Continue   => None,
-                plir::Stmt::FunDecl(_) => Some(plir::Type::void()),
+                plir::Stmt::FunDecl(_) => Some(plir::ty!(plir::Type::S_VOID)),
                 plir::Stmt::Expr(e)    => Some(e.ty.clone())
             },
-            None => Some(plir::Type::void()),
+            None => Some(plir::ty!(plir::Type::S_VOID)),
         };
 
         if let Some(exit_type) = maybe_exit_type {
@@ -349,7 +349,7 @@ impl CodeGenerator {
             .map(|p| {
                 let tree::Param { rt, mt, ident, ty } = p;
                 let ty = ty.map_or(
-                    plir::Type::unk(),
+                    plir::ty!(plir::Type::S_UNK),
                     plir::Type::from
                 );
 
@@ -358,7 +358,7 @@ impl CodeGenerator {
             .collect();
         
         let ret = ret.map_or(
-            plir::Type::void(),
+            plir::ty!(plir::Type::S_VOID),
             plir::Type::from
         );
 
@@ -381,15 +381,17 @@ impl CodeGenerator {
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
             tree::Expr::Literal(literal) => {
-                let expr = match literal {
-                    tree::Literal::Int(_)   => plir::Expr::new(plir::Type::int(),   plir::ExprType::Literal(literal)),
-                    tree::Literal::Float(_) => plir::Expr::new(plir::Type::float(), plir::ExprType::Literal(literal)),
-                    tree::Literal::Char(_)  => plir::Expr::new(plir::Type::char(),  plir::ExprType::Literal(literal)),
-                    tree::Literal::Str(_)   => plir::Expr::new(plir::Type::str(),   plir::ExprType::Literal(literal)),
-                    tree::Literal::Bool(_)  => plir::Expr::new(plir::Type::bool(),  plir::ExprType::Literal(literal)),
+                let ty = match literal {
+                    tree::Literal::Int(_)   => plir::ty!(plir::Type::S_INT),
+                    tree::Literal::Float(_) => plir::ty!(plir::Type::S_FLOAT),
+                    tree::Literal::Char(_)  => plir::ty!(plir::Type::S_CHAR),
+                    tree::Literal::Str(_)   => plir::ty!(plir::Type::S_STR),
+                    tree::Literal::Bool(_)  => plir::ty!(plir::Type::S_BOOL)
                 };
 
-                Ok(expr)
+                Ok(plir::Expr::new(
+                    ty, plir::ExprType::Literal(literal)
+                ))
             },
             tree::Expr::ListLiteral(lst) => {
                 let new_inner: Vec<_> = lst.into_iter()
@@ -400,7 +402,7 @@ impl CodeGenerator {
                     .ok_or(PLIRErr::CannotResolveType)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::list(elem_ty),
+                    plir::ty!(plir::Type::S_LIST, [elem_ty]),
                     plir::ExprType::ListLiteral(new_inner)
                 ))
             },
@@ -413,7 +415,7 @@ impl CodeGenerator {
                     .ok_or(PLIRErr::CannotResolveType)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::generic("set", vec![elem_ty]),
+                    plir::ty!(plir::Type::S_SET, [elem_ty]),
                     plir::ExprType::SetLiteral(new_inner)
                 ))
             },
@@ -431,7 +433,7 @@ impl CodeGenerator {
                     .ok_or(PLIRErr::CannotResolveType)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::generic("dict", vec![key_ty, val_ty]),
+                    plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]),
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
@@ -479,7 +481,7 @@ impl CodeGenerator {
                     .collect::<Result<_, _>>()?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::bool(),
+                    plir::ty!(plir::Type::S_BOOL),
                     plir::ExprType::Comparison { left, rights }
                 ))
             },
@@ -495,7 +497,7 @@ impl CodeGenerator {
                     .ok_or(PLIRErr::CannotResolveType)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::generic("range", vec![ty]),
+                    plir::ty!(plir::Type::S_RANGE, [ty]),
                     plir::ExprType::Range { left, right, step }
                 ))
             },
@@ -527,7 +529,7 @@ impl CodeGenerator {
                 let block = self.consume_block(block, BlockBehavior::Loop)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::list(block.0.clone()),
+                    plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
@@ -536,7 +538,7 @@ impl CodeGenerator {
                 let block = self.consume_block(block, BlockBehavior::Loop)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::list(block.0.clone()),
+                    plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
                     plir::ExprType::For { ident, iterator, block }
                 ))
             },

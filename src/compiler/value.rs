@@ -1,11 +1,10 @@
 mod op_impl;
 
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 
-use crate::tree;
-
 use super::Compiler;
+use super::resolve::plir;
 
 #[derive(Clone, Copy, Debug)]
 pub enum GonValue<'ctx> {
@@ -15,11 +14,11 @@ pub enum GonValue<'ctx> {
 }
 
 impl<'ctx> GonValue<'ctx> {
-    pub fn typed(&self) -> GonValueType {
+    pub fn typed(&self) -> TypeLayout {
         match self {
-            GonValue::Float(_) => GonValueType::Float,
-            GonValue::Int(_)   => GonValueType::Int,
-            GonValue::Bool(_)  => GonValueType::Bool,
+            GonValue::Float(_) => TypeLayout::Float,
+            GonValue::Int(_)   => TypeLayout::Int,
+            GonValue::Bool(_)  => TypeLayout::Bool,
         }
     }
 
@@ -41,38 +40,51 @@ impl<'ctx> GonValue<'ctx> {
         }
     }
 
-    pub fn reconstruct(t: GonValueType, v: BasicValueEnum<'ctx>) -> Self {
+    pub fn reconstruct(t: TypeLayout, v: BasicValueEnum<'ctx>) -> Self {
         match t {
-            GonValueType::Float => Self::Float(v.into_float_value()),
-            GonValueType::Int   => Self::Int(v.into_int_value()),
-            GonValueType::Bool  => Self::Bool(v.into_int_value()),
-            GonValueType::Unit  => todo!("construct a value out of Unit"),
+            TypeLayout::Float => Self::Float(v.into_float_value()),
+            TypeLayout::Int   => Self::Int(v.into_int_value()),
+            TypeLayout::Bool  => Self::Bool(v.into_int_value()),
+            TypeLayout::Unit  => todo!("construct a value out of Unit"),
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GonValueType {
+pub enum TypeLayout {
     Float, Int, Bool, Unit
 }
 
-impl GonValueType {
-    pub fn lookup(ty: &tree::Type) -> Option<Self> {
-        match ty.0.as_str() {
-            "float" => Some(GonValueType::Float),
-            "int"   => Some(GonValueType::Int),
-            "bool"  => Some(GonValueType::Bool),
-            "unit"  => Some(GonValueType::Unit),
-            _       => None
+impl TypeLayout {
+    pub fn lookup(ty: &plir::Type) -> Option<Self> {
+        match ty {
+            plir::Type::Prim(prim) => match prim.as_str() {
+                plir::Type::S_FLOAT => Some(TypeLayout::Float),
+                plir::Type::S_INT   => Some(TypeLayout::Int),
+                plir::Type::S_BOOL  => Some(TypeLayout::Bool),
+                plir::Type::S_VOID  => Some(TypeLayout::Unit),
+                _       => todo!()
+            },
+            plir::Type::Generic(_, _) => todo!(),
+            plir::Type::Tuple(_) => todo!(),
         }
     }
 
     pub fn basic_enum<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
         match self {
-            GonValueType::Float => c.ctx.f64_type().into(),
-            GonValueType::Int   => c.ctx.i64_type().into(),
-            GonValueType::Bool  => c.ctx.bool_type().into(),
-            GonValueType::Unit  => todo!("get basic enum value out of Unit"),
+            TypeLayout::Float => c.ctx.f64_type().into(),
+            TypeLayout::Int   => c.ctx.i64_type().into(),
+            TypeLayout::Bool  => c.ctx.bool_type().into(),
+            TypeLayout::Unit  => todo!("get basic enum value out of Unit"),
+        }
+    }
+
+    pub fn fn_type<'ctx>(&self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+        match self {
+            TypeLayout::Float => c.ctx.f64_type().fn_type(params, is_var_args),
+            TypeLayout::Int   => c.ctx.i64_type().fn_type(params, is_var_args),
+            TypeLayout::Bool  => c.ctx.bool_type().fn_type(params, is_var_args),
+            TypeLayout::Unit  => c.ctx.void_type().fn_type(params, is_var_args),
         }
     }
 }

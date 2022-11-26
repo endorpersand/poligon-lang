@@ -1,8 +1,9 @@
 pub mod display;
-pub mod types;
+mod types;
 
 use crate::tree::{op, self};
 pub use types::*;
+pub(crate) use types::ty;
 
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Vec<Stmt>);

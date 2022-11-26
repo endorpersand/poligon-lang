@@ -17,53 +17,34 @@ enum TypeRezError {
     MultipleBranches
 }
 impl Type {
-    pub fn int() -> Self {
-        Type::Prim(String::from("int"))
-    }
-    pub fn float() -> Self {
-        Type::Prim(String::from("float"))
-    }
-    pub fn bool() -> Self {
-        Type::Prim(String::from("bool"))
-    }
-    pub fn char() -> Self {
-        Type::Prim(String::from("char"))
-    }
-    pub fn str() -> Self {
-        Type::Prim(String::from("string"))
-    }
-    pub fn void() -> Self {
-        Type::Prim(String::from("void"))
-    }
-    pub fn unk() -> Self {
-        Type::Prim(String::from("unk"))
-    }
-    pub fn never() -> Self {
-        Type::Prim(String::from("never"))
-    }
-
-    pub fn list(t: Type) -> Self {
-        Type::Generic(String::from("list"), vec![t])
-    }
-    pub fn generic(ident: &str, params: Vec<Type>) -> Self {
-        Type::Generic(String::from(ident), params)
-    }
+    pub(crate) const S_INT: &'static str   = "int";
+    pub(crate) const S_FLOAT: &'static str = "float";
+    pub(crate) const S_BOOL: &'static str  = "bool";
+    pub(crate) const S_CHAR: &'static str  = "char";
+    pub(crate) const S_STR: &'static str   = "string";
+    pub(crate) const S_VOID: &'static str  = "void";
+    pub(crate) const S_LIST: &'static str  = "list";
+    pub(crate) const S_SET: &'static str   = "set";
+    pub(crate) const S_DICT: &'static str  = "dict";
+    pub(crate) const S_RANGE: &'static str = "range";
+    pub(crate) const S_NEVER: &'static str = "never";
+    pub(crate) const S_UNK: &'static str   = "unk";
 
     pub fn is_never(&self) -> bool {
         match self {
-            Type::Prim(ty) => ty == "never",
+            Type::Prim(ty) => ty == Type::S_NEVER,
             _ => false,
         }
     }
     pub fn is_numeric(&self) -> bool {
         match self {
-            Type::Prim(ty) => ty == "int" || ty == "float",
+            Type::Prim(ty) => ty == Type::S_INT || ty == Type::S_FLOAT,
             _ => false
         }
     }
     #[inline]
     fn is_int(&self) -> bool {
-        matches!(self, Type::Prim(ty) if ty == "int")
+        matches!(self, Type::Prim(ty) if ty == Type::S_INT)
     }
 
     fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
@@ -82,7 +63,7 @@ impl Type {
     pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
         match Type::resolve_type(into_it) {
             Ok(ty) => Some(ty),
-            Err(TypeRezError::NoBranches) => Some(Type::never()),
+            Err(TypeRezError::NoBranches) => Some(ty!(Type::S_NEVER)),
             Err(TypeRezError::MultipleBranches) => None,
         }
     }
@@ -95,7 +76,7 @@ impl Type {
         match self {
             Type::Prim(_) => Err(PLIRErr::CannotSplitType),
             Type::Generic(ident, params) => {
-                if ident == "list" {
+                if ident == Type::S_LIST {
                     if let Some(param) = params.first() {
                         match sp {
                             Split::Left(_)
@@ -129,11 +110,8 @@ impl Type {
         match op {
             op::Unary::Plus   => ty.is_numeric().then(|| ty.clone()),
             op::Unary::Minus  => ty.is_numeric().then(|| ty.clone()),
-            op::Unary::LogNot => Some(Type::bool()),
-            op::Unary::BitNot => match ty {
-                Type::Prim(tyname) if tyname == "int" => Some(ty.clone()),
-                _ => None
-            },
+            op::Unary::LogNot => Some(ty!(Type::S_BOOL)),
+            op::Unary::BitNot => ty.is_int().then(|| ty.clone()),
         }
     }
     pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Option<Type> {
@@ -149,12 +127,12 @@ impl Type {
 
         match expr {
             Type::Prim(expr_ty) => match expr_ty.as_ref() {
-                "string" => idx_ty.is_int().then(|| Type::char()),
+                Type::S_STR => idx_ty.is_int().then(|| ty!(Type::S_CHAR)),
                 _ => None
             },
             Type::Generic(expr_ty, param_tys) => match expr_ty.as_ref() {
-                "list" => idx_ty.is_int().then(|| param_tys[0].clone()),
-                "dict" => (idx_ty == &param_tys[0]).then(|| param_tys[1].clone()),
+                Type::S_LIST => idx_ty.is_int().then(|| param_tys[0].clone()),
+                Type::S_DICT => (idx_ty == &param_tys[0]).then(|| param_tys[1].clone()),
                 _ => None
             },
             Type::Tuple(tys) => match &idx.expr {
@@ -170,6 +148,21 @@ impl Type {
         }
     }
 }
+
+macro_rules! ty {
+    ($e:expr) => {
+        $crate::compiler::resolve::plir::Type::Prim(String::from($e))
+    };
+
+    ($e:expr, [$($p:expr),+]) => {
+        $crate::compiler::resolve::plir::Type::Generic(String::from($e), vec![$($p),+])
+    };
+
+    ([$($p:expr),+]) => {
+        $crate::compiler::resolve::plir::Type::Tuple(vec![$($p),+])
+    };
+}
+pub(crate) use ty;
 
 impl From<tree::Type> for Type {
     fn from(ty: tree::Type) -> Self {

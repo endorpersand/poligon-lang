@@ -1,7 +1,8 @@
 use inkwell::values::{IntValue, FloatValue};
 
+use crate::compiler::resolve::plir;
 use crate::compiler::{Compiler, IRResult, IRErr, TraverseIR};
-use crate::tree::{op, self};
+use crate::tree::op;
 
 use self::internal::*;
 
@@ -201,7 +202,7 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
         }
     }
 }
-impl<'ctx> Binary<'ctx> for &tree::Expr {
+impl<'ctx> Binary<'ctx> for &plir::Expr {
     type Output = IRResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: &op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
