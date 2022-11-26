@@ -435,7 +435,11 @@ impl CodeGenerator {
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
-            tree::Expr::Assign(_, _) => todo!(),
+            tree::Expr::Assign(pat, expr) => {
+                let expr = self.consume_expr(*expr)?;
+
+                todo!()
+            },
             tree::Expr::Path(_) => todo!(),
             tree::Expr::UnaryOps { ops, expr } => {
                 let expr = self.consume_expr_and_box(*expr)?;
