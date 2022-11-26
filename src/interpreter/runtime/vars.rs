@@ -21,10 +21,10 @@ pub struct ScopeContext<'a, T> {
 pub type VarContext<'a> = ScopeContext<'a, Value>;
 
 /// Iterates through a VarContext and its parents to provide all accessible HashMaps
-struct VCtxIter<'a, T> {
+struct Iter<'a, T> {
     next: Option<&'a ScopeContext<'a, T>>
 }
-impl<'a, T> Iterator for VCtxIter<'a, T> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a ScopeContext<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -40,10 +40,10 @@ impl<'a, T> Iterator for VCtxIter<'a, T> {
 }
 
 /// Mutable version of `VCtxIter`
-struct VCtxIterMut<'a, T> {
+struct IterMut<'a, T> {
     next: Option<NonNull<ScopeContext<'a, T>>>
 }
-impl<'a, T: 'a> Iterator for VCtxIterMut<'a, T> {
+impl<'a, T: 'a> Iterator for IterMut<'a, T> {
     type Item = &'a mut ScopeContext<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -80,11 +80,11 @@ impl<T> ScopeContext<'_, T> {
         }
     }
 
-    fn ancestors(&self) -> VCtxIter<T> {
-        VCtxIter { next: Some(self) }
+    fn ancestors(&self) -> Iter<T> {
+        Iter { next: Some(self) }
     }
-    fn ancestors_mut(&mut self) -> VCtxIterMut<T> {
-        VCtxIterMut { next: NonNull::new(self) }
+    fn ancestors_mut(&mut self) -> IterMut<T> {
+        IterMut { next: NonNull::new(self) }
     }
 
     /// Iterator providing an immutable reference to all HashMaps of variables

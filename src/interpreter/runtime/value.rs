@@ -116,10 +116,10 @@ impl<'a> DoubleEndedIterator for ListValueIter<'a> {
         match *borrow {
             [] => None,
             [.., _] => {
-                let (head, tail) = Ref::map_split(borrow, |slice| {
-                    let last = slice.len() - 1;
-                    (&slice[0..last], &slice[last])
-                });
+                let (tail, head) = Ref::map_split(
+                    borrow, 
+                    |slice| slice.split_last().unwrap()
+                );
                 self.r.replace(head);
                 Some(tail.clone())
             }
