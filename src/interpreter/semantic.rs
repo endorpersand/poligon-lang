@@ -274,8 +274,8 @@ impl TraverseResolve for tree::Expr {
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
             tree::Expr::Path(p) => p.obj.traverse_rs(map),
-            tree::Expr::UnaryOps { ops, expr } => expr.traverse_rs(map),
-            tree::Expr::BinaryOp { op, left, right } => {
+            tree::Expr::UnaryOps { ops: _, expr } => expr.traverse_rs(map),
+            tree::Expr::BinaryOp { op: _, left, right } => {
                 left.traverse_rs(map)?;
                 right.traverse_rs(map)
             },

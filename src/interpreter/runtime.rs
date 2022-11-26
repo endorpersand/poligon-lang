@@ -28,7 +28,7 @@ impl BlockContext<'_> {
     /// Create a new context.
     pub fn new() -> Self {
         Self {
-            vars: VarContext::new(),
+            vars: VarContext::new_with_std(),
             rs: Rc::new(ResolveState::new())
         }
     }
@@ -573,7 +573,7 @@ impl TraverseRt for tree::FunDecl {
             ctx.vars.idx()
         );
         
-        let rf = ctx.vars.declare(ident.clone(), val)?;
+        let rf = ctx.vars.declare(ident.clone(), val)?.clone();
         Ok(rf)
     }
 }
@@ -697,7 +697,7 @@ fn declare_pat(pat: &tree::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: tree
             rhs,
             rt,
             *mt
-        ),
+        ).cloned(),
         tree::DeclUnit::Expr(_) => todo!(),
     })
 }

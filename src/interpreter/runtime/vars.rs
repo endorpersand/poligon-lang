@@ -11,19 +11,21 @@ use super::value::Value;
 /// 
 /// This also provides read/write access to variables in parent scopes.
 #[derive(Debug)]
-pub struct VarContext<'a> {
-    scope: HashMap<String, Value>,
-    parent: Option<NonNull<VarContext<'a>>>,
+pub struct ScopeContext<'a, T> {
+    scope: HashMap<String, T>,
+    parent: Option<NonNull<ScopeContext<'a, T>>>,
     _ghost: PhantomData<&'a ()>,
     _idx: usize
 }
 
+pub type VarContext<'a> = ScopeContext<'a, Value>;
+
 /// Iterates through a VarContext and its parents to provide all accessible HashMaps
-struct VCtxIter<'a> {
-    next: Option<&'a VarContext<'a>>
+struct VCtxIter<'a, T> {
+    next: Option<&'a ScopeContext<'a, T>>
 }
-impl<'a> Iterator for VCtxIter<'a> {
-    type Item = &'a VarContext<'a>;
+impl<'a, T> Iterator for VCtxIter<'a, T> {
+    type Item = &'a ScopeContext<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.map(|current| {
@@ -38,11 +40,11 @@ impl<'a> Iterator for VCtxIter<'a> {
 }
 
 /// Mutable version of `VCtxIter`
-struct VCtxIterMut<'a> {
-    next: Option<NonNull<VarContext<'a>>>
+struct VCtxIterMut<'a, T> {
+    next: Option<NonNull<ScopeContext<'a, T>>>
 }
-impl<'a> Iterator for VCtxIterMut<'a> {
-    type Item = &'a mut VarContext<'a>;
+impl<'a, T: 'a> Iterator for VCtxIterMut<'a, T> {
+    type Item = &'a mut ScopeContext<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.take().map(|mut c_ptr| {
@@ -56,11 +58,11 @@ impl<'a> Iterator for VCtxIterMut<'a> {
     }
 }
 
-impl VarContext<'_> {
-    /// Create a new VarContext.
-    pub fn new() -> Self {
+impl<T> ScopeContext<'_, T> {
+    /// Create a new ScopeContext.
+    pub fn empty() -> Self {
         Self { 
-            scope: gstd::std_map(), 
+            scope: HashMap::new(), 
             parent: None, 
             _ghost: PhantomData,
             _idx: 0
@@ -69,8 +71,8 @@ impl VarContext<'_> {
 
     /// Create a child scope. 
     /// While this child scope is in use, this scope cannot be used.
-    pub fn child(&mut self) -> VarContext {
-        VarContext { 
+    pub fn child(&mut self) -> ScopeContext<T> {
+        ScopeContext { 
             scope: HashMap::new(), 
             parent: NonNull::new(self),
             _ghost: PhantomData,
@@ -78,49 +80,49 @@ impl VarContext<'_> {
         }
     }
 
-    fn ancestors(&self) -> VCtxIter {
+    fn ancestors(&self) -> VCtxIter<T> {
         VCtxIter { next: Some(self) }
     }
-    fn ancestors_mut(&mut self) -> VCtxIterMut {
+    fn ancestors_mut(&mut self) -> VCtxIterMut<T> {
         VCtxIterMut { next: NonNull::new(self) }
     }
 
     /// Iterator providing an immutable reference to all HashMaps of variables
-    fn hash_maps(&self) -> impl Iterator<Item = &HashMap<String, Value>> {
+    fn hash_maps(&self) -> impl Iterator<Item = &HashMap<String, T>> {
         self.ancestors().map(|m| &m.scope)
     }
     /// Iterator providing a mutable reference to all HashMaps of variables
-    fn hash_maps_mut(&mut self) -> impl Iterator<Item = &mut HashMap<String, Value>> {
+    fn hash_maps_mut(&mut self) -> impl Iterator<Item = &mut HashMap<String, T>> {
         self.ancestors_mut().map(|m| &mut m.scope)
     }
     /// Query a variable (or return `None` if it does not exist)
     #[allow(unused)]
-    pub fn get(&self, ident: &str) -> Option<&Value> {
+    pub fn get(&self, ident: &str) -> Option<&T> {
         self.hash_maps()
             .find_map(|m| m.get(ident))
     }
 
     /// Declares a variable in the current scope
-    pub fn declare(&mut self, ident: String, v: Value) -> super::RtResult<Value> {
+    pub fn declare(&mut self, ident: String, v: T) -> super::RtResult<&T> {
         self.declare_full(ident, v, ReasgType::Let, MutType::Mut)
     }
 
     /// Declares a variable in the current scope (with a reassignment type and mutability type)
     pub fn declare_full(
-        &mut self, ident: String, v: Value, _rt: ReasgType, _mt: MutType
-    ) -> super::RtResult<Value> {
+        &mut self, ident: String, v: T, _rt: ReasgType, _mt: MutType
+    ) -> super::RtResult<&T> {
         let entry = self.scope.entry(ident.clone());
 
         // only allow declare if variable in the top level is not declared
         match entry {
             Entry::Occupied(_) => Err(super::RuntimeErr::AlreadyDeclared(ident)),
-            Entry::Vacant(_) => Ok(entry.or_insert(v).clone()),
+            Entry::Vacant(_) => Ok(entry.or_insert(v)),
         }
     }
 
     /// Set a variable (or error if it is not declared)
     #[allow(unused)]
-    pub fn set(&mut self, ident: &str, v: Value) -> super::RtResult<&Value> {
+    pub fn set(&mut self, ident: &str, v: T) -> super::RtResult<&T> {
         let maybe_m = self.hash_maps_mut()
             .find(|m| m.contains_key(ident));
 
@@ -133,7 +135,7 @@ impl VarContext<'_> {
         }
     }
 
-    pub fn get_indexed(&self, ident: &str, midx: Option<usize>) -> Option<&Value> {
+    pub fn get_indexed(&self, ident: &str, midx: Option<usize>) -> Option<&T> {
         let maybe_m = {
             let mut hms = self.hash_maps();
 
@@ -146,7 +148,9 @@ impl VarContext<'_> {
         maybe_m.and_then(|m| m.get(ident))
     }
 
-    pub fn set_indexed(&mut self, ident: &str, v: Value, midx: Option<usize>) -> super::RtResult<Value> {
+    pub fn set_indexed(&mut self, ident: &str, v: T, midx: Option<usize>) -> super::RtResult<T> 
+        where T: Clone
+    {
         let maybe_m = {
             let mut hms = self.hash_maps_mut();
 
@@ -178,12 +182,24 @@ impl VarContext<'_> {
         self._idx
     }
 
-    pub fn goto_idx(&mut self, idx: usize) -> Option<&mut VarContext> {
+    pub fn goto_idx(&mut self, idx: usize) -> Option<&mut ScopeContext<T>> {
         self.ancestors_mut()
             .find(|ctx| ctx._idx == idx)
     }
 }
 
+impl VarContext<'_> {
+    /// Create a new VarContext that includes the standard library.
+    pub fn new_with_std() -> Self {
+        Self { 
+            scope: gstd::std_map(), 
+            parent: None, 
+            _ghost: PhantomData,
+            _idx: 0
+        }
+    }
+
+}
 #[cfg(test)]
 mod tests {
     use crate::interpreter::runtime::RtResult;
@@ -193,7 +209,7 @@ mod tests {
 
     #[test]
     fn scope_test() -> RtResult<()> {
-        let mut a = VarContext::new();
+        let mut a = VarContext::new_with_std();
         a.declare(String::from("a"), Value::Int(1))?;
         
         let mut b = a.child();
