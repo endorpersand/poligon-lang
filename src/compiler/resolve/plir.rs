@@ -206,6 +206,18 @@ pub struct Index {
     pub index: Box<Expr>
 }
 
+impl Stmt {
+    pub fn ends_with_block(&self) -> bool {
+        matches!(self, 
+            | Stmt::FunDecl(_)
+            | Stmt::Expr(Expr { expr: ExprType::Block(_), .. })
+            | Stmt::Expr(Expr { expr: ExprType::If { .. }, .. })
+            | Stmt::Expr(Expr { expr: ExprType::While { .. }, .. })
+            | Stmt::Expr(Expr { expr: ExprType::For { .. }, .. })
+        )
+    }
+}
+
 // TODO: can this be combined with Index?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Split {

@@ -137,6 +137,18 @@ pub struct Index {
     pub index: Box<Expr>
 }
 
+impl Stmt {
+    pub fn ends_with_block(&self) -> bool {
+        matches!(self, 
+            | Stmt::FunDecl(_)
+            | Stmt::Expr(Expr::Block(_))
+            | Stmt::Expr(Expr::If { .. })
+            | Stmt::Expr(Expr::While { .. })
+            | Stmt::Expr(Expr::For { .. })
+        )
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum AsgUnit {
     Ident(String),

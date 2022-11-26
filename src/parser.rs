@@ -290,22 +290,12 @@ impl Parser {
 
             // if statement exists, check if statement needs a semicolon and add to program list
             if let Some(st) = mst {
-                match &st {
+                if st.ends_with_block() {
                     // it does not need a semi if it is a block, if, while, for
-                    tree::Stmt::Expr(e) if matches!(e,
-                        | tree::Expr::Block(_)
-                        | tree::Expr::If { .. }
-                        | tree::Expr::While { .. }
-                        | tree::Expr::For { .. }
-                    ) => { self.match1(token![;]); },
-
-                    // also for function declarations
-                    tree::Stmt::FunDecl(_) => { self.match1(token![;]); },
-
-                    // otherwise, it does
-                    _ => self.expect1(token![;])?
+                    self.match1(token![;]);
+                } else {
+                    self.expect1(token![;])?;
                 }
-
                 stmts.push(st);
             } else if !self.match1(token![;]) {
                 break; 

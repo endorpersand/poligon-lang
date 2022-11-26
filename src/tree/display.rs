@@ -5,13 +5,9 @@ use super::*;
 fn fmt_stmt_list(f: &mut std::fmt::Formatter<'_>, stmts: &[Stmt]) -> std::fmt::Result {
     for stmt in stmts {
         write!(f, "{stmt}")?;
-        match stmt {
-            | Stmt::FunDecl(_)
-            | Stmt::Expr(Expr::Block(_))
-            | Stmt::Expr(Expr::If { .. })
-            | Stmt::Expr(Expr::While { .. })
-            | Stmt::Expr(Expr::For { .. }) => {}
-            _ => write!(f, ";")?
+
+        if !stmt.ends_with_block() {
+            write!(f, ";")?;
         }
     
         writeln!(f)?;
@@ -239,7 +235,7 @@ impl Display for Expr {
                     
                     write!(f, "if {penult_cond} {penult_block}")?;
                     match last {
-                        Some(b) => write!(f, "else {b}"),
+                        Some(b) => write!(f, " else {b}"),
                         None => Ok(()),
                     }
                 } else {

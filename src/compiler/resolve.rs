@@ -21,6 +21,7 @@ fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
     }
 }
 
+#[derive(Debug)]
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotBreak,
@@ -34,7 +35,6 @@ pub enum PLIRErr {
     InvalidSplit(plir::Type, plir::Split)
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
-type PartialDecl = (ReasgType, plir::Type);
 
 enum BlockExit {
     Return(plir::Type),
@@ -484,5 +484,25 @@ impl CodeGenerator {
             tree::Expr::Index(_) => todo!(),
             tree::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{lexer, parser};
+
+    use super::*;
+
+    #[test]
+    fn get_display() {
+        let lexed = lexer::tokenize("if true {
+            2;
+        } else {
+            3;
+        }").unwrap();
+
+        let parsed = parser::parse(lexed).unwrap();
+
+        println!("{}", codegen(parsed).unwrap())
     }
 }

@@ -7,16 +7,10 @@ use super::*;
 fn fmt_stmt_list(f: &mut std::fmt::Formatter<'_>, stmts: &[Stmt]) -> std::fmt::Result {
     for stmt in stmts {
         write!(f, "{stmt}")?;
-        match stmt {
-            | Stmt::FunDecl(_)
-            | Stmt::Expr(Expr {expr: ExprType::Block(_), ..})
-            | Stmt::Expr(Expr {expr: ExprType::If { .. }, ..})
-            | Stmt::Expr(Expr {expr: ExprType::While { .. }, ..})
-            | Stmt::Expr(Expr {expr: ExprType::For { .. }, ..})
-            => {}
-            _ => write!(f, ";")?
+
+        if !stmt.ends_with_block() {
+            write!(f, ";")?;
         }
-    
         writeln!(f)?;
     }
     
@@ -207,7 +201,7 @@ impl Display for ExprType {
                     
                     write!(f, "if {penult_cond} {penult_block}")?;
                     match last {
-                        Some(b) => write!(f, "else {b}"),
+                        Some(b) => write!(f, " else {b}"),
                         None => Ok(()),
                     }
                 } else {
