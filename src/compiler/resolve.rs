@@ -1,4 +1,4 @@
-use crate::tree::{self, ReasgType, MutType};
+use crate::tree::{self, ReasgType, MutType, op};
 
 pub mod plir;
 
@@ -19,7 +19,10 @@ pub enum PLIRErr {
     CannotSpread,
     CannotSpreadMultiple,
     CannotSplitType,
-    InvalidSplit(plir::Type, plir::Split)
+    InvalidSplit(plir::Type, plir::Split),
+    CannotUnary(op::Unary, plir::Type),
+    CannotBinary(op::Binary, plir::Type, plir::Type),
+    CannotCmp(op::Cmp, plir::Type, plir::Type),
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 
@@ -258,7 +261,8 @@ impl CodeGenerator {
             }
         }
         
-        let bty = plir::Type::resolve_branches(&branch_types);
+        let bty = plir::Type::resolve_branches(&branch_types)
+            .ok_or(PLIRErr::CannotResolveType)?;
         Ok(plir::Block(bty, block))
     }
 
@@ -389,45 +393,109 @@ impl CodeGenerator {
                 Ok(expr)
             },
             tree::Expr::ListLiteral(lst) => {
-                let newlst: Vec<_> = lst.into_iter()
+                let new_inner: Vec<_> = lst.into_iter()
                     .map(|e| self.consume_expr(e))
                     .collect::<Result<_, _>>()?;
 
-                // type resolution
-                match newlst.split_first() {
-                    Some((head, tail)) => {
-                        if tail.iter().all(|e| e.ty == head.ty) {
-                            let e = plir::Expr::new(
-                                plir::Type::list(head.ty.clone()),
-                                plir::ExprType::ListLiteral(newlst)
-                            );
-                            Ok(e)
-                        } else {
-                            // TODO: union?
-                            Err(PLIRErr::CannotResolveType)
-                        }
-                    },
-                    // TODO: resolve type of []
-                    None => Err(PLIRErr::CannotResolveType),
-                }
+                let elem_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
+                    .ok_or(PLIRErr::CannotResolveType)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::list(elem_ty),
+                    plir::ExprType::ListLiteral(new_inner)
+                ))
             },
-            tree::Expr::SetLiteral(_) => todo!(),
-            tree::Expr::DictLiteral(_) => todo!(),
+            tree::Expr::SetLiteral(set) => {
+                let new_inner: Vec<_> = set.into_iter()
+                    .map(|e| self.consume_expr(e))
+                    .collect::<Result<_, _>>()?;
+
+                let elem_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
+                    .ok_or(PLIRErr::CannotResolveType)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::generic("set", vec![elem_ty]),
+                    plir::ExprType::SetLiteral(new_inner)
+                ))
+            },
+            tree::Expr::DictLiteral(entries) => {
+                let new_inner: Vec<_> = entries.into_iter()
+                    .map(|(k, v)| Ok((self.consume_expr(k)?, self.consume_expr(v)?)))
+                    .collect::<Result<_, _>>()?;
+
+                let (key_tys, val_tys): (Vec<_>, Vec<_>) = new_inner.iter()
+                    .map(|(k, v)| (&k.ty, &v.ty))
+                    .unzip();
+                let key_ty = plir::Type::resolve_collection_ty(key_tys)
+                    .ok_or(PLIRErr::CannotResolveType)?;
+                let val_ty = plir::Type::resolve_collection_ty(val_tys)
+                    .ok_or(PLIRErr::CannotResolveType)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::generic("dict", vec![key_ty, val_ty]),
+                    plir::ExprType::DictLiteral(new_inner)
+                ))
+            },
             tree::Expr::Assign(_, _) => todo!(),
             tree::Expr::Path(_) => todo!(),
-            tree::Expr::UnaryOps { ops, expr } => todo!(),
-            tree::Expr::BinaryOp { op, left, right } => todo!(),
-            tree::Expr::Comparison { left, rights } => {
-                let lval = self.consume_expr(*left)?;
-                let lvar = self.push_tmp_decl("cmp_val", lval);
-                for (cmp, right) in rights {
-                    let rval = self.consume_expr(right)?;
-                    let rvar = self.push_tmp_decl("cmp_val", rval);
+            tree::Expr::UnaryOps { ops, expr } => {
+                let expr = self.consume_expr_and_box(*expr)?;
+                
+                let mut top_ty = expr.ty.clone();
+                let mut op_stack = vec![];
+
+                for op in ops.into_iter().rev() {
+                    top_ty = plir::Type::resolve_unary_type(&op, &top_ty)
+                        .ok_or_else(|| PLIRErr::CannotUnary(op, top_ty.clone()))?;
+                    op_stack.push((op, top_ty.clone()));
                 }
 
-                todo!()
+                let ops = op_stack.into_iter().rev().collect();
+                
+                Ok(plir::Expr::new(
+                    top_ty,
+                    plir::ExprType::UnaryOps { ops, expr }
+                ))
             },
-            tree::Expr::Range { left, right, step } => todo!(),
+            tree::Expr::BinaryOp { op, left, right } => {
+                let left = self.consume_expr_and_box(*left)?;
+                let right = self.consume_expr_and_box(*right)?;
+
+                let ty = plir::Type::resolve_binary_type(&op, &left.ty, &right.ty)
+                    .ok_or_else(|| PLIRErr::CannotBinary(op, left.ty.clone(), right.ty.clone()))?;
+                
+                    Ok(plir::Expr::new(
+                    ty,
+                    plir::ExprType::BinaryOp { op, left, right }
+                ))
+            },
+            tree::Expr::Comparison { left, rights } => {
+                let left = self.consume_expr_and_box(*left)?;
+                let rights = rights.into_iter()
+                    .map(|(op, right)| Ok((op, self.consume_expr(right)?)))
+                    .collect::<Result<_, _>>()?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::bool(),
+                    plir::ExprType::Comparison { left, rights }
+                ))
+            },
+            tree::Expr::Range { left, right, step } => {
+                let left = self.consume_expr_and_box(*left)?;
+                let right = self.consume_expr_and_box(*right)?;
+                let step = match step {
+                    Some(st) => Some(self.consume_expr_and_box(*st)?),
+                    None => None,
+                };
+
+                let ty = plir::Type::resolve_collection_ty([&left.ty, &right.ty])
+                    .ok_or(PLIRErr::CannotResolveType)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::generic("range", vec![ty]),
+                    plir::ExprType::Range { left, right, step }
+                ))
+            },
             tree::Expr::If { conditionals, last } => {
                 let conditionals: Vec<_> = conditionals.into_iter()
                     .map(|(cond, block)| {
@@ -447,7 +515,7 @@ impl CodeGenerator {
                     .chain(last.iter().map(|b| &b.0));
 
                 Ok(plir::Expr::new(
-                    plir::Type::resolve_branches(type_iter),
+                    plir::Type::resolve_branches(type_iter).ok_or(PLIRErr::CannotResolveType)?,
                     plir::ExprType::If { conditionals, last }
                 ))
             },
@@ -456,15 +524,37 @@ impl CodeGenerator {
                 let block = self.consume_block(block, BlockBehavior::Loop)?;
 
                 Ok(plir::Expr::new(
-                    plir::Type::list(block.0.clone()), 
+                    plir::Type::list(block.0.clone()),
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
-            tree::Expr::For { ident, iterator, block } => todo!(),
-            tree::Expr::Call { funct, params } => todo!(),
+            tree::Expr::For { ident, iterator, block } => {
+                let iterator = self.consume_expr_and_box(*iterator)?;
+                let block = self.consume_block(block, BlockBehavior::Loop)?;
+
+                Ok(plir::Expr::new(
+                    plir::Type::list(block.0.clone()),
+                    plir::ExprType::For { ident, iterator, block }
+                ))
+            },
+            tree::Expr::Call { funct, params } => {
+                let funct = self.consume_expr_and_box(*funct)?;
+                let params = params.into_iter()
+                    .map(|expr| self.consume_expr(expr))
+                    .collect::<Result<_, _>>()?;
+                
+                Ok(plir::Expr::new(
+                    todo!(),
+                    plir::ExprType::Call { funct, params }
+                ))
+            },
             tree::Expr::Index(_) => todo!(),
             tree::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
         }
+    }
+
+    fn consume_expr_and_box(&mut self, expr: tree::Expr) -> PLIRResult<Box<plir::Expr>> {
+        Ok(Box::new(self.consume_expr(expr)?))
     }
 }
 

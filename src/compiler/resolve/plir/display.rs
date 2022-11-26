@@ -183,8 +183,14 @@ impl Display for ExprType {
             ExprType::BinaryOp { op, left, right } => {
                 write!(f, "{left} {op} {right}")
             },
-            ExprType::Comparison { op, left, right } => {
-                write!(f, "{left} {op} {right}")
+            ExprType::Comparison { left, rights } => {
+                write!(f, "{left}")?;
+
+                for (cmp, right) in rights {
+                    write!(f, " {cmp} {right}")?;
+                }
+
+                Ok(())
             },
             ExprType::Range { left, right, step } => {
                 write!(f, "{left}..{right}")?;

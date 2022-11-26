@@ -42,6 +42,10 @@ pub enum Type {
     Generic(String, Vec<Type>),
     Tuple(Vec<Type>)
 }
+enum TypeRezError {
+    NoBranches,
+    MultipleBranches
+}
 impl Type {
     pub fn int() -> Self {
         Type::Prim(String::from("int"))
@@ -71,24 +75,45 @@ impl Type {
     pub fn list(t: Type) -> Self {
         Type::Generic(String::from("list"), vec![t])
     }
+    pub fn generic(ident: &str, params: Vec<Type>) -> Self {
+        Type::Generic(String::from(ident), params)
+    }
+
     pub fn is_never(&self) -> bool {
         match self {
-            Type::Prim(ty) if ty == "never" => true,
+            Type::Prim(ty) => ty == "never",
             _ => false,
         }
     }
-    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Type {
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            Type::Prim(ty) => ty == "int" || ty == "float",
+            _ => false
+        }
+    }
+
+    fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
         let mut it = into_it.into_iter()
             .filter(|ty| !ty.is_never());
     
         match it.next() {
             Some(head) => if it.all(|u| head == u) {
-                head.clone()
+                Ok(head.clone())
             } else {
-                Type::never()
+                Err(TypeRezError::MultipleBranches)
             },
-            None => Type::never(),
+            None => Err(TypeRezError::NoBranches),
         }
+    }
+    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
+        match Type::resolve_type(into_it) {
+            Ok(ty) => Some(ty),
+            Err(TypeRezError::NoBranches) => Some(Type::never()),
+            Err(TypeRezError::MultipleBranches) => None,
+        }
+    }
+    pub fn resolve_collection_ty<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
+        Type::resolve_type(into_it).ok()
     }
 
     // technically index but whatever
@@ -125,6 +150,26 @@ impl Type {
             },
         }
     }
+
+    pub fn resolve_unary_type(op: &op::Unary, ty: &Type) -> Option<Type> {
+        match op {
+            op::Unary::Plus   => ty.is_numeric().then(|| ty.clone()),
+            op::Unary::Minus  => ty.is_numeric().then(|| ty.clone()),
+            op::Unary::LogNot => Some(Type::bool()),
+            op::Unary::BitNot => match ty {
+                Type::Prim(tyname) if tyname == "int" => Some(ty.clone()),
+                _ => None
+            },
+        }
+    }
+    pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Option<Type> {
+        todo!()
+    }
+    // pub fn resolve_cmp_type(_: &op::Cmp, left: Type, right: Type) -> Option<Type> {
+    //     let comparable = (left.is_numeric() && right.is_numeric()) || (left == right);
+
+    //     comparable.then(|| Type::bool())
+    // }
 }
 
 impl From<tree::Type> for Type {
@@ -183,9 +228,8 @@ pub enum ExprType {
         right: Box<Expr>
     },
     Comparison {
-        op: op::Cmp,
         left: Box<Expr>,
-        right: Box<Expr>
+        rights: Vec<(op::Cmp, Expr)>
     },
     Range {
         left: Box<Expr>,
