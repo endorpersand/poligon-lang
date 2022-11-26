@@ -64,26 +64,33 @@ impl Type {
     pub fn unk() -> Self {
         Type::Prim(String::from("unk"))
     }
+    pub fn never() -> Self {
+        Type::Prim(String::from("never"))
+    }
 
     pub fn list(t: Type) -> Self {
         Type::Generic(String::from("list"), vec![t])
     }
-}
-impl From<tree::Type> for Type {
-    fn from(ty: tree::Type) -> Self {
-        let tree::Type(ident, params) = ty;
-        
-        if params.is_empty() {
-            Type::Prim(ident)
-        } else {
-            let p = params.into_iter()
-                .map(Type::from)
-                .collect();
-            Type::Generic(ident, p)
+    pub fn is_never(&self) -> bool {
+        match self {
+            Type::Prim(ty) if ty == "never" => true,
+            _ => false,
         }
     }
-}
-impl Type {
+    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Type {
+        let mut it = into_it.into_iter()
+            .filter(|ty| !ty.is_never());
+    
+        match it.next() {
+            Some(head) => if it.all(|u| head == u) {
+                head.clone()
+            } else {
+                Type::never()
+            },
+            None => Type::never(),
+        }
+    }
+
     // technically index but whatever
     pub fn split(&self, sp: Split) -> PLIRResult<Type> {
         match self {
@@ -119,6 +126,22 @@ impl Type {
         }
     }
 }
+
+impl From<tree::Type> for Type {
+    fn from(ty: tree::Type) -> Self {
+        let tree::Type(ident, params) = ty;
+        
+        if params.is_empty() {
+            Type::Prim(ident)
+        } else {
+            let p = params.into_iter()
+                .map(Type::from)
+                .collect();
+            Type::Generic(ident, p)
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
     pub ident: String,

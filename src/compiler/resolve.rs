@@ -8,19 +8,6 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
     Ok(cg.unwrap())
 }
 
-// Generic over &Type and Type
-fn resolve_type<T: PartialEq>(into_it: impl IntoIterator<Item=T>) -> Option<T> {
-    let mut it = into_it.into_iter();
-
-    let ty = it.next()?;
-    // TODO: union?
-    if it.all(|u| ty == u) {
-        Some(ty)
-    } else {
-        None
-    }
-}
-
 #[derive(Debug)]
 pub enum PLIRErr {
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
@@ -134,7 +121,7 @@ struct Var {
     ty: plir::Type
 }
 impl Var {
-    fn to_expr(self) -> plir::Expr {
+    fn into_expr(self) -> plir::Expr {
         plir::Expr::new(self.ty, plir::ExprType::Ident(self.ident))
     }
 
@@ -271,10 +258,8 @@ impl CodeGenerator {
             }
         }
         
-        match resolve_type(branch_types) {
-            Some(bty) => Ok(plir::Block(bty, block)),
-            None => Err(PLIRErr::CannotResolveType),
-        }
+        let bty = plir::Type::resolve_branches(&branch_types);
+        Ok(plir::Block(bty, block))
     }
 
     fn unwrap_decl(&mut self, rt: ReasgType, pat: tree::DeclPat, ty: Option<plir::Type>, e: plir::Expr) -> PLIRResult<()> {
@@ -461,12 +446,8 @@ impl CodeGenerator {
                     .map(|(_, block)| &block.0)
                     .chain(last.iter().map(|b| &b.0));
 
-                let if_type = resolve_type(type_iter)
-                    .ok_or(PLIRErr::CannotResolveType)?
-                    .clone();
-
                 Ok(plir::Expr::new(
-                    if_type,
+                    plir::Type::resolve_branches(type_iter),
                     plir::ExprType::If { conditionals, last }
                 ))
             },
@@ -493,16 +474,32 @@ mod test {
 
     use super::*;
 
+    fn assert_plir_pass(input: &str) {
+        let lexed = lexer::tokenize(input).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        println!("{}", codegen(parsed).unwrap())
+    }
+
     #[test]
     fn get_display() {
-        let lexed = lexer::tokenize("if true {
+        assert_plir_pass("if true {
             2;
         } else {
             3;
-        }").unwrap();
+        }");
 
-        let parsed = parser::parse(lexed).unwrap();
+        assert_plir_pass("fun a(b: int, c: string) {
+            let d = if 0 {
+                return 1;
+            } else {
+                3;
+            };
 
-        println!("{}", codegen(parsed).unwrap())
+            4;
+        }");
+
+        assert_plir_pass("
+            let [a, .., b] = [1, 2, 3, 4];
+        ")
     }
 }
