@@ -23,22 +23,19 @@ fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
         .map(|(i, _)| plir::Split::Right(i))
         .rev();
     
-    match right.next() {
-        Some(first_right) => {
-            let lidx = splits.last().map_or(0, |split| match split {
-                plir::Split::Left(idx) => *idx + 1,
-                _ => unreachable!()
-            });
-            let ridx = match first_right {
-                plir::Split::Right(idx) => idx,
-                _ => unreachable!()
-            };
+    if let Some(first_right) = right.next() {
+        let lidx = splits.last().map_or(0, |split| match split {
+            plir::Split::Left(idx) => *idx + 1,
+            _ => unreachable!()
+        });
+        let ridx = match first_right {
+            plir::Split::Right(idx) => idx,
+            _ => unreachable!()
+        };
 
-            splits.push(plir::Split::Middle(lidx, ridx));
-            splits.push(first_right);
-            splits.extend(right);
-        },
-        None => {},
+        splits.push(plir::Split::Middle(lidx, ridx));
+        splits.push(first_right);
+        splits.extend(right);
     };
 
     splits
