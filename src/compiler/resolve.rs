@@ -23,6 +23,8 @@ pub enum PLIRErr {
     CannotUnary(op::Unary, plir::Type),
     CannotBinary(op::Binary, plir::Type, plir::Type),
     CannotCmp(op::Cmp, plir::Type, plir::Type),
+    CannotIndex(plir::Type),
+    CannotIndexWith(plir::Type, plir::Type),
 }
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 
@@ -548,13 +550,24 @@ impl CodeGenerator {
                     plir::ExprType::Call { funct, params }
                 ))
             },
-            tree::Expr::Index(_) => todo!(),
+            tree::Expr::Index(tree::Index { expr, index }) => {
+                let expr = self.consume_expr_and_box(*expr)?;
+                let index = self.consume_expr_and_box(*index)?;
+
+                let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)
+                    .ok_or_else(|| PLIRErr::CannotIndexWith(expr.ty.clone(), index.ty.clone()))?;
+                
+                Ok(plir::Expr::new(
+                    idx_ty,
+                    plir::ExprType::Index(plir::Index { expr, index })
+                ))
+            },
             tree::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
         }
     }
 
     fn consume_expr_and_box(&mut self, expr: tree::Expr) -> PLIRResult<Box<plir::Expr>> {
-        Ok(Box::new(self.consume_expr(expr)?))
+        self.consume_expr(expr).map(Box::new)
     }
 }
 

@@ -42,6 +42,7 @@ pub enum Type {
     Generic(String, Vec<Type>),
     Tuple(Vec<Type>)
 }
+
 enum TypeRezError {
     NoBranches,
     MultipleBranches
@@ -170,6 +171,35 @@ impl Type {
 
     //     comparable.then(|| Type::bool())
     // }
+    pub fn resolve_index_type(expr: &Type, idx: &Expr) -> Option<Type> {
+        #[inline]
+        fn is_int(t: &Type) -> bool {
+            matches!(t, Type::Prim(ty) if ty == "int")
+        }
+        let idx_ty = &idx.ty;
+
+        match expr {
+            Type::Prim(expr_ty) => match expr_ty.as_ref() {
+                "string" => is_int(idx_ty).then(|| Type::char()),
+                _ => None
+            },
+            Type::Generic(expr_ty, param_tys) => match expr_ty.as_ref() {
+                "list" => is_int(idx_ty).then(|| param_tys[0].clone()),
+                "dict" => (idx_ty == &param_tys[0]).then(|| param_tys[1].clone()),
+                _ => None
+            },
+            Type::Tuple(tys) => match &idx.expr {
+                ExprType::Literal(literal) => match *literal {
+                    tree::Literal::Int(idx_literal) => usize::try_from(idx_literal)
+                        .ok()
+                        .and_then(|idx| tys.get(idx))
+                        .cloned(), // TODO: properly error handle
+                    _ => None
+                },
+                _ => None
+            },
+        }
+    }
 }
 
 impl From<tree::Type> for Type {
