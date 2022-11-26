@@ -5,7 +5,7 @@ pub mod plir;
 pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
     let mut cg = CodeGenerator::new();
     cg.consume_program(t)?;
-    Ok(cg.unwrap())
+    Ok(cg.unwrap()?)
 }
 
 fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
@@ -43,10 +43,11 @@ fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
 
 #[derive(Debug)]
 pub enum PLIRErr {
-    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotBreak,
     CannotContinue,
     CannotReturn,
+    UnclosedBlock,
+    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotResolveType,
     PoisonedTree,
     CannotSpread,
@@ -182,9 +183,19 @@ impl CodeGenerator {
     fn new() -> Self {
         Self { program: InsertBlock::new(), blocks: vec![], var_id: 0 }
     }
-    fn unwrap(self) -> plir::Program {
-        // TODO: handle return, break, etc
-        plir::Program(self.program.block)
+    fn unwrap(self) -> PLIRResult<plir::Program> {
+        if !self.blocks.is_empty() {
+            Err(PLIRErr::UnclosedBlock)?;
+        }
+        let InsertBlock { block, exits } = self.program;
+
+        match exits.last() {
+            None => Ok(plir::Program(block)),
+            Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
+            Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
+            Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
+            Some(BlockExit::Exit(_))   => Err(PLIRErr::CannotReturn),
+        }
     }
 
     fn push_block(&mut self) {
@@ -414,7 +425,12 @@ impl CodeGenerator {
 
     fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
         match expr {
-            tree::Expr::Ident(_) => todo!(),
+            tree::Expr::Ident(ident) => {
+                Ok(plir::Expr::new(
+                    todo!(),
+                    plir::ExprType::Ident(ident)
+                ))
+            },
             tree::Expr::Block(b) => {
                 let block = self.consume_tree_block(b, BlockBehavior::Bare)?;
                 
