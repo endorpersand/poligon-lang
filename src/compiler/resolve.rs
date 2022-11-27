@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::tree::{self, ReasgType, MutType};
 
 pub mod plir;
@@ -49,6 +51,8 @@ pub enum PLIRErr {
     UnclosedBlock,
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotResolveType,
+    UndefinedVar(String),
+    CannotCall,
     PoisonedTree,
     CannotSpread,
     CannotSpreadMultiple,
@@ -117,13 +121,15 @@ impl BlockBehavior {
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::Stmt>,
-    exits: Vec<BlockExit>
+    exits: Vec<BlockExit>,
+    vars: HashMap<String, plir::Type>
 }
 impl InsertBlock {
     fn new() -> Self {
         Self {
             block: vec![],
-            exits: vec![]
+            exits: vec![],
+            vars: HashMap::new()
         }
     }
 
@@ -176,18 +182,25 @@ impl Var {
 struct CodeGenerator {
     program: InsertBlock,
     blocks: Vec<InsertBlock>,
-    var_id: usize
+    var_id: usize,
+
+    // steps: HashMap<*const plir::Expr, usize>
 }
 
 impl CodeGenerator {
     fn new() -> Self {
-        Self { program: InsertBlock::new(), blocks: vec![], var_id: 0 }
+        Self { 
+            program: InsertBlock::new(), 
+            blocks: vec![], 
+            var_id: 0,
+            // steps: HashMap::new()
+        }
     }
     fn unwrap(self) -> PLIRResult<plir::Program> {
         if !self.blocks.is_empty() {
             Err(PLIRErr::UnclosedBlock)?;
         }
-        let InsertBlock { block, exits } = self.program;
+        let InsertBlock { block, exits, .. } = self.program;
 
         match exits.last() {
             None => Ok(plir::Program(block)),
@@ -208,14 +221,24 @@ impl CodeGenerator {
         self.blocks.last_mut().unwrap_or(&mut self.program)
     }
 
-    fn var_name(&mut self, ident: &str) -> String {
+    fn declare(&mut self, ident: &str, ty: plir::Type) {
+        self.peek_block().vars.insert(String::from(ident), ty);
+    }
+    fn get_var_type(&self, ident: &str) -> PLIRResult<&plir::Type> {
+        self.blocks.iter().rev()
+            .chain(std::iter::once(&self.program))
+            .find_map(|ib| ib.vars.get(ident))
+            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
+    }
+
+    fn tmp_var_name(&mut self, ident: &str) -> String {
         let string = format!("_{ident}_{}", self.var_id);
         self.var_id += 1;
         string
     }
 
     fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr) -> Var {
-        let ident = self.var_name(ident);
+        let ident = self.tmp_var_name(ident);
         let ety = e.ty.clone();
 
         let decl = plir::Decl {
@@ -271,7 +294,7 @@ impl CodeGenerator {
     }
 
     fn consume_insert_block(&mut self, block: InsertBlock, btype: BlockBehavior) -> PLIRResult<plir::Block> {
-        let InsertBlock { block, mut exits } = block;
+        let InsertBlock { block, mut exits, .. } = block;
         
         // check the last statement and add BlockExit::Exit if necessary
         let maybe_exit_type = match block.last() {
@@ -385,8 +408,11 @@ impl CodeGenerator {
                 let (rt, ty) = extra;
 
                 let ty = ty.unwrap_or_else(|| e.ty.clone());
+
+                this.declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
                 this.peek_block().push_stmt(plir::Stmt::Decl(decl));
+
                 Ok(())
             },
             false
@@ -417,6 +443,14 @@ impl CodeGenerator {
             .map_err(|_| PLIRErr::PoisonedTree)?;
         let block = self.consume_tree_block(old_block, BlockBehavior::Function)?;
 
+        let param_tys = params.iter()
+            .map(|p| &p.ty)
+            .cloned()
+            .collect();
+        self.declare(&ident, 
+            plir::Type::Fun(param_tys, Box::new(ret.clone()))
+        );
+
         // TODO, type check block
         let fun_decl = plir::FunDecl { ident, params, ret, block };
         self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl));
@@ -427,7 +461,7 @@ impl CodeGenerator {
         match expr {
             tree::Expr::Ident(ident) => {
                 Ok(plir::Expr::new(
-                    todo!(),
+                    self.get_var_type(&ident)?.clone(),
                     plir::ExprType::Ident(ident)
                 ))
             },
@@ -632,10 +666,12 @@ impl CodeGenerator {
                     .map(|expr| self.consume_expr(expr))
                     .collect::<Result<_, _>>()?;
                 
-                Ok(plir::Expr::new(
-                    todo!(),
-                    plir::ExprType::Call { funct, params }
-                ))
+                match &funct.ty {
+                    plir::Type::Fun(_, ret) => Ok(plir::Expr::new(
+                        (**ret).clone(), plir::ExprType::Call { funct, params }
+                    )),
+                    _ => Err(PLIRErr::CannotCall)
+                }
             },
             tree::Expr::Index(idx) => {
                 self.consume_index(idx)
@@ -698,6 +734,23 @@ mod test {
 
             a = 4;
             [a, b, c, .., d, e, f] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-        ")
+        ");
+
+        assert_plir_pass("
+            fun print(a: int) {
+                // :?
+            }
+
+            let vd = {
+                let a = 1;
+                {
+                    print(a);
+                }
+
+                fun print(a: int) -> int {
+                    a * 2;
+                }
+            };
+        ");
     }
 }

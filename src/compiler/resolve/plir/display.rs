@@ -134,6 +134,11 @@ impl Display for Type {
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
+            Type::Fun(params, ret) => {
+                write!(f, "(")?;
+                fmt_list(f, params)?;
+                write!(f, ") -> {ret}")
+            },
         }
     }
 }

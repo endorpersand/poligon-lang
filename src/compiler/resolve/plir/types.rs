@@ -19,20 +19,23 @@ pub enum OpErr {
 pub enum Type {
     Prim(String),
     Generic(String, Vec<Type>),
-    Tuple(Vec<Type>)
+    Tuple(Vec<Type>),
+    Fun(Vec<Type>, Box<Type>)
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum TypeRef<'a> {
     Prim(&'a str),
     Generic(&'a str, &'a [Type]),
-    Tuple(&'a [Type])
+    Tuple(&'a [Type]),
+    Fun(&'a [Type], &'a Type)
 }
 impl TypeRef<'_> {
     fn cloned(self) -> Type {
         match self {
             TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
             TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
-            TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys))
+            TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys)),
+            TypeRef::Fun(params, ret) => Type::Fun(Vec::from(params), Box::new(ret.clone())),
         }
     }
 }
@@ -60,6 +63,7 @@ impl Type {
             Type::Prim(ident) => TypeRef::Prim(ident),
             Type::Generic(ident, params) => TypeRef::Generic(ident, params),
             Type::Tuple(params) => TypeRef::Tuple(params),
+            Type::Fun(params, ret) => TypeRef::Fun(params, ret),
         }
     }
 
@@ -158,7 +162,8 @@ impl Type {
                 match (left.referenced(), right.referenced()) {
                     (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_FLOAT)) => Ok(ty!(Type::S_FLOAT)),
                     (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT))   => Ok(ty!(Type::S_FLOAT)),
-                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT))   => Ok(ty!(Type::S_INT)),
+                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT))   => Ok(ty!(Type::S_FLOAT)),
+                    (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT))     => Ok(ty!(Type::S_INT)),
                     $(($a, $b) => $bl),+
                 }
             }
