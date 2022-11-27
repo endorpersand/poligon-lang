@@ -2,18 +2,23 @@ pub mod value;
 pub mod resolve;
 
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::iter;
 
+use inkwell::OptimizationLevel;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
+use inkwell::support::LLVMString;
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
 use crate::tree::{op, Literal};
 
 use self::resolve::plir;
 use self::value::{TypeLayout, GonValue, apply_bv};
+
+use lazy_static::lazy_static;
 
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
@@ -30,6 +35,21 @@ impl<'ctx> Compiler<'ctx> {
             builder: ctx.create_builder(),
             module: ctx.create_module("eval"),
             vars: HashMap::new()
+        }
+    }
+
+    fn jit_compile<T>(&mut self, prog: plir::Program) -> IRResult<T> {
+        let fun = self.compile(&prog)?;
+        let fn_name = fun.get_name()
+            .to_str()
+            .unwrap();
+
+        let jit = self.module.create_jit_execution_engine(OptimizationLevel::Default)
+            .map_err(IRErr::LLVMErr)?;
+
+        unsafe {
+            let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
+            Ok(jit_fun.call())
         }
     }
 
@@ -142,6 +162,9 @@ pub enum IRErr {
     CannotUnary(op::Unary, TypeLayout),
     CannotBinary(op::Binary, TypeLayout, TypeLayout),
     CannotCmp(op::Cmp, TypeLayout, TypeLayout),
+
+    CannotDetermineMain,
+    LLVMErr(LLVMString)
 }
 type IRResult<T> = Result<T, IRErr>;
 
@@ -167,10 +190,84 @@ impl<'ctx> TraverseIR<'ctx> for plir::Block {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = IRResult<GonValue<'ctx>>;
+    type Return = IRResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        todo!()
+        lazy_static! {
+            static ref CS_MAIN: CString = CString::new("main").unwrap();
+        }
+
+        // group the functions: 
+        let mut fun_decls = vec![];
+        let mut rest = vec![];
+        
+        for stmt in &self.0 {
+            match stmt {
+                plir::Stmt::FunDecl(dcl) => fun_decls.push(dcl),
+                stmt => rest.push(stmt)
+            }
+        }
+
+        // eval fns
+        let funs: Vec<_> = fun_decls.into_iter()
+            .map(|f| f.write_ir(compiler))
+            .collect::<Result<_, _>>()?;
+
+        // evaluate type of program
+        if rest.is_empty() {
+            match funs.as_slice() {
+                // the program is an empty function
+                &[] => {
+                    let main = compiler.module.add_function(
+                        "main", 
+                        compiler.ctx.void_type().fn_type(&[], false), 
+                        None
+                    );
+
+                    let bb = compiler.ctx.append_basic_block(main, "main_body");
+                    compiler.builder.position_at_end(bb);
+                    compiler.builder.build_return(None);
+
+                    if main.verify(false) {
+                        Ok(main)
+                    } else {
+                        unreachable!("Creation of blank main function errored?");
+                    }
+                }
+                // the program is the only function in fun_decls
+                &[fun] => Ok(fun),
+                // the program is the "main" function in fun_decls
+                _ => {
+                    funs.into_iter().find(|f| f.get_name() == &**CS_MAIN)
+                        .ok_or(IRErr::CannotDetermineMain)
+                }
+            }
+        } else {
+            // the program is the anonymous statements
+            if funs.iter().any(|f| f.get_name() == &**CS_MAIN) {
+                Err(IRErr::CannotDetermineMain)
+            } else {
+                let main = compiler.module.add_function(
+                    "main", 
+                    compiler.ctx.void_type().fn_type(&[], false), 
+                    None
+                );
+
+                let bb = compiler.ctx.append_basic_block(main, "main_body");
+                
+                compiler.builder.position_at_end(bb);
+                for stmt in rest {
+                    stmt.write_ir(compiler)?;
+                }
+                compiler.builder.build_return(None);
+
+                if main.verify(true) {
+                    Ok(main)
+                } else {
+                    Err(IRErr::InvalidFunction)
+                }
+            }
+        }
     }
 }
 
@@ -338,12 +435,17 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                     // build then block
                     compiler.builder.position_at_end(then_bb);
+                    // write ir from the block
                     let then_result = block.write_ir(compiler)?;
-                    compiler.builder.build_unconditional_branch(merge_bb);
-                    //update then block
-                    then_bb = compiler.builder.get_insert_block().unwrap();
+                    // if there is no terminator, then this block exits to merge
+                    if then_bb.get_terminator().is_none() {
+                        compiler.builder.build_unconditional_branch(merge_bb);
+                        
+                        // add block to phi
+                        then_bb = compiler.builder.get_insert_block().unwrap();
+                        incoming.push((then_result, then_bb));
+                    }
 
-                    incoming.push((then_result, then_bb));
                     prev_else.replace(else_bb);
                 }
 
@@ -541,6 +643,24 @@ mod tests {
         }
     }
 
+    fn exec<T>(input: &str) -> T {
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed  = lexer::tokenize(input).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        let plired = resolve::codegen(parsed).unwrap();
+
+        compiler.jit_compile::<T>(plired).unwrap()
+    }
+
+    #[test]
+    fn mid_return() {
+        assert_fun_pass("fun main() -> float {
+            return 2.0;
+            main();
+        }")
+    }
     #[test]
     fn what_am_i_doing_2() {
         assert_fun_pass("fun hello() -> float {
@@ -716,4 +836,24 @@ mod tests {
     //         main() + 1;
     //     }")
     // }
+    #[test]
+    fn jit_compile_test() {
+        let value = exec::<f64>("
+            fun double(a: float) -> float {
+                a * 2;
+            }
+            
+            fun main() -> float {
+                double(15.);
+            }
+        ");
+        println!("{}", value);
+
+        let value = exec::<bool>("
+            fun main() -> bool {
+                true;
+            }
+        ");
+        println!("{}", value);
+    }
 }
