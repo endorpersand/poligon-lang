@@ -259,7 +259,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 }
             },
             plir::ExprType::Path(_) => todo!(),
-            plir::ExprType::UnaryOps { ops, expr } => todo!(),
+            plir::ExprType::UnaryOps { ops, expr } => {
+                match ops.split_last() {
+                    Some(((tail_op, _), head)) => {
+                        let first = compiler.apply_unary(&**expr, tail_op)?;
+                        head.iter()
+                            .try_rfold(first, |e, (op, _)| compiler.apply_unary(e, op))
+                    },
+                    None => expr.write_ir(compiler),
+                }
+            },
             plir::ExprType::BinaryOp { op, left, right } => {
                 compiler.apply_binary(&**left, op, &**right)
             },
@@ -547,7 +556,7 @@ mod tests {
 
     #[test]
     fn if_else_compile_test() {
-        assert_fun_pass("fun main(a) -> float {
+        assert_fun_pass("fun main(a: float) -> float {
             if a {
                 main(0.); 
             } else {
@@ -555,7 +564,7 @@ mod tests {
             }
         }");
 
-        assert_fun_pass("fun main(a) -> float {
+        assert_fun_pass("fun main(a: float) -> float {
             if a {
                 main(0.); 
             } else if a {
@@ -565,7 +574,7 @@ mod tests {
             }
         }");
         
-        assert_fun_pass("fun main(a) -> float {
+        assert_fun_pass("fun main(a: float) -> float {
             if a {
                 main(0.); 
             } else if a {

@@ -202,6 +202,15 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
         }
     }
 }
+
+impl<'ctx> Unary<'ctx> for &plir::Expr {
+    type Output = IRResult<GonValue<'ctx>>;
+
+    fn apply_unary(self, op: &op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        let val = self.write_ir(c)?;
+        c.apply_unary(val, op)
+    }
+}
 impl<'ctx> Binary<'ctx> for &plir::Expr {
     type Output = IRResult<GonValue<'ctx>>;
 
