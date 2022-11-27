@@ -215,16 +215,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 
         // evaluate type of program
         if rest.is_empty() {
-            match funs.as_slice() {
+            match *funs.as_slice() {
                 // the program is an empty function
-                &[] => {
+                [] => {
                     let main = compiler.module.add_function(
                         "main", 
                         compiler.ctx.void_type().fn_type(&[], false), 
                         None
                     );
 
-                    let bb = compiler.ctx.append_basic_block(main, "main_body");
+                    let bb = compiler.ctx.append_basic_block(main, "body");
                     compiler.builder.position_at_end(bb);
                     compiler.builder.build_return(None);
 
@@ -234,8 +234,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                         unreachable!("Creation of blank main function errored?");
                     }
                 }
+
                 // the program is the only function in fun_decls
-                &[fun] => Ok(fun),
+                [fun] => Ok(fun),
+                
                 // the program is the "main" function in fun_decls
                 _ => {
                     funs.into_iter().find(|f| f.get_name() == &**CS_MAIN)
@@ -517,7 +519,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let expr_params = params.len();
                 if fun_params == expr_params {
                     let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(&compiler).into()))
+                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(compiler).into()))
                         .collect::<Result<_, _>>()?;
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
@@ -584,7 +586,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         }
 
         // Body
-        let bb = compiler.ctx.append_basic_block(fun, &format!("{ident}_body"));
+        let bb = compiler.ctx.append_basic_block(fun, "body");
         compiler.builder.position_at_end(bb);
 
         // store params
@@ -613,6 +615,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+
     use inkwell::context::Context;
 
     use crate::lexer;
@@ -622,15 +627,26 @@ mod tests {
     use super::resolve;
     use super::resolve::plir;
 
+    fn file(input: impl AsRef<Path>) -> String {
+        fs::read_to_string(input.as_ref()).unwrap()
+    }
     /// Assert that a function declaration with an expression in it passes.
     /// Also prints the function to STDERR.
     fn assert_fun_pass(input: &str) {
+        assert_fun_pass_vb(input, false)
+    }
+
+    fn assert_fun_pass_vb(input: &str, verbose: bool) {
         let ctx = Context::create();
         let mut compiler = Compiler::from_ctx(&ctx);
 
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
         let plired = resolve::codegen(parsed).unwrap();
+
+        if verbose {
+            println!("{plired}");
+        }
 
         match &plired.0[..] {
             [plir::Stmt::FunDecl(fdcl)] => {
@@ -855,5 +871,10 @@ mod tests {
             }
         ");
         println!("{}", value);
+    }
+
+    #[test]
+    fn plir_llvm_creation() {
+        assert_fun_pass_vb(&file("_test_files/plir_llvm_creation.gon"), true)
     }
 }

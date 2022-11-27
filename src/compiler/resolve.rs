@@ -68,15 +68,30 @@ impl From<plir::OpErr> for PLIRErr {
 
 #[derive(Debug)]
 enum BlockExit {
+    /// This block exited by returning a value.
     Return(plir::Type),
+
+    /// This block exited by `break`.
     Break,
+
+    /// This block exited by `continue`.
     Continue,
+
+    /// This block exited normally.
     Exit(plir::Type)
 }
 enum BlockBehavior {
+    /// This block is a function body.
     Function,
+
+    /// This block is the body for a `while` or `for` loop.
     Loop,
-    Bare
+
+    /// This block is on its own.
+    Bare,
+
+    /// This block is the body of an `if` statement.
+    Conditional
 }
 enum BlockExitHandle {
     /// Continue running in the upper loop.
@@ -90,7 +105,9 @@ enum BlockExitHandle {
     LoopExit,
 
     /// Propagate the exit to the upper loop.
-    Propagate(BlockExit)
+    /// 
+    /// The second parameter is true if this is a conditional exit (it does not ALWAYS occur).
+    Propagate(BlockExit, bool /* conditional? */),
 }
 
 impl BlockBehavior {
@@ -103,15 +120,21 @@ impl BlockBehavior {
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
             },
             BlockBehavior::Loop => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
                 BlockExit::Break     => Ok(BlockExitHandle::LoopExit),
                 BlockExit::Continue  => Ok(BlockExitHandle::LoopExit),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
             },
             BlockBehavior::Bare => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit)),
-                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit)),
-                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit)),
+                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
+                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, false)),
+                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, false)),
+                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+            },
+            BlockBehavior::Conditional => match exit {
+                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, true)),
+                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, true)),
+                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, true)),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
             },
         }
@@ -121,44 +144,92 @@ impl BlockBehavior {
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::Stmt>,
+
+    /// All conditional exits.
     exits: Vec<BlockExit>,
+    /// The *unconditional* exit.
+    /// If this is present, this is the last statement of the block.
+    /// If a conditional exit does not pass, this exit is how the block exits.
+    final_exit: Option<BlockExit>,
+
     vars: HashMap<String, plir::Type>
 }
+
 impl InsertBlock {
     fn new() -> Self {
         Self {
             block: vec![],
             exits: vec![],
+            final_exit: None,
             vars: HashMap::new()
         }
     }
 
-    fn push_stmt(&mut self, stmt: plir::Stmt) {
+    /// Determine whether another statement can be pushed into the insert block.
+    fn is_open(&self) -> bool {
+        self.final_exit.is_none()
+    }
+
+    /// Push a singular statement into this insert block.
+    /// 
+    /// The return indicates whether or not another statement 
+    /// can be pushed into the insert block (whether a final exit has been set).
+    fn push_stmt(&mut self, stmt: plir::Stmt) -> bool {
         match stmt {
             plir::Stmt::Return(e) => self.push_return(e),
             plir::Stmt::Break => self.push_break(),
             plir::Stmt::Continue => self.push_cont(),
-            st => self.block.push(st)
+            st => {
+                if self.is_open() {
+                    self.block.push(st)
+                }
+
+                self.is_open()
+            }
         }
     }
 
-    fn push_return(&mut self, me: Option<plir::Expr>) {
-        let ty = match me {
-            Some(ref e) => e.ty.clone(),
-            None => plir::ty!(plir::Type::S_VOID),
-        };
-        self.block.push(plir::Stmt::Return(me));
-        self.exits.push(BlockExit::Return(ty));
+    /// Push a return statement into this insert block.
+    /// 
+    /// The return will be false, indicating another statement cannot
+    /// be pushed into the insert block (as a final exit has been set).
+    fn push_return(&mut self, me: Option<plir::Expr>) -> bool {
+        if self.is_open() {
+            let ty = match me {
+                Some(ref e) => e.ty.clone(),
+                None => plir::ty!(plir::Type::S_VOID),
+            };
+            self.block.push(plir::Stmt::Return(me));
+            self.final_exit.replace(BlockExit::Return(ty));
+        }
+
+        false
     }
 
-    fn push_break(&mut self) {
-        self.block.push(plir::Stmt::Break);
-        self.exits.push(BlockExit::Break);
+    /// Push a break statement into this insert block.
+    /// 
+    /// The return will be false, indicating another statement cannot
+    /// be pushed into the insert block (as a final exit has been set).
+    fn push_break(&mut self) -> bool {
+        if self.is_open() {
+            self.block.push(plir::Stmt::Break);
+            self.final_exit.replace(BlockExit::Break);
+        }
+
+        false
     }
 
-    fn push_cont(&mut self) {
-        self.block.push(plir::Stmt::Continue);
-        self.exits.push(BlockExit::Continue);
+    /// Push a continue statement into this insert block.
+    /// 
+    /// The return will be false, indicating another statement cannot
+    /// be pushed into the insert block (as a final exit has been set).
+    fn push_cont(&mut self) -> bool {
+        if self.is_open() {
+            self.block.push(plir::Stmt::Continue);
+            self.final_exit.replace(BlockExit::Continue);
+        }
+
+        false
     }
 }
 
@@ -258,14 +329,27 @@ impl CodeGenerator {
     }
 
     fn consume_program(&mut self, prog: tree::Program) -> PLIRResult<()> {
-        for stmt in prog.0.0 {
-            self.consume_stmt(stmt)?;
+        self.consume_stmts(prog.0.0)
+    }
+
+    /// Consume an iterator of statements into the current insert block.
+    /// 
+    /// This function stops parsing statements early if an unconditional exit has been found.
+    /// At this point, the insert block cannot accept any more statements.
+    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=tree::Stmt>) -> PLIRResult<()> {
+        for stmt in stmts.into_iter() {
+            if !self.consume_stmt(stmt)? {
+                break;
+            }
         }
 
         Ok(())
     }
 
-    fn consume_stmt(&mut self, stmt: tree::Stmt) -> PLIRResult<()> {
+    /// Consume a statement into the current insert block.
+    /// 
+    /// This function returns whether or not the insert block accepts any more statements.
+    fn consume_stmt(&mut self, stmt: tree::Stmt) -> PLIRResult<bool> {
         match stmt {
             tree::Stmt::Decl(d) => self.consume_decl(d),
             tree::Stmt::Return(me) => {
@@ -273,45 +357,43 @@ impl CodeGenerator {
                     Some(e) => Some(self.consume_expr(e)?),
                     None => None,
                 };
-                self.peek_block().push_return(maybe_expr);
-                Ok(())
+                Ok(self.peek_block().push_return(maybe_expr))
             },
             tree::Stmt::Break => {
-                self.peek_block().push_break();
-                Ok(())
+                Ok(self.peek_block().push_break())
             },
             tree::Stmt::Continue => {
-                self.peek_block().push_cont();
-                Ok(())
+                Ok(self.peek_block().push_cont())
             },
             tree::Stmt::FunDecl(f) => self.consume_fun_decl(f),
             tree::Stmt::Expr(e) => {
                 let e = self.consume_expr(e)?;
-                self.peek_block().push_stmt(plir::Stmt::Expr(e));
-                Ok(())
+                Ok(self.peek_block().push_stmt(plir::Stmt::Expr(e)))
             },
         }
     }
 
     fn consume_insert_block(&mut self, block: InsertBlock, btype: BlockBehavior) -> PLIRResult<plir::Block> {
-        let InsertBlock { block, mut exits, .. } = block;
+        let InsertBlock { block, exits, final_exit, vars: _ } = block;
         
-        // check the last statement and add BlockExit::Exit if necessary
-        let maybe_exit_type = match block.last() {
-            Some(stmt) => match stmt {
-                plir::Stmt::Decl(_)    => Some(plir::ty!(plir::Type::S_VOID)),
-                plir::Stmt::Return(_)  => None,
-                plir::Stmt::Break      => None,
-                plir::Stmt::Continue   => None,
-                plir::Stmt::FunDecl(_) => Some(plir::ty!(plir::Type::S_VOID)),
-                plir::Stmt::Expr(e)    => Some(e.ty.clone())
-            },
-            None => Some(plir::ty!(plir::Type::S_VOID)),
-        };
+        // fill the conditional exit if necessary:
+        let final_exit = final_exit.unwrap_or_else(|| {
+            let exit_ty = match block.last() {
+                Some(stmt) => match stmt {
+                    plir::Stmt::Decl(_)    => plir::ty!(plir::Type::S_VOID),
+                    plir::Stmt::FunDecl(_) => plir::ty!(plir::Type::S_VOID),
+                    plir::Stmt::Expr(e)    => e.ty.clone(),
 
-        if let Some(exit_type) = maybe_exit_type {
-            exits.push(BlockExit::Exit(exit_type));
-        };
+                    plir::Stmt::Return(_)
+                    | plir::Stmt::Break
+                    | plir::Stmt::Continue
+                    => unreachable!("Statement should have emitted unconditional exit"),
+                },
+                None => plir::ty!(plir::Type::S_VOID),
+            };
+
+            BlockExit::Exit(exit_ty)
+        });
 
         // resolve block's type
         let mut branch_types = vec![];
@@ -319,12 +401,27 @@ impl CodeGenerator {
             match btype.handle_exit(exit)? {
                 BlockExitHandle::Continue(ty) => branch_types.push(ty),
                 BlockExitHandle::LoopExit => {},
-                BlockExitHandle::Propagate(p) => {
-                    self.peek_block().exits.push(p);
+
+                // second parameter does not matter here because
+                // this is already in the conditional exits.
+                // as such, just propagate as a conditional exit.
+                BlockExitHandle::Propagate(exit, _) => {
+                    self.peek_block().exits.push(exit);
                 },
             }
         }
-        
+        match btype.handle_exit(final_exit)? {
+            BlockExitHandle::Continue(ty) => branch_types.push(ty),
+            BlockExitHandle::LoopExit => {},
+            BlockExitHandle::Propagate(exit, conditional) => {
+                if conditional {
+                    self.peek_block().exits.push(exit);
+                } else {
+                    self.peek_block().final_exit.replace(exit);
+                }
+            },
+        }
+
         let bty = plir::Type::resolve_branches(&branch_types)
             .ok_or(PLIRErr::CannotResolveType)?;
         Ok(plir::Block(bty, block))
@@ -332,9 +429,7 @@ impl CodeGenerator {
     fn consume_tree_block(&mut self, block: tree::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
         self.push_block();
         // collect all the statements from this block
-        for stmt in block.0 {
-            self.consume_stmt(stmt)?;
-        }
+        self.consume_stmts(block.0)?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype)
     }
@@ -389,7 +484,10 @@ impl CodeGenerator {
         }
     }
 
-    fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<()> {
+    /// Consume a declaration into the current insert block.
+    /// 
+    /// This function returns whether or not the insert block accepts any more statements.
+    fn consume_decl(&mut self, decl: tree::Decl) -> PLIRResult<bool> {
         let tree::Decl { rt, pat, ty, val } = decl;
 
         let e = self.consume_expr(val)?;
@@ -415,10 +513,15 @@ impl CodeGenerator {
                 Ok(())
             },
             false
-        )
+        )?;
+
+        Ok(self.peek_block().is_open())
     }
 
-    fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
+    /// Consume a function declaration statement into the current insert block.
+    /// 
+    /// This function returns whether or not the insert block accepts any more statements.
+    fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<bool> {
         let tree::FunDecl { ident, params, ret, block } = decl;
 
         let (params, param_tys): (Vec<_>, Vec<_>) = params.into_iter()
@@ -458,9 +561,7 @@ impl CodeGenerator {
             }
     
             // collect all the statements from this block
-            for stmt in old_block.0 {
-                self.consume_stmt(stmt)?;
-            }
+            self.consume_stmts(old_block.0)?;
     
             let insert_block = self.pop_block().unwrap();
             self.consume_insert_block(insert_block, BlockBehavior::Function)?
@@ -468,8 +569,7 @@ impl CodeGenerator {
 
         // TODO: type check block
         let fun_decl = plir::FunDecl { ident, params, ret: ret_ty, block };
-        self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl));
-        Ok(())
+        Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
     }
 
     fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
@@ -638,13 +738,13 @@ impl CodeGenerator {
                 let conditionals: Vec<_> = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr(cond)?;
-                        let b = self.consume_tree_block(block, BlockBehavior::Bare)?;
+                        let b = self.consume_tree_block(block, BlockBehavior::Conditional)?;
                         Ok((c, b))
                     })
                     .collect::<PLIRResult<_>>()?;
                 
                 let last = match last {
-                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Bare)?),
+                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Conditional)?),
                     None => None,
                 };
 
