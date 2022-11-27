@@ -94,7 +94,7 @@ enum BlockExitHandle {
 }
 
 impl BlockBehavior {
-    fn unpack_exit(&self, exit: BlockExit) -> PLIRResult<BlockExitHandle> {
+    fn handle_exit(&self, exit: BlockExit) -> PLIRResult<BlockExitHandle> {
         match self {
             BlockBehavior::Function => match exit {
                 BlockExit::Return(t) => Ok(BlockExitHandle::Continue(t)),
@@ -316,7 +316,7 @@ impl CodeGenerator {
         // resolve block's type
         let mut branch_types = vec![];
         for exit in exits {
-            match btype.unpack_exit(exit)? {
+            match btype.handle_exit(exit)? {
                 BlockExitHandle::Continue(ty) => branch_types.push(ty),
                 BlockExitHandle::LoopExit => {},
                 BlockExitHandle::Propagate(p) => {

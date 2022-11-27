@@ -79,7 +79,8 @@ impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
                     Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(*op, self.type_layout())),
                 },
                 GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
-                GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate bool int
+                GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate int/bool
+                GonValue::Unit     => Err(IRErr::CannotUnary(*op, self.type_layout())),
             }
         }
     }
@@ -199,6 +200,7 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
             GonValue::Float(f) => f.truth_internal(c),
             GonValue::Int(i)   => i.truth_internal(c),
             GonValue::Bool(b)  => b,
+            GonValue::Unit     => c.ctx.bool_type().const_int(0, true),
         }
     }
 }
@@ -236,9 +238,9 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                 let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logand_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&rhs.basic_value(), then_bb),
+                    (&rhs.basic_value(c), then_bb),
                     // if LHS was false
-                    (&lhs.basic_value(), bb),
+                    (&lhs.basic_value(c), bb),
                 ]);
 
                 Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))
@@ -263,9 +265,9 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                 let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logor_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&lhs.basic_value(), bb),
+                    (&lhs.basic_value(c), bb),
                     // if LHS was false
-                    (&rhs.basic_value(), else_bb)
+                    (&rhs.basic_value(c), else_bb)
                 ]);
 
                 Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))

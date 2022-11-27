@@ -76,11 +76,11 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Store the value in the allocated position or return None if there is no allocated position
-    fn store_val(&mut self, ident: &str, val: GonValue<'ctx>) -> Option<PointerValue<'ctx>>
+    fn store_val(&self, ident: &str, val: GonValue<'ctx>) -> Option<PointerValue<'ctx>>
     {
         self.vars.get(ident)
             .map(|&alloca| {
-                self.builder.build_store(alloca, val.basic_value());
+                self.builder.build_store(alloca, val.basic_value(self));
                 alloca
             })
     }
@@ -90,11 +90,11 @@ impl<'ctx> Compiler<'ctx> {
     {
         let alloca = self.create_entry_block_alloca(ident, val.type_layout());
 
-        self.builder.build_store(alloca, val.basic_value());
+        self.builder.build_store(alloca, val.basic_value(self));
         alloca
     }
 
-    fn get_val(&mut self, ident: &str, ty: &plir::Type) -> IRResult<GonValue<'ctx>> {
+    fn get_val(&self, ident: &str, ty: &plir::Type) -> IRResult<GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
                 let val = self.builder.build_load(ptr, "load");
@@ -102,6 +102,18 @@ impl<'ctx> Compiler<'ctx> {
             },
             None => Err(IRErr::UndefinedVariable(String::from(ident))),
         }
+    }
+
+    fn add_incoming_gv<'a>(&self, phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
+        let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
+            .map(|(a, b)| (a.basic_value(self), *b))
+            .unzip();
+    
+        let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
+            .map(|(a, b)| (a as _, b))
+            .collect();
+        
+        phi.add_incoming(&vec);
     }
 }
 
@@ -120,25 +132,11 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
     phi.add_incoming(&vec);
 }
 
-fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
-    let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
-        .map(|(a, b)| (a.basic_value(), *b))
-        .unzip();
-
-    let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
-        .map(|(a, b)| (a as _, b))
-        .collect();
-    
-    phi.add_incoming(&vec);
-}
-
 #[derive(Debug)]
 pub enum IRErr {
     UndefinedVariable(String),
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
-    CallWasInstruction,
-    CallNoType,
     InvalidFunction,
     BlockNoValue, // TODO: remove
     UnresolvedType(plir::Type),
@@ -154,7 +152,7 @@ trait TraverseIR<'ctx> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Block {
-    type Return = IRResult<Option<GonValue<'ctx>>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self.1.split_last() {
@@ -164,13 +162,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Block {
                 }
                 tail.write_ir(compiler)
             }
-            None => Ok(None),
+            None => Ok(GonValue::Unit),
         }
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = IRResult<FloatValue<'ctx>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         todo!()
@@ -178,7 +176,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
-    type Return = IRResult<Option<GonValue<'ctx>>>;
+    type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
@@ -187,27 +185,27 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
 
                 let val = val.write_ir(compiler)?;
                 compiler.alloca_and_store(ident, val);
-                Ok(None)
+                Ok(GonValue::Unit)
             },
             plir::Stmt::Return(me) => {
                 match me {
                     Some(expr) => {
                         let e = expr.write_ir(compiler)?;
-                        compiler.builder.build_return(Some(&e.basic_value()))
+                        compiler.builder.build_return(Some(&e.basic_value(compiler)))
                     }
                     _ => compiler.builder.build_return(None)
                 };
 
-                Ok(None)
+                Ok(GonValue::Unit)
             },
             plir::Stmt::Break => todo!(),
             plir::Stmt::Continue => todo!(),
             plir::Stmt::FunDecl(d) => {
                 d.write_ir(compiler)?;
-                Ok(None)
+                Ok(GonValue::Unit)
             },
             plir::Stmt::Expr(e) => {
-                e.write_ir(compiler).map(Some)
+                e.write_ir(compiler)
             },
         }
     }
@@ -233,14 +231,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.position_at_end(orig_bb);
                 compiler.builder.build_unconditional_branch(expr_bb);
 
-                let t = compiler.update_block(&mut expr_bb, |_, c| {
+                let block = compiler.update_block(&mut expr_bb, |_, c| {
                     let t = block.write_ir(c)?;
                     c.builder.build_unconditional_branch(exit_bb);
-                    t.ok_or(IRErr::BlockNoValue)
+                    Ok(t)
                 })?;
 
                 compiler.builder.position_at_end(exit_bb);
-                Ok(t)
+                Ok(block)
             },
             plir::ExprType::Literal(literal) => literal.write_ir(compiler),
             plir::ExprType::ListLiteral(_) => todo!(),
@@ -341,8 +339,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                     // build then block
                     compiler.builder.position_at_end(then_bb);
-                    let then_result = block.write_ir(compiler)?
-                        .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
+                    let then_result = block.write_ir(compiler)?;
                     compiler.builder.build_unconditional_branch(merge_bb);
                     //update then block
                     then_bb = compiler.builder.get_insert_block().unwrap();
@@ -356,8 +353,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     (Some(mut else_bb), Some(block)) => {
                         // build else block
                         compiler.builder.position_at_end(else_bb);
-                        let else_result = block.write_ir(compiler)?
-                            .unwrap_or_else(|| todo!("Accept blocks that do not return a value"));
+                        let else_result = block.write_ir(compiler)?;
                         compiler.builder.build_unconditional_branch(merge_bb);
                         //update else block
                         else_bb = compiler.builder.get_insert_block().unwrap();
@@ -372,7 +368,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 // TODO type properly
 
                 let phi = compiler.builder.build_phi(expr_layout.basic_type(compiler), "if_result");
-                add_incoming_gv(phi, &incoming);
+                compiler.add_incoming_gv(phi, &incoming);
                 
                 Ok(GonValue::reconstruct(expr_ty, phi.as_basic_value()))
             },
@@ -421,13 +417,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let expr_params = params.len();
                 if fun_params == expr_params {
                     let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value().into()))
+                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(&compiler).into()))
                         .collect::<Result<_, _>>()?;
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
                     match call.try_as_basic_value().left() {
                         Some(basic) => Ok(GonValue::reconstruct(fun_ret, basic)),
-                        None => Err(IRErr::CallWasInstruction),
+                        None => Ok(GonValue::Unit),
                     }
                 } else {
                     Err(IRErr::WrongArity(fun_params, expr_params))
@@ -496,8 +492,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
             compiler.alloca_and_store(&param.ident, GonValue::reconstruct(plir_ty, val));
         }
 
-        let ret_value = block.write_ir(compiler)?
-            .map(GonValue::basic_value);
+        // return nothing if the return value is Unit
+        let ret_value = match block.write_ir(compiler)? {
+            GonValue::Unit => None,
+            val => Some(val.basic_value(compiler))
+        };
+
         // write the last value in block as return
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         
@@ -556,6 +556,14 @@ mod tests {
 
     #[test]
     fn if_else_compile_test() {
+        assert_fun_pass("fun main(a: int) {
+            if a {
+                main(a);
+            } else {
+                main(a);
+            };
+        }");
+
         assert_fun_pass("fun main(a: float) -> float {
             if a {
                 main(0.); 
@@ -680,16 +688,16 @@ mod tests {
             7. + 8. + 9.;
         }");
 
-        // // fast return
-        // assert_fun_pass("fun main(a) {
-        //     let b = if a {
-        //         return 2.;
-        //     } else {
-        //         2. + 15.;
-        //     };
+        // fast return
+        assert_fun_pass("fun main(a: int) {
+            let b = if a {
+                return 2.;
+            } else {
+                2. + 15.;
+            };
 
-        //     b;
-        // }");
+            b;
+        }");
     }
 
     // #[test]

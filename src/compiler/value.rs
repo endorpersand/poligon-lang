@@ -11,6 +11,7 @@ pub enum GonValue<'ctx> {
     Float(FloatValue<'ctx> /* f64 */),
     Int(IntValue<'ctx> /* i? */),
     Bool(IntValue<'ctx> /* i1 */),
+    Unit
 }
 
 impl<'ctx> GonValue<'ctx> {
@@ -19,6 +20,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Float(_) => plir::ty!(plir::Type::S_FLOAT),
             GonValue::Int(_)   => plir::ty!(plir::Type::S_INT),
             GonValue::Bool(_)  => plir::ty!(plir::Type::S_BOOL),
+            GonValue::Unit     => plir::ty!(plir::Type::S_VOID),
         }
     }
 
@@ -27,6 +29,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Float(_) => TypeLayout::Float,
             GonValue::Int(_)   => TypeLayout::Int,
             GonValue::Bool(_)  => TypeLayout::Bool,
+            GonValue::Unit     => TypeLayout::Unit,
         }
     }
 
@@ -40,11 +43,12 @@ impl<'ctx> GonValue<'ctx> {
         Self::Float(c.ctx.f64_type().const_float(f))
     }
 
-    pub fn basic_value(self) -> BasicValueEnum<'ctx> {
+    pub fn basic_value(self, c: &Compiler<'ctx>) -> BasicValueEnum<'ctx> {
         match self {
             GonValue::Float(f) => f.as_basic_value_enum(),
             GonValue::Int(i)   => i.as_basic_value_enum(),
             GonValue::Bool(b)  => b.as_basic_value_enum(),
+            GonValue::Unit     => c.ctx.struct_type(&[], true).const_zero().as_basic_value_enum(),
         }
     }
 
@@ -53,6 +57,7 @@ impl<'ctx> GonValue<'ctx> {
             plir::TypeRef::Prim(plir::Type::S_FLOAT) => Self::Float(v.into_float_value()),
             plir::TypeRef::Prim(plir::Type::S_INT)   => Self::Int(v.into_int_value()),
             plir::TypeRef::Prim(plir::Type::S_BOOL)  => Self::Bool(v.into_int_value()),
+            plir::TypeRef::Prim(plir::Type::S_VOID)  => Self::Unit,
             // TODO: not panic
             _ => panic!("Cannot reconstruct value from type")
         }
@@ -83,7 +88,7 @@ impl TypeLayout {
             TypeLayout::Float => c.ctx.f64_type().into(),
             TypeLayout::Int   => c.ctx.i64_type().into(),
             TypeLayout::Bool  => c.ctx.bool_type().into(),
-            TypeLayout::Unit  => todo!("get basic enum value out of Unit"),
+            TypeLayout::Unit  => c.ctx.struct_type(&[], true).into(),
         }
     }
 
