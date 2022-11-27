@@ -192,14 +192,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 Ok(None)
             },
             plir::Stmt::Return(me) => {
-                let maybe_expr = match me {
-                    Some(e) => Some(e.write_ir(compiler)?),
-                    None => None,
-                };
-
-                match maybe_expr {
-                    Some(e) => compiler.builder.build_return(Some(&e.basic_enum())),
-                    None    => compiler.builder.build_return(None),
+                match me {
+                    Some(expr) => {
+                        let e = expr.write_ir(compiler)?;
+                        compiler.builder.build_return(Some(&e.basic_enum()))
+                    }
+                    _ => compiler.builder.build_return(None)
                 };
 
                 Ok(None)
