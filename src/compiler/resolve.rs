@@ -7,7 +7,7 @@ pub mod plir;
 pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
     let mut cg = CodeGenerator::new();
     cg.consume_program(t)?;
-    Ok(cg.unwrap()?)
+    cg.unwrap()
 }
 
 fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
@@ -330,12 +330,11 @@ impl CodeGenerator {
         Ok(plir::Block(bty, block))
     }
     fn consume_tree_block(&mut self, block: tree::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
-        // collect all the statements from this block
         self.push_block();
+        // collect all the statements from this block
         for stmt in block.0 {
             self.consume_stmt(stmt)?;
         }
-        
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype)
     }
@@ -441,12 +440,25 @@ impl CodeGenerator {
 
         let old_block = std::rc::Rc::try_unwrap(block)
             .map_err(|_| PLIRErr::PoisonedTree)?;
-        let block = self.consume_tree_block(old_block, BlockBehavior::Function)?;
 
-        let param_tys = params.iter()
-            .map(|p| &p.ty)
-            .cloned()
-            .collect();
+        let mut param_tys = vec![];
+        let block = {
+            self.push_block();
+    
+            for plir::Param { ident, ty, .. } in params.iter() {
+                param_tys.push(ty.clone());
+                self.declare(ident, ty.clone());
+            }
+    
+            // collect all the statements from this block
+            for stmt in old_block.0 {
+                self.consume_stmt(stmt)?;
+            }
+    
+            let insert_block = self.pop_block().unwrap();
+            self.consume_insert_block(insert_block, BlockBehavior::Function)?
+        };
+
         self.declare(&ident, 
             plir::Type::Fun(param_tys, Box::new(ret.clone()))
         );
@@ -747,7 +759,7 @@ mod test {
                     print(a);
                 }
 
-                fun print(a: int) -> int {
+                fun print(a: float) {
                     a * 2;
                 }
             };
