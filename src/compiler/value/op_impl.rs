@@ -154,7 +154,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 // TODO: proper typing
                 let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logand_eager_result");
                 
-                Ok(GonValue::reconstruct(self.type_layout(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
             },
 
             // logical or
@@ -177,7 +177,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 // TODO: proper typing
                 let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logor_eager_result");
                 
-                Ok(GonValue::reconstruct(self.type_layout(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
             },
         }
     }
@@ -232,7 +232,7 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                     (&lhs.basic_value(), bb),
                 ]);
 
-                Ok(GonValue::reconstruct(lhs.type_layout(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))
             },
             op::Binary::LogOr  => {
                 let parent = c.parent_fn();
@@ -259,7 +259,7 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                     (&rhs.basic_value(), else_bb)
                 ]);
 
-                Ok(GonValue::reconstruct(lhs.type_layout(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))
             },
 
             // eager eval

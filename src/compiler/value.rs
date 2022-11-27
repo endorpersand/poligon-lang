@@ -21,7 +21,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Bool(_)  => plir::ty!(plir::Type::S_BOOL),
         }
     }
-    
+
     pub fn type_layout(&self) -> TypeLayout {
         match self {
             GonValue::Float(_) => TypeLayout::Float,
@@ -48,12 +48,13 @@ impl<'ctx> GonValue<'ctx> {
         }
     }
 
-    pub fn reconstruct(t: TypeLayout, v: BasicValueEnum<'ctx>) -> Self {
-        match t {
-            TypeLayout::Float => Self::Float(v.into_float_value()),
-            TypeLayout::Int   => Self::Int(v.into_int_value()),
-            TypeLayout::Bool  => Self::Bool(v.into_int_value()),
-            TypeLayout::Unit  => todo!("construct a value out of Unit"),
+    pub fn reconstruct(t: &plir::Type, v: BasicValueEnum<'ctx>) -> Self {
+        match t.as_ref() {
+            plir::TypeRef::Prim(plir::Type::S_FLOAT) => Self::Float(v.into_float_value()),
+            plir::TypeRef::Prim(plir::Type::S_INT)   => Self::Int(v.into_int_value()),
+            plir::TypeRef::Prim(plir::Type::S_BOOL)  => Self::Bool(v.into_int_value()),
+            // TODO: not panic
+            _ => panic!("Cannot reconstruct value from type")
         }
     }
 }

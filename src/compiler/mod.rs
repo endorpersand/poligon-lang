@@ -20,8 +20,7 @@ pub struct Compiler<'ctx> {
     builder: Builder<'ctx>,
     module: Module<'ctx>,
 
-    vars: HashMap<String, (TypeLayout, PointerValue<'ctx>)>,
-    fn_ret: HashMap<String, TypeLayout>
+    vars: HashMap<String, PointerValue<'ctx>>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -30,8 +29,7 @@ impl<'ctx> Compiler<'ctx> {
             ctx,
             builder: ctx.create_builder(),
             module: ctx.create_module("eval"),
-            vars: HashMap::new(),
-            fn_ret: HashMap::new()
+            vars: HashMap::new()
         }
     }
 
@@ -61,7 +59,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Create an alloca instruction in the entry block of
     /// the function.  This is used for mutable variables etc.
-    fn create_entry_block_alloca(&mut self, ident: &str, ty: TypeLayout) -> PointerValue<'ctx> {
+    fn create_entry_block_alloca(&mut self, ident: &str, layout: TypeLayout) -> PointerValue<'ctx> {
         let builder = self.ctx.create_builder();
 
         let fun_bb = self.parent_fn().get_first_basic_block().expect("Expected function to have block");
@@ -72,8 +70,8 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         // create alloca
-        let alloca = builder.build_alloca(ty.basic_type(self), ident);
-        self.vars.insert(String::from(ident), (ty, alloca));
+        let alloca = builder.build_alloca(layout.basic_type(self), ident);
+        self.vars.insert(String::from(ident), alloca);
         alloca
     }
 
@@ -81,7 +79,7 @@ impl<'ctx> Compiler<'ctx> {
     fn store_val(&mut self, ident: &str, val: GonValue<'ctx>) -> Option<PointerValue<'ctx>>
     {
         self.vars.get(ident)
-            .map(|&(_, alloca)| {
+            .map(|&alloca| {
                 self.builder.build_store(alloca, val.basic_value());
                 alloca
             })
@@ -96,9 +94,9 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    fn get_val(&mut self, ident: &str) -> IRResult<GonValue<'ctx>> {
+    fn get_val(&mut self, ident: &str, ty: &plir::Type) -> IRResult<GonValue<'ctx>> {
         match self.vars.get(ident) {
-            Some(&(ty, ptr)) => {
+            Some(&ptr) => {
                 let val = self.builder.build_load(ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
@@ -220,10 +218,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
-        let expr_layout = TypeLayout::of(expr_ty).expect("Expected concrete type");
+        let expr_layout = TypeLayout::of(expr_ty)
+            .ok_or_else(|| IRErr::UnresolvedType(expr_ty.clone()))?;
 
         match expr {
-            plir::ExprType::Ident(ident) => compiler.get_val(ident),
+            plir::ExprType::Ident(ident) => compiler.get_val(ident, expr_ty),
             plir::ExprType::Block(block) => {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
@@ -366,7 +365,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let phi = compiler.builder.build_phi(expr_layout.basic_type(compiler), "if_result");
                 add_incoming_gv(phi, &incoming);
                 
-                Ok(GonValue::reconstruct(expr_layout, phi.as_basic_value()))
+                Ok(GonValue::reconstruct(expr_ty, phi.as_basic_value()))
             },
             plir::ExprType::While { condition, block } => {
                 let bb = compiler.get_insert_block();
@@ -397,34 +396,32 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             },
             plir::ExprType::For { ident, iterator, block } => todo!(),
             plir::ExprType::Call { funct, params } => {
-                if let plir::ExprType::Ident(ident) = &funct.expr {
-                    match compiler.module.get_function(ident) {
-                        Some(fun) => {
-                            let fun_params = fun.count_params() as usize;
-                            let expr_params = params.len();
-                            if fun_params == expr_params {
-                                let resolved_params: Vec<_> = params.iter()
-                                    .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value().into()))
-                                    .collect::<Result<_, _>>()?;
-
-                                let call = compiler.builder.build_call(fun, &resolved_params, "call");
-                                match call.try_as_basic_value().left() {
-                                    Some(basic) => {
-                                        let ret = compiler.fn_ret.get(ident)
-                                            .ok_or(IRErr::CallNoType)?;
-                                        
-                                        Ok(GonValue::reconstruct(*ret, basic))
-                                    },
-                                    None => Err(IRErr::CallWasInstruction),
-                                }
-                            } else {
-                                Err(IRErr::WrongArity(fun_params, expr_params))
-                            }
-                        },
-                        None => Err(IRErr::UndefinedFunction(ident.clone())),
-                    }
+                let fun = if let plir::ExprType::Ident(ident) = &funct.expr {
+                    compiler.module.get_function(ident)
+                        .ok_or_else(|| IRErr::UndefinedFunction(ident.clone()))?
                 } else {
                     todo!()
+                };
+
+                let fun_ret = match &funct.ty {
+                    plir::Type::Fun(_, ret) => &**ret,
+                    _ => unreachable!()
+                };
+                
+                let fun_params = fun.count_params() as usize;
+                let expr_params = params.len();
+                if fun_params == expr_params {
+                    let resolved_params: Vec<_> = params.iter()
+                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value().into()))
+                        .collect::<Result<_, _>>()?;
+
+                    let call = compiler.builder.build_call(fun, &resolved_params, "call");
+                    match call.try_as_basic_value().left() {
+                        Some(basic) => Ok(GonValue::reconstruct(fun_ret, basic)),
+                        None => Err(IRErr::CallWasInstruction),
+                    }
+                } else {
+                    Err(IRErr::WrongArity(fun_params, expr_params))
                 }
             },
             plir::ExprType::Index(_) => todo!(),
@@ -457,26 +454,24 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         let plir::FunDecl { ident, params, ret, block } = self;
 
         // Function signature
-        let arg_gty: Vec<_> = params.iter()
+        let arg_plir_tys: Vec<_> = params.iter()
             .map(|p| &p.ty)
-            .map(|ty| {
-                TypeLayout::of(ty)
-                    .ok_or_else(|| IRErr::UnresolvedType(ty.clone()))
+            .collect();
+        
+        let arg_llvm_tys: Vec<_> = arg_plir_tys.iter()
+            .map(|&ty| {
+                let layout = TypeLayout::of(ty)
+                    .ok_or_else(|| IRErr::UnresolvedType(ty.clone()))?;
+                Ok(layout.basic_type(compiler).into())
             })
             .collect::<Result<_, _>>()?;
-        
-        let arg_types: Vec<_> = arg_gty.iter()
-            .map(|ty| ty.basic_type(compiler).into())
-            .collect();
 
-        let ret_type = TypeLayout::of(ret)
+        let ret_llvm_ty = TypeLayout::of(ret)
             .ok_or_else(|| IRErr::UnresolvedType(ret.clone()))?;
 
-        let fun_type = ret_type.fn_type(compiler, &arg_types, false);
-        // HACK
-        compiler.fn_ret.insert(String::from(ident), ret_type);
+        let fun_llvm_ty = ret_llvm_ty.fn_type(compiler, &arg_llvm_tys, false);
 
-        let fun = compiler.module.add_function(ident, fun_type, None);
+        let fun = compiler.module.add_function(ident, fun_llvm_ty, None);
 
         // set arguments names
         for (param, arg) in iter::zip(params, fun.get_param_iter()) {
@@ -488,8 +483,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         compiler.builder.position_at_end(bb);
 
         // store params
-        for (param, (val, gty)) in iter::zip(params, iter::zip(fun.get_param_iter(), arg_gty)) {
-            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(gty, val));
+        for (param, (val, plir_ty)) in iter::zip(params, iter::zip(fun.get_param_iter(), arg_plir_tys)) {
+            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(plir_ty, val));
         }
 
         let ret_value = block.write_ir(compiler)?
