@@ -72,7 +72,7 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         // create alloca
-        let alloca = builder.build_alloca(ty.basic_enum(self), ident);
+        let alloca = builder.build_alloca(ty.basic_type(self), ident);
         self.vars.insert(String::from(ident), (ty, alloca));
         alloca
     }
@@ -82,7 +82,7 @@ impl<'ctx> Compiler<'ctx> {
     {
         self.vars.get(ident)
             .map(|&(_, alloca)| {
-                self.builder.build_store(alloca, val.basic_enum());
+                self.builder.build_store(alloca, val.basic_value());
                 alloca
             })
     }
@@ -90,9 +90,9 @@ impl<'ctx> Compiler<'ctx> {
     /// Create an alloca instruction at the top and also store the value at the current insert point
     fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> PointerValue<'ctx>
     {
-        let alloca = self.create_entry_block_alloca(ident, val.typed());
+        let alloca = self.create_entry_block_alloca(ident, val.type_layout());
 
-        self.builder.build_store(alloca, val.basic_enum());
+        self.builder.build_store(alloca, val.basic_value());
         alloca
     }
 
@@ -124,7 +124,7 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
 
 fn add_incoming_gv<'a, 'ctx>(phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
     let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
-        .map(|(a, b)| (a.basic_enum(), *b))
+        .map(|(a, b)| (a.basic_value(), *b))
         .unzip();
 
     let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
@@ -195,7 +195,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 match me {
                     Some(expr) => {
                         let e = expr.write_ir(compiler)?;
-                        compiler.builder.build_return(Some(&e.basic_enum()))
+                        compiler.builder.build_return(Some(&e.basic_value()))
                     }
                     _ => compiler.builder.build_return(None)
                 };
@@ -361,8 +361,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.position_at_end(merge_bb);
                 // TODO type properly
 
-                let gty = incoming.first().unwrap().0.typed();
-                let phi = compiler.builder.build_phi(gty.basic_enum(compiler), "if_result");
+                let gty = incoming.first().unwrap().0.type_layout();
+                let phi = compiler.builder.build_phi(gty.basic_type(compiler), "if_result");
                 add_incoming_gv(phi, &incoming);
                 
                 Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
@@ -403,7 +403,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                             let expr_params = params.len();
                             if fun_params == expr_params {
                                 let resolved_params: Vec<_> = params.iter()
-                                    .map(|p| p.write_ir(compiler).map(|gv| gv.basic_enum().into()))
+                                    .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value().into()))
                                     .collect::<Result<_, _>>()?;
 
                                 let call = compiler.builder.build_call(fun, &resolved_params, "call");
@@ -459,16 +459,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         let arg_gty: Vec<_> = params.iter()
             .map(|p| &p.ty)
             .map(|ty| {
-                TypeLayout::lookup(ty)
+                TypeLayout::of(ty)
                     .ok_or_else(|| IRErr::UnresolvedType(ty.clone()))
             })
             .collect::<Result<_, _>>()?;
         
         let arg_types: Vec<_> = arg_gty.iter()
-            .map(|ty| ty.basic_enum(compiler).into())
+            .map(|ty| ty.basic_type(compiler).into())
             .collect();
 
-        let ret_type = TypeLayout::lookup(ret)
+        let ret_type = TypeLayout::of(ret)
             .ok_or_else(|| IRErr::UnresolvedType(ret.clone()))?;
 
         let fun_type = ret_type.fn_type(compiler, &arg_types, false);
@@ -492,7 +492,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         }
 
         let ret_value = block.write_ir(compiler)?
-            .map(GonValue::basic_enum);
+            .map(GonValue::basic_value);
         // write the last value in block as return
         compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
         

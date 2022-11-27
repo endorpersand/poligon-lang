@@ -76,7 +76,7 @@ impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
             op => match self {
                 GonValue::Float(v) => match v.unary_internal(op, c) {
                     Ok(f) => Ok(GonValue::Float(f)),
-                    Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(*op, self.typed())),
+                    Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(*op, self.type_layout())),
                 },
                 GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
                 GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate bool int
@@ -93,7 +93,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 match NumericArgs::new(c, self, right) {
                     NumericArgs::Float(f1, f2) => match f1.binary_internal(op, f2, c) {
                         Ok(t) => Ok(GonValue::Float(t)),
-                        Err(IOpErr::WrongType) => Err(IRErr::CannotBinary(*op, self.typed(), right.typed())),
+                        Err(IOpErr::WrongType) => Err(IRErr::CannotBinary(*op, self.type_layout(), right.type_layout())),
                     },
                     NumericArgs::Int(i1, i2) => {
                         Ok(GonValue::Int(i1.binary_internal(op, i2, c)))
@@ -111,7 +111,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
             | op::Binary::Shl
             | op::Binary::Shr
             => num_args_else!{
-                NumericArgs::Other(o1, o2) => Err(IRErr::CannotBinary(*op, o1.typed(), o2.typed()))
+                NumericArgs::Other(o1, o2) => Err(IRErr::CannotBinary(*op, o1.type_layout(), o2.type_layout()))
             },
 
             // numeric mul, collection repeat
@@ -152,9 +152,9 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
 
                 c.builder.position_at_end(merge_bb);
                 // TODO: proper typing
-                let phi = c.builder.build_phi(self.typed().basic_enum(c), "logand_eager_result");
+                let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logand_eager_result");
                 
-                Ok(GonValue::reconstruct(self.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(self.type_layout(), phi.as_basic_value()))
             },
 
             // logical or
@@ -175,9 +175,9 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
 
                 c.builder.position_at_end(merge_bb);
                 // TODO: proper typing
-                let phi = c.builder.build_phi(self.typed().basic_enum(c), "logor_eager_result");
+                let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logor_eager_result");
                 
-                Ok(GonValue::reconstruct(self.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(self.type_layout(), phi.as_basic_value()))
             },
         }
     }
@@ -224,15 +224,15 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                 then_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(lhs.typed().basic_enum(c), "logand_result"); // TODO, properly type
+                let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logand_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&rhs.basic_enum(), then_bb),
+                    (&rhs.basic_value(), then_bb),
                     // if LHS was false
-                    (&lhs.basic_enum(), bb),
+                    (&lhs.basic_value(), bb),
                 ]);
 
-                Ok(GonValue::reconstruct(lhs.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(lhs.type_layout(), phi.as_basic_value()))
             },
             op::Binary::LogOr  => {
                 let parent = c.parent_fn();
@@ -251,15 +251,15 @@ impl<'ctx> Binary<'ctx> for &plir::Expr {
                 else_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(lhs.typed().basic_enum(c), "logor_result"); // TODO, properly type
+                let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logor_result"); // TODO, properly type
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&lhs.basic_enum(), bb),
+                    (&lhs.basic_value(), bb),
                     // if LHS was false
-                    (&rhs.basic_enum(), else_bb)
+                    (&rhs.basic_value(), else_bb)
                 ]);
 
-                Ok(GonValue::reconstruct(lhs.typed(), phi.as_basic_value()))
+                Ok(GonValue::reconstruct(lhs.type_layout(), phi.as_basic_value()))
             },
 
             // eager eval

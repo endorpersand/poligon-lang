@@ -14,7 +14,7 @@ pub enum GonValue<'ctx> {
 }
 
 impl<'ctx> GonValue<'ctx> {
-    pub fn typed(&self) -> TypeLayout {
+    pub fn type_layout(&self) -> TypeLayout {
         match self {
             GonValue::Float(_) => TypeLayout::Float,
             GonValue::Int(_)   => TypeLayout::Int,
@@ -32,7 +32,7 @@ impl<'ctx> GonValue<'ctx> {
         Self::Float(c.ctx.f64_type().const_float(f))
     }
 
-    pub fn basic_enum(self) -> BasicValueEnum<'ctx> {
+    pub fn basic_value(self) -> BasicValueEnum<'ctx> {
         match self {
             GonValue::Float(f) => f.as_basic_value_enum(),
             GonValue::Int(i)   => i.as_basic_value_enum(),
@@ -56,7 +56,7 @@ pub enum TypeLayout {
 }
 
 impl TypeLayout {
-    pub fn lookup(ty: &plir::Type) -> Option<Self> {
+    pub fn of(ty: &plir::Type) -> Option<Self> {
         match ty {
             plir::Type::Prim(prim) => match prim.as_str() {
                 plir::Type::S_FLOAT => Some(TypeLayout::Float),
@@ -71,7 +71,7 @@ impl TypeLayout {
         }
     }
 
-    pub fn basic_enum<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
+    pub fn basic_type<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
         match self {
             TypeLayout::Float => c.ctx.f64_type().into(),
             TypeLayout::Int   => c.ctx.i64_type().into(),
