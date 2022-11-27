@@ -421,7 +421,7 @@ impl CodeGenerator {
     fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<()> {
         let tree::FunDecl { ident, params, ret, block } = decl;
 
-        let params: Vec<_> = params.into_iter()
+        let (params, param_tys): (Vec<_>, Vec<_>) = params.into_iter()
             .map(|p| {
                 let tree::Param { rt, mt, ident, ty } = p;
                 let ty = ty.map_or(
@@ -431,22 +431,29 @@ impl CodeGenerator {
 
                 plir::Param { rt, mt, ident, ty }
             })
-            .collect();
+            .map(|p| {
+                let ty = p.ty.clone();
+                (p, ty)
+            })
+            .unzip();
         
-        let ret = ret.map_or(
+        let ret_ty = ret.map_or(
             plir::ty!(plir::Type::S_VOID),
             plir::Type::from
+        );
+
+        // declare function before parsing block
+        self.declare(&ident, 
+            plir::Type::Fun(param_tys, Box::new(ret_ty.clone()))
         );
 
         let old_block = std::rc::Rc::try_unwrap(block)
             .map_err(|_| PLIRErr::PoisonedTree)?;
 
-        let mut param_tys = vec![];
         let block = {
             self.push_block();
     
             for plir::Param { ident, ty, .. } in params.iter() {
-                param_tys.push(ty.clone());
                 self.declare(ident, ty.clone());
             }
     
@@ -459,12 +466,8 @@ impl CodeGenerator {
             self.consume_insert_block(insert_block, BlockBehavior::Function)?
         };
 
-        self.declare(&ident, 
-            plir::Type::Fun(param_tys, Box::new(ret.clone()))
-        );
-
-        // TODO, type check block
-        let fun_decl = plir::FunDecl { ident, params, ret, block };
+        // TODO: type check block
+        let fun_decl = plir::FunDecl { ident, params, ret: ret_ty, block };
         self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl));
         Ok(())
     }

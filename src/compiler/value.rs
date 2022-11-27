@@ -72,11 +72,9 @@ impl TypeLayout {
                 plir::Type::S_INT   => Some(TypeLayout::Int),
                 plir::Type::S_BOOL  => Some(TypeLayout::Bool),
                 plir::Type::S_VOID  => Some(TypeLayout::Unit),
-                _ => todo!()
+                _ => todo!("type layout of {ty}")
             },
-            plir::Type::Generic(_, _) => todo!(),
-            plir::Type::Tuple(_) => todo!(),
-            plir::Type::Fun(_, _) => todo!(),
+            _ => todo!("type layout of {ty}")
         }
     }
 
