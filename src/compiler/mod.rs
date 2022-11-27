@@ -219,7 +219,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
     type Return = IRResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let plir::Expr { ty, expr } = self;
+        let plir::Expr { ty: expr_ty, expr } = self;
+        let expr_layout = TypeLayout::of(expr_ty).expect("Expected concrete type");
+
         match expr {
             plir::ExprType::Ident(ident) => compiler.get_val(ident),
             plir::ExprType::Block(block) => {
@@ -361,11 +363,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.position_at_end(merge_bb);
                 // TODO type properly
 
-                let gty = incoming.first().unwrap().0.type_layout();
-                let phi = compiler.builder.build_phi(gty.basic_type(compiler), "if_result");
+                let phi = compiler.builder.build_phi(expr_layout.basic_type(compiler), "if_result");
                 add_incoming_gv(phi, &incoming);
                 
-                Ok(GonValue::reconstruct(gty, phi.as_basic_value()))
+                Ok(GonValue::reconstruct(expr_layout, phi.as_basic_value()))
             },
             plir::ExprType::While { condition, block } => {
                 let bb = compiler.get_insert_block();

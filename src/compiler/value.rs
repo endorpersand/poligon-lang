@@ -14,6 +14,14 @@ pub enum GonValue<'ctx> {
 }
 
 impl<'ctx> GonValue<'ctx> {
+    pub fn plir_type(&self) -> plir::Type {
+        match self {
+            GonValue::Float(_) => plir::ty!(plir::Type::S_FLOAT),
+            GonValue::Int(_)   => plir::ty!(plir::Type::S_INT),
+            GonValue::Bool(_)  => plir::ty!(plir::Type::S_BOOL),
+        }
+    }
+    
     pub fn type_layout(&self) -> TypeLayout {
         match self {
             GonValue::Float(_) => TypeLayout::Float,

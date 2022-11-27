@@ -23,14 +23,14 @@ pub enum Type {
     Fun(Vec<Type>, Box<Type>)
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum TypeRef<'a> {
+pub(crate) enum TypeRef<'a> {
     Prim(&'a str),
     Generic(&'a str, &'a [Type]),
     Tuple(&'a [Type]),
     Fun(&'a [Type], &'a Type)
 }
 impl TypeRef<'_> {
-    fn cloned(self) -> Type {
+    pub(crate) fn to_owned(self) -> Type {
         match self {
             TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
             TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
@@ -58,7 +58,7 @@ impl Type {
     pub(crate) const S_NEVER: &'static str = "never";
     pub(crate) const S_UNK: &'static str   = "unk";
 
-    fn referenced(&self) -> TypeRef {
+    pub(crate) fn as_ref(&self) -> TypeRef {
         match self {
             Type::Prim(ident) => TypeRef::Prim(ident),
             Type::Generic(ident, params) => TypeRef::Generic(ident, params),
@@ -68,14 +68,14 @@ impl Type {
     }
 
     pub fn is_never(&self) -> bool {
-        matches!(self.referenced(), TypeRef::Prim(Type::S_NEVER))
+        matches!(self.as_ref(), TypeRef::Prim(Type::S_NEVER))
     }
     pub fn is_numeric(&self) -> bool {
-        matches!(self.referenced(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
+        matches!(self.as_ref(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
     }
     #[inline]
     fn is_int(&self) -> bool {
-        matches!(self.referenced(), TypeRef::Prim(Type::S_INT))
+        matches!(self.as_ref(), TypeRef::Prim(Type::S_INT))
     }
 
     fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
@@ -104,7 +104,7 @@ impl Type {
 
     // technically index but whatever
     pub fn split(&self, sp: Split) -> Result<Type, OpErr> {
-        match self.referenced() {
+        match self.as_ref() {
             TypeRef::Prim(Type::S_STR) => match sp {
                 Split::Left(_)
                 | Split::Right(_) 
@@ -154,12 +154,12 @@ impl Type {
     pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Result<Type, OpErr> {
         #[inline]
         fn bin_op(ty: TypeRef, left: &Type, right: &Type) -> Option<Type> {
-            (left.referenced() == ty && right.referenced() == ty).then(|| ty.cloned())
+            (left.as_ref() == ty && right.as_ref() == ty).then(|| ty.to_owned())
         }
 
         macro_rules! numeric_op_else {
             ($left:expr, $right:expr, $(($a:pat, $b:pat) => $bl:expr),+) => {
-                match (left.referenced(), right.referenced()) {
+                match (left.as_ref(), right.as_ref()) {
                     (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_FLOAT)) => Ok(ty!(Type::S_FLOAT)),
                     (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT))   => Ok(ty!(Type::S_FLOAT)),
                     (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT))   => Ok(ty!(Type::S_FLOAT)),
@@ -202,7 +202,7 @@ impl Type {
     pub fn resolve_index_type(expr: &Type, idx: &Expr) -> Result<Type, OpErr> {
         let idx_ty = &idx.ty;
 
-        match expr.referenced() {
+        match expr.as_ref() {
             TypeRef::Prim(Type::S_STR) => match idx_ty.is_int() {
                 true  => Ok(ty!(Type::S_CHAR)),
                 false => Err(OpErr::CannotIndexWith(expr.clone(), idx_ty.clone())),
