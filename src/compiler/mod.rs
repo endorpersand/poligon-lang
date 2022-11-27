@@ -8,7 +8,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
 use crate::tree::{op, Literal};
 
@@ -138,7 +138,6 @@ pub enum IRErr {
     UndefinedFunction(String),
     WrongArity(usize /* expected */, usize /* got */),
     InvalidFunction,
-    BlockNoValue, // TODO: remove
     UnresolvedType(plir::Type),
     CannotUnary(op::Unary, TypeLayout),
     CannotBinary(op::Binary, TypeLayout, TypeLayout),
@@ -349,23 +348,22 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 }
 
                 // handle last
-                match (prev_else, last) {
-                    (Some(mut else_bb), Some(block)) => {
-                        // build else block
-                        compiler.builder.position_at_end(else_bb);
-                        let else_result = block.write_ir(compiler)?;
-                        compiler.builder.build_unconditional_branch(merge_bb);
-                        //update else block
-                        else_bb = compiler.builder.get_insert_block().unwrap();
+                let mut else_bb = prev_else.unwrap();
 
-                        incoming.push((else_result, else_bb));
-                    },
-                    (None, Some(_)) => unreachable!(),
-                    (_, None)       => todo!("Support if with no else"),
-                }
+                // build else block
+                compiler.builder.position_at_end(else_bb);
+                let else_result = match last {
+                    Some(block) => block.write_ir(compiler)?,
+                    None => GonValue::Unit,
+                };
+                compiler.builder.build_unconditional_branch(merge_bb);
+
+                //update else block
+                else_bb = compiler.builder.get_insert_block().unwrap();
+
+                incoming.push((else_result, else_bb));
 
                 compiler.builder.position_at_end(merge_bb);
-                // TODO type properly
 
                 let phi = compiler.builder.build_phi(expr_layout.basic_type(compiler), "if_result");
                 compiler.add_incoming_gv(phi, &incoming);
@@ -555,7 +553,13 @@ mod tests {
     }
 
     #[test]
-    fn if_else_compile_test() {
+    fn if_else_void_test() {
+        assert_fun_pass("fun main(a: int) {
+            if a {
+                main(a);
+            };
+        }");
+    
         assert_fun_pass("fun main(a: int) {
             if a {
                 main(a);
@@ -563,7 +567,10 @@ mod tests {
                 main(a);
             };
         }");
+    }
 
+    #[test]
+    fn if_else_chain_test() {
         assert_fun_pass("fun main(a: float) -> float {
             if a {
                 main(0.); 
