@@ -570,6 +570,20 @@ mod tests {
     }
 
     #[test]
+    fn if_with_fast_return() {
+        // fast return
+        assert_fun_pass("fun main(a: int) -> float {
+            let b = if a {
+                return 2.;
+            } else {
+                2. + 15.;
+            };
+
+            b;
+        }");
+    }
+
+    #[test]
     fn if_else_chain_test() {
         assert_fun_pass("fun main(a: float) -> float {
             if a {
@@ -622,7 +636,7 @@ mod tests {
 
     #[test]
     fn while_ir() {
-        assert_fun_pass("fun main(a) -> float {
+        assert_fun_pass("fun main(a: float) -> float {
             while a {
                 main(a);
             };
@@ -633,37 +647,37 @@ mod tests {
 
     #[test]
     fn var_test() {
-        assert_fun_pass("fun main(a) -> float {
+        assert_fun_pass("fun main(a: float) -> float {
             a = 2.;
         }");
 
-        assert_fun_pass("fun main(a) {
+        assert_fun_pass("fun main() {
             let b = 2.;
         }");
     }
 
     #[test]
     fn log_and_log_or_test() {
-        assert_fun_pass("fun main(a, b) -> float {
+        assert_fun_pass("fun main(a: bool, b: bool) -> bool {
             a && b;
         }");
         
-        assert_fun_pass("fun main(a, b) -> float {
+        assert_fun_pass("fun main(a: bool, b: bool) -> bool {
             a || b;
         }");
     }
 
     #[test]
     fn cmp_test() {
-        assert_fun_pass("fun main(a, b) -> bool {
+        assert_fun_pass("fun main(a: int, b: int) -> bool {
             a < b;
         }");
         
-        assert_fun_pass("fun main(a, b, c) -> bool {
+        assert_fun_pass("fun main(a: int, b: int, c: int) -> bool {
             a < b < c;
         }");
 
-        assert_fun_pass("fun main(a, b, c, d, e, f, g) -> bool {
+        assert_fun_pass("fun main(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> bool {
             a < b < c < d == e < f > g;
         }");
     }
@@ -693,17 +707,6 @@ mod tests {
             1. + 2. + 3.;
             4. + 5. + 6.;
             7. + 8. + 9.;
-        }");
-
-        // fast return
-        assert_fun_pass("fun main(a: int) {
-            let b = if a {
-                return 2.;
-            } else {
-                2. + 15.;
-            };
-
-            b;
         }");
     }
 
