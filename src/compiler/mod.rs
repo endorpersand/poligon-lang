@@ -683,8 +683,8 @@ mod tests {
             2. + 3.;
         }");
 
-        assert_fun_pass("fun double(a) -> float {
-            a * 2.;
+        assert_fun_pass("fun double(a: float) -> float {
+            a * 2;
         }");
     }
 
