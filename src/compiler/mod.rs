@@ -593,7 +593,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     type Return = IRResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let plir::FunDecl { ident, params, ret, block } = self;
+        let plir::FunDecl { sig: plir::FunSignature { ident, params, ret }, block } = self;
 
         // Function signature
         let arg_plir_tys: Vec<_> = params.iter()

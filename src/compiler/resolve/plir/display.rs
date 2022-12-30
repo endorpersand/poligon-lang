@@ -92,13 +92,19 @@ impl Display for Decl {
     }
 }
 
-impl Display for FunDecl {
+impl Display for FunSignature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let FunDecl { ident, params, ret, block } = self;
-        
+        let FunSignature { ident, params, ret } = self;
         write!(f, "fun {ident}(")?;
         fmt_list(f, params)?;
-        write!(f, ") -> {ret} {block}")
+        write!(f, ") -> {ret}")
+    }
+}
+
+impl Display for FunDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let FunDecl { sig, block } = self;
+        write!(f, "{sig} {block}")
     }
 }
 

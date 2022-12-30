@@ -523,37 +523,44 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
-    /// Consume a function declaration statement into the current insert block.
-    /// 
-    /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<bool> {
-        let tree::FunDecl { ident, params, ret, block } = decl;
-
-        let (params, param_tys): (Vec<_>, Vec<_>) = params.into_iter()
-            .map(|p| {
-                let tree::Param { rt, mt, ident, ty } = p;
-                let ty = ty.map_or(
-                    plir::ty!(plir::Type::S_UNK),
-                    plir::Type::from
-                );
-
-                plir::Param { rt, mt, ident, ty }
-            })
-            .map(|p| {
-                let ty = p.ty.clone();
-                (p, ty)
-            })
-            .unzip();
+    /// Consume a function signature and convert it into a PLIR function signature.
+    fn consume_fun_sig(&mut self, sig: tree::FunSignature) -> PLIRResult<plir::FunSignature> {
+        let tree::FunSignature { ident, params, ret } = sig;
         
-        let ret_ty = ret.map_or(
+        let (params, param_tys): (Vec<_>, Vec<_>) = params.into_iter()
+        .map(|p| {
+            let tree::Param { rt, mt, ident, ty } = p;
+            let ty = ty.map_or(
+                plir::ty!(plir::Type::S_UNK),
+                plir::Type::from
+            );
+
+            plir::Param { rt, mt, ident, ty }
+        })
+        .map(|p| {
+            let ty = p.ty.clone();
+            (p, ty)
+        })
+        .unzip();
+    
+        let ret = ret.map_or(
             plir::ty!(plir::Type::S_VOID),
             plir::Type::from
         );
 
         // declare function before parsing block
         self.declare(&ident, 
-            plir::Type::Fun(param_tys, Box::new(ret_ty.clone()))
+            plir::Type::Fun(param_tys, Box::new(ret.clone()))
         );
+
+        Ok(plir::FunSignature { ident, params, ret })
+    }
+    /// Consume a function declaration statement into the current insert block.
+    /// 
+    /// This function returns whether or not the insert block accepts any more statements.
+    fn consume_fun_decl(&mut self, decl: tree::FunDecl) -> PLIRResult<bool> {
+        let tree::FunDecl { sig, block } = decl;
+        let sig = self.consume_fun_sig(sig)?;
 
         let old_block = std::rc::Rc::try_unwrap(block)
             .map_err(|_| PLIRErr::PoisonedTree)?;
@@ -561,7 +568,7 @@ impl CodeGenerator {
         let block = {
             self.push_block();
     
-            for plir::Param { ident, ty, .. } in params.iter() {
+            for plir::Param { ident, ty, .. } in sig.params.iter() {
                 self.declare(ident, ty.clone());
             }
     
@@ -573,7 +580,7 @@ impl CodeGenerator {
         };
 
         // TODO: type check block
-        let fun_decl = plir::FunDecl { ident, params, ret: ret_ty, block };
+        let fun_decl = plir::FunDecl { sig, block };
         Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
     }
 

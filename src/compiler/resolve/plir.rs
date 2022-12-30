@@ -44,11 +44,15 @@ pub struct Param {
     pub ty: Type // Explicit type
 }
 
-#[derive(Debug, PartialEq)]
-pub struct FunDecl {
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunSignature {
     pub ident: String,
     pub params: Vec<Param>,
     pub ret: Type, // Explicit type
+}
+#[derive(Debug, PartialEq)]
+pub struct FunDecl {
+    pub sig: FunSignature,
     pub block: Block
 }
 

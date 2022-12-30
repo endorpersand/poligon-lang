@@ -541,7 +541,7 @@ impl TraverseRt for tree::Decl {
 
 impl TraverseRt for tree::FunDecl {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let tree::FunDecl { ident, params, ret, block } = self;
+        let tree::FunDecl { sig: tree::FunSignature { ident, params, ret }, block } = self;
         
         let mut param_types = vec![];
         let mut param_names = vec![];

@@ -498,9 +498,11 @@ impl Parser {
         let block = self.expect_block()?;
 
         Ok(tree::FunDecl {
-            ident,
-            params,
-            ret,
+            sig: tree::FunSignature {
+                ident,
+                params,
+                ret
+            },
             block: Rc::new(block)
         })
     }

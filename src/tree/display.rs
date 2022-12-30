@@ -121,19 +121,25 @@ impl Display for DeclUnit {
     }
 }
 
-impl Display for FunDecl {
+impl Display for FunSignature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let FunDecl { ident, params, ret, block } = self;
-        
+        let FunSignature { ident, params, ret } = self;
+
         write!(f, "fun {ident}(")?;
         fmt_list(f, params)?;
         write!(f, ") ")?;
 
         if let Some(retty) = ret {
-            write!(f, "-> {retty} ")?;
-        }
+            write!(f, "-> {retty}")?;
+        };
 
-        write!(f, "{block}")
+        Ok(())
+    }
+}
+impl Display for FunDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let FunDecl { sig, block } = self;
+        write!(f, "{sig} {block}")
     }
 }
 

@@ -42,11 +42,15 @@ pub enum MutType { Mut, Immut }
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type(pub String, pub Vec<Type>);
 
-#[derive(Debug, PartialEq)]
-pub struct FunDecl {
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunSignature {
     pub ident: String,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
+}
+#[derive(Debug, PartialEq)]
+pub struct FunDecl {
+    pub sig: FunSignature,
     pub block: Rc<Block>
 }
 

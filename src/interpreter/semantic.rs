@@ -347,10 +347,10 @@ impl TraverseResolve for tree::Decl {
 
 impl TraverseResolve for tree::FunDecl {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        map.declare(&self.ident);
+        map.declare(&self.sig.ident);
 
         map.typed_scope(BlockType::Function, |map| {
-            for p in &self.params {
+            for p in &self.sig.params {
                 map.declare(&p.ident);
             }
     
