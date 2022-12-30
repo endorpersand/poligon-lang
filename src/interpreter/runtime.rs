@@ -579,7 +579,7 @@ impl TraverseRt for tree::FunDecl {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::Interpreter;
 
     #[test]

@@ -411,7 +411,7 @@ impl TraverseResolve for tree::DeclUnit {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashMap;
 
     use crate::interpreter::semantic::ResolveState;

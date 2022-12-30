@@ -313,7 +313,7 @@ impl Display for Index {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::Interpreter;
 
     #[test]

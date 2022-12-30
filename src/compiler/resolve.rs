@@ -814,7 +814,7 @@ impl CodeGenerator {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{lexer, parser};
 
     use super::*;
