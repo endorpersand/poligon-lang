@@ -25,6 +25,7 @@ pub enum Stmt {
     Continue,
     Exit(Option<Expr>),
     FunDecl(FunDecl),
+    ExternFunDecl(FunSignature),
     Expr(Expr)
 }
 

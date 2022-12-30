@@ -366,6 +366,10 @@ impl CodeGenerator {
                 Ok(self.peek_block().push_cont())
             },
             tree::Stmt::FunDecl(f) => self.consume_fun_decl(f),
+            tree::Stmt::ExternFunDecl(fs) => {
+                let fs = self.consume_fun_sig(fs)?;
+                Ok(self.peek_block().push_stmt(plir::Stmt::ExternFunDecl(fs)))
+            },
             tree::Stmt::Expr(e) => {
                 let e = self.consume_expr(e)?;
                 Ok(self.peek_block().push_stmt(plir::Stmt::Expr(e)))

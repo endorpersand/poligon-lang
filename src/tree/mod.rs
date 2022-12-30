@@ -11,12 +11,31 @@ pub struct Block(pub Vec<Stmt>);
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
-    Decl(Decl),           // declaration
-    Return(Option<Expr>), // return x;
-    Break,                // break;
-    Continue,             // continue;
-    FunDecl(FunDecl),     // function declaration
-    Expr(Expr)            // any expression
+    /// A variable declaration with a specified right-hand side
+    Decl(Decl),
+    
+    /// A return statement that tells the program to exit the function body
+    /// 
+    /// This return statement can return nothing (void), 
+    /// or return a value from a given expression
+    Return(Option<Expr>),
+    
+    /// `break`
+    Break,
+
+    /// `continue`
+    Continue,
+    
+    /// A function declaration with a specified body
+    FunDecl(FunDecl),
+
+    /// A function declaration without a specified body
+    /// 
+    /// In the compiler, this is used to call functions from libc
+    ExternFunDecl(FunSignature),
+
+    /// An expression
+    Expr(Expr)
 }
 
 #[derive(Debug, PartialEq)]

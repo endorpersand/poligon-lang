@@ -170,7 +170,8 @@ define_keywords! {
     Step:     "step",    // 1..2 step 4
     In:       "in",      // for x in y
     True:     "true",
-    False:    "false"
+    False:    "false",
+    Extern:   "extern"
 }
 
 define_operators_and_delimiters! {
@@ -246,7 +247,8 @@ macro_rules! token {
     (in)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::In)       };
     (true)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::True)     };
     (false)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::False)    };
-
+    (extern)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extern)   };
+    
     (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
     (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
     (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };

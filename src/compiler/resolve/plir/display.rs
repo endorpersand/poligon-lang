@@ -70,6 +70,7 @@ impl Display for Stmt {
                 None => write!(f, "exit"),
             },
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
+            Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
         }
     }

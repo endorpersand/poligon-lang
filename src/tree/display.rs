@@ -65,6 +65,7 @@ impl Display for Stmt {
             Stmt::Break => write!(f, "break"),
             Stmt::Continue => write!(f, "continue"),
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
+            Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
         }
     }

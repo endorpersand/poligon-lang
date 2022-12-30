@@ -340,6 +340,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 d.write_ir(compiler)?;
                 Ok(GonValue::Unit)
             },
+            plir::Stmt::ExternFunDecl(_) => todo!(),
             plir::Stmt::Expr(e) => {
                 e.write_ir(compiler)
             },

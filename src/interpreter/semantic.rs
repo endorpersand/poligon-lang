@@ -55,7 +55,8 @@ pub enum ResolveErr {
     CannotBreak,
     CannotContinue,
     CannotSpread,
-    CannotSpreadNone
+    CannotSpreadNone,
+    CompilerOnlyFeature
 }
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
@@ -67,6 +68,7 @@ impl From<ResolveErr> for runtime::RuntimeErr {
             ResolveErr::CannotContinue   => Self::CannotContinue,
             ResolveErr::CannotSpread     => Self::CannotSpread,
             ResolveErr::CannotSpreadNone => Self::CannotSpreadNone,
+            ResolveErr::CompilerOnlyFeature => Self::CompilerOnlyFeature,
         }
     }
 }
@@ -243,6 +245,7 @@ impl TraverseResolve for tree::Stmt {
                 _ => Err(ResolveErr::CannotContinue)
             },
             tree::Stmt::FunDecl(f) => f.traverse_rs(map),
+            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnlyFeature),
             tree::Stmt::Expr(e)   => e.traverse_rs(map),
         }
     }

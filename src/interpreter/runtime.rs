@@ -151,7 +151,8 @@ pub enum RuntimeErr {
     Todo(&'static str),
 
     AlreadyDeclared(String),
-    NotDeclared(String)
+    NotDeclared(String),
+    CompilerOnlyFeature
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -525,6 +526,7 @@ impl TraverseRt for tree::Stmt {
             tree::Stmt::Break     => Err(TermOp::Break),
             tree::Stmt::Continue  => Err(TermOp::Continue),
             tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
+            tree::Stmt::ExternFunDecl(_) => Err(RuntimeErr::CompilerOnlyFeature)?,
             tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
     }
