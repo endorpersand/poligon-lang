@@ -68,15 +68,6 @@ impl<'ctx> Compiler<'ctx> {
             .expect("No insert block found")
     }
 
-    fn update_block<F, T>(&mut self, bb: &mut BasicBlock<'ctx>, mut f: F) -> IRResult<T>
-        where F: FnMut(&mut BasicBlock<'ctx>, &mut Self) -> IRResult<T>
-    {
-        self.builder.position_at_end(*bb);
-        let t = f(bb, self)?;
-        *bb = self.builder.get_insert_block().unwrap();
-        Ok(t)
-    }
-
     /// Create an alloca instruction in the entry block of
     /// the function.  This is used for mutable variables etc.
     fn create_entry_block_alloca(&mut self, ident: &str, layout: TypeLayout) -> PointerValue<'ctx> {
@@ -158,6 +149,11 @@ impl<'ctx> Compiler<'ctx> {
             },
             None => Ok(GonValue::Unit), // {}
         }
+    }
+
+    fn branch_and_goto(&self, bb: BasicBlock<'ctx>) {
+        self.builder.build_unconditional_branch(bb);
+        self.builder.position_at_end(bb);
     }
 }
 
@@ -365,16 +361,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let exit_bb = compiler.ctx.append_basic_block(fun, "post_block");
 
                 compiler.builder.position_at_end(orig_bb);
-                compiler.builder.build_unconditional_branch(expr_bb);
 
-                let block = compiler.update_block(&mut expr_bb, |_, c| {
-                    c.write_block(block, |c, _| {
-                        c.builder.build_unconditional_branch(exit_bb);
-                    })
+                compiler.branch_and_goto(expr_bb);
+                let bval = compiler.write_block(block, |c, _| {
+                    c.builder.build_unconditional_branch(exit_bb);
                 })?;
 
                 compiler.builder.position_at_end(exit_bb);
-                Ok(block)
+                Ok(bval)
             },
             plir::ExprType::Literal(literal) => literal.write_ir(compiler),
             plir::ExprType::ListLiteral(_) => todo!(),
@@ -435,12 +429,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         // last block
                         let rval = last_rexpr.write_ir(compiler)?;
                         let result = compiler.apply_cmp(lval, last_cmp, rval)?;
-                        // go to post block
-                        compiler.builder.build_unconditional_branch(post_bb);
                         // add to phi
                         incoming.push((result, compiler.get_insert_block()));
 
-                        compiler.builder.position_at_end(post_bb);
+                        // close block and go to post
+                        compiler.branch_and_goto(post_bb);
+
                         let phi = compiler.builder.build_phi(compiler.ctx.bool_type(), "cmp_result");
                         add_incoming(phi, &incoming);
 
@@ -522,11 +516,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 // end BB by going into loop
                 compiler.builder.position_at_end(bb);
-                compiler.builder.build_unconditional_branch(cond_bb);
+                compiler.branch_and_goto(cond_bb);
 
                 // if cond is true, go into the loop. otherwise, exit
-                compiler.builder.position_at_end(cond_bb);
-                
                 let condval = condition.write_ir(compiler)?;
                 let cond = compiler.truth(condval);
                 compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);

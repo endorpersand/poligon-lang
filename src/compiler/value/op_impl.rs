@@ -142,19 +142,22 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 let merge_bb = c.ctx.append_basic_block(fun, "post_logand_eager");
 
                 let mut rhs_bb = c.ctx.append_basic_block(fun, "logand_eager_true");
-                c.update_block(&mut rhs_bb, |_, c| {
-                    c.builder.build_unconditional_branch(merge_bb);
-                    Ok(())
-                })?;
-                c.update_block(&mut bb, |_, c| {
-                    c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
-                    Ok(())
-                })?;
+                
+                c.builder.position_at_end(rhs_bb);
+                c.builder.build_unconditional_branch(merge_bb);
+                rhs_bb = c.builder.get_insert_block().unwrap();
+                
+                c.builder.position_at_end(bb);
+                c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
+                bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                // TODO: proper typing
+
                 let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logand_eager_result");
-                
+                phi.add_incoming(&[
+                    (&self.basic_value(c), bb),
+                    (&right.basic_value(c), rhs_bb),
+                ]);
                 Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
             },
 
@@ -165,19 +168,22 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 let merge_bb = c.ctx.append_basic_block(fun, "post_logor_eager");
 
                 let mut rhs_bb = c.ctx.append_basic_block(fun, "logor_eager_false");
-                c.update_block(&mut rhs_bb, |_, c| {
-                    c.builder.build_unconditional_branch(merge_bb);
-                    Ok(())
-                })?;
-                c.update_block(&mut bb, |_, c| {
-                    c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
-                    Ok(())
-                })?;
+
+                c.builder.position_at_end(rhs_bb);
+                c.builder.build_unconditional_branch(merge_bb);
+                rhs_bb = c.builder.get_insert_block().unwrap();
+                
+                c.builder.position_at_end(bb);
+                c.builder.build_conditional_branch(self.truth(c), merge_bb, rhs_bb);
+                bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                // TODO: proper typing
+
                 let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logor_eager_result");
-                
+                phi.add_incoming(&[
+                    (&self.basic_value(c), bb),
+                    (&right.basic_value(c), rhs_bb),
+                ]);
                 Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
             },
         }
