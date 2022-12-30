@@ -38,6 +38,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    #[allow(unused)]
     fn jit_compile<T>(&mut self, prog: plir::Program) -> IRResult<T> {
         let fun = self.compile(&prog)?;
         let fn_name = fun.get_name()
@@ -53,6 +54,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    #[allow(unused)]
     fn compile<T: TraverseIR<'ctx>>(&mut self, t: &T) -> T::Return {
         t.write_ir(self)
     }
@@ -310,7 +312,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
             plir::Stmt::Decl(d) => {
-                let plir::Decl { rt, mt, ident, ty, val } = d;
+                let plir::Decl { ident, val, .. } = d;
+                // TODO: support rt, mt, ty
 
                 let val = val.write_ir(compiler)?;
                 compiler.alloca_and_store(ident, val);
@@ -327,7 +330,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
 
                 Ok(GonValue::Unit)
             },
-            plir::Stmt::Exit(me) => {
+            plir::Stmt::Exit(_) => {
+                // Exits are resolved at the block level
                 Ok(GonValue::Unit)
             },
             plir::Stmt::Break => todo!(),
@@ -357,11 +361,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
                 let orig_bb = compiler.get_insert_block();
-                let mut expr_bb = compiler.ctx.append_basic_block(fun, "block");
+                let expr_bb = compiler.ctx.append_basic_block(fun, "block");
                 let exit_bb = compiler.ctx.append_basic_block(fun, "post_block");
 
                 compiler.builder.position_at_end(orig_bb);
-
                 compiler.branch_and_goto(expr_bb);
                 let bval = compiler.write_block(block, |c, _| {
                     c.builder.build_unconditional_branch(exit_bb);
@@ -444,7 +447,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     None => Ok(lval),
                 }
             },
-            plir::ExprType::Range { left, right, step } => todo!(),
+            plir::ExprType::Range { .. } => todo!(),
             plir::ExprType::If { conditionals, last } => {
                 let parent = compiler.parent_fn();
         
@@ -533,7 +536,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 Ok(GonValue::new_bool(compiler, true)) // TODO
 
             },
-            plir::ExprType::For { ident, iterator, block } => todo!(),
+            plir::ExprType::For { .. } => todo!(),
             plir::ExprType::Call { funct, params } => {
                 let fun = if let plir::ExprType::Ident(ident) = &funct.expr {
                     compiler.module.get_function(ident)

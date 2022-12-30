@@ -805,7 +805,7 @@ impl CodeGenerator {
         self.consume_expr(expr).map(Box::new)
     }
 
-    fn consume_path(&mut self, p: tree::Path) -> PLIRResult<(plir::Type, plir::Path)> {
+    fn consume_path(&mut self, _p: tree::Path) -> PLIRResult<(plir::Type, plir::Path)> {
         todo!()
     }
     fn consume_index(&mut self, idx: tree::Index) -> PLIRResult<(plir::Type, plir::Index)> {

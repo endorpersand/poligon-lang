@@ -60,6 +60,7 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
 
 impl<T> ScopeContext<'_, T> {
     /// Create a new ScopeContext.
+    #[allow(unused)]
     pub fn empty() -> Self {
         Self { 
             scope: HashMap::new(), 
