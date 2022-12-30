@@ -65,6 +65,10 @@ impl Display for Stmt {
             },
             Stmt::Break => write!(f, "break"),
             Stmt::Continue => write!(f, "continue"),
+            Stmt::Exit(me) => match me {
+                Some(e) => write!(f, "exit {e}"),
+                None => write!(f, "exit"),
+            },
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
             Stmt::Expr(e) => write!(f, "{e}"),
         }

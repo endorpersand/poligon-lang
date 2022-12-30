@@ -52,6 +52,13 @@ impl<'ctx> GonValue<'ctx> {
         }
     }
 
+    pub fn basic_value_or_void(self, c: &Compiler<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+        match self {
+            GonValue::Unit => None,
+            val => Some(val.basic_value(c))
+        }
+    }
+
     pub fn reconstruct(t: &plir::Type, v: BasicValueEnum<'ctx>) -> Self {
         match t.as_ref() {
             plir::TypeRef::Prim(plir::Type::S_FLOAT) => Self::Float(v.into_float_value()),

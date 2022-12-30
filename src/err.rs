@@ -228,10 +228,10 @@ impl<E: GonErr> FullGonErr<E> {
                 lines.extend(ptr_point(orig_txt, *p));
             },
             ErrPos::Points(pts) => {
-                let mut lmap = HashMap::new();
+                let mut lmap: HashMap<_, Vec<_>> = HashMap::new();
 
                 for (lno, cno) in pts {
-                    lmap.entry(*lno).or_insert(vec![]).push(*cno);
+                    lmap.entry(*lno).or_default().push(*cno);
                 }
 
                 let mut linemaps: Vec<_> = lmap.into_iter()

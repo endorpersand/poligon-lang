@@ -11,12 +11,19 @@ pub struct Program(pub Vec<Stmt>);
 #[derive(Debug, PartialEq)]
 pub struct Block(pub Type, pub Vec<Stmt>);
 
+impl Default for Block {
+    fn default() -> Self {
+        Self(ty!(Type::S_VOID), vec![Stmt::Exit(None)])
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
     Decl(Decl),
     Return(Option<Expr>),
     Break,
     Continue,
+    Exit(Option<Expr>),
     FunDecl(FunDecl),
     Expr(Expr)
 }

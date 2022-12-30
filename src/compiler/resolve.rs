@@ -106,7 +106,7 @@ enum BlockExitHandle {
 
     /// Propagate the exit to the upper loop.
     /// 
-    /// The second parameter is true if this is a conditional exit (it does not ALWAYS occur).
+    /// The second parameter is `true` if this is a conditional exit (it does not ALWAYS occur).
     Propagate(BlockExit, bool /* conditional? */),
 }
 
@@ -374,36 +374,41 @@ impl CodeGenerator {
     }
 
     fn consume_insert_block(&mut self, block: InsertBlock, btype: BlockBehavior) -> PLIRResult<plir::Block> {
-        let InsertBlock { block, exits, final_exit, vars: _ } = block;
+        let InsertBlock { mut block, exits, final_exit, vars: _ } = block;
         
-        // fill the conditional exit if necessary:
+        // fill the unconditional exit if necessary:
         let final_exit = final_exit.unwrap_or_else(|| {
-            let exit_ty = match block.last() {
-                Some(stmt) => match stmt {
-                    plir::Stmt::Decl(_)    => plir::ty!(plir::Type::S_VOID),
-                    plir::Stmt::FunDecl(_) => plir::ty!(plir::Type::S_VOID),
-                    plir::Stmt::Expr(e)    => e.ty.clone(),
+            // we need to add an explicit exit statement.
 
-                    plir::Stmt::Return(_)
-                    | plir::Stmt::Break
-                    | plir::Stmt::Continue
-                    => unreachable!("Statement should have emitted unconditional exit"),
-                },
-                None => plir::ty!(plir::Type::S_VOID),
+            // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
+            // otherwise just append an `exit` stmt.
+            let exit_expr = if let Some(plir::Stmt::Expr(_)) = block.last() {
+                if let plir::Stmt::Expr(e) = block.pop().unwrap() {
+                    Some(e)
+                } else {
+                    unreachable!()
+                }
+            } else {
+                None
             };
 
+            let exit_ty = match &exit_expr {
+                Some(e) => e.ty.clone(),
+                None => plir::ty!(plir::Type::S_VOID),
+            };
+            block.push(plir::Stmt::Exit(exit_expr));
             BlockExit::Exit(exit_ty)
         });
 
-        // resolve block's type
-        let mut branch_types = vec![];
+        // resolve block's types and handle the methods of exiting the block
+        let mut type_branches = vec![];
         for exit in exits {
             match btype.handle_exit(exit)? {
-                BlockExitHandle::Continue(ty) => branch_types.push(ty),
+                BlockExitHandle::Continue(ty) => type_branches.push(ty),
                 BlockExitHandle::LoopExit => {},
 
                 // second parameter does not matter here because
-                // this is already in the conditional exits.
+                // this is already conditional.
                 // as such, just propagate as a conditional exit.
                 BlockExitHandle::Propagate(exit, _) => {
                     self.peek_block().exits.push(exit);
@@ -411,7 +416,7 @@ impl CodeGenerator {
             }
         }
         match btype.handle_exit(final_exit)? {
-            BlockExitHandle::Continue(ty) => branch_types.push(ty),
+            BlockExitHandle::Continue(ty) => type_branches.push(ty),
             BlockExitHandle::LoopExit => {},
             BlockExitHandle::Propagate(exit, conditional) => {
                 if conditional {
@@ -422,7 +427,7 @@ impl CodeGenerator {
             },
         }
 
-        let bty = plir::Type::resolve_branches(&branch_types)
+        let bty = plir::Type::resolve_branches(&type_branches)
             .ok_or(PLIRErr::CannotResolveType)?;
         Ok(plir::Block(bty, block))
     }

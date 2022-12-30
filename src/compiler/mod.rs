@@ -135,6 +135,30 @@ impl<'ctx> Compiler<'ctx> {
         
         phi.add_incoming(&vec);
     }
+
+    fn write_block<F>(&mut self, block: &plir::Block, close: F) -> IRResult<GonValue<'ctx>>
+        where F: FnOnce(&mut Self, GonValue<'ctx>)
+    {
+        match block.1.split_last() {
+            Some((tail, head)) => {
+                for stmt in head {
+                    stmt.write_ir(self)?;
+                }
+
+                if let plir::Stmt::Exit(me) = tail {
+                    let value = match me {
+                        Some(e) => e.write_ir(self)?,
+                        None => GonValue::Unit,
+                    };
+                    close(self, value);
+                    Ok(value)
+                } else {
+                    tail.write_ir(self)
+                }
+            },
+            None => Ok(GonValue::Unit), // {}
+        }
+    }
 }
 
 fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
@@ -173,31 +197,42 @@ trait TraverseIR<'ctx> {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
 }
 
-impl<'ctx> TraverseIR<'ctx> for plir::Block {
-    type Return = IRResult<GonValue<'ctx>>;
+// impl<'ctx> TraverseIR<'ctx> for plir::Block {
+//     type Return = IRResult<GonValue<'ctx>>;
 
-    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        match self.1.split_last() {
-            Some((tail, head)) => {
-                for stmt in head {
-                    stmt.write_ir(compiler)?;
-                }
-                tail.write_ir(compiler)
-            }
-            None => Ok(GonValue::Unit),
-        }
-    }
-}
+//     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+//         match self.1.split_last() {
+//             Some((tail, head)) => {
+//                 for stmt in head {
+//                     stmt.write_ir(compiler)?;
+//                 }
+//                 tail.write_ir(compiler)
+//             }
+//             None => Ok(GonValue::Unit),
+//         }
+//     }
+// }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
     type Return = IRResult<FunctionValue<'ctx>>;
 
+    /// To create a program from a script, we must determine the given `main` endpoint.
+    /// 
+    /// This is how it is currently implemented:
+    /// First, evaluate all of the function declarations. (TODO!: don't hoist functions?)
+    /// 
+    /// We can then determine the program entry point:
+    /// 1. If there are any statements outside of function declarations, 
+    /// then those statements are treated as a single program.
+    ///     - In this case, there cannot be a function named `main`.
+    /// 2. If there is only one function, then that function is the program.
+    /// 3. If there are any functions named main, then that function is the program.
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         lazy_static! {
             static ref CS_MAIN: CString = CString::new("main").unwrap();
         }
 
-        // group the functions: 
+        // group the functions:
         let mut fun_decls = vec![];
         let mut rest = vec![];
         
@@ -240,13 +275,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 
                 // the program is the "main" function in fun_decls
                 _ => {
-                    funs.into_iter().find(|f| f.get_name() == &**CS_MAIN)
+                    funs.into_iter().find(|f| f.get_name() == CS_MAIN.as_c_str())
                         .ok_or(IRErr::CannotDetermineMain)
                 }
             }
         } else {
             // the program is the anonymous statements
-            if funs.iter().any(|f| f.get_name() == &**CS_MAIN) {
+            if funs.iter().any(|f| f.get_name() == CS_MAIN.as_c_str()) {
                 Err(IRErr::CannotDetermineMain)
             } else {
                 let main = compiler.module.add_function(
@@ -291,9 +326,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                         let e = expr.write_ir(compiler)?;
                         compiler.builder.build_return(Some(&e.basic_value(compiler)))
                     }
-                    _ => compiler.builder.build_return(None)
+                    None => compiler.builder.build_return(None)
                 };
 
+                Ok(GonValue::Unit)
+            },
+            plir::Stmt::Exit(me) => {
                 Ok(GonValue::Unit)
             },
             plir::Stmt::Break => todo!(),
@@ -330,9 +368,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.build_unconditional_branch(expr_bb);
 
                 let block = compiler.update_block(&mut expr_bb, |_, c| {
-                    let t = block.write_ir(c)?;
-                    c.builder.build_unconditional_branch(exit_bb);
-                    Ok(t)
+                    c.write_block(block, |c, _| {
+                        c.builder.build_unconditional_branch(exit_bb);
+                    })
                 })?;
 
                 compiler.builder.position_at_end(exit_bb);
@@ -438,15 +476,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     // build then block
                     compiler.builder.position_at_end(then_bb);
                     // write ir from the block
-                    let then_result = block.write_ir(compiler)?;
-                    // if there is no terminator, then this block exits to merge
-                    if then_bb.get_terminator().is_none() {
+                    compiler.write_block(block, |compiler, result| {
                         compiler.builder.build_unconditional_branch(merge_bb);
                         
                         // add block to phi
                         then_bb = compiler.builder.get_insert_block().unwrap();
-                        incoming.push((then_result, then_bb));
-                    }
+                        incoming.push((result, then_bb));
+                    })?;
 
                     prev_else.replace(else_bb);
                 }
@@ -456,16 +492,18 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 // build else block
                 compiler.builder.position_at_end(else_bb);
-                let else_result = match last {
-                    Some(block) => block.write_ir(compiler)?,
-                    None => GonValue::Unit,
+
+                let mut close = |compiler: &mut Compiler<'ctx>, result| {
+                    compiler.builder.build_unconditional_branch(merge_bb);
+    
+                    //update else block
+                    else_bb = compiler.builder.get_insert_block().unwrap();
+                    incoming.push((result, else_bb));
                 };
-                compiler.builder.build_unconditional_branch(merge_bb);
-
-                //update else block
-                else_bb = compiler.builder.get_insert_block().unwrap();
-
-                incoming.push((else_result, else_bb));
+                match last {
+                    Some(block) => { compiler.write_block(block, close)?; },
+                    None => close(compiler, GonValue::Unit),
+                };
 
                 compiler.builder.position_at_end(merge_bb);
 
@@ -494,8 +532,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);
 
                 compiler.builder.position_at_end(loop_bb);
-                block.write_ir(compiler)?; // todo, use value
-                compiler.builder.build_unconditional_branch(cond_bb);
+                compiler.write_block(block, |compiler, _| {
+                    // todo, use value
+                    compiler.builder.build_unconditional_branch(cond_bb);
+                })?; 
 
                 compiler.builder.position_at_end(exit_loop_bb);
                 Ok(GonValue::new_bool(compiler, true)) // TODO
@@ -595,13 +635,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         }
 
         // return nothing if the return value is Unit
-        let ret_value = match block.write_ir(compiler)? {
-            GonValue::Unit => None,
-            val => Some(val.basic_value(compiler))
-        };
-
-        // write the last value in block as return
-        compiler.builder.build_return(ret_value.as_ref().map(|t| t as _));
+        compiler.write_block(block, |compiler, result| {
+            let rval = result.basic_value_or_void(compiler);
+            compiler.builder.build_return(rval.as_ref().map(|t| t as _));
+        })?;
         
         if fun.verify(true) {
             Ok(fun)
@@ -672,10 +709,10 @@ mod tests {
 
     #[test]
     fn mid_return() {
-        assert_fun_pass("fun main() -> float {
+        assert_fun_pass_vb("fun main() -> float {
             return 2.0;
             main();
-        }")
+        }", true)
     }
     #[test]
     fn what_am_i_doing_2() {
