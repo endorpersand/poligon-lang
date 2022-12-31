@@ -327,6 +327,10 @@ impl Parser {
             Some(token![break])    => Some(self.expect_break()?),
             Some(token![continue]) => Some(self.expect_cont()?),
             Some(token![fun])      => Some(self.expect_fun()?).map(tree::Stmt::FunDecl),
+            Some(token![extern])   => {
+                self.expect1(token![extern])?;
+                Some(self.expect_fun_sig()?).map(tree::Stmt::ExternFunDecl)
+            },
             Some(_)                => self.match_expr()?.map(tree::Stmt::Expr),
             None                   => None
         };
@@ -473,11 +477,12 @@ impl Parser {
 
         Ok(tree::Stmt::Continue)
     }
-    /// Expect that the next tokens represent a function declaration.
+
+    /// Expect that the next tokens represent a function signature.
     /// 
-    /// Return the function declaration,
-    /// or error if the tokens do not represent a function declaration.
-    fn expect_fun(&mut self) -> ParseResult<tree::FunDecl> {
+    /// Return the function signature,
+    /// or error if the tokens do not represent a function signature.
+    fn expect_fun_sig(&mut self) -> ParseResult<tree::FunSignature> {
         self.expect1(token![fun])?;
 
         let ident = self.expect_ident()?;
@@ -495,14 +500,19 @@ impl Parser {
             None
         };
 
+        Ok(tree::FunSignature { ident, params, ret })
+    }
+
+    /// Expect that the next tokens represent a function declaration.
+    /// 
+    /// Return the function declaration,
+    /// or error if the tokens do not represent a function declaration.
+    fn expect_fun(&mut self) -> ParseResult<tree::FunDecl> {
+        let sig = self.expect_fun_sig()?;
         let block = self.expect_block()?;
 
         Ok(tree::FunDecl {
-            sig: tree::FunSignature {
-                ident,
-                params,
-                ret
-            },
+            sig,
             block: Rc::new(block)
         })
     }
