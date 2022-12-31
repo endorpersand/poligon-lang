@@ -97,7 +97,7 @@ impl<'ctx> GonValue<'ctx> {
 
     pub fn param_value(self, c: &mut Compiler<'ctx>) -> BasicMetadataValueEnum<'ctx> {
         match self {
-            GonValue::Str(s) => {
+            GonValue::Str(_) => {
                 // HACK: Forgive me father, for I have sinned.
 
                 // Okay, now seriously,
