@@ -230,21 +230,17 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             static ref CS_MAIN: CString = CString::new("main").unwrap();
         }
 
-        // group the functions:
-        let mut fun_decls = vec![];
+        // split the functions from everything else:
+        let mut funs = vec![];
         let mut rest = vec![];
         
         for stmt in &self.0 {
             match stmt {
-                plir::Stmt::FunDecl(dcl) => fun_decls.push(dcl),
+                plir::Stmt::FunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
+                plir::Stmt::ExternFunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
                 stmt => rest.push(stmt)
             }
         }
-
-        // eval fns
-        let funs: Vec<_> = fun_decls.into_iter()
-            .map(|f| f.write_ir(compiler))
-            .collect::<Result<_, _>>()?;
 
         // evaluate type of program
         if rest.is_empty() {
@@ -558,7 +554,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let expr_params = params.len();
                 if fun_params == expr_params {
                     let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(compiler).into()))
+                        .map(|p| p.write_ir(compiler).map(|gv| gv.param_value(compiler)))
                         .collect::<Result<_, _>>()?;
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
@@ -585,7 +581,7 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
             Literal::Int(i)   => GonValue::new_int(compiler,   *i),
             Literal::Float(f) => GonValue::new_float(compiler, *f),
             Literal::Char(_)  => todo!("char literal"),
-            Literal::Str(_)   => todo!("str literal"),
+            Literal::Str(s)   => GonValue::new_str(compiler, s),
             Literal::Bool(b)  => GonValue::new_bool(compiler,  *b),
         };
 
@@ -619,7 +615,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 
         // set arguments names
         for (param, arg) in iter::zip(params, fun.get_param_iter()) {
-            apply_bv!(v as arg => v.set_name(&param.ident));
+            apply_bv!(let v = arg => v.set_name(&param.ident));
         }
 
         Ok(fun)
@@ -700,6 +696,24 @@ mod tests {
             _ => {
                 panic!("Program is not a singular function declaration");
             }
+        }
+    }
+
+    fn assert_main_pass_vb(input: &str, verbose: bool) {
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed  = lexer::tokenize(input).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        let plired = resolve::codegen(parsed).unwrap();
+
+        if verbose {
+            println!("{plired}");
+        }
+
+        compiler.compile(&plired).unwrap();
+        for fun in compiler.module.get_functions() {
+            fun.print_to_stderr();
         }
     }
 
@@ -919,6 +933,33 @@ mod tests {
 
     #[test]
     fn plir_llvm_creation() {
-        assert_fun_pass_vb(&file("_test_files/plir_llvm_creation.gon"), true)
+        assert_main_pass_vb(&file("_test_files/plir_llvm_creation.gon"), true)
+    }
+
+    #[test]
+    fn printing() {
+        let code = "
+        extern fun puts(s: string) -> int;
+
+        fun main() {
+            puts(\"Hello World!\");
+            return;
+        }
+        ";
+
+        assert_main_pass_vb(code, true);
+        exec::<()>(code);
+    }
+    #[test]
+    fn lexical_scope() {
+        assert_main_pass_vb(&file("_test_files/lexical_scope_ll.gon"), true);
+        let ctx = Context::create();
+        let mut compiler = Compiler::from_ctx(&ctx);
+
+        let lexed  = lexer::tokenize(&file("_test_files/lexical_scope_ll.gon")).unwrap();
+        let parsed = parser::parse(lexed).unwrap();
+        let plired = resolve::codegen(parsed).unwrap();
+
+        compiler.jit_compile::<bool>(plired).unwrap();
     }
 }

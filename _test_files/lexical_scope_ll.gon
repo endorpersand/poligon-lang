@@ -1,0 +1,24 @@
+extern fun puts(c: string) -> int;
+
+fun main() {
+    let a = "global";
+    {
+        fun showA() {
+            puts(a);
+        }
+
+        {
+            showA();
+            let a = "block";
+            showA();
+        }
+    }
+}
+
+// dynamic scope:
+// global
+// block
+
+// lexical scope:
+// global
+// global

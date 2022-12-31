@@ -291,8 +291,8 @@ impl Display for Literal {
         match self {
             Literal::Int(v) => write!(f, "{v}"),
             Literal::Float(v) => write!(f, "{v}"),
-            Literal::Char(v) => write!(f, "{v}"),
-            Literal::Str(v) => write!(f, "{v}"),
+            Literal::Char(v) => write!(f, "{v:?}"),
+            Literal::Str(v) => write!(f, "{v:?}"),
             Literal::Bool(v) => write!(f, "{v}"),
         }
     }

@@ -9,5 +9,5 @@ edition = "2021"
 lazy_static = "1.4.0"
 regex = "1.6.0"
 
-# 83dd54b was the latest commit on master on November 9, 2022
-inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "83dd54b", features = ["llvm14-0"] }
+# 83dd54b was the latest commit on master on December 30, 2022
+inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "3c5d770", features = ["llvm14-0"] }

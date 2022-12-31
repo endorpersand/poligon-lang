@@ -80,6 +80,7 @@ impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
                 },
                 GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
                 GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate int/bool
+                GonValue::Str(_)   => todo!(),
                 GonValue::Unit     => Err(IRErr::CannotUnary(*op, self.type_layout())),
             }
         }
@@ -206,6 +207,7 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
             GonValue::Float(f) => f.truth_internal(c),
             GonValue::Int(i)   => i.truth_internal(c),
             GonValue::Bool(b)  => b,
+            GonValue::Str(_)   => todo!(),
             GonValue::Unit     => c.ctx.bool_type().const_int(0, true),
         }
     }
