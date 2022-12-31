@@ -340,7 +340,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 d.write_ir(compiler)?;
                 Ok(GonValue::Unit)
             },
-            plir::Stmt::ExternFunDecl(_) => todo!(),
+            plir::Stmt::ExternFunDecl(fs) => {
+                fs.write_ir(compiler)?;
+                Ok(GonValue::Unit)
+            },
             plir::Stmt::Expr(e) => {
                 e.write_ir(compiler)
             },
@@ -590,17 +593,15 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
+impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     type Return = IRResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let plir::FunDecl { sig: plir::FunSignature { ident, params, ret }, block } = self;
+        let plir::FunSignature { ident, params, ret } = self;
 
-        // Function signature
         let arg_plir_tys: Vec<_> = params.iter()
             .map(|p| &p.ty)
             .collect();
-        
         let arg_llvm_tys: Vec<_> = arg_plir_tys.iter()
             .map(|&ty| {
                 let layout = TypeLayout::of(ty)
@@ -621,13 +622,23 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
             apply_bv!(v as arg => v.set_name(&param.ident));
         }
 
-        // Body
+        Ok(fun)
+    }
+}
+impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
+    type Return = IRResult<FunctionValue<'ctx>>;
+
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        let plir::FunDecl { sig, block } = self;
+
+        let fun = sig.write_ir(compiler)?;
+
         let bb = compiler.ctx.append_basic_block(fun, "body");
         compiler.builder.position_at_end(bb);
 
         // store params
-        for (param, (val, plir_ty)) in iter::zip(params, iter::zip(fun.get_param_iter(), arg_plir_tys)) {
-            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(plir_ty, val));
+        for (param, val) in iter::zip(&sig.params, fun.get_param_iter()) {
+            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(&param.ty, val));
         }
 
         // return nothing if the return value is Unit
