@@ -49,6 +49,8 @@ pub enum PLIRErr {
     CannotContinue,
     CannotReturn,
     UnclosedBlock,
+
+    // TODO: split into Covariant, Invariant, and Contravariant
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     CannotResolveType,
     UndefinedVar(String),
@@ -583,9 +585,13 @@ impl CodeGenerator {
             self.consume_insert_block(insert_block, BlockBehavior::Function)?
         };
 
-        // TODO: type check block
-        let fun_decl = plir::FunDecl { sig, block };
-        Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
+        // TODO: type contravariant type checking on block
+        if sig.ret == block.0 {
+            let fun_decl = plir::FunDecl { sig, block };
+            Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
+        } else {
+            Err(PLIRErr::ExpectedType(sig.ret, block.0))
+        }
     }
 
     fn consume_expr(&mut self, expr: tree::Expr) -> PLIRResult<plir::Expr> {
