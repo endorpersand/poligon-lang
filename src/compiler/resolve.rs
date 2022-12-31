@@ -11,36 +11,19 @@ pub fn codegen(t: tree::Program) -> PLIRResult<plir::Program> {
 }
 
 fn create_splits<T>(pats: &[tree::Pat<T>]) -> Vec<plir::Split> {
-    let mut splits = Vec::with_capacity(pats.len());
-    let mut pats = pats.iter();
+    let len = pats.len();
+    match pats.iter().position(|pat| matches!(pat, tree::Pat::Spread(_))) {
+        Some(pt) => {
+            let rpt = len - pt;
+            
+            let mut splits: Vec<_> = (0..pt).map(plir::Split::Left).collect();
+            splits.push(plir::Split::Middle(pt, rpt));
+            splits.extend((0..rpt).rev().map(plir::Split::Right));
 
-    let left = pats.by_ref()
-        .take_while(|pat| !matches!(pat, tree::Pat::Spread(_)))
-        .enumerate()
-        .map(|(i, _)| plir::Split::Left(i));
-    splits.extend(left);
-    
-    let mut right = pats.rev()
-        .enumerate()
-        .map(|(i, _)| plir::Split::Right(i))
-        .rev();
-    
-    if let Some(first_right) = right.next() {
-        let lidx = splits.last().map_or(0, |split| match split {
-            plir::Split::Left(idx) => *idx + 1,
-            _ => unreachable!()
-        });
-        let ridx = match first_right {
-            plir::Split::Right(idx) => idx,
-            _ => unreachable!()
-        };
-
-        splits.push(plir::Split::Middle(lidx, ridx));
-        splits.push(first_right);
-        splits.extend(right);
-    };
-
-    splits
+            splits
+        },
+        None => (0..len).map(plir::Split::Left).collect(),
+    }
 }
 
 #[derive(Debug)]
@@ -445,41 +428,35 @@ impl CodeGenerator {
         self.consume_insert_block(insert_block, btype)
     }
 
-    fn unpack_pat<T, U, FS, FM>(
+    fn unpack_pat<T, E>(
         &mut self, 
         pat: tree::Pat<T>, 
-        e: plir::Expr, 
-        extra: U, 
-        mut split_extra: FS, 
-        mut map: FM,
+        expr: plir::Expr, 
+        extra: E, 
+        mut split_extra: impl FnMut(&E, plir::Split) -> PLIRResult<E>,
+        mut map: impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
         consume_var: bool
-    ) -> PLIRResult<()> 
-        where FS: FnMut(&U, plir::Split) -> PLIRResult<U>,
-              FM: FnMut(&mut Self, T, plir::Expr, U) -> PLIRResult<()>,
-    {
-        self.unpack_pat_inner(pat, e, extra, &mut split_extra, &mut map, consume_var)
+    ) -> PLIRResult<()> {
+        self.unpack_pat_inner(pat, expr, extra, &mut split_extra, &mut map, consume_var)
     }
 
-    fn unpack_pat_inner<T, U, FS, FM>(
+    fn unpack_pat_inner<T, E>(
         &mut self, 
         pat: tree::Pat<T>, 
-        e: plir::Expr, 
-        extra: U, 
-        split_extra: &mut FS, 
-        map: &mut FM,
+        expr: plir::Expr, 
+        extra: E, 
+        split_extra: &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>,
+        map: &mut impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
         consume_var: bool
-    ) -> PLIRResult<()> 
-        where FS: FnMut(&U, plir::Split) -> PLIRResult<U>,
-              FM: FnMut(&mut Self, T, plir::Expr, U) -> PLIRResult<()>
-    {
+    ) -> PLIRResult<()> {
         match pat {
-            tree::Pat::Unit(t) => map(self, t, e, extra),
+            tree::Pat::Unit(t) => map(self, t, expr, extra),
             tree::Pat::Spread(spread) => match spread {
-                Some(pat) => self.unpack_pat_inner(*pat, e, extra, split_extra, map, consume_var),
+                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, split_extra, map, consume_var),
                 None => Ok(()),
             },
             tree::Pat::List(pats) => {
-                let var = self.push_tmp_decl("decl", e);
+                let var = self.push_tmp_decl("decl", expr);
 
                 for (idx, pat) in std::iter::zip(create_splits(&pats), pats) {
                     let rhs = var.clone().split(idx)?;

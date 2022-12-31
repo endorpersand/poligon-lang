@@ -253,7 +253,7 @@ impl Display for ExprType {
                 write!(f, "{ident}~[")?;
                 match idx {
                     Split::Left(left) => write!(f, "{left}"),
-                    Split::Middle(left, right) => write!(f, "{left}..-{right}"),
+                    Split::Middle(left, right) => write!(f, "{left}..=-{right}"),
                     Split::Right(right) => write!(f, "-{right}"),
                 }?;
                 write!(f, "]")
