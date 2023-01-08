@@ -4,10 +4,11 @@
 
 use std::fmt::{Debug, Display};
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
 use lazy_static::lazy_static;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-/// A specific unit that carries some value in Poligon.
+/// A specific unit that carries some graphemic value in Poligon.
 pub enum Token {
     /// An identifier, such as function names or variable names. (e.g. `abcd`, `a_b`, `a1`)
     Ident(String),
@@ -37,27 +38,33 @@ pub enum Token {
     LineSep
 }
 
+/// A token with position information
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pub(crate) loc: std::ops::RangeInclusive<(usize, usize)>,
+    pub(crate) loc: RangeInclusive<(usize, usize)>,
     pub(crate) tt: Token
 }
 
 impl FullToken {
-    pub fn new(tt: Token, loc: std::ops::RangeInclusive<(usize, usize)>) -> Self {
+    /// Create a FullToken using a token and its given position
+    pub fn new(tt: Token, loc: RangeInclusive<(usize, usize)>) -> Self {
         Self { loc, tt }
     }
 }
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
+        /// Enum that provides all the given Poligon keywords
         #[derive(PartialEq, Eq, Debug, Clone)]
         pub enum Keyword {
             $(
-                $id
+                #[allow(missing_docs)] $id
             ),*
         }
 
         impl Keyword {
+            /// If the string is a keyword, return the Token it represents.
+            /// 
+            /// Else, return None
             pub fn get_kw(s: &str) -> Option<Token> {
                 match s {
                     $(
@@ -83,10 +90,11 @@ macro_rules! define_operators_and_delimiters {
         operators: {$($id:ident: $ex:literal),*},
         delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
     ) => {
+        /// Enum that provides all the defined Poligon operators
         #[derive(PartialEq, Eq, Debug, Clone)]
         pub enum Operator {
             $(
-                $id
+                #[allow(missing_docs)] $id
             ),*
         }
 
@@ -98,14 +106,18 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
+        /// Enum that provides all the defined Poligon delimiters (`()`, `[]`, etc.)
         #[derive(PartialEq, Eq, Debug, Clone, Copy)]
         pub enum Delimiter {
             $(
-                $idl, $idr
+                #[allow(missing_docs)] $idl,
+                #[allow(missing_docs)] $idr
             ),*
         }
 
         impl Delimiter {
+            /// If this delimiter is a left variant, get the corresponding right variant.
+            /// If this delimiter is a right variant, get the corresponding left variant.
             pub fn reversed(&self) -> Self {
                 match self {
                     $(Self::$idl => Self::$idr),+,
@@ -113,6 +125,7 @@ macro_rules! define_operators_and_delimiters {
                 }
             }
 
+            /// Check that this variant is the right variant.
             pub fn is_right(&self) -> bool {
                 match self {
                     $(Self::$idl => false),+,
