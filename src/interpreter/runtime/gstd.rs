@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use lazy_static::lazy_static;
 
-use super::{RtResult, RuntimeErr};
+use super::ValueErr;
+use super::err::TypeErr;
+use super::RtResult;
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType, fun_type};
 
 macro_rules! str_map {
@@ -37,7 +39,7 @@ fn std_is(args: Vec<Value>) -> RtResult<Value> {
 
         Ok(Value::Bool(eval))
     } else {
-        Err(RuntimeErr::WrongArity(2))
+        Err(ValueErr::WrongArity(2))?
     }
 }
 
@@ -45,7 +47,7 @@ fn std_type(args: Vec<Value>) -> RtResult<Value> {
     if let [a] = &args[..] {
         Ok(Value::Str(a.ty().to_string()))
     } else {
-        Err(RuntimeErr::WrongArity(1))
+        Err(ValueErr::WrongArity(1))?
     }
 }
 
@@ -55,19 +57,19 @@ fn std_contains(args: Vec<Value>) -> RtResult<Value> {
             Value::Char(c1) => match item {
                 Value::Char(c2) => c1 == c2,
                 Value::Str(s2) => s2.is_empty() || (s2.len() == 1 && s2 == &c1.to_string()),
-                _ => Err(RuntimeErr::ExpectedType(ValueType::Str))?
+                _ => Err(TypeErr::ExpectedType(ValueType::Str))?
             },
             Value::Str(s)  => match item {
                 Value::Char(c2) => s.contains(*c2),
                 Value::Str(s2) => s.contains(s2),
-                _ => Err(RuntimeErr::ExpectedType(ValueType::Str))?
+                _ => Err(TypeErr::ExpectedType(ValueType::Str))?
             },
             Value::List(l) => l.borrow().contains(item),
-            _ => Err(RuntimeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
+            _ => Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         };
         Ok(Value::Bool(b))
     } else {
-        Err(RuntimeErr::WrongArity(2))
+        Err(ValueErr::WrongArity(2))?
     }
 }
 fn std_push(args: Vec<Value>) -> RtResult<Value> {
@@ -76,10 +78,10 @@ fn std_push(args: Vec<Value>) -> RtResult<Value> {
             l.try_borrow_mut()?.push(item.clone());
             Ok(Value::Unit)
         } else {
-            Err(RuntimeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))
+            Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         }
     } else {
-        Err(RuntimeErr::WrongArity(2))
+        Err(ValueErr::WrongArity(2))?
     }
 }
 fn std_pop(args: Vec<Value>) -> RtResult<Value> {
@@ -87,10 +89,10 @@ fn std_pop(args: Vec<Value>) -> RtResult<Value> {
         if let Value::List(l) = lst {
             Ok(l.try_borrow_mut()?.pop().unwrap_or(Value::Unit))
         } else {
-            Err(RuntimeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))
+            Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         }
     } else {
-        Err(RuntimeErr::WrongArity(1))
+        Err(ValueErr::WrongArity(1))?
     }
 }
 
@@ -103,7 +105,7 @@ fn std_time(args: Vec<Value>) -> RtResult<Value> {
         let now = Instant::now();
         Ok(Value::Int((now - *PROGRAM_START).as_millis() as isize))
     } else {
-        Err(RuntimeErr::WrongArity(0))
+        Err(ValueErr::WrongArity(0))?
     }
 }
 

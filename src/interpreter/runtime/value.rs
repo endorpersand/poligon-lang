@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use super::{RtResult, RuntimeErr};
+use super::{RtResult, TypeErr, ValueErr};
 use crate::tree::{self, op};
 pub(super) use refval::*;
 
@@ -234,24 +234,24 @@ impl Value {
                 match mi {
                     Some(i) => lst.borrow().get(i).map(Value::clone),
                     None => None,
-                }.ok_or(RuntimeErr::IndexOutOfBounds)
+                }.ok_or_else(|| ValueErr::IndexOutOfBounds.into())
             } else {
-                Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                Err(TypeErr::CannotIndexWith(e.ty(), idx.ty()))?
             },
 
             // Convert to iter => get nth item
             e => {
                 let mut it = e.as_iterator()
-                    .ok_or_else(|| RuntimeErr::CannotIndex(e.ty()))?;
+                    .ok_or_else(|| TypeErr::CannotIndex(e.ty()))?;
 
                 if let Value::Int(signed_idx) = idx {
                     let i = usize::try_from(signed_idx)
-                        .map_err(|_| RuntimeErr::IndexOutOfBounds)?;
+                        .map_err(|_| ValueErr::IndexOutOfBounds)?;
                     
                     it.nth(i)
-                        .ok_or(RuntimeErr::IndexOutOfBounds)
+                        .ok_or_else(|| ValueErr::IndexOutOfBounds.into())
                 } else {
-                    Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                    Err(TypeErr::CannotIndexWith(e.ty(), idx.ty()))?
                 }
             }
         }
@@ -271,12 +271,12 @@ impl Value {
                         lst_ref.get(i).map(Value::clone)
                     },
                     None => None,
-                }.ok_or(RuntimeErr::IndexOutOfBounds)
+                }.ok_or_else(|| ValueErr::IndexOutOfBounds.into())
             } else {
-                Err(RuntimeErr::CannotIndexWith(e.ty(), idx.ty()))
+                Err(TypeErr::CannotIndexWith(e.ty(), idx.ty()))?
             },
 
-            e => Err(RuntimeErr::CannotSetIndex(e.ty()))
+            e => Err(TypeErr::CannotSetIndex(e.ty()))?
         }
     }
 
@@ -292,7 +292,7 @@ impl Value {
             },
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
-        }.ok_or(RuntimeErr::CannotApplyUnary(*o, ty))
+        }.ok_or(TypeErr::CannotApplyUnary(*o, ty).into())
     }
     
     /// Apply a comparison operator between two computed values.
@@ -332,7 +332,7 @@ impl Value {
                     _ => None
                 }
             },
-        }.ok_or_else(|| RuntimeErr::CannotCompare(*o, self.ty(), right.ty()))
+        }.ok_or_else(|| TypeErr::CannotCompare(*o, self.ty(), right.ty()).into())
     }
 
     /// Copies item directly. For lists, this means that this value 

@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::err::GonErr;
 use crate::tree;
-
-use super::runtime;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SubType {
@@ -63,23 +62,28 @@ pub enum ResolveErr {
     /// Cannot spread nothing here.
     CannotSpreadNone,
     /// This feature isn't implemented in the interpreter.
-    CompilerOnlyFeature(&'static str)
+    CompilerOnly(&'static str)
 }
-/// Fallible result in the variable resolution process.
-pub type ResolveResult<T> = Result<T, ResolveErr>;
 
-impl From<ResolveErr> for runtime::RuntimeErr {
-    fn from(re: ResolveErr) -> Self {
-        match re {
-            ResolveErr::CannotReturn     => Self::CannotReturn,
-            ResolveErr::CannotBreak      => Self::CannotBreak,
-            ResolveErr::CannotContinue   => Self::CannotContinue,
-            ResolveErr::CannotSpread     => Self::CannotSpread,
-            ResolveErr::CannotSpreadNone => Self::CannotSpreadNone,
-            ResolveErr::CompilerOnlyFeature(s) => Self::CompilerOnly(s),
+impl GonErr for ResolveErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            ResolveErr::CannotReturn => String::from("cannot 'return' here"),
+            ResolveErr::CannotBreak => String::from("cannot 'break' here"),
+            ResolveErr::CannotContinue => String::from("cannot 'continue' here"),
+            ResolveErr::CannotSpread => String::from("cannot spread here"),
+            ResolveErr::CannotSpreadNone => String::from("cannot empty spread here"),
+            ResolveErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
         }
     }
 }
+
+/// Fallible result in the variable resolution process.
+pub type ResolveResult<T> = Result<T, ResolveErr>;
 
 impl ResolveState {
     pub fn new() -> Self {
@@ -253,7 +257,7 @@ impl TraverseResolve for tree::Stmt {
                 _ => Err(ResolveErr::CannotContinue)
             },
             tree::Stmt::FunDecl(f) => f.traverse_rs(map),
-            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnlyFeature("extern function declarations")),
+            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
             tree::Stmt::Expr(e)   => e.traverse_rs(map),
         }
     }

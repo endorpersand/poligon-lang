@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::interpreter::{BlockContext, TraverseRt, tree};
-use crate::interpreter::runtime::{RtResult, RuntimeErr, RtTraversal, TermOp};
+use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr};
 
 use super::{VArbType, Value};
 
@@ -39,7 +39,7 @@ impl GonFun {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {
-                Err(RuntimeErr::WrongArity(arity))?;
+                Err(ValueErr::WrongArity(arity))?;
             }
         }
 
@@ -55,7 +55,7 @@ impl GonFun {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if pvals.len() != arity {
-                Err(RuntimeErr::WrongArity(arity))?;
+                Err(ValueErr::WrongArity(arity))?;
             }
         }
 
@@ -73,8 +73,8 @@ impl GonFun {
                     Ok(t) => Ok(t),
                     Err(TermOp::Return(t)) => Ok(t),
                     Err(TermOp::Err(e))    => Err(e)?,
-                    Err(TermOp::Break)     => Err(RuntimeErr::CannotBreak)?,
-                    Err(TermOp::Continue)  => Err(RuntimeErr::CannotContinue)?,
+                    Err(TermOp::Break)     => Err(ResolveErr::CannotBreak)?,
+                    Err(TermOp::Continue)  => Err(ResolveErr::CannotContinue)?,
                 }
             },
         }

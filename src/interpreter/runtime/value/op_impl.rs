@@ -1,5 +1,5 @@
 use crate::tree::op;
-use crate::interpreter::runtime::RuntimeErr;
+use crate::interpreter::runtime::{TypeErr, ValueErr};
 
 use super::{Value, RefValue};
 
@@ -75,7 +75,7 @@ fn as_int_pairs(lhs: Value, rhs: Value) -> Result<(isize, isize), (Value, Value)
 }
 
 macro_rules! cannot_binary {
-    ($e:expr, $l:expr, $r:expr) => { RuntimeErr::CannotApplyBinary($e, $l.ty(), $r.ty()) }
+    ($e:expr, $l:expr, $r:expr) => { TypeErr::CannotApplyBinary($e, $l.ty(), $r.ty()).into() }
 }
 
 impl Value {
@@ -112,7 +112,7 @@ impl Value {
                         (a, CollValue::Not(Value::Int(b))) => a.repeat(b).ok(),
                         (CollValue::Not(Value::Int(a)), b) => b.repeat(a).ok(),
                         _ => None
-                    }.ok_or(RuntimeErr::CannotApplyBinary(*o, aty, bty))
+                    }.ok_or(TypeErr::CannotApplyBinary(*o, aty, bty).into())
                 },
             },
 
@@ -125,7 +125,7 @@ impl Value {
                 NumOperands::Float(a, b) => Ok(Value::Float(a % b)),
                 NumOperands::Int(a, b) => a.checked_rem(b)
                     .map(Value::Int)
-                    .ok_or(RuntimeErr::DivisionByZero),
+                    .ok_or_else(|| ValueErr::DivisionByZero.into()),
                 NumOperands::Neither(a, b) => Err(cannot_binary!(*o, a, b)),
             },
 

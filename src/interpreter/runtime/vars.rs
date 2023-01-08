@@ -116,7 +116,7 @@ impl<T> ScopeContext<'_, T> {
 
         // only allow declare if variable in the top level is not declared
         match entry {
-            Entry::Occupied(_) => Err(super::RuntimeErr::AlreadyDeclared(ident)),
+            Entry::Occupied(_) => Err(super::NameErr::AlreadyDeclared(ident))?,
             Entry::Vacant(_) => Ok(entry.or_insert(v)),
         }
     }
@@ -132,7 +132,7 @@ impl<T> ScopeContext<'_, T> {
 
             Ok(self.get(ident).unwrap())
         } else {
-            Err(super::RuntimeErr::NotDeclared(String::from(ident)))
+            Err(super::NameErr::NotDeclared(String::from(ident)))?
         }
     }
 
@@ -169,11 +169,11 @@ impl<T> ScopeContext<'_, T> {
                     Ok(ent.get().clone())
                 },
                 Entry::Vacant(ent) => {
-                    Err(super::RuntimeErr::NotDeclared(ent.into_key()))
+                    Err(super::NameErr::NotDeclared(ent.into_key()))?
                 },
             }
         } else {
-            Err(super::RuntimeErr::NotDeclared(ident))
+            Err(super::NameErr::NotDeclared(ident))?
         }
     }
 

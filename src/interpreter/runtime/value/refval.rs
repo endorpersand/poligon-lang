@@ -1,7 +1,7 @@
 use std::cell::{RefCell, Ref, RefMut, BorrowMutError};
 use std::rc::Rc;
 
-use crate::interpreter::runtime::RuntimeErr;
+use crate::err::GonErr;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RefValue<T> {
@@ -9,20 +9,31 @@ pub struct RefValue<T> {
     mutable: bool
 }
 
+/// An error occurred in the use of the RefValue type
 #[derive(Debug)]
 pub enum RvErr {
+    /// A mutable borrow was attempted at the same time as another borrow
     BorrowMutConcur,
+    /// A mutable borrow was attempted at the same time as an immutable borrow
     BorrowMutImmutable
+}
+
+impl GonErr for RvErr {
+    fn err_name(&self) -> &'static str {
+        "concurrency error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            RvErr::BorrowMutConcur => String::from("cannot perform mutation while reference is held"),
+            RvErr::BorrowMutImmutable => String::from("cannot perform mutation while reference is immutably held"),
+        }
+    }
 }
 
 impl From<BorrowMutError> for RvErr {
     fn from(_: BorrowMutError) -> Self {
         RvErr::BorrowMutConcur
-    }
-}
-impl From<RvErr> for RuntimeErr {
-    fn from(e: RvErr) -> Self {
-        RuntimeErr::RvErr(e)
     }
 }
 

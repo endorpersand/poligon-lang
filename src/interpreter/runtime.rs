@@ -4,9 +4,8 @@
 
 use std::rc::Rc;
 
-use super::semantic::ResolveState;
-use crate::{GonErr, tree};
-use value::RvErr;
+use super::semantic::{ResolveState, ResolveErr};
+use crate::tree;
 
 use crate::tree::op;
 pub use self::value::Value;
@@ -112,105 +111,211 @@ impl tree::Program {
         rs.traverse_tree(&self)?;
 
         // Runtime traversal
-        self.traverse_rt(ctx).map_err(|to| match to {
-            TermOp::Err(e) => e,
-            TermOp::Return(_) => RuntimeErr::CannotReturn,
-            TermOp::Break     => RuntimeErr::CannotBreak,
-            TermOp::Continue  => RuntimeErr::CannotContinue,
-        })
+        self.traverse_rt(ctx).map_err(into_err)
     }
 }
 
-/// An error which occurs in runtime evaluation.
-#[derive(Debug)]
-pub enum RuntimeErr {
-    /// These two types can't be compared using the given operation.
-    CannotCompare(op::Cmp, ValueType, ValueType),
+/// Runtime errors
+pub mod err {
+    use crate::tree::op;
 
-    /// The unary operator cannot be applied to this type.
-    CannotApplyUnary(op::Unary, ValueType),
+    use super::value::ValueType;
+    use super::value::RvErr;
+    use super::super::semantic::ResolveErr;
+    use crate::GonErr;
 
-    /// The binary operator cannot be applied between these two types.
-    CannotApplyBinary(op::Binary, ValueType, ValueType),
+    macro_rules! rt_err {
+        ($($e:ident),*) => {
+            /// Errors that occur during runtime evaluation.
+            #[derive(Debug)]
+            pub enum RuntimeErr {
+                $(
+                    #[allow(missing_docs)]
+                    $e($e)
+                ),*
+            }
 
-    /// Cannot compute a range between these two types.
-    CannotApplyRange(ValueType, ValueType),
-
-    /// Integer division was attempted when the second parameter was 0.
-    DivisionByZero,
-
-    /// A specific type was expected here.
-    ExpectedType(ValueType),
-
-    /// Ranges are computed as lists in the interpreter. Therefore, ranges cannot be infinite.
-    RangeIsInfinite,
-
-    /// Cannot iterate over this type.
-    CannotIterateOver(ValueType),
-
-    /// Cannot index this type.
-    CannotIndex(ValueType),
-
-    /// Cannot set index of this type.
-    CannotSetIndex(ValueType),
-
-    /// Cannot index this type using the other type.
-    CannotIndexWith(ValueType, ValueType),
-
-    /// Index out of bounds.
-    IndexOutOfBounds,
-
-    /// Could not find this variable.
-    UndefinedVar(String),
-
-    /// Function was called with the wrong number of parameters. It actually expected this number.
-    WrongArity(usize),
-
-    /// Cannot call this type.
-    CannotCall,
-
-    /// Cannot `return` from this block.
-    CannotReturn,
-
-    /// Cannot `break` from this block.
-    CannotBreak,
-
-    /// Cannot `continue` from this block.
-    CannotContinue,
-    NotIterable(ValueType),
-
-    /// Unpack (without spread) was attempted, but there needed to be more elements
-    UnpackTooLittle(usize /* expected */, usize /* got */),
-    /// Unpack (without spread) was attempted, but there needed to be more elements
-    UnpackTooLittleS(usize /* expected at least */, usize /* got */),
-    /// Unpack was attempted, but there were not enough elements
-    UnpackTooMany(usize /* expected */),
-    /// Concurrent mutable access to an object occurred
-    RvErr(RvErr),
-    /// Cannot spread this expression.
-    CannotSpread,
-    /// Cannot spread nothing here.
-    CannotSpreadNone,
-    /// Feature not completed.
-    Todo(&'static str),
-
-    /// Variable was already declared.
-    AlreadyDeclared(String),
-    /// Variable was not declared.
-    NotDeclared(String),
-    /// This feature is only implemented in the compiler.
-    CompilerOnly(&'static str)
-}
-impl GonErr for RuntimeErr {
-    fn err_name(&self) -> &'static str {
-        "runtime error"
+            $(
+                impl From<$e> for RuntimeErr {
+                    fn from(e: $e) -> Self {
+                        Self::$e(e)
+                    }
+                }
+            )*
+            
+            impl GonErr for RuntimeErr {
+                fn err_name(&self) -> &'static str {
+                    match self {
+                        $(
+                            Self::$e(e) => e.err_name()
+                        ),*
+                    }
+                }
+            
+                fn message(&self) -> String {
+                    match self {
+                        $(
+                            Self::$e(e) => e.message()
+                        ),*
+                    }
+                }
+            }
+        }
     }
 
-    fn message(&self) -> String {
-        // TODO
-        format!("{:?}", self)
+    rt_err! { TypeErr, ValueErr, NameErr, ResolveErr, RvErr, FeatureErr }
+
+    /// An error caused by type mismatches
+    #[derive(Debug)]
+    pub enum TypeErr {
+        /// These two types can't be compared using the given operation.
+        CannotCompare(op::Cmp, ValueType, ValueType),
+
+        /// The unary operator cannot be applied to this type.
+        CannotApplyUnary(op::Unary, ValueType),
+
+        /// The binary operator cannot be applied between these two types.
+        CannotApplyBinary(op::Binary, ValueType, ValueType),
+
+        /// Cannot compute a range between these two types.
+        CannotApplyRange(ValueType, ValueType),
+
+        /// Cannot iterate over this type.
+        NotIterable(ValueType),
+
+        /// A specific type was expected here.
+        ExpectedType(ValueType),
+
+        /// Cannot index this type.
+        CannotIndex(ValueType),
+
+        /// Cannot set index of this type.
+        CannotSetIndex(ValueType),
+
+        /// Cannot index this type using the other type.
+        CannotIndexWith(ValueType, ValueType),
+
+        /// Cannot call this type.
+        CannotCall(ValueType),
+    }
+
+    impl GonErr for TypeErr {
+        fn err_name(&self) -> &'static str {
+            "type error"
+        }
+
+        fn message(&self) -> String {
+            match self {
+                TypeErr::CannotCompare(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+                TypeErr::CannotApplyUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+                TypeErr::CannotApplyBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+                TypeErr::CannotApplyRange(t1, t2) => format!("cannot create range {t1}..{t2}"),
+                TypeErr::NotIterable(t1) => format!("{t1} is not iterable"),
+                TypeErr::ExpectedType(t1) => format!("expected {t1}"),
+                TypeErr::CannotIndex(t1) => format!("cannot index {t1}"),
+                TypeErr::CannotSetIndex(t1) => format!("cannot assign to elements of {t1}"),
+                TypeErr::CannotIndexWith(t1, t2) => format!("cannot index {t1} with {t2}"),
+                TypeErr::CannotCall(t1) => format!("{t1} is not callable"),
+            }
+        }
+    }
+
+    /// An error caused by invalid value arguments
+    #[derive(Debug)]
+    pub enum ValueErr {
+        /// Integer division was attempted when the second parameter was 0.
+        DivisionByZero,
+
+        /// Ranges are computed as lists in the interpreter. Therefore, ranges cannot be infinite.
+        RangeIsInfinite,
+
+        /// Index out of bounds.
+        IndexOutOfBounds,
+
+        /// Function was called with the wrong number of parameters. It actually expected this number.
+        WrongArity(usize),
+
+        /// Unpack (without spread) was attempted, but there needed to be more elements
+        UnpackTooLittle(usize /* expected */, usize /* got */),
+
+        /// Unpack (without spread) was attempted, but there needed to be more elements
+        UnpackTooLittleS(usize /* expected at least */, usize /* got */),
+
+        /// Unpack was attempted, but there were not enough elements
+        UnpackTooMany(usize /* expected */),
+    }
+
+    impl GonErr for ValueErr {
+        fn err_name(&self) -> &'static str {
+            "value error"
+        }
+
+        fn message(&self) -> String {
+            match self {
+                ValueErr::DivisionByZero => String::from("division by zero"),
+                ValueErr::RangeIsInfinite => String::from("range produced is infinite length"),
+                ValueErr::IndexOutOfBounds => String::from("index out of bounds"),
+                ValueErr::WrongArity(n) => format!("expected {n} parameters in function call"),
+                ValueErr::UnpackTooLittle(ex, got) => format!("unpack failed, expected {ex} elements, but got {got}"),
+                ValueErr::UnpackTooLittleS(exa, got) => format!("unpack failed, expected at least {exa} elements, but got {got}"),
+                ValueErr::UnpackTooMany(ex) => format!("unpack failed, only expected {ex} elements"),
+            }
+        }
+    }
+
+    /// An error caused by variable name conflicts
+    #[derive(Debug)]
+    pub enum NameErr {
+        /// Could not find this variable.
+        UndefinedVar(String),
+
+        /// Variable was already declared.
+        AlreadyDeclared(String),
+
+        /// Variable was not declared.
+        NotDeclared(String),
+    }
+
+
+    impl GonErr for NameErr {
+        fn err_name(&self) -> &'static str {
+            "name error"
+        }
+
+        fn message(&self) -> String {
+            match self {
+                NameErr::UndefinedVar(name) => format!("could not find variable \'{name}\'"),
+                NameErr::AlreadyDeclared(name) => format!("cannot redeclare \'{name}\'"),
+                NameErr::NotDeclared(name) => format!("undeclared variable \'{name}\'"),
+            }
+        }
+    }
+
+    /// An error caused because the feature is unimplemented
+    #[derive(Debug)]
+    pub enum FeatureErr {
+        /// Feature not completed.
+        Incomplete(&'static str),
+
+        /// This feature is only implemented in the compiler.
+        CompilerOnly(&'static str)
+    }
+
+    impl GonErr for FeatureErr {
+        fn err_name(&self) -> &'static str {
+            "feature error"
+        }
+
+        fn message(&self) -> String {
+            match self {
+                FeatureErr::Incomplete(s) => format!("not yet implemented - {s}"),
+                FeatureErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
+            }
+        }
     }
 }
+use err::*;
+
 /// Fallible evaluation in runtime
 pub type RtResult<T> = Result<T, RuntimeErr>;
 
@@ -228,9 +333,9 @@ pub enum TermOp<T, E> {
     /// `continue` was called
     Continue
 }
-impl<T> From<RuntimeErr> for TermOp<T, RuntimeErr> {
-    fn from(e: RuntimeErr) -> Self {
-        TermOp::Err(e)
+impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
+    fn from(e: E) -> Self {
+        TermOp::Err(e.into())
     }
 }
 /// Evaluation in runtime that could interrupt normal program flow
@@ -247,7 +352,7 @@ impl TraverseRt for tree::Expr {
         match self {
             tree::Expr::Ident(ident) => {
                 ctx.get_var(ident, self)
-                    .ok_or_else(|| RuntimeErr::UndefinedVar(String::from(ident)))
+                    .ok_or_else(|| NameErr::UndefinedVar(String::from(ident)).into())
                     .map(Value::clone)
                     .map_err(TermOp::Err)
             },
@@ -260,10 +365,10 @@ impl TraverseRt for tree::Expr {
                     match e {
                         tree::Expr::Spread(inner) => {
                             let inner = inner.as_ref()
-                                .ok_or(RuntimeErr::CannotSpreadNone)?
+                                .ok_or(ResolveErr::CannotSpreadNone)?
                                 .traverse_rt(ctx)?;
                             let it = inner.as_iterator()
-                                .ok_or_else(|| RuntimeErr::NotIterable(inner.ty()))?;
+                                .ok_or_else(|| TypeErr::NotIterable(inner.ty()))?;
 
                             vec.extend(it);
                         },
@@ -273,15 +378,15 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::new_list(vec))
             },
-            tree::Expr::SetLiteral(_) => Err(RuntimeErr::Todo("sets not yet implemented"))?,
-            tree::Expr::DictLiteral(_) => Err(RuntimeErr::Todo("dicts not yet implemented"))?,
+            tree::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets"))?,
+            tree::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts"))?,
             tree::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
                 assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
-            tree::Expr::Path(_) => Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?,
+            tree::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
             tree::Expr::UnaryOps { ops, expr } => {
                 let mut ops_iter = ops.iter().rev();
         
@@ -328,7 +433,7 @@ impl TraverseRt for tree::Expr {
                 // for now, step can only be int:
                 let step = match step_value { 
                     Value::Int(s) => s,
-                    _ => Err(RuntimeErr::ExpectedType(ValueType::Int))?
+                    _ => Err(TypeErr::ExpectedType(ValueType::Int))?
                 };
 
                 match (&l, &r) {
@@ -355,7 +460,7 @@ impl TraverseRt for tree::Expr {
 
                         Ok(Value::new_list(values))
                     },
-                    _ => Err(RuntimeErr::CannotApplyRange(l.ty(), r.ty()))?
+                    _ => Err(TypeErr::CannotApplyRange(l.ty(), r.ty()))?
                 }
             },
             tree::Expr::If { conditionals, last } => {
@@ -388,7 +493,7 @@ impl TraverseRt for tree::Expr {
             tree::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
                 let it = it_val.as_iterator()
-                    .ok_or_else(|| RuntimeErr::CannotIterateOver(it_val.ty()))?;
+                    .ok_or_else(|| TypeErr::NotIterable(it_val.ty()))?;
 
                 let mut result = vec![];
                 for val in it {
@@ -443,12 +548,11 @@ impl TraverseRt for tree::Expr {
                             }
                         }
                         
-                        Err(RuntimeErr::Todo("general attribute functionality not yet implemented"))?
+                        Err(FeatureErr::Incomplete("general attribute functionality"))?
                     },
-                    funct => if let Value::Fun(f) = funct.traverse_rt(ctx)? {
-                        f.call(params, ctx)
-                    } else {
-                        Err(RuntimeErr::CannotCall)?
+                    funct => match funct.traverse_rt(ctx)? {
+                        Value::Fun(f) => f.call(params, ctx),
+                        val => Err(TypeErr::CannotCall(val.ty()))?
                     }
                 }
             }
@@ -459,14 +563,14 @@ impl TraverseRt for tree::Expr {
 
                 val.get_index(index_val).map_err(TermOp::Err)
             },
-            tree::Expr::Spread(_) => Err(RuntimeErr::CannotSpread)?,
+            tree::Expr::Spread(_) => Err(ResolveErr::CannotSpread)?,
         }
     }
 }
 
 fn compute_int_range(left: isize, right: isize, step: isize) -> RtResult<Vec<isize>>
 {
-    if step == 0 { return Err(RuntimeErr::RangeIsInfinite); }
+    if step == 0 { Err(ValueErr::RangeIsInfinite)? }
     let mut values = vec![];
     let mut n = left;
 
@@ -485,7 +589,7 @@ fn compute_int_range(left: isize, right: isize, step: isize) -> RtResult<Vec<isi
 }
 fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 {
-    if step == 0 { return Err(RuntimeErr::RangeIsInfinite); }
+    if step == 0 { Err(ValueErr::RangeIsInfinite)? }
     let mut values = vec![];
 
     let positive = step > 0;
@@ -535,9 +639,9 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
 fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
     match t {
         TermOp::Err(e)    => e,
-        TermOp::Return(_) => RuntimeErr::CannotReturn,
-        TermOp::Break     => RuntimeErr::CannotBreak,
-        TermOp::Continue  => RuntimeErr::CannotContinue,
+        TermOp::Return(_) => ResolveErr::CannotReturn.into(),
+        TermOp::Break     => ResolveErr::CannotBreak.into(),
+        TermOp::Continue  => ResolveErr::CannotContinue.into(),
     }
 }
 
@@ -583,7 +687,7 @@ impl TraverseRt for tree::Stmt {
             tree::Stmt::Break     => Err(TermOp::Break),
             tree::Stmt::Continue  => Err(TermOp::Continue),
             tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::ExternFunDecl(_) => Err(RuntimeErr::CompilerOnly("extern function declarations"))?,
+            tree::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations"))?,
             tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
     }
@@ -669,7 +773,7 @@ impl<T> tree::Pat<T> {
             tree::Pat::Unit(unit) => unit_mapper(unit, rhs),
             tree::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
-                    .ok_or_else(|| RuntimeErr::NotIterable(rhs.ty()))?;
+                    .ok_or_else(|| TypeErr::NotIterable(rhs.ty()))?;
     
                 let has_spread = pats.iter().any(|p| matches!(p, Self::Spread(_)));
                 let mut left_values = vec![];
@@ -686,9 +790,9 @@ impl<T> tree::Pat<T> {
                         // we ran out of elements:
     
                         if has_spread {
-                            Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))
+                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i))
                         } else {
-                            Err(RuntimeErr::UnpackTooLittle(pats.len(), i))
+                            Err(ValueErr::UnpackTooLittle(pats.len(), i))
                         }?
                     };
                 }
@@ -702,13 +806,13 @@ impl<T> tree::Pat<T> {
                             right_values.push(t);
                         } else {
                             // we ran out of elements:
-                            Err(RuntimeErr::UnpackTooLittleS(pats.len() - 1, i))?
+                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i))?
                         };
                     }
                 } else {
                     // confirm no extra elements:
                     if it.next().is_some() {
-                        Err(RuntimeErr::UnpackTooMany(pats.len()))?
+                        Err(ValueErr::UnpackTooMany(pats.len()))?
                     }
                 }
                 
@@ -737,7 +841,7 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
         tree::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
         },
-        tree::AsgUnit::Path(_) => Err(RuntimeErr::Todo("general attribute functionality not yet implemented")),
+        tree::AsgUnit::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
         tree::AsgUnit::Index(idx) => {
             let tree::Index {expr, index} = idx;
             
