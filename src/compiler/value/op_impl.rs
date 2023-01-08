@@ -2,7 +2,7 @@ use inkwell::values::{IntValue, FloatValue};
 
 use crate::compiler::resolve::plir;
 use crate::compiler::{Compiler, IRResult, IRErr, TraverseIR};
-use crate::tree::op;
+use crate::ast::op;
 
 use self::internal::*;
 
@@ -297,7 +297,7 @@ mod internal {
     use inkwell::values::{FloatValue, IntValue};
 
     use crate::compiler::Compiler;
-    use crate::tree::op;
+    use crate::ast::op;
 
     pub(super) enum IOpErr {
         WrongType

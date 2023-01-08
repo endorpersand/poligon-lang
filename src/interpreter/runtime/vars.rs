@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use super::gstd;
-use crate::tree::{ReasgType, MutType};
+use crate::ast::{ReasgType, MutType};
 use super::value::Value;
 
 /// Stores the variables in the current scope.

@@ -42,7 +42,7 @@ use err::{GonErr, FullGonErr};
 pub use interpreter::Interpreter;
 pub mod lexer;
 pub mod parser;
-pub(crate) mod tree;
+pub(crate) mod ast;
 
 pub mod interpreter;
 pub mod compiler;

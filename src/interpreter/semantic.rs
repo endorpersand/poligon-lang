@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::err::GonErr;
-use crate::tree;
+use crate::ast;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum SubType {
@@ -43,7 +43,7 @@ impl Local {
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResolveState {
-    steps: HashMap<*const tree::Expr, usize>,
+    steps: HashMap<*const ast::Expr, usize>,
     locals: Vec<Local>,
     global_subs: Vec<SubType>,
 }
@@ -153,7 +153,7 @@ impl ResolveState {
         }
     }
 
-    fn resolve(&mut self, e: &tree::Expr, ident: &str) {
+    fn resolve(&mut self, e: &ast::Expr, ident: &str) {
         // at depth 0, this means it is in our scope and we have to traverse 0 scopes
         // at depth 1, it is one scope above
         // etc.
@@ -172,11 +172,11 @@ impl ResolveState {
         self.locals.clear();
     }
 
-    pub fn traverse_tree(&mut self, t: &tree::Program) -> ResolveResult<()> {
+    pub fn traverse_tree(&mut self, t: &ast::Program) -> ResolveResult<()> {
         t.traverse_rs(self)
     }
 
-    pub fn get_steps(&self, t: &tree::Expr) -> Option<usize> {
+    pub fn get_steps(&self, t: &ast::Expr) -> Option<usize> {
         self.steps.get(&(t as *const _)).copied()
     }
 }
@@ -191,7 +191,7 @@ pub trait TraverseResolve {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()>;
 }
 trait TRsDependent {
-    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()>;
+    fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()>;
 }
 
 impl<T: TraverseResolve> TraverseResolve for [T] {
@@ -213,7 +213,7 @@ impl<T: TraverseResolve> TraverseResolve for Option<T> {
     }
 }
 impl<T: TRsDependent> TRsDependent for [T] {
-    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
         for t in self {
             t.traverse_rs(map, e)?;
         }
@@ -223,7 +223,7 @@ impl<T: TRsDependent> TRsDependent for [T] {
 }
 
 // As a program, we do not want to create another scope.
-impl TraverseResolve for tree::Program {
+impl TraverseResolve for ast::Program {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         self.0.0.traverse_rs(map)
     }
@@ -232,7 +232,7 @@ impl TraverseResolve for tree::Program {
 // The Block node's default traversal is to create a new scope without modifying the type.
 // This may differ from an intended goal, and in that case, 
 // the implementation for [T] should be used instead.
-impl TraverseResolve for tree::Block {
+impl TraverseResolve for ast::Block {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.scope(|map| {
             self.0.traverse_rs(map)
@@ -240,43 +240,43 @@ impl TraverseResolve for tree::Block {
     }
 }
 
-impl TraverseResolve for tree::Stmt {
+impl TraverseResolve for ast::Stmt {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
-            tree::Stmt::Decl(d)   => d.traverse_rs(map),
-            tree::Stmt::Return(e) => match map.block_type() {
+            ast::Stmt::Decl(d)   => d.traverse_rs(map),
+            ast::Stmt::Return(e) => match map.block_type() {
                 BlockType::Function => e.traverse_rs(map),
                 _ => Err(ResolveErr::CannotReturn)
             },
-            tree::Stmt::Break => match map.block_type() {
+            ast::Stmt::Break => match map.block_type() {
                 BlockType::Loop => Ok(()),
                 _ => Err(ResolveErr::CannotBreak)
             },
-            tree::Stmt::Continue => match map.block_type() {
+            ast::Stmt::Continue => match map.block_type() {
                 BlockType::Loop => Ok(()),
                 _ => Err(ResolveErr::CannotContinue)
             },
-            tree::Stmt::FunDecl(f) => f.traverse_rs(map),
-            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
-            tree::Stmt::Expr(e)   => e.traverse_rs(map),
+            ast::Stmt::FunDecl(f) => f.traverse_rs(map),
+            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
+            ast::Stmt::Expr(e)   => e.traverse_rs(map),
         }
     }
 }
 
-impl TraverseResolve for tree::Expr {
+impl TraverseResolve for ast::Expr {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
-            e @ tree::Expr::Ident(s) => {
+            e @ ast::Expr::Ident(s) => {
                 map.resolve(e, s);
                 Ok(())
             },
-            tree::Expr::Block(p) => p.traverse_rs(map),
-            tree::Expr::Literal(_) => Ok(()),
-            tree::Expr::ListLiteral(l) => {
+            ast::Expr::Block(p) => p.traverse_rs(map),
+            ast::Expr::Literal(_) => Ok(()),
+            ast::Expr::ListLiteral(l) => {
                 map.with_sub(SubType::List, |map| l.traverse_rs(map))
             },
-            tree::Expr::SetLiteral(s) => s.traverse_rs(map),
-            tree::Expr::DictLiteral(d) => {
+            ast::Expr::SetLiteral(s) => s.traverse_rs(map),
+            ast::Expr::DictLiteral(d) => {
                 for (k, v) in d {
                     k.traverse_rs(map)?;
                     v.traverse_rs(map)?;
@@ -284,24 +284,24 @@ impl TraverseResolve for tree::Expr {
 
                 Ok(())
             },
-            tree::Expr::Assign(lhs, rhs) => {
+            ast::Expr::Assign(lhs, rhs) => {
                 rhs.traverse_rs(map)?;
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
-            tree::Expr::Path(p) => p.obj.traverse_rs(map),
-            tree::Expr::UnaryOps { ops: _, expr } => expr.traverse_rs(map),
-            tree::Expr::BinaryOp { op: _, left, right } => {
+            ast::Expr::Path(p) => p.obj.traverse_rs(map),
+            ast::Expr::UnaryOps { ops: _, expr } => expr.traverse_rs(map),
+            ast::Expr::BinaryOp { op: _, left, right } => {
                 left.traverse_rs(map)?;
                 right.traverse_rs(map)
             },
-            tree::Expr::Comparison { left, rights } => {
+            ast::Expr::Comparison { left, rights } => {
                 left.traverse_rs(map)?;
                 for (_, e) in rights {
                     e.traverse_rs(map)?;
                 }
                 Ok(())
             },
-            tree::Expr::Range { left, right, step } => {
+            ast::Expr::Range { left, right, step } => {
                 left.traverse_rs(map)?;
                 right.traverse_rs(map)?;
                 if let Some(t) = step {
@@ -309,7 +309,7 @@ impl TraverseResolve for tree::Expr {
                 }
                 Ok(())
             },
-            tree::Expr::If { conditionals, last } => {
+            ast::Expr::If { conditionals, last } => {
                 for (e, p) in conditionals {
                     e.traverse_rs(map)?;
                     p.traverse_rs(map)?;
@@ -317,13 +317,13 @@ impl TraverseResolve for tree::Expr {
         
                 last.traverse_rs(map)
             },
-            tree::Expr::While { condition, block } => {
+            ast::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
                 map.typed_scope(BlockType::Loop, |map| {
                     block.0.traverse_rs(map)
                 })
             },
-            tree::Expr::For { ident, iterator, block } => {
+            ast::Expr::For { ident, iterator, block } => {
                 iterator.traverse_rs(map)?;
 
                 map.typed_scope(BlockType::Loop, |map| {
@@ -331,12 +331,12 @@ impl TraverseResolve for tree::Expr {
                     block.0.traverse_rs(map)
                 })
             },
-            tree::Expr::Call { funct, params } => {
+            ast::Expr::Call { funct, params } => {
                 funct.traverse_rs(map)?;
                 params.traverse_rs(map)
             },
-            tree::Expr::Index(idx) => idx.traverse_rs(map),
-            tree::Expr::Spread(e) => match map.sub_type() {
+            ast::Expr::Index(idx) => idx.traverse_rs(map),
+            ast::Expr::Spread(e) => match map.sub_type() {
                 SubType::None => Err(ResolveErr::CannotSpread),
                 SubType::List => match e {
                     Some(inner) => inner.traverse_rs(map),
@@ -351,16 +351,16 @@ impl TraverseResolve for tree::Expr {
     }
 }
 
-impl TraverseResolve for tree::Decl {
+impl TraverseResolve for ast::Decl {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        let tree::Decl { pat, val, .. } = self;
+        let ast::Decl { pat, val, .. } = self;
 
         pat.traverse_rs(map)?;
         val.traverse_rs(map)
     }
 }
 
-impl TraverseResolve for tree::FunDecl {
+impl TraverseResolve for ast::FunDecl {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.declare(&self.sig.ident);
 
@@ -374,31 +374,31 @@ impl TraverseResolve for tree::FunDecl {
     }
 }
 
-impl TraverseResolve for tree::Index {
+impl TraverseResolve for ast::Index {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         self.expr.traverse_rs(map)?;
         self.index.traverse_rs(map)
     }
 }
 
-impl<T: TRsDependent> TRsDependent for tree::Pat<T> {
-    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
+impl<T: TRsDependent> TRsDependent for ast::Pat<T> {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
         match self {
-            tree::Pat::Unit(u) => u.traverse_rs(map, e),
-            tree::Pat::List(lst) => lst.traverse_rs(map, e),
-            tree::Pat::Spread(mp) => match mp {
+            ast::Pat::Unit(u) => u.traverse_rs(map, e),
+            ast::Pat::List(lst) => lst.traverse_rs(map, e),
+            ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map, e),
                 None => Ok(()),
             },
         }
     }
 }
-impl<T: TraverseResolve> TraverseResolve for tree::Pat<T> {
+impl<T: TraverseResolve> TraverseResolve for ast::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
-            tree::Pat::Unit(u) => u.traverse_rs(map),
-            tree::Pat::List(lst) => lst.traverse_rs(map),
-            tree::Pat::Spread(mp) => match mp {
+            ast::Pat::Unit(u) => u.traverse_rs(map),
+            ast::Pat::List(lst) => lst.traverse_rs(map),
+            ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map),
                 None => Ok(()),
             },
@@ -406,19 +406,19 @@ impl<T: TraverseResolve> TraverseResolve for tree::Pat<T> {
     }
 }
 
-impl TRsDependent for tree::AsgUnit {
-    fn traverse_rs(&self, map: &mut ResolveState, e: &tree::Expr) -> ResolveResult<()> {
+impl TRsDependent for ast::AsgUnit {
+    fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
         match self {
-            tree::AsgUnit::Ident(ident) => {
+            ast::AsgUnit::Ident(ident) => {
                 map.resolve(e, ident);
                 Ok(())
             },
-            tree::AsgUnit::Path(p) => p.obj.traverse_rs(map),
-            tree::AsgUnit::Index(idx) => idx.traverse_rs(map),
+            ast::AsgUnit::Path(p) => p.obj.traverse_rs(map),
+            ast::AsgUnit::Index(idx) => idx.traverse_rs(map),
         }
     }
 }
-impl TraverseResolve for tree::DeclUnit {
+impl TraverseResolve for ast::DeclUnit {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         map.declare(&self.0);
         Ok(())
@@ -430,7 +430,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::interpreter::semantic::ResolveState;
-    use crate::{tree::*, Interpreter};
+    use crate::{ast::*, Interpreter};
 
     use super::ResolveResult;
 

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::tree;
+use crate::ast;
 
 use super::{FunType, FunParamType};
 
@@ -56,10 +56,10 @@ impl Display for VArbType {
 }
 
 impl VArbType {
-    pub fn lookup(t: &tree::Type) -> Self {
+    pub fn lookup(t: &ast::Type) -> Self {
         // TODO, consider generics + resolve properly if not found
         
-        let tree::Type(s, g) = t;
+        let ast::Type(s, g) = t;
         
         match s.as_str() {
             "int"    => Self::Value(ValueType::Int),

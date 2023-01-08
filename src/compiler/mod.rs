@@ -13,7 +13,7 @@ use inkwell::module::Module;
 use inkwell::support::LLVMString;
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
-use crate::tree::{op, Literal};
+use crate::ast::{op, Literal};
 
 use self::resolve::plir;
 use self::value::{TypeLayout, GonValue, apply_bv};

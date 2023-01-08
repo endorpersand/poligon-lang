@@ -1,7 +1,7 @@
 pub mod display;
 mod types;
 
-use crate::tree::{op, self};
+use crate::ast::{op, self};
 pub use types::*;
 pub(crate) use types::ty;
 
@@ -31,16 +31,16 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq)]
 pub struct Decl {
-    pub rt: tree::ReasgType,
-    pub mt: tree::MutType, // No pattern matching
+    pub rt: ast::ReasgType,
+    pub mt: ast::MutType, // No pattern matching
     pub ident: String, // No pattern matching
     pub ty: Type, // Explicit type
     pub val: Expr
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct Param {
-    pub rt: tree::ReasgType,
-    pub mt: tree::MutType,
+    pub rt: ast::ReasgType,
+    pub mt: ast::MutType,
     pub ident: String,
     pub ty: Type // Explicit type
 }
@@ -72,7 +72,7 @@ impl Expr {
 pub enum ExprType {
     Ident(String), // a variable
     Block(Block), // a block
-    Literal(tree::Literal), // int, float, char, str literal
+    Literal(ast::Literal), // int, float, char, str literal
     ListLiteral(Vec<Expr>), // [1, 2, 3, 4]
     SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
     DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}

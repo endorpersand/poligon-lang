@@ -9,7 +9,7 @@
 use std::{io, fs};
 use std::path::Path;
 
-use crate::{lexer, parser, FullGonErr, tree};
+use crate::{lexer, parser, FullGonErr, ast};
 use runtime::Value;
 use runtime::{BlockContext, TraverseRt};
 pub use repl::Repl;
@@ -52,7 +52,7 @@ impl Interpreter {
     }
 
     /// Parse the source string.
-    pub fn parse(&self) -> InterpretResult<tree::Program> {
+    pub fn parse(&self) -> InterpretResult<ast::Program> {
         let lexed = self.lex()?;
 
         parser::parse(lexed)

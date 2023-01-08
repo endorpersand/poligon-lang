@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::tree::{ReasgType, MutType};
+use crate::ast::{ReasgType, MutType};
 
 use super::*;
 

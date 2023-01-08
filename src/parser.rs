@@ -10,12 +10,12 @@ use std::rc::Rc;
 use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken};
-use crate::tree::{self, PatErr};
+use crate::ast::{self, PatErr};
 
-pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<tree::Program> {
+pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens).parse()
 }
-pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<tree::Program> 
+pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<ast::Program> 
 {
     if let Some(FullToken { loc, tt }) = tokens.last() {
         if tt != &token![;] {
@@ -102,10 +102,10 @@ pub type ParseResult<T> = Result<T, FullGonErr<ParseErr>>;
 
 macro_rules! left_assoc_op {
     ($n:ident = $ds:ident (($($op:tt),+) $_:ident)*;) => {
-        fn $n(&mut self) -> ParseResult<Option<tree::Expr>> {
+        fn $n(&mut self) -> ParseResult<Option<ast::Expr>> {
             if let Some(mut e) = self.$ds()? {
                 while let Some(op) = self.match_n(&[$(token![$op]),+]) {
-                    e = tree::Expr::BinaryOp {
+                    e = ast::Expr::BinaryOp {
                         op: op.tt.try_into().unwrap(),
                         left: Box::new(e),
                         right: self.$ds()?
@@ -274,7 +274,7 @@ impl Parser {
     
     /// The parsing function.
     /// Takes a list of tokens and converts it into a parse tree.
-    fn parse(mut self) -> ParseResult<tree::Program> {
+    fn parse(mut self) -> ParseResult<ast::Program> {
         let program = self.expect_stmts()?;
 
         if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
@@ -283,7 +283,7 @@ impl Parser {
 
             Err(expected_tokens![;].at_range(loc.clone()))
         } else {
-            Ok(tree::Program(program))
+            Ok(ast::Program(program))
         }
     }
 
@@ -291,7 +291,7 @@ impl Parser {
     /// 
     /// Return the block enclosing the vector of statements,
     /// or error if the tokens do not represent a vector of statements.
-    fn expect_stmts(&mut self) -> ParseResult<tree::Block> {
+    fn expect_stmts(&mut self) -> ParseResult<ast::Block> {
         let mut stmts = vec![];
 
         /*
@@ -323,14 +323,14 @@ impl Parser {
             }
         }
 
-        Ok(tree::Block(stmts))
+        Ok(ast::Block(stmts))
     }
 
     /// Expect that the next tokens represent a block.
     /// 
     /// Return the block enclosing the vector of statements,
     /// or error if the tokens do not represent a block.
-    fn expect_block(&mut self) -> ParseResult<tree::Block> {
+    fn expect_block(&mut self) -> ParseResult<ast::Block> {
         self.expect1(token!["{"])?;
         let p = self.expect_stmts()?;
         self.expect1(token!["}"])?;
@@ -341,18 +341,18 @@ impl Parser {
     /// 
     /// Return the statement,
     /// or error if the tokens do not represent a statement.
-    fn match_stmt(&mut self) -> ParseResult<Option<tree::Stmt>> {
+    fn match_stmt(&mut self) -> ParseResult<Option<ast::Stmt>> {
         let st = match self.peek_token() {
-            Some(token![let]) | Some(token![const]) => Some(self.expect_decl()?).map(tree::Stmt::Decl),
+            Some(token![let]) | Some(token![const]) => Some(self.expect_decl()?).map(ast::Stmt::Decl),
             Some(token![return])   => Some(self.expect_return()?),
             Some(token![break])    => Some(self.expect_break()?),
             Some(token![continue]) => Some(self.expect_cont()?),
-            Some(token![fun])      => Some(self.expect_fun()?).map(tree::Stmt::FunDecl),
+            Some(token![fun])      => Some(self.expect_fun()?).map(ast::Stmt::FunDecl),
             Some(token![extern])   => {
                 self.expect1(token![extern])?;
-                Some(self.expect_fun_sig()?).map(tree::Stmt::ExternFunDecl)
+                Some(self.expect_fun_sig()?).map(ast::Stmt::ExternFunDecl)
             },
-            Some(_)                => self.match_expr()?.map(tree::Stmt::Expr),
+            Some(_)                => self.match_expr()?.map(ast::Stmt::Expr),
             None                   => None
         };
 
@@ -363,10 +363,10 @@ impl Parser {
     /// 
     /// Return the variable declaration,
     /// or error if the tokens do not represent a variable declaration.
-    fn expect_decl(&mut self) -> ParseResult<tree::Decl> {
+    fn expect_decl(&mut self) -> ParseResult<ast::Decl> {
         let rt = match self.next_token() {
-            Some(token![let])   => tree::ReasgType::Let,
-            Some(token![const]) => tree::ReasgType::Const,
+            Some(token![let])   => ast::ReasgType::Let,
+            Some(token![const]) => ast::ReasgType::Const,
             _ => unreachable!()
         };
         
@@ -382,7 +382,7 @@ impl Parser {
         self.expect1(token![=])?;
         let expr = self.expect_expr()?;
 
-        Ok(tree::Decl {
+        Ok(ast::Decl {
             rt,
             pat,
             ty,
@@ -390,7 +390,7 @@ impl Parser {
         })
     }
 
-    fn match_decl_pat(&mut self) -> ParseResult<Option<tree::DeclPat>> {
+    fn match_decl_pat(&mut self) -> ParseResult<Option<ast::DeclPat>> {
         if let Some(t) = self.peek_token() {
             let pat = match t {
                 token!["["] => {
@@ -401,23 +401,23 @@ impl Parser {
                         ParseErr::ExpectedPattern
                     )?;
 
-                    tree::DeclPat::List(tpl)
+                    ast::DeclPat::List(tpl)
                 },
                 token![..] => {
                     self.expect1(token![..])?;
                     let item = self.match_decl_pat()?.map(Box::new);
 
-                    tree::DeclPat::Spread(item)
+                    ast::DeclPat::Spread(item)
                 }
                 token![mut] | Token::Ident(_) => {
                     let mt = if self.match1(token![mut]) {
-                        tree::MutType::Mut
+                        ast::MutType::Mut
                     } else {
-                        tree::MutType::Immut
+                        ast::MutType::Immut
                     };
 
-                    let node = tree::DeclUnit(self.expect_ident()?, mt);
-                    tree::DeclPat::Unit(node)
+                    let node = ast::DeclUnit(self.expect_ident()?, mt);
+                    ast::DeclPat::Unit(node)
                 },
                 _ => return Ok(None)
             };
@@ -432,22 +432,22 @@ impl Parser {
     /// consume the tokens and return the parameter.
     /// 
     /// In the construction of a parameter, syntax errors are propagated.
-    fn match_param(&mut self) -> ParseResult<Option<tree::Param>> {
+    fn match_param(&mut self) -> ParseResult<Option<ast::Param>> {
         let mrt_token = self.match_n(&[token![let], token![const]])
             .map(|t| t.tt);
         
         let mut empty = mrt_token.is_none(); // if mrt is not empty, ensure empty is false
         let rt = match mrt_token {
-            Some(token![let]) | None => tree::ReasgType::Let,
-            Some(token![const]) => tree::ReasgType::Const,
+            Some(token![let]) | None => ast::ReasgType::Let,
+            Some(token![const]) => ast::ReasgType::Const,
             _ => unreachable!()
         };
         
         let mt = if self.match1(token![mut]) {
             empty = false;
-            tree::MutType::Mut
+            ast::MutType::Mut
         } else {
-            tree::MutType::Immut
+            ast::MutType::Immut
         };
 
         // the param checked so far is fully empty and probably not an actual param:
@@ -462,7 +462,7 @@ impl Parser {
             None
         };
 
-        Ok(Some(tree::Param {
+        Ok(Some(ast::Param {
             rt,
             mt,
             ident,
@@ -474,36 +474,36 @@ impl Parser {
     /// 
     /// Return the statement,
     /// or error if the tokens do not represent a return statement.
-    fn expect_return(&mut self) -> ParseResult<tree::Stmt> {
+    fn expect_return(&mut self) -> ParseResult<ast::Stmt> {
         self.expect1(token![return])?;
         let e = self.match_expr()?;
 
-        Ok(tree::Stmt::Return(e))
+        Ok(ast::Stmt::Return(e))
     }
     /// Expect that the next tokens represent a break statement.
     /// 
     /// Return the statement,
     /// or error if the tokens do not represent a break statement.
-    fn expect_break(&mut self) -> ParseResult<tree::Stmt> {
+    fn expect_break(&mut self) -> ParseResult<ast::Stmt> {
         self.expect1(token![break])?;
 
-        Ok(tree::Stmt::Break)
+        Ok(ast::Stmt::Break)
     }
     /// Expect that the next tokens represent a continue statement.
     /// 
     /// Return the statement,
     /// or error if the tokens do not represent a continue statement.
-    fn expect_cont(&mut self) -> ParseResult<tree::Stmt> {
+    fn expect_cont(&mut self) -> ParseResult<ast::Stmt> {
         self.expect1(token![continue])?;
 
-        Ok(tree::Stmt::Continue)
+        Ok(ast::Stmt::Continue)
     }
 
     /// Expect that the next tokens represent a function signature.
     /// 
     /// Return the function signature,
     /// or error if the tokens do not represent a function signature.
-    fn expect_fun_sig(&mut self) -> ParseResult<tree::FunSignature> {
+    fn expect_fun_sig(&mut self) -> ParseResult<ast::FunSignature> {
         self.expect1(token![fun])?;
 
         let ident = self.expect_ident()?;
@@ -521,18 +521,18 @@ impl Parser {
             None
         };
 
-        Ok(tree::FunSignature { ident, params, ret })
+        Ok(ast::FunSignature { ident, params, ret })
     }
 
     /// Expect that the next tokens represent a function declaration.
     /// 
     /// Return the function declaration,
     /// or error if the tokens do not represent a function declaration.
-    fn expect_fun(&mut self) -> ParseResult<tree::FunDecl> {
+    fn expect_fun(&mut self) -> ParseResult<ast::FunDecl> {
         let sig = self.expect_fun_sig()?;
         let block = self.expect_block()?;
 
-        Ok(tree::FunDecl {
+        Ok(ast::FunDecl {
             sig,
             block: Rc::new(block)
         })
@@ -550,7 +550,7 @@ impl Parser {
         }
     }
     
-    fn match_type(&mut self) -> ParseResult<Option<tree::Type>> {
+    fn match_type(&mut self) -> ParseResult<Option<ast::Type>> {
         if matches!(self.peek_token(), Some(Token::Ident(_))) {
             let ident = self.expect_ident()?;
 
@@ -577,7 +577,7 @@ impl Parser {
                 vec![]
             };
 
-            Ok(Some(tree::Type(ident, params)))
+            Ok(Some(ast::Type(ident, params)))
         } else {
             Ok(None)
         }
@@ -587,7 +587,7 @@ impl Parser {
     /// 
     /// Return the type expression,
     /// or error if the tokens do not represent a type expression.
-    fn expect_type(&mut self) -> ParseResult<tree::Type> {
+    fn expect_type(&mut self) -> ParseResult<ast::Type> {
         self.match_type()?
             .ok_or_else(|| ParseErr::ExpectedType.at_range(self.peek_loc()))
     }
@@ -603,20 +603,20 @@ impl Parser {
     /// or return none if the tokens do not represent an expression.
     /// 
     /// Note that syntax errors are propagated through this function.
-    fn match_expr(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_expr(&mut self) -> ParseResult<Option<ast::Expr>> {
         self.match_asg()
     }
     /// Expect that the next tokens represent an expression
     /// 
     /// Return the expression,
     /// or error if the tokens do not represent a expression.
-    fn expect_expr(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_expr(&mut self) -> ParseResult<ast::Expr> {
         self.match_expr()?
             .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))
     }
 
     /// Match an assignment operation. (a = b)
-    fn match_asg(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_asg(&mut self) -> ParseResult<Option<ast::Expr>> {
         // a = b = c = d = e = [expr]
 
         let mut pats = vec![];
@@ -631,7 +631,7 @@ impl Parser {
             // if there was an equal sign, this expression must've been a pattern:
             let pat_expr = last
                 .ok_or_else(|| ParseErr::ExpectedPattern.at_range(eq_pos.clone()))?;
-            let pat = match tree::AsgPat::try_from(pat_expr) {
+            let pat = match ast::AsgPat::try_from(pat_expr) {
                 Ok(p) => p,
                 Err(e) => {
                     Err(ParseErr::AsgPatErr(e)
@@ -652,7 +652,7 @@ impl Parser {
 
             let asg = pats.into_iter()
                 .rfold(rhs, |e, pat| {
-                    tree::Expr::Assign(pat, Box::new(e))
+                    ast::Expr::Assign(pat, Box::new(e))
                 });
             
             Ok(Some(asg))
@@ -697,7 +697,7 @@ impl Parser {
     }
 
     /// Match a comparison operation. (2 < 3, 2 < 3 < 4)
-    fn match_cmp(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_cmp(&mut self) -> ParseResult<Option<ast::Expr>> {
         let me = self.match_spread()?;
 
         if let Some(mut e) = me {
@@ -720,7 +720,7 @@ impl Parser {
 
             }
             if !rights.is_empty() {
-                e = tree::Expr::Comparison { 
+                e = ast::Expr::Comparison { 
                     left: Box::new(e), 
                     rights 
                 }
@@ -733,20 +733,20 @@ impl Parser {
     }
 
     // Match a spread operation. (..[1,2,3,4])
-    fn match_spread(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_spread(&mut self) -> ParseResult<Option<ast::Expr>> {
         let is_spread = self.match1(token![..]);
         let me = self.match_range()?;
         
         if is_spread {
             let boxed = me.map(Box::new);
-            Ok(Some(tree::Expr::Spread(boxed)))
+            Ok(Some(ast::Expr::Spread(boxed)))
         } else {
             Ok(me)
         }
     }
 
     // Match a range operation. (1..5)
-    fn match_range(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_range(&mut self) -> ParseResult<Option<ast::Expr>> {
         if let Some(mut e) = self.match_bor()? {
             if self.match1(token![..]) {
                 let right = self.match_bor()?
@@ -760,7 +760,7 @@ impl Parser {
                     None
                 };
 
-                e = tree::Expr::Range {
+                e = ast::Expr::Range {
                     left: Box::new(e), 
                     right: Box::new(right), 
                     step: step.map(Box::new)
@@ -784,7 +784,7 @@ impl Parser {
     }
 
     /// Match a unary operation. (!expr, ~expr, -expr, +expr)
-    fn match_unary(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_unary(&mut self) -> ParseResult<Option<ast::Expr>> {
         lazy_static! {
             static ref UNARY_OPS: [Token; 4] = [token![!], token![~], token![-], token![+]];
         }
@@ -811,16 +811,16 @@ impl Parser {
     /// It takes the inner expression and acts as though the unary operators were applied to it.
     /// If the inner expression is a uops node, this also flattens the operators 
     /// (so that we don't have a unary operators node wrapping another one)
-    fn wrap_unary_op(mut ops: Vec<tree::op::Unary>, inner: tree::Expr) -> tree::Expr {
+    fn wrap_unary_op(mut ops: Vec<ast::op::Unary>, inner: ast::Expr) -> ast::Expr {
         // flatten if unary ops inside
-        if let tree::Expr::UnaryOps { ops: ops2, expr } = inner {
+        if let ast::Expr::UnaryOps { ops: ops2, expr } = inner {
             ops.extend(ops2);
-            tree::Expr::UnaryOps {
+            ast::Expr::UnaryOps {
                 ops, expr
             }
         } else {
             // wrap otherwise
-            tree::Expr::UnaryOps {
+            ast::Expr::UnaryOps {
                 ops,
                 expr: Box::new(inner)
             }
@@ -828,14 +828,14 @@ impl Parser {
     }
 
     /// Match a function call OR index. (f(1, 2, 3, 4), a[1])
-    fn match_call_index(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_call_index(&mut self) -> ParseResult<Option<ast::Expr>> {
         if let Some(mut e) = self.match_path()? {
             while let Some(delim) = self.match_n(&[token!["("], token!["["]]) {
                 match delim.tt {
                     token!["("] => {
                         let params = self.expect_closing_tuple(token![")"])?;
 
-                        e = tree::Expr::Call {
+                        e = ast::Expr::Call {
                             funct: Box::new(e), 
                             params
                         };
@@ -844,7 +844,7 @@ impl Parser {
                         let index = self.expect_expr()?;
                         self.expect1(token!["]"])?;
 
-                        e = tree::Expr::Index(tree::Index {
+                        e = ast::Expr::Index(ast::Index {
                             expr: Box::new(e), 
                             index: Box::new(index)
                         });
@@ -860,7 +860,7 @@ impl Parser {
     }
 
     /// Match a path. (a.b.c::d::e::f.g.h.i)
-    fn match_path(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_path(&mut self) -> ParseResult<Option<ast::Expr>> {
         if let Some(mut e) = self.match_unit()? {
             let mut attrs = vec![];
 
@@ -875,7 +875,7 @@ impl Parser {
             }
 
             if !attrs.is_empty() {
-                e = tree::Expr::Path(tree::Path {
+                e = ast::Expr::Path(ast::Path {
                     obj: Box::new(e),
                     attrs
                 })
@@ -888,15 +888,15 @@ impl Parser {
     }
 
     /// Match something with lower precedence than a path.
-    fn match_unit(&mut self) -> ParseResult<Option<tree::Expr>> {
+    fn match_unit(&mut self) -> ParseResult<Option<ast::Expr>> {
         if let Some(t) = self.peek_token() {
             let unit = match t {
                 Token::Ident(id) if id == "set" => self.expect_set()?,
                 Token::Ident(id) if id == "dict" => self.expect_dict()?,
-                Token::Ident(_)   => self.expect_ident().map(tree::Expr::Ident)?,
+                Token::Ident(_)   => self.expect_ident().map(ast::Expr::Ident)?,
                 Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
                 token!["["]       => self.expect_list()?,
-                token!["{"]       => self.expect_block().map(tree::Expr::Block)?,
+                token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
                 token![if]        => self.expect_if()?,
                 token![while]     => self.expect_while()?,
                 token![for]       => self.expect_for()?,
@@ -940,7 +940,7 @@ impl Parser {
     }
 
     /// Expect that the next tokens represent expressions separated by commas
-    fn expect_closing_tuple(&mut self, close_with: Token) -> ParseResult<Vec<tree::Expr>> 
+    fn expect_closing_tuple(&mut self, close_with: Token) -> ParseResult<Vec<ast::Expr>> 
     {
         self.expect_closing_tuple_of(Parser::match_expr, close_with, ParseErr::ExpectedExpr)
     }
@@ -972,46 +972,46 @@ impl Parser {
     }
 
     /// Expect a literal (numeric, str, char)
-    fn expect_literal(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_literal(&mut self) -> ParseResult<ast::Expr> {
         let FullToken { tt, loc } = self.tokens.pop_front().expect("unreachable");
         
         let lit = match tt {
-            Token::Numeric(s) => tree::Literal::from_numeric(&s)
+            Token::Numeric(s) => ast::Literal::from_numeric(&s)
                 .ok_or_else(|| ParseErr::CannotParseNumeric.at_range(loc))?,
-            Token::Str(s)  => tree::Literal::Str(s),
-            Token::Char(c) => tree::Literal::Char(c),
-            token![true]   => tree::Literal::Bool(true),
-            token![false]  => tree::Literal::Bool(false),
+            Token::Str(s)  => ast::Literal::Str(s),
+            Token::Char(c) => ast::Literal::Char(c),
+            token![true]   => ast::Literal::Bool(true),
+            token![false]  => ast::Literal::Bool(false),
             _ => unreachable!()
         };
 
-        Ok(tree::Expr::Literal(lit))
+        Ok(ast::Expr::Literal(lit))
     }
 
     /// Expect a list ([1, 2, 3, 4, 5])
-    fn expect_list(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_list(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(token!["["])?;
         let exprs = self.expect_closing_tuple(token!["]"])?;
         
-        Ok(tree::Expr::ListLiteral(exprs))
+        Ok(ast::Expr::ListLiteral(exprs))
     }
 
     /// Expect a set (set {1, 2, 3, 4})
-    fn expect_set(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_set(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(Token::Ident("set".to_string()))?;
 
         let e = if self.match1(token!["{"]) {
             let exprs = self.expect_closing_tuple(token!["}"])?;
             
-            tree::Expr::SetLiteral(exprs)
+            ast::Expr::SetLiteral(exprs)
         } else {
-            tree::Expr::Ident("set".to_string())
+            ast::Expr::Ident("set".to_string())
         };
 
         Ok(e)
     }
     /// Expect a dict (dict {1: 2, 3: 4})
-    fn expect_dict(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_dict(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(Token::Ident("dict".to_string()))?;
 
         let e = if self.match1(token!["{"]) {
@@ -1021,15 +1021,15 @@ impl Parser {
                 ParseErr::ExpectedEntry
             )?;
             
-            tree::Expr::DictLiteral(entries)
+            ast::Expr::DictLiteral(entries)
         } else {
-            tree::Expr::Ident("dict".to_string())
+            ast::Expr::Ident("dict".to_string())
         };
 
         Ok(e)
     }
     /// Match a dict entry (1: 2)
-    fn match_entry(&mut self) -> ParseResult<Option<(tree::Expr, tree::Expr)>> {
+    fn match_entry(&mut self) -> ParseResult<Option<(ast::Expr, ast::Expr)>> {
         if let Some(k) = self.match_expr()? {
             self.expect1(token![:])?;
             let v = self.expect_expr()?;
@@ -1040,7 +1040,7 @@ impl Parser {
     }
 
     /// Expect an if expression (if cond {}, if cond {} else cond {}, etc.)
-    fn expect_if(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_if(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(token![if])?;
 
         let mut conditionals = vec![(self.expect_expr()?, self.expect_block()?)];
@@ -1061,32 +1061,32 @@ impl Parser {
             }
         }
 
-        Ok(tree::Expr::If {
+        Ok(ast::Expr::If {
             conditionals,
             last
         })
     }
 
     // Expect a while loop.
-    fn expect_while(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_while(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(token![while])?;
         let condition = self.expect_expr()?;
         let block = self.expect_block()?;
         
-        Ok(tree::Expr::While {
+        Ok(ast::Expr::While {
             condition: Box::new(condition), block
         })
     }
 
     // Expect a for loop.
-    fn expect_for(&mut self) -> ParseResult<tree::Expr> {
+    fn expect_for(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(token![for])?;
         let ident = self.expect_ident()?;
         self.expect1(token![in])?;
         let iterator = self.expect_expr()?;
         let block = self.expect_block()?;
         
-        Ok(tree::Expr::For {
+        Ok(ast::Expr::For {
             ident, iterator: Box::new(iterator), block
         })
     }
@@ -1096,7 +1096,7 @@ impl Parser {
 mod tests {
     use crate::lexer::token::token;
     use crate::lexer::tokenize;
-    use crate::tree::*;
+    use crate::ast::*;
 
     use super::{parse, ParseErr, Parser, ParseResult};
 

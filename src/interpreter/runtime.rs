@@ -5,9 +5,9 @@
 use std::rc::Rc;
 
 use super::semantic::{ResolveState, ResolveErr};
-use crate::tree;
+use crate::ast;
 
-use crate::tree::op;
+use crate::ast::op;
 pub use self::value::Value;
 use self::value::{ValueType, VArbType, FunType, FunParamType};
 use self::vars::VarContext;
@@ -50,10 +50,10 @@ impl BlockContext<'_> {
         }).unwrap()
     }
 
-    pub fn get_var(&self, ident: &str, e: &tree::Expr) -> Option<&Value> {
+    pub fn get_var(&self, ident: &str, e: &ast::Expr) -> Option<&Value> {
         self.vars.get_indexed(ident, self.rs.get_steps(e))
     }
-    pub fn set_var(&mut self, ident: &str, v: Value, e: &tree::Expr) -> RtResult<Value> {
+    pub fn set_var(&mut self, ident: &str, v: Value, e: &ast::Expr) -> RtResult<Value> {
         self.vars.set_indexed(ident, v, self.rs.get_steps(e))
     }
 }
@@ -68,7 +68,7 @@ macro_rules! cast {
     ($e:expr) => { Ok($e?) }
 }
 
-impl tree::Expr {
+impl ast::Expr {
     /// Evaluate an expression and then apply the unary operator for it.
     pub fn apply_unary(&self, o: op::Unary, ctx: &mut BlockContext) -> RtTraversal<Value> {
         self.traverse_rt(ctx)
@@ -97,7 +97,7 @@ impl tree::Expr {
     }
 }
 
-impl tree::Program {
+impl ast::Program {
     pub fn run(self) -> RtResult<Value> {
         self.run_with_ctx(&mut BlockContext::new())
     }
@@ -117,7 +117,7 @@ impl tree::Program {
 
 /// Runtime errors
 pub mod err {
-    use crate::tree::op;
+    use crate::ast::op;
 
     use super::value::ValueType;
     use super::value::RvErr;
@@ -347,23 +347,23 @@ pub trait TraverseRt {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value>;
 }
 
-impl TraverseRt for tree::Expr {
+impl TraverseRt for ast::Expr {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
-            tree::Expr::Ident(ident) => {
+            ast::Expr::Ident(ident) => {
                 ctx.get_var(ident, self)
                     .ok_or_else(|| NameErr::UndefinedVar(String::from(ident)).into())
                     .map(Value::clone)
                     .map_err(TermOp::Err)
             },
-            tree::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
-            tree::Expr::Literal(e) => e.traverse_rt(ctx),
-            tree::Expr::ListLiteral(exprs) => {
+            ast::Expr::Block(e) => e.traverse_rt(&mut ctx.child()),
+            ast::Expr::Literal(e) => e.traverse_rt(ctx),
+            ast::Expr::ListLiteral(exprs) => {
                 let mut vec = vec![];
                 
                 for e in exprs.iter() {
                     match e {
-                        tree::Expr::Spread(inner) => {
+                        ast::Expr::Spread(inner) => {
                             let inner = inner.as_ref()
                                 .ok_or(ResolveErr::CannotSpreadNone)?
                                 .traverse_rt(ctx)?;
@@ -378,16 +378,16 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::new_list(vec))
             },
-            tree::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets"))?,
-            tree::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts"))?,
-            tree::Expr::Assign(pat, expr) => {
+            ast::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets"))?,
+            ast::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts"))?,
+            ast::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
                 assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
-            tree::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
-            tree::Expr::UnaryOps { ops, expr } => {
+            ast::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
+            ast::Expr::UnaryOps { ops, expr } => {
                 let mut ops_iter = ops.iter().rev();
         
                 // ops should always have at least 1 unary op, so this should always be true
@@ -405,8 +405,8 @@ impl TraverseRt for tree::Expr {
 
                 Ok(e)
             },
-            tree::Expr::BinaryOp { op, left, right } => left.apply_binary(*op, right, ctx),
-            tree::Expr::Comparison { left, rights } => {
+            ast::Expr::BinaryOp { op, left, right } => left.apply_binary(*op, right, ctx),
+            ast::Expr::Comparison { left, rights } => {
                 let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
                 // break it up into a < b && b < c && c < d && d < e
@@ -423,7 +423,7 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::Bool(true))
             },
-            tree::Expr::Range { left, right, step } => {
+            ast::Expr::Range { left, right, step } => {
                 // TODO: be lazy
                 let (l, r) = (left.traverse_rt(ctx)?, right.traverse_rt(ctx)?);
                 let step_value = step.as_ref()
@@ -463,7 +463,7 @@ impl TraverseRt for tree::Expr {
                     _ => Err(TypeErr::CannotApplyRange(l.ty(), r.ty()))?
                 }
             },
-            tree::Expr::If { conditionals, last } => {
+            ast::Expr::If { conditionals, last } => {
                 for (cond, block) in conditionals {
                     if cond.traverse_rt(ctx)?.truth() {
                         return block.traverse_rt(&mut ctx.child());
@@ -475,7 +475,7 @@ impl TraverseRt for tree::Expr {
                     |block| block.traverse_rt(&mut ctx.child())
                 )
             },
-            tree::Expr::While { condition, block } => {
+            ast::Expr::While { condition, block } => {
                 let mut values = vec![];
                 while condition.traverse_rt(ctx)?.truth() {
                     let iteration = match block.traverse_rt(&mut ctx.child()) {
@@ -490,7 +490,7 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::new_list(values))
             },
-            tree::Expr::For { ident, iterator, block } => {
+            ast::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
                 let it = it_val.as_iterator()
                     .ok_or_else(|| TypeErr::NotIterable(it_val.ty()))?;
@@ -511,10 +511,10 @@ impl TraverseRt for tree::Expr {
 
                 Ok(Value::new_list(result))
             },
-            tree::Expr::Call { funct, params } => {
+            ast::Expr::Call { funct, params } => {
                 match &**funct {
                     // HACK: generalize methods
-                    e @ tree::Expr::Path(tree::Path { obj, attrs }) => {
+                    e @ ast::Expr::Path(ast::Path { obj, attrs }) => {
                         if let this @ Value::List(_) = obj.traverse_rt(ctx)? {
                             if attrs.len() == 1 {
                                 let (property, _) = &attrs[0];
@@ -556,14 +556,14 @@ impl TraverseRt for tree::Expr {
                     }
                 }
             }
-            tree::Expr::Index(idx) => {
-                let tree::Index {expr, index} = idx;
+            ast::Expr::Index(idx) => {
+                let ast::Index {expr, index} = idx;
                 let val = expr.traverse_rt(ctx)?;
                 let index_val = index.traverse_rt(ctx)?;
 
                 val.get_index(index_val).map_err(TermOp::Err)
             },
-            tree::Expr::Spread(_) => Err(ResolveErr::CannotSpread)?,
+            ast::Expr::Spread(_) => Err(ResolveErr::CannotSpread)?,
         }
     }
 }
@@ -645,19 +645,19 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
     }
 }
 
-impl TraverseRt for tree::Literal {
+impl TraverseRt for ast::Literal {
     fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtTraversal<Value> {
         Ok(self.clone().into())
     }
 }
 
-impl TraverseRt for tree::Program {
+impl TraverseRt for ast::Program {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         self.0.traverse_rt(ctx)
     }
 }
 
-impl TraverseRt for tree::Block {
+impl TraverseRt for ast::Block {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self.0.split_last() {
             Some((tail, head)) => {
@@ -671,11 +671,11 @@ impl TraverseRt for tree::Block {
     }
 }
 
-impl TraverseRt for tree::Stmt {
+impl TraverseRt for ast::Stmt {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match self {
-            tree::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::Return(mt) => {
+            ast::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
+            ast::Stmt::Return(mt) => {
                 let expr = mt.as_ref()
                     .map_or(
                         Ok(Value::Unit), 
@@ -684,16 +684,16 @@ impl TraverseRt for tree::Stmt {
                 
                 Err(TermOp::Return(expr))
             },
-            tree::Stmt::Break     => Err(TermOp::Break),
-            tree::Stmt::Continue  => Err(TermOp::Continue),
-            tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations"))?,
-            tree::Stmt::Expr(e) => e.traverse_rt(ctx),
+            ast::Stmt::Break     => Err(TermOp::Break),
+            ast::Stmt::Continue  => Err(TermOp::Continue),
+            ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
+            ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations"))?,
+            ast::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
     }
 }
 
-impl TraverseRt for tree::Decl {
+impl TraverseRt for ast::Decl {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         let rhs = self.val.traverse_rt(ctx)?;
         
@@ -702,15 +702,15 @@ impl TraverseRt for tree::Decl {
     }
 }
 
-impl TraverseRt for tree::FunDecl {
+impl TraverseRt for ast::FunDecl {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        let tree::FunDecl { sig: tree::FunSignature { ident, params, ret }, block } = self;
+        let ast::FunDecl { sig: ast::FunSignature { ident, params, ret }, block } = self;
         
         let mut param_types = vec![];
         let mut param_names = vec![];
 
         for p in params {
-            let tree::Param { ident, ty, .. } = p;
+            let ast::Param { ident, ty, .. } = p;
 
             param_types.push(
                 ty.as_ref()
@@ -736,7 +736,7 @@ impl TraverseRt for tree::FunDecl {
             ctx.vars.idx()
         );
         
-        let rf = ctx.vars.declare(ident.clone(), val)?.clone();
+        let rf = ctx.vars.declare(ident.to_string(), val)?.clone();
         Ok(rf)
     }
 }
@@ -755,7 +755,7 @@ mod tests {
     }
 }
 
-impl<T> tree::Pat<T> {
+impl<T> ast::Pat<T> {
     pub fn unpack<F>(&self, rhs: Value, mut unit_mapper: F) -> RtResult<Value>
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
@@ -770,8 +770,8 @@ impl<T> tree::Pat<T> {
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
         match self {
-            tree::Pat::Unit(unit) => unit_mapper(unit, rhs),
-            tree::Pat::List(pats) => {
+            ast::Pat::Unit(unit) => unit_mapper(unit, rhs),
+            ast::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
                     .ok_or_else(|| TypeErr::NotIterable(rhs.ty()))?;
     
@@ -828,7 +828,7 @@ impl<T> tree::Pat<T> {
                 
                 Ok(rhs)
             },
-            tree::Pat::Spread(mp) => match mp {
+            ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.unpack_mut(rhs, unit_mapper),
                 None => Ok(rhs), // we can dispose if spread is None, TODO!: what does a no-spread return?
             },
@@ -836,14 +836,14 @@ impl<T> tree::Pat<T> {
     }
 }
 
-fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tree::Expr) -> RtResult<Value> {
+fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast::Expr) -> RtResult<Value> {
     pat.unpack(rhs, |unit, rhs| match unit {
-        tree::AsgUnit::Ident(ident) => {
+        ast::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
         },
-        tree::AsgUnit::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
-        tree::AsgUnit::Index(idx) => {
-            let tree::Index {expr, index} = idx;
+        ast::AsgUnit::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
+        ast::AsgUnit::Index(idx) => {
+            let ast::Index {expr, index} = idx;
             
             let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
             let index_val = index.traverse_rt(ctx).map_err(into_err)?;
@@ -853,8 +853,8 @@ fn assign_pat(pat: &tree::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &tre
     })
 }
 
-fn declare_pat(pat: &tree::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: tree::ReasgType) -> RtResult<Value> {
-    pat.unpack(rhs, |tree::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
+fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: ast::ReasgType) -> RtResult<Value> {
+    pat.unpack(rhs, |ast::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
         String::from(ident), 
         rhs,
         rt,

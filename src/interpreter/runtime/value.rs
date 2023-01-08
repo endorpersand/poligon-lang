@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::ops::Deref;
 
 use super::{RtResult, TypeErr, ValueErr};
-use crate::tree::{self, op};
+use crate::ast::{self, op};
 pub(super) use refval::*;
 
 pub mod fun;
@@ -395,7 +395,7 @@ impl Value {
     }
 
     /// Create a function value, using a functon defined in Poligon.
-    pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<tree::Block>, idx: usize) -> Self {
+    pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<ast::Block>, idx: usize) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,
@@ -414,14 +414,14 @@ impl TryFrom<&Value> for f64 {
     }
 }
 
-impl From<tree::Literal> for Value {
-    fn from(literal: tree::Literal) -> Self {
+impl From<ast::Literal> for Value {
+    fn from(literal: ast::Literal) -> Self {
         match literal {
-            tree::Literal::Int(v)   => Value::Int(v),
-            tree::Literal::Float(v) => Value::Float(v),
-            tree::Literal::Char(v)  => Value::Char(v),
-            tree::Literal::Str(v)   => Value::Str(v),
-            tree::Literal::Bool(v)  => Value::Bool(v),
+            ast::Literal::Int(v)   => Value::Int(v),
+            ast::Literal::Float(v) => Value::Float(v),
+            ast::Literal::Char(v)  => Value::Char(v),
+            ast::Literal::Str(v)   => Value::Str(v),
+            ast::Literal::Bool(v)  => Value::Bool(v),
         }
     }
 }

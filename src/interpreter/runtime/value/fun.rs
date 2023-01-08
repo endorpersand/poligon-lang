@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::interpreter::{BlockContext, TraverseRt, tree};
+use crate::interpreter::{BlockContext, TraverseRt, ast};
 use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr};
 
 use super::{VArbType, Value};
@@ -23,7 +23,7 @@ pub enum FunParamType {
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
     Rust(fn(Vec<Value>) -> RtResult<Value>),
-    Poligon(Vec<String>, Rc<tree::Block>, usize /* scope idx */)
+    Poligon(Vec<String>, Rc<ast::Block>, usize /* scope idx */)
 }
 
 impl GonFun {
@@ -35,7 +35,7 @@ impl GonFun {
         }
     }
 
-    pub fn call(&self, params: &[tree::Expr], ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn call(&self, params: &[ast::Expr], ctx: &mut BlockContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {

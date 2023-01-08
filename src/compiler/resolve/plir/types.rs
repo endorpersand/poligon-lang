@@ -1,4 +1,4 @@
-use crate::tree::{op, self};
+use crate::ast::{op, self};
 
 use super::{Split, Expr, ExprType};
 
@@ -219,7 +219,7 @@ impl Type {
                 }
             }
             TypeRef::Tuple(tys) => match idx.expr {
-                ExprType::Literal(tree::Literal::Int(idx_lit)) => {
+                ExprType::Literal(ast::Literal::Int(idx_lit)) => {
                     usize::try_from(idx_lit)
                         .ok()
                         .and_then(|idx| tys.get(idx))
@@ -251,9 +251,9 @@ macro_rules! ty {
 }
 pub(crate) use ty;
 
-impl From<tree::Type> for Type {
-    fn from(ty: tree::Type) -> Self {
-        let tree::Type(ident, params) = ty;
+impl From<ast::Type> for Type {
+    fn from(ty: ast::Type) -> Self {
+        let ast::Type(ident, params) = ty;
         
         if params.is_empty() {
             Type::Prim(ident)
