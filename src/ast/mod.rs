@@ -75,51 +75,108 @@ pub struct FunDecl {
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
-    Ident(String), // a variable
-    Block(Block), // a block
-    Literal(Literal), // int, float, char, str literal
-    ListLiteral(Vec<Expr>), // [1, 2, 3, 4]
-    SetLiteral(Vec<Expr>), // set {1, 2, 3, 4}
-    DictLiteral(Vec<(Expr, Expr)>), // dict {1: 1, 2: 2, 3: 3, 4: 4}
+    /// Variable access.
+    Ident(String),
+
+    /// A block of statements.
+    Block(Block),
+
+    /// An int, float, char, or string literal.
+    Literal(Literal),
+
+    /// A list literal (e.g. `[1, 2, 3, 4]`).
+    ListLiteral(Vec<Expr>),
+
+    /// A set literal (e.g. `set {1, 2, 3, 4}`).
+    SetLiteral(Vec<Expr>),
+
+    /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
+    DictLiteral(Vec<(Expr, Expr)>),
     
+    /// An assignment operation.
     Assign(AsgPat, Box<Expr>),
+
+    /// A path (e.g. `obj.prop.prop.prop`).
     Path(Path),
+
+    /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
+        /// The operators applied. These are in display order 
+        /// (i.e. they are applied to the expression from right to left).
         ops: Vec<op::Unary>,
+        /// Expression to apply the unary operations to.
         expr: Box<Expr>
     },
+
+    /// A binary operation (e.g. `a + b`).
     BinaryOp {
+        /// Operator to apply.
         op: op::Binary,
+        /// The left expression.
         left: Box<Expr>,
+        /// The right expression.
         right: Box<Expr>
     },
+
+    /// A comparison operation (e.g. `a < b < c < d`).
+    /// 
+    /// Compound comparison operations are broken down by `&&`.
+    /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
     Comparison {
+        /// The left expression
         left: Box<Expr>,
+        /// A list of comparison operators and a right expressions to apply.
         rights: Vec<(op::Cmp, Expr)>
     },
+
+    /// A range (e.g. `1..10` or `1..10 step 1`).
     Range {
+        /// The left expression
         left: Box<Expr>,
+        /// The right expression
         right: Box<Expr>,
+        /// The expression for the step if it exists
         step: Option<Box<Expr>>
     },
+
+    /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
     If {
+        /// The condition and block connected to each `if` of the chain
         conditionals: Vec<(Expr, Block)>,
+        /// The final bare `else` block (if it exists)
         last: Option<Block>
     },
+
+    /// A `while` loop.
     While {
+        /// The condition to check before each iteration.
         condition: Box<Expr>,
+        /// The block to run in each iteration.
         block: Block
     },
+
+    /// A `for` loop.
     For {
+        /// Variable to bind elements of the iterator to.
         ident: String,
+        /// The iterator.
         iterator: Box<Expr>,
+        /// The block to run in each iteration.
         block: Block
     },
+
+    /// A function call.
     Call {
+        /// The function to call.
         funct: Box<Expr>,
+        /// The parameters to the function call.
         params: Vec<Expr>
     },
+
+    /// An index operation (e.g. `lst[0]`).
     Index(Index),
+
+    /// A spread operation (e.g. `..`, `..lst`).
     Spread(Option<Box<Expr>>)
 }
 
