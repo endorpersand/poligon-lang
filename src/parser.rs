@@ -13,24 +13,16 @@ use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{self, PatErr};
 
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
-    Parser::new(tokens).parse()
+    Parser::new(tokens, false).parse()
 }
-pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<ast::Program> 
-{
-    if let Some(FullToken { loc, tt }) = tokens.last() {
-        if tt != &token![;] {
-            let (lno, cno) = loc.end();
-            let cursor = (*lno, cno + 1);
-            tokens.push(FullToken::new(token![;], cursor..=cursor));
-        }
-    }
-
-    Parser::new(tokens).parse()
+pub fn parse_repl(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
+    Parser::new(tokens, true).parse()
 }
 
 /// A struct that does the conversion of tokens to a parseable program tree.
 pub struct Parser {
     tokens: VecDeque<FullToken>,
+    repl_mode: bool,
     eof: (usize, usize)
 }
 
@@ -154,7 +146,7 @@ fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T
 }
 
 impl Parser {
-    fn new(tokens: impl IntoIterator<Item=FullToken>) -> Self {
+    fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
             .collect();
@@ -166,7 +158,7 @@ impl Parser {
             (0, 0)
         };
 
-        Self { tokens, eof }
+        Self { tokens, repl_mode, eof }
     }
 
     // General terminology:
@@ -309,17 +301,30 @@ impl Parser {
         */
         
         loop {
-            let mst = self.match_stmt()?;
+            // outside of REPL mode:
+            // if statement exists, check for semicolon
+            // - for statements with blocks, semi can be ignored
+            // - semicolon MUST appear otherwise
 
-            // if statement exists, check if statement needs a semicolon and add to program list
-            if let Some(st) = mst {
-                if st.ends_with_block() {
-                    // it does not need a semi if it is a block, if, while, for
+            // in REPL mode:
+            // same rules apply, however:
+            // - semicolon may be omitted at the end of a block
+            // - therefore, an omitted semicolon indicates the end of the block
+
+            if let Some(st) = self.match_stmt()? {
+                let ends_with_block = st.ends_with_block();
+                stmts.push(st);
+
+                if ends_with_block {
+                    // drop the semi if it exists, but don't do anything with it
                     self.match1(token![;]);
+                } else if self.repl_mode {
+                    // in REPL mode, semicolon does not need to appear at the end of a line
+                    if !self.match1(token![;]) { break; }
                 } else {
+                    // outside of REPL mode, semicolon does need to appear.
                     self.expect1(token![;])?;
                 }
-                stmts.push(st);
             } else if !self.match1(token![;]) {
                 break; 
             }
@@ -1292,15 +1297,14 @@ mod tests {
 
     #[test]
     fn type_test() {
-        
         let tokens = tokenize("int").unwrap();
-        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+        assert_eq!(Parser::new(tokens, false).expect_type(), Ok(
             Type("int".to_string(), vec![])
         ));
 
         let tokens = tokenize("dict<a, b>").unwrap();
 
-        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+        assert_eq!(Parser::new(tokens, false).expect_type(), Ok(
             Type("dict".to_string(), vec![
                 Type("a".to_string(), vec![]),
                 Type("b".to_string(), vec![])
@@ -1308,7 +1312,7 @@ mod tests {
         ));
 
         let tokens = tokenize("dict<list<list<int>>, str>").unwrap();
-        assert_eq!(Parser::new(tokens).expect_type(), Ok(
+        assert_eq!(Parser::new(tokens, false).expect_type(), Ok(
             Type("dict".to_string(), vec![
                 Type("list".to_string(), vec![
                     Type("list".to_string(), vec![
