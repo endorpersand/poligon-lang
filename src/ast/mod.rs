@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 pub mod op;
-pub mod display;
+mod display;
 
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Block);

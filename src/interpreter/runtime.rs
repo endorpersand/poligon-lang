@@ -8,8 +8,7 @@ use super::semantic::{ResolveState, ResolveErr};
 use crate::ast;
 
 use crate::ast::op;
-pub use self::value::Value;
-use self::value::{ValueType, VArbType, FunType, FunParamType};
+pub use self::value::*;
 use self::vars::VarContext;
 
 pub(crate) mod value;

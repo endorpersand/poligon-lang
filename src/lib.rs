@@ -14,6 +14,7 @@
 //! These modules provide:
 //! - [`Lexer`]: A struct that processes strings (or files) into sequences of tokens.
 //! - [`Parser`]: A struct that processes sequences of lexer tokens into an AST.
+//! - [`ast`]: The components of the AST.
 //! 
 //! # Interpreting
 //! 
@@ -42,7 +43,7 @@ use err::{GonErr, FullGonErr};
 pub use interpreter::Interpreter;
 pub mod lexer;
 pub mod parser;
-pub(crate) mod ast;
+pub mod ast;
 
 pub mod interpreter;
 pub mod compiler;

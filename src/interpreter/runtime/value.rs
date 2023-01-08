@@ -5,14 +5,14 @@ use std::ops::Deref;
 
 use super::{RtResult, TypeErr, ValueErr};
 use crate::ast::{self, op};
-pub(super) use refval::*;
 
-pub mod fun;
-pub mod ty;
+mod fun;
+mod ty;
 mod op_impl;
 pub(super) mod refval;
 
 pub use fun::*;
+pub use refval::*;
 pub use ty::*;
 
 /// A list of [`Value`]s

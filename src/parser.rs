@@ -27,6 +27,8 @@ pub fn parse_repl(mut tokens: Vec<FullToken>) -> ParseResult<ast::Program>
 
     Parser::new(tokens).parse()
 }
+
+/// A struct that does the conversion of tokens to a parseable program tree.
 pub struct Parser {
     tokens: VecDeque<FullToken>,
     eof: (usize, usize)
