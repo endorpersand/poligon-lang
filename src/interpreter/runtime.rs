@@ -121,38 +121,85 @@ impl tree::Program {
     }
 }
 
+/// An error which occurs in runtime evaluation.
 #[derive(Debug)]
 pub enum RuntimeErr {
+    /// These two types can't be compared using the given operation.
     CannotCompare(op::Cmp, ValueType, ValueType),
+
+    /// The unary operator cannot be applied to this type.
     CannotApplyUnary(op::Unary, ValueType),
+
+    /// The binary operator cannot be applied between these two types.
     CannotApplyBinary(op::Binary, ValueType, ValueType),
+
+    /// Cannot compute a range between these two types.
     CannotApplyRange(ValueType, ValueType),
+
+    /// Integer division was attempted when the second parameter was 0.
     DivisionByZero,
+
+    /// A specific type was expected here.
     ExpectedType(ValueType),
-    RangeIsInfinite, // TODO: remove
+
+    /// Ranges are computed as lists in the interpreter. Therefore, ranges cannot be infinite.
+    RangeIsInfinite,
+
+    /// Cannot iterate over this type.
     CannotIterateOver(ValueType),
+
+    /// Cannot index this type.
     CannotIndex(ValueType),
+
+    /// Cannot set index of this type.
     CannotSetIndex(ValueType),
+
+    /// Cannot index this type using the other type.
     CannotIndexWith(ValueType, ValueType),
+
+    /// Index out of bounds.
     IndexOutOfBounds,
+
+    /// Could not find this variable.
     UndefinedVar(String),
+
+    /// Function was called with the wrong number of parameters. It actually expected this number.
     WrongArity(usize),
+
+    /// Cannot call this type.
     CannotCall,
+
+    /// Cannot `return` from this block.
     CannotReturn,
+
+    /// Cannot `break` from this block.
     CannotBreak,
+
+    /// Cannot `continue` from this block.
     CannotContinue,
     NotIterable(ValueType),
+
+    /// Unpack (without spread) was attempted, but there needed to be more elements
     UnpackTooLittle(usize /* expected */, usize /* got */),
+    /// Unpack (without spread) was attempted, but there needed to be more elements
     UnpackTooLittleS(usize /* expected at least */, usize /* got */),
+    /// Unpack was attempted, but there were not enough elements
     UnpackTooMany(usize /* expected */),
+    /// Concurrent mutable access to an object occurred
     RvErr(RvErr),
+    /// Cannot spread this expression.
     CannotSpread,
+    /// Cannot spread nothing here.
     CannotSpreadNone,
+    /// Feature not completed.
     Todo(&'static str),
 
+    /// Variable was already declared.
     AlreadyDeclared(String),
+    /// Variable was not declared.
     NotDeclared(String),
-    CompilerOnlyFeature
+    /// This feature is only implemented in the compiler.
+    CompilerOnly(&'static str)
 }
 impl GonErr for RuntimeErr {
     fn err_name(&self) -> &'static str {
@@ -164,12 +211,21 @@ impl GonErr for RuntimeErr {
         format!("{:?}", self)
     }
 }
+/// Fallible evaluation in runtime
 pub type RtResult<T> = Result<T, RuntimeErr>;
 
+/// Operations that result in interruption of normal program flow
 pub enum TermOp<T, E> {
+    /// An error occurred
     Err(E),
+
+    /// A value was returned
     Return(T),
+
+    /// `break` was called
     Break,
+
+    /// `continue` was called
     Continue
 }
 impl<T> From<RuntimeErr> for TermOp<T, RuntimeErr> {
@@ -177,7 +233,8 @@ impl<T> From<RuntimeErr> for TermOp<T, RuntimeErr> {
         TermOp::Err(e)
     }
 }
-type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
+/// Evaluation in runtime that could interrupt normal program flow
+pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
 
 /// This trait enables the traversal of a program tree.
 pub trait TraverseRt {
@@ -526,7 +583,7 @@ impl TraverseRt for tree::Stmt {
             tree::Stmt::Break     => Err(TermOp::Break),
             tree::Stmt::Continue  => Err(TermOp::Continue),
             tree::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
-            tree::Stmt::ExternFunDecl(_) => Err(RuntimeErr::CompilerOnlyFeature)?,
+            tree::Stmt::ExternFunDecl(_) => Err(RuntimeErr::CompilerOnly("extern function declarations"))?,
             tree::Stmt::Expr(e) => e.traverse_rt(ctx),
         }
     }

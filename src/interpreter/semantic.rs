@@ -49,15 +49,23 @@ pub struct ResolveState {
     global_subs: Vec<SubType>,
 }
 
+/// An error that occurs in the variable resolution process.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ResolveErr {
+    /// Cannot call `return` from this block.
     CannotReturn,
+    /// Cannot call `break` from this block.
     CannotBreak,
+    /// Cannot call `continue` from this block.
     CannotContinue,
+    /// Cannot spread here.
     CannotSpread,
+    /// Cannot spread nothing here.
     CannotSpreadNone,
-    CompilerOnlyFeature
+    /// This feature isn't implemented in the interpreter.
+    CompilerOnlyFeature(&'static str)
 }
+/// Fallible result in the variable resolution process.
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
 impl From<ResolveErr> for runtime::RuntimeErr {
@@ -68,7 +76,7 @@ impl From<ResolveErr> for runtime::RuntimeErr {
             ResolveErr::CannotContinue   => Self::CannotContinue,
             ResolveErr::CannotSpread     => Self::CannotSpread,
             ResolveErr::CannotSpreadNone => Self::CannotSpreadNone,
-            ResolveErr::CompilerOnlyFeature => Self::CompilerOnlyFeature,
+            ResolveErr::CompilerOnlyFeature(s) => Self::CompilerOnly(s),
         }
     }
 }
@@ -245,7 +253,7 @@ impl TraverseResolve for tree::Stmt {
                 _ => Err(ResolveErr::CannotContinue)
             },
             tree::Stmt::FunDecl(f) => f.traverse_rs(map),
-            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnlyFeature),
+            tree::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnlyFeature("extern function declarations")),
             tree::Stmt::Expr(e)   => e.traverse_rs(map),
         }
     }

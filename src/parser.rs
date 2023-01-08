@@ -32,17 +32,37 @@ pub struct Parser {
     eof: (usize, usize)
 }
 
+/// An error that occurs in the parsing process.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseErr {
+    /// The parser expected one of the tokens.
     ExpectedTokens(Vec<Token>),
+
+    /// The parser expected an identifier.
     ExpectedIdent,
+
+    /// The parser expected an expression here, but failed to match an expression.
     ExpectedExpr,
+
+    /// The string provided could not be parsed into a numeric value.
     CannotParseNumeric,
+
+    /// The parser expected a block (e.g. `{ code; code; }`).
     ExpectedBlock,
+
+    /// The parser expected a type expression (e.g. `list<str>`).
     ExpectedType,
+    
+    /// The parser expected an assignment or declaration pattern, but failed to match one.
     ExpectedPattern,
+
+    /// The parser expected a dictionary entry (e.g. `expr: expr`).
     ExpectedEntry,
+
+    /// The parser expected a function parameter.
     ExpectedParam,
+
+    /// An error occurred in creating an assignment pattern.
     AsgPatErr(PatErr)
 }
 impl GonErr for ParseErr {
@@ -77,6 +97,7 @@ impl GonErr for ParseErr {
         }
     }
 }
+/// Fallible result in the lexing process
 pub type ParseResult<T> = Result<T, FullGonErr<ParseErr>>;
 
 macro_rules! left_assoc_op {
@@ -927,7 +948,7 @@ impl Parser {
     /// Expect that the next tokens represent values of type T separated by commas 
     /// (optionally with a terminating comma)
     /// 
-    /// This function requires a function that represents the match function for type T
+    /// This function requires a function that represents the **match** function for type T
     fn expect_closing_tuple_of<T, F>(
         &mut self, f: F, close_with: Token, or_else: ParseErr
     ) -> ParseResult<Vec<T>> 

@@ -67,7 +67,7 @@ pub enum LexErr {
     /// Character with given hex does not exist
     InvalidChar(u32)
 }
-/// Result for anything in the lexing process
+/// Fallible result in the lexing process
 pub type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;
 
