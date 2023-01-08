@@ -1,8 +1,10 @@
-//! The full process that converts text into a running program.
+//! Converts text into a running program via interpreting.
 //! 
-//! The [Interpreter] struct does the full processing from string to execution.
-//! 
-//! TODO!: example
+//! This module provides:
+//! - [`Interpreter`]: A struct which does the full interpreting from string to execution.
+//! - [`Repl`]: A struct which performs read-eval-print loop evaluation in the command line 
+//! via the interpreter's runtime.
+//! - [`semantic`], [`runtime`]: Modules which execute an AST
 
 use std::fmt::Display;
 use std::{io, fs};
@@ -17,7 +19,15 @@ pub mod semantic;
 pub mod runtime;
 mod repl;
 
-/// The struct that performs the full processing from string to execution.
+/// The struct that performs the interpretation of strings to executable code.
+/// 
+/// This struct creates an AST out of a provided string, and directly runs it 
+/// through a traversal sequence and runtime processed through Rust's runtime.
+/// 
+/// As such, this struct may be more limited than the [compiler] form.
+/// 
+/// TODO!: usage example
+/// [compiler]: crate::compiler
 pub struct Interpreter {
     source: String
 }

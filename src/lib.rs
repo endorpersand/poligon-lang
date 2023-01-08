@@ -1,13 +1,39 @@
+#![warn(missing_docs)]
+
 //! Tools to run code with the Poligon language.
 //! 
-//! The command-line tool runs code through the [`Interpreter`] or [`Repl`] structs.
-//! This crates provides other utilities beyond those:
-//! - [`Lexer`]: The processing of strings (or text from files) into sequences of tokens.
-//! - [`Parser`]: The processing of sequences of tokens into parse trees.
-//! - [the runtime]: The execution of parse trees
+//! This project is split across the [`interpreter`] and [`compiler`] modules.
+//! Both perform the same function (convert an arbitrary syntax tree into executable code), 
+//! but using different approaches.
+//! 
+//! # Parsing
+//! 
+//! Parsing of a string to an arbitrary syntax tree (AST) is done 
+//! with the [`lexer`] and [`parser`] modules.
+//! 
+//! These modules provide:
+//! - [`Lexer`]: A struct that processes strings (or files) into sequences of tokens.
+//! - [`Parser`]: A struct that processes sequences of lexer tokens into an AST.
+//! 
+//! # Interpreting
+//! 
+//! The AST is run directly, and Poligon's runtime is processed through Rust's.
+//! See the [`interpreter`] module for more info.
+//! 
+//! This module provides:
+//! - [`Interpreter`]: A struct which completes the full executing process starting 
+//! from string processing.
+//! - [`interpreter::Repl`]: A REPL, run using the interpreter
+//! - [`interpreter::runtime`]: The runtime where the AST is executed
+//! 
+//! # Compiling
+//! 
+//! The AST is compiled into LLVM, and is converted to an executable via LLVM's processes.
+//! See the [`compiler`] module for more info.
+//! TODO!: compiler info
 //! 
 //! [`Parser`]: parser::Parser
-//! [the runtime]: TraverseRt
+
 // useful crate items
 use lexer::Lexer;
 use err::{GonErr, FullGonErr};
