@@ -108,13 +108,13 @@ enum CharClass {
 }
 
 impl CharClass {
-    fn of(c: &char) -> Option<Self> {
+    fn of(c: char) -> Option<Self> {
         if c.is_alphabetic()             { Some(Self::Alpha) }
         else if c.is_numeric()           { Some(Self::Numeric) }
-        else if c == &'_'                { Some(Self::Underscore) }
-        else if c == &'\''               { Some(Self::CharQuote) }
-        else if c == &'"'                { Some(Self::StrQuote) }
-        else if c == &';'                { Some(Self::Semi) }
+        else if c == '_'                 { Some(Self::Underscore) }
+        else if c == '\''                { Some(Self::CharQuote) }
+        else if c == '"'                 { Some(Self::StrQuote) }
+        else if c == ';'                 { Some(Self::Semi) }
         else if c.is_ascii_punctuation() { Some(Self::Punct) }
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
@@ -150,7 +150,7 @@ impl<'lx> LiteralCharReader<'lx> {
 
     fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
         match self.lexer.peek() {
-            Some(c) if c == &self.terminal && !allow_term => { Err(LCError::HitTerminal) }
+            Some(c) if c == self.terminal && !allow_term => { Err(LCError::HitTerminal) }
             Some(_) => {
                 Ok(self.lexer.next().unwrap())
             }
@@ -263,7 +263,7 @@ impl<'lx> LiteralCharReader<'lx> {
 
 macro_rules! char_class_or_err {
     ($c:expr, $e:expr) => {
-        CharClass::of($c).ok_or_else(|| LexErr::UnknownChar(*$c).at($e))
+        CharClass::of($c).ok_or_else(|| LexErr::UnknownChar($c).at($e))
     }
 }
 
@@ -300,9 +300,9 @@ impl Lexer {
 
     /// Lex whatever is currently in the input, but do not consume the lexer.
     pub fn partial_lex(&mut self) -> LexResult<()> {
-        while let Some(&chr) = self.peek() {
+        while let Some(chr) = self.peek() {
             self.token_start = self.peek_cursor();
-            let cls = char_class_or_err!(&chr, self.token_start)?;
+            let cls = char_class_or_err!(chr, self.token_start)?;
             
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident()?,
@@ -369,8 +369,8 @@ impl Lexer {
     /// Look at the next character in the input.
     /// 
     /// If there are no more characters in the input, return None.
-    fn peek(&self) -> Option<&char> {
-        self.remaining.get(0)
+    fn peek(&self) -> Option<char> {
+        self.remaining.get(0).copied()
     }
 
     /// Consume the next character in the input and return it.
@@ -416,7 +416,7 @@ impl Lexer {
             let cls = char_class_or_err!(chr, self.peek_cursor())?;
             match cls {
                 CharClass::Alpha | CharClass::Underscore | CharClass::Numeric => {
-                    buf.push(*chr);
+                    buf.push(chr);
                     self.next();
                 }
                 _ => break
@@ -446,7 +446,7 @@ impl Lexer {
         // 123. + 444 => [123.] [+] [444]
         
         // peek next character. check if it's .
-        if self.peek() == Some(&'.') {
+        if self.peek() == Some('.') {
             // whether the "." is part of the numeric or if it's a part of a spread/call operator
             // depends on the character after the "."
             
@@ -457,7 +457,7 @@ impl Lexer {
             // then scan for any further numerics after that "."
             let dot_is_numeric = match self.remaining.get(1) {
                 Some('.') => false,
-                Some(chr) => !matches!(CharClass::of(chr), Some(CharClass::Alpha | CharClass::Underscore)),
+                Some(&chr) => !matches!(CharClass::of(chr), Some(CharClass::Alpha | CharClass::Underscore)),
                 None => true,
             };
 
