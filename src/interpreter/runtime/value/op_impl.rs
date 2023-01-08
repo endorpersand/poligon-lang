@@ -79,6 +79,7 @@ macro_rules! cannot_binary {
 }
 
 impl Value {
+    /// Apply a binary operation to two given values.
     pub fn apply_binary(self, o: op::Binary, rhs: Self) -> super::RtResult<Value> {
         macro_rules! int_only_op {
             ($l:ident $t:tt $r:ident) => {

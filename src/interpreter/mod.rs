@@ -33,23 +33,25 @@ pub struct Interpreter {
 type InterpretResult<T> = Result<T, String>;
 
 impl Interpreter {
+    /// Create an interpreter from a string
     pub fn from_string(s: &str) -> Self {
         Self {
             source: String::from(s)
         }
     }
+
+    /// Read the text from a file and create an interpreter out of it if successfully read
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
-        let source = fs::read_to_string(fp)?;
-        Ok(Self {
-            source
-        })
+        fs::read_to_string(fp).map(|source| Self { source })
     }
 
+    /// Lex the source string.
     pub fn lex(&self) -> InterpretResult<Vec<lexer::token::FullToken>> {
         lexer::tokenize(&self.source)
             .map_err(|err| err.full_msg(&self.source))
     }
 
+    /// Parse the source string.
     pub fn parse(&self) -> InterpretResult<tree::Program> {
         let lexed = self.lex()?;
 
@@ -57,6 +59,7 @@ impl Interpreter {
             .map_err(|err| err.full_msg(&self.source))
     }
 
+    /// Execute the source string.
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
         
