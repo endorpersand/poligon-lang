@@ -2,6 +2,7 @@
 //! 
 //! TODO! more doc
 
+use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
 
 use lazy_static::lazy_static;
@@ -49,7 +50,6 @@ pub enum LexErr {
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
 
-    InvalidEscape(char),
     InvalidX,
     InvalidU,
     InvalidChar(u32)
@@ -73,12 +73,6 @@ impl GonErr for LexErr {
             LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
             LexErr::DelimiterClosedSemi => String::from("unexpected ';'"),
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
-            LexErr::InvalidEscape(e)    => format!("unknown character escape '{}'", 
-                if e == &'\n' {
-                    String::from("\\n") 
-                } else {
-                    String::from(*e)
-                }),
             LexErr::InvalidX            => String::from("invalid \\xXX escape"),
             LexErr::InvalidU            => String::from("invalid \\u{XXXX} escape"),
             LexErr::InvalidChar(c)      => format!("invalid char {:x}", c),
@@ -93,6 +87,26 @@ impl GonErr for LexErr {
 /// For ', it appears as `"'"`.
 fn wrapq(c: char) -> String {
     if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
+}
+
+/// Advance cursor given the character at the cursor and the characters following it
+fn advance_cursor((lno, cno): Cursor, current: Option<char>, extra: &[char]) -> Cursor {
+    let (mut dl, mut nc) = match current {
+        Some('\n') => (1, 0),
+        Some(_) => (0, cno + 1),
+        None => (0, cno)
+    };
+
+    let mut split = extra.split(|&c| c == '\n');
+    if let Some(fline) = split.next() {
+        nc += fline.len();
+        for line in split {
+            dl += 1;
+            nc = line.len();
+        }
+    }
+    
+    (lno + dl, nc)
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -127,60 +141,68 @@ fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
     (lno, cno + chars)
 }
 
-struct LiteralCharReader<'lx> {
+struct LiteralBuffer<'lx> {
     lexer: &'lx mut Lexer,
-    terminal: char
+    terminal: char,
+    buf: String
 }
 
-enum LCError {
+enum LCErr {
     HitTerminal,
     HitEOF,
-    InvalidEscape(char),
     InvalidX,
     InvalidU,
     InvalidChar(u32)
 }
-type LiteralCharResult<T> = Result<T, LCError>;
+type LiteralCharResult<T> = Result<T, LCErr>;
 
 
-impl<'lx> LiteralCharReader<'lx> {
+impl<'lx> LiteralBuffer<'lx> {
     fn new(lexer: &'lx mut Lexer, terminal: char) -> Self {
-        Self { lexer, terminal }
+        Self { lexer, terminal, buf: String::new() }
     }
 
-    fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
+    fn try_add(&mut self) -> LiteralCharResult<()> {
         match self.lexer.peek() {
-            Some(c) if c == self.terminal && !allow_term => { Err(LCError::HitTerminal) }
+            Some('\\') => self.try_add_esc(),
+            Some(c) if c == self.terminal => Err(LCErr::HitTerminal),
             Some(_) => {
-                Ok(self.lexer.next().unwrap())
-            }
-            None => { Err(LCError::HitEOF) }
+                let take_point = self.lexer.remaining.iter()
+                    .position(|&c| c == self.terminal || c == '\\')
+                    // take point doesn't appear, so consume entire lexer buffer
+                    .unwrap_or(self.lexer.remaining.len());
+                
+                self.buf.extend(self.lexer.next_n(take_point));
+                Ok(())
+            },
+            None => Err(LCErr::HitEOF),
         }
     }
 
-    fn next(&mut self) -> LiteralCharResult<Option<char>> {
+    fn try_add_esc(&mut self) -> LiteralCharResult<()> {
         lazy_static! {
-            static ref BASIC_ESCAPES: HashMap<char, Option<char>> = {
+            static ref BASIC_ESCAPES: HashMap<char, &'static str> = {
                 let mut m = HashMap::new();
     
-                m.insert('0',  Some('\0'));
-                m.insert('\\', Some('\\'));
-                m.insert('n',  Some('\n'));
-                m.insert('t',  Some('\t'));
-                m.insert('r',  Some('\r'));
-                m.insert('\'', Some( '\''));
-                m.insert('"',  Some('"'));
-                m.insert('\n', None);
+                m.insert('0',  "\0");
+                m.insert('\\', "\\");
+                m.insert('n',  "\n");
+                m.insert('t',  "\t");
+                m.insert('r',  "\r");
+                m.insert('\'', "'");
+                m.insert('"',  "\"");
+                m.insert('\n', "");
                 m
             };
         }
-        
+
         match self.next_raw(false)? {
             '\\' => {
                 let c = self.next_raw(true)?;
 
-                if let Some(escaped) = BASIC_ESCAPES.get(&c) {
-                    Ok(*escaped)
+                // match a basic escape? add that basic escape to buffer
+                if let Some(&escaped) = BASIC_ESCAPES.get(&c) {
+                    self.buf.push_str(escaped);
                 } else {
                     match c {
                         'u' => {
@@ -188,68 +210,55 @@ impl<'lx> LiteralCharReader<'lx> {
                                 .take(8)
                                 .take_while(|c| !matches!(c, Ok('}')))
                                 .collect::<Result<_, _>>()
-                                .map_err(|_| LCError::InvalidU)?;
+                                .map_err(|_| LCErr::InvalidU)?;
                             
                             if c8.starts_with('{') && c8.len() < 8 {
                                 let codepoint = u32::from_str_radix(&c8[1..], 16)
-                                    .map_err(|_| LCError::InvalidU)?;
+                                    .map_err(|_| LCErr::InvalidU)?;
                                 
                                 let chr = char::from_u32(codepoint)
-                                    .ok_or(LCError::InvalidChar(codepoint))?;
+                                    .ok_or(LCErr::InvalidChar(codepoint))?;
                                 
-                                Ok(Some(chr))
+                                self.buf.push(chr);
                             } else {
-                                Err(LCError::InvalidU)
+                                Err(LCErr::InvalidU)?
                             }
                         }
                         'x' => {
                             let c2: String = std::iter::repeat_with(|| self.next_raw(false))
                                 .take(2)
                                 .collect::<Result<_, _>>()
-                                .map_err(|_| LCError::InvalidX)?;
+                                .map_err(|_| LCErr::InvalidX)?;
                             
                             let codepoint = u32::from_str_radix(&c2, 16)
-                                .map_err(|_| LCError::InvalidX)?;
+                                .map_err(|_| LCErr::InvalidX)?;
                             
                             let chr = char::from_u32(codepoint)
-                                .ok_or(LCError::InvalidChar(codepoint))?;
+                                .ok_or(LCErr::InvalidChar(codepoint))?;
                             
-                            Ok(Some(chr))
+                            self.buf.push(chr);
                         },
                         c => {
-                            Err(LCError::InvalidEscape(c))
+                            self.buf.push('\\');
+                            self.buf.push(c);
                         }
                     }
                 }
-            },
-            c => Ok(Some(c))
-        }
-        // // if terminal, mark the char as terminal
-        // if self.peek() != Some(&term_chr) {
-        //     // if there's a 
-        //     match unwrap_chr!(self.next()) {
-        //         '\\' => {
-        //             let c = unwrap_chr!(self.next());
 
-        //             match BASIC_ESCAPES.get(&c) {
-        //                 Some(c) => Ok((c.clone(), 2)),
-        //                 None => match c {
-        //                     'x' => {},
-        //                     'u' => {}
-        //                 },
-        //             }
-        //         },
-        //         c => Ok((Some(c), 1)),
-        //     }
-        // } else {
-        //     Err(LCError::HitTerminal)
-        // }
+                Ok(())
+            },
+            _ => unimplemented!("try_add_esc should not be called unless the first character is \\")
+        }
     }
 
-    fn one(lexer: &'lx mut Lexer, terminal: char) -> LiteralCharResult<char> {
-        let mut reader = Self::new(lexer, terminal);
-        
-        reader.next()?.ok_or(LCError::InvalidChar('\n' as u32))
+    fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
+        match self.lexer.peek() {
+            Some(c) if c == self.terminal && !allow_term => { Err(LCErr::HitTerminal) }
+            Some(_) => {
+                Ok(self.lexer.next().unwrap())
+            }
+            None => { Err(LCErr::HitEOF) }
+        }
     }
 
     fn cursor(&self) -> Cursor {
@@ -357,13 +366,7 @@ impl Lexer {
     }
 
     fn peek_cursor(&self) -> Cursor {
-        let (lno, cno) = &self.cursor;
-
-        match &self._current {
-            Some('\n') => (lno + 1, 0),
-            Some(_)    => (*lno, cno + 1),
-            None       => (*lno, *cno)
-        }
+        advance_cursor(self.cursor, self._current, &[])
     }
 
     /// Look at the next character in the input.
@@ -380,6 +383,16 @@ impl Lexer {
         let mcd = self.remaining.pop_front();
         self._current = mcd;
         mcd
+    }
+
+    fn next_n(&mut self, n: usize) -> VecDeque<char> {
+        let mut front = self.remaining.split_off(n);
+        std::mem::swap(&mut self.remaining, &mut front);
+
+        let slice = front.make_contiguous();
+        self.cursor = advance_cursor(self.cursor, self._current, slice);
+        self._current = slice.last().copied();
+        front
     }
 
     fn token_range(&self) -> std::ops::RangeInclusive<Cursor> {
@@ -480,25 +493,22 @@ impl Lexer {
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
         
-        let mut buf = String::new();
-        let mut reader = LiteralCharReader::new(self, qt);
-
-        loop {
+        let mut reader = LiteralBuffer::new(self, qt);
+        let buf = loop {
             let chr_cursor = cur_shift(reader.cursor(), 1);
-            match reader.next() {
-                Ok(c) => buf.extend(c),
+            match reader.try_add() {
+                Ok(()) => {},
                 Err(e) => Err(match e {
-                    LCError::HitTerminal => break,
-                    LCError::HitEOF => {
+                    LCErr::HitTerminal => break reader.buf,
+                    LCErr::HitEOF => {
                         LexErr::UnclosedQuote.at_range(reader.cursor_range())
                     },
-                    LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(chr_cursor..reader.cursor()),
-                    LCError::InvalidX         => LexErr::InvalidX.at_range(chr_cursor..reader.cursor()),
-                    LCError::InvalidU         => LexErr::InvalidU.at_range(chr_cursor..reader.cursor()),
-                    LCError::InvalidChar(c)   => LexErr::InvalidChar(c).at_range(chr_cursor..reader.cursor()),
+                    LCErr::InvalidX         => LexErr::InvalidX.at_range(chr_cursor..reader.cursor()),
+                    LCErr::InvalidU         => LexErr::InvalidU.at_range(chr_cursor..reader.cursor()),
+                    LCErr::InvalidChar(c)   => LexErr::InvalidChar(c).at_range(chr_cursor..reader.cursor()),
                 })?,
             }
-        }
+        };
         
         // Assert next char matches quote:
         if self.next().unwrap() == qt {
@@ -520,15 +530,25 @@ impl Lexer {
         let token_start = self.token_start;
         let token_start_p1 = cur_shift(token_start, 1);
 
-        let c = match LiteralCharReader::one(self, qt) {
-            Ok(c) => Ok(c),
+        let mut reader = LiteralBuffer::new(self, qt);
+        let c = match reader.try_add() {
+            Ok(()) => {
+                let buf = reader.buf;
+                let len = buf.chars().count();
+                
+                // check that the add added only 1 char
+                match len.cmp(&1) {
+                    Ordering::Less    => Err(LexErr::InvalidChar('\n' as u32).at(token_start_p1)),
+                    Ordering::Equal   => Ok(buf.chars().next().unwrap()),
+                    Ordering::Greater => Err(LexErr::ExpectedChar(qt).at(cur_shift(token_start, 2))),
+                }
+            },
             Err(e) => Err(match e {
-                LCError::HitTerminal => LexErr::EmptyChar.at(self.cursor),
-                LCError::HitEOF      => LexErr::UnclosedQuote.at(token_start),
-                LCError::InvalidEscape(e) => LexErr::InvalidEscape(e).at_range(token_start_p1..self.cursor),
-                LCError::InvalidX         => LexErr::InvalidX.at_range(token_start_p1..self.cursor),
-                LCError::InvalidU         => LexErr::InvalidU.at_range(token_start_p1..self.cursor),
-                LCError::InvalidChar(c)   => LexErr::InvalidChar(c).at_range(token_start_p1..self.cursor),
+                LCErr::HitTerminal => LexErr::EmptyChar.at(self.cursor),
+                LCErr::HitEOF      => LexErr::UnclosedQuote.at(token_start),
+                LCErr::InvalidX       => LexErr::InvalidX.at_range(token_start_p1..self.cursor),
+                LCErr::InvalidU       => LexErr::InvalidU.at_range(token_start_p1..self.cursor),
+                LCErr::InvalidChar(c) => LexErr::InvalidChar(c).at_range(token_start_p1..self.cursor),
             }),
         }?;
 
@@ -871,8 +891,8 @@ mod tests {
         // basic escape tests
         assert_lex_basic!("'\\''" => vec![Token::Char('\'')]); // '\''
         assert_lex_basic!("'\\n'" => vec![Token::Char('\n')]); // '\n'
+        assert_lex_basic!("\"\\e\"" => vec![Token::Str(String::from("\\e"))]); // '\e'
         assert_lex_fail_basic!("'\\n" => LexErr::UnclosedQuote); // '\n
-        assert_lex_fail_basic!("'\\e'" => LexErr::InvalidEscape('e')); // '\e'
         
         // \x test
         assert_lex_basic!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
