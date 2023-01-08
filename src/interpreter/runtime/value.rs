@@ -15,18 +15,37 @@ pub(super) mod refval;
 pub use fun::*;
 pub use ty::*;
 
-type GonList = RefValue<Vec<Value>>;
+/// A list of [`Value`]s
+pub type GonList = RefValue<Vec<Value>>;
 type GonListPtr = *const std::cell::RefCell<Vec<Value>>;
 
+/// A value in Poligon's runtime
 #[derive(PartialEq, Clone, Debug)]
 pub enum Value {
+    /// An int value (`5`)
+    /// 
+    /// In this implementation, it is limited by Rust's `isize`
     Int(isize),
+
+    /// An IEEE-754 double value (`0.3`)
     Float(f64),
+
+    /// A character (`'a'`)
     Char(char),
+
+    /// A string (`"abc"`)
     Str(String),
+
+    /// A boolean (`true`, `false`)
     Bool(bool),
+
+    /// A list of values
     List(GonList),
+
+    /// `void`
     Unit,
+
+    /// A function
     Fun(GonFun)
 }
 
@@ -192,6 +211,7 @@ impl Value {
         }
     }
 
+    /// Produce the code representation of this value
     pub fn repr(&self) -> String {
         match self {
             Value::Int(i)   => i.to_string(),
@@ -208,6 +228,7 @@ impl Value {
         }
     }
 
+    /// Produce the string representation of this value
     pub fn str(&self) -> String {
         match self {
             Value::Char(c) => c.to_string(),
@@ -223,6 +244,7 @@ impl Value {
         }
     }
 
+    /// Try to index this value
     pub fn get_index(&self, idx: Value) -> RtResult<Value> {
         match self {
             // There is a more efficient method of indexing lists 
@@ -257,6 +279,7 @@ impl Value {
         }
     }
 
+    /// Try to set an index of this value
     pub fn set_index(&mut self, idx: Value, nv: Value) -> RtResult<Value> {
         match self {
             e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
@@ -335,10 +358,12 @@ impl Value {
         }.ok_or_else(|| TypeErr::CannotCompare(o, self.ty(), right.ty()).into())
     }
 
-    /// Copies item directly. For lists, this means that this value 
-    /// is equal but does not have the same identity as the previous value.
-    /// This is different from `.clone`, which preserves identity.
-    pub fn hard_clone(&self) -> Value {
+    /// Deep copies the value. For lists, this means that this value 
+    /// is equal but does not have the same identity as the original.
+    /// 
+    /// This is different from `.clone`, which copies references
+    /// and preserves identity.
+    pub fn deep_clone(&self) -> Value {
         match self {
             Value::List(l) => Value::new_list(l.borrow().clone()),
             e @ (
@@ -353,10 +378,12 @@ impl Value {
         }
     }
 
+    /// Create a list value.
     pub fn new_list(l: Vec<Value>) -> Self {
         Value::List(RefValue::new(l, true))
     }
 
+    /// Create a function value, using a function defined in Rust.
     pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
@@ -367,6 +394,7 @@ impl Value {
         Value::Fun(gf)
     }
 
+    /// Create a function value, using a functon defined in Poligon.
     pub fn new_gon_fn(name: Option<&str>, ty: FunType, params: Vec<String>, fun: Rc<tree::Block>, idx: usize) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
