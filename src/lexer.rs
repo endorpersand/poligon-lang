@@ -1,9 +1,14 @@
 //! Converts strings to sequences of tokens.
 //! 
-//! TODO! more doc
+//! This module provides:
+//! - [`tokenize`]: A utility function that opaquely does the lexing from string to tokens
+//! - [`Lexer`]: A struct which does the entire lexing process
+//! 
+//! TODO! code example
 
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
+use std::ops::RangeInclusive;
 
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -13,15 +18,18 @@ use crate::err::{GonErr, FullGonErr};
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
 
+/// Convert a string and lex it into a sequence of tokens.
+/// 
+/// For more control, see the [`Lexer`] struct.
 pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
     Lexer::new(input).lex()
 }
 
-/// An error that occurs when a string could not be parsed into tokens.
+/// An error that occurs in the lexing process.
 #[derive(PartialEq, Eq, Debug)]
 pub enum LexErr {
-    /// There was a character that isn't used in Poligon code (e.g. emojis)
-    UnknownChar(char),   // Char isn't used in Poligon code
+    /// Lexer found character that isn't used in Poligon code (e.g. emojis)
+    UnknownChar(char),
 
     /// The lexer tried to parse a string or character literal 
     /// but there was no closing quote. (e.g. `"hello!`)
@@ -50,10 +58,16 @@ pub enum LexErr {
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
 
+    /// Escape of the form '\x00' was invalid
     InvalidX,
+
+    /// Escape of the form '\u{000000}' was invalid
     InvalidU,
+
+    /// Character with given hex does not exist
     InvalidChar(u32)
 }
+/// Result for anything in the lexing process
 pub type LexResult<T> = Result<T, FullLexErr>;
 type FullLexErr = FullGonErr<LexErr>;
 
@@ -89,6 +103,12 @@ fn wrapq(c: char) -> String {
     if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
 }
 
+type Cursor = (usize, usize);
+
+/// Shift cursor forward along a line
+fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
+    (lno, cno + chars)
+}
 /// Advance cursor given the character at the cursor and the characters following it
 fn advance_cursor((lno, cno): Cursor, current: Option<char>, extra: &[char]) -> Cursor {
     let (mut dl, mut nc) = match current {
@@ -109,15 +129,31 @@ fn advance_cursor((lno, cno): Cursor, current: Option<char>, extra: &[char]) -> 
     (lno + dl, nc)
 }
 
+/// Character classes that are treated differently in the lexer
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum CharClass {
+    /// An alphabetic character (`a-z`, `A-Z`)
     Alpha,
+
+    /// A numeric character (`0-9`)
     Numeric,
+
+    /// An underscore (`_`)
     Underscore,
+
+    /// Quote that encloses a char (`'`)
     CharQuote,
+
+    /// Quote that encloses a str (`"`)
     StrQuote,
+
+    /// Semicolon / line separator (`;`)
     Semi,
+
+    /// Any miscellaneous ASCII punctuation
     Punct,
+
+    /// Whitespace
     Whitespace,
 }
 
@@ -133,35 +169,51 @@ impl CharClass {
         else if c.is_whitespace()        { Some(Self::Whitespace) }
         else { None }
     }
+
+    fn of_or_err(c: char, pt: (usize, usize)) -> LexResult<Self> {
+        Self::of(c).ok_or(LexErr::UnknownChar(c).at(pt))
+    }
 }
 
-type Cursor = (usize, usize);
-
-fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
-    (lno, cno + chars)
-}
-
+/// Buffer that computes a string literal
+/// 
+/// This also handles escapes.
 struct LiteralBuffer<'lx> {
     lexer: &'lx mut Lexer,
+
+    /// Character which ends the literal
     terminal: char,
+
+    /// Buffer that represents what the literal holds
+    /// 
+    /// This will never contain an unescaped terminal character.
     buf: String
 }
 
+/// Methods for an attempt to add to the buffer to halt
 enum LCErr {
+    /// Cannot add because the next character is an unescaped terminal
     HitTerminal,
+
+    /// Cannot add because there are no more characters to parse
     HitEOF,
+
+    /// [`LexErr::InvalidX`]
     InvalidX,
+    /// [`LexErr::InvalidU`]
     InvalidU,
+    /// [`LexErr::InvalidChar`]
     InvalidChar(u32)
 }
 type LiteralCharResult<T> = Result<T, LCErr>;
 
-
 impl<'lx> LiteralBuffer<'lx> {
+    /// Borrow the lexer to create a LiteralBuffer
     fn new(lexer: &'lx mut Lexer, terminal: char) -> Self {
         Self { lexer, terminal, buf: String::new() }
     }
 
+    /// Attempt to add characters to the buffer
     fn try_add(&mut self) -> LiteralCharResult<()> {
         match self.lexer.peek() {
             Some('\\') => self.try_add_esc(),
@@ -179,6 +231,7 @@ impl<'lx> LiteralBuffer<'lx> {
         }
     }
 
+    /// Parse an escape at the front of the lexer buffer and add to the buffer
     fn try_add_esc(&mut self) -> LiteralCharResult<()> {
         lazy_static! {
             static ref BASIC_ESCAPES: HashMap<char, &'static str> = {
@@ -251,6 +304,7 @@ impl<'lx> LiteralBuffer<'lx> {
         }
     }
 
+    /// Pull the next character from the lexer buffer
     fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
         match self.lexer.peek() {
             Some(c) if c == self.terminal && !allow_term => { Err(LCErr::HitTerminal) }
@@ -265,28 +319,31 @@ impl<'lx> LiteralBuffer<'lx> {
         self.lexer.cursor
     }
 
-    fn cursor_range(&self) -> std::ops::RangeInclusive<Cursor> {
+    fn cursor_range(&self) -> RangeInclusive<Cursor> {
         self.lexer.token_start ..= self.lexer.cursor
     }
 }
 
-macro_rules! char_class_or_err {
-    ($c:expr, $e:expr) => {
-        CharClass::of($c).ok_or_else(|| LexErr::UnknownChar($c).at($e))
-    }
-}
-
+/// The struct which does the full lexing process.
 pub struct Lexer {
+    /// The tokens that are generated from the string
     tokens: Vec<FullToken>,
+    /// A stack to keep track of delimiters (and their original position)
     delimiters: Vec<(Cursor, Delimiter)>,
     
+    /// The current position of the _current char
     cursor: Cursor,
-    token_start: Cursor,
+    /// The char that was last read
     _current: Option<char>,
+
+    /// The start position of the current token being evaluated
+    token_start: Cursor,
+    /// The remaining characters to be read
     remaining: VecDeque<char>,
 }
 
 impl Lexer {
+    /// Create a new lexer using the given input
     pub fn new(input: &str) -> Self {
         Self {
             tokens: vec![],
@@ -311,7 +368,7 @@ impl Lexer {
     pub fn partial_lex(&mut self) -> LexResult<()> {
         while let Some(chr) = self.peek() {
             self.token_start = self.peek_cursor();
-            let cls = char_class_or_err!(chr, self.token_start)?;
+            let cls = CharClass::of_or_err(chr, self.token_start)?;
             
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident()?,
@@ -347,11 +404,14 @@ impl Lexer {
         Ok(())
     }
 
-    /// Add characters to the end of the input.
+    /// Insert extra characters at the end of the lexer's input buffer.
     pub fn append_input(&mut self, input: &str) {
         self.remaining.extend(input.chars());
     }
 
+    /// Check if the lexer can be consumed without error.
+    /// 
+    /// Lexer cannot be consumed if it has any unclosed delimiters.
     pub fn try_close(&self) -> LexResult<()> {
         if let Some((p, _)) = self.delimiters.last() {
             return Err(LexErr::UnclosedDelimiter.at(*p));
@@ -359,12 +419,13 @@ impl Lexer {
 
         Ok(())
     }
-    /// Consume the lexer and return the tokens in it.
+    /// Consume the lexer and return the tokens in it if the lexer is in a closable state ([`Lexer::try_close`]).
     pub fn close(self) -> LexResult<Vec<FullToken>> {
         self.try_close()?;
         Ok(self.tokens)
     }
 
+    /// Check the cursor of the next character in the input.
     fn peek_cursor(&self) -> Cursor {
         advance_cursor(self.cursor, self._current, &[])
     }
@@ -385,6 +446,7 @@ impl Lexer {
         mcd
     }
 
+    /// Consume the next n characters in the input and return them.
     fn next_n(&mut self, n: usize) -> VecDeque<char> {
         let mut front = self.remaining.split_off(n);
         std::mem::swap(&mut self.remaining, &mut front);
@@ -395,14 +457,18 @@ impl Lexer {
         front
     }
 
-    fn token_range(&self) -> std::ops::RangeInclusive<Cursor> {
+    /// Get the range of the current token being generated.
+    fn token_range(&self) -> RangeInclusive<Cursor> {
         self.token_start ..= self.cursor
     }
 
+    /// Add token to the token buffer, using the default range
     fn push_token(&mut self, t: Token) {
         self.push_token_with_range(t, self.token_range());
     }
-    fn push_token_with_range(&mut self, t: Token, r: std::ops::RangeInclusive<Cursor>) {
+
+    /// Add token to the token buffer, with a custom defined range
+    fn push_token_with_range(&mut self, t: Token, r: RangeInclusive<Cursor>) {
         let ft = FullToken::new(t, r);
         self.tokens.push(ft);
     }
@@ -426,7 +492,7 @@ impl Lexer {
         let mut buf = String::new();
 
         while let Some(chr) = self.peek() {
-            let cls = char_class_or_err!(chr, self.peek_cursor())?;
+            let cls = CharClass::of_or_err(chr, self.peek_cursor())?;
             match cls {
                 CharClass::Alpha | CharClass::Underscore | CharClass::Numeric => {
                     buf.push(chr);
@@ -538,7 +604,7 @@ impl Lexer {
                 
                 // check that the add added only 1 char
                 match len.cmp(&1) {
-                    Ordering::Less    => Err(LexErr::InvalidChar('\n' as u32).at(token_start_p1)),
+                    Ordering::Less    => Err(LexErr::UnclosedQuote.at(token_start)),
                     Ordering::Equal   => Ok(buf.chars().next().unwrap()),
                     Ordering::Greater => Err(LexErr::ExpectedChar(qt).at(cur_shift(token_start, 2))),
                 }
@@ -881,18 +947,17 @@ mod tests {
 
     #[test]
     fn char_lex() {
+        // basic char checks
         assert_lex_basic!("'a'" => vec![Token::Char('a')]);
         assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 0)));
-    }
 
-    #[test]
-    fn escape_char_lex() {
         // basic escape tests
         assert_lex_basic!("'\\''" => vec![Token::Char('\'')]); // '\''
         assert_lex_basic!("'\\n'" => vec![Token::Char('\n')]); // '\n'
         assert_lex_basic!("\"\\e\"" => vec![Token::Str(String::from("\\e"))]); // '\e'
         assert_lex_fail_basic!("'\\n" => LexErr::UnclosedQuote); // '\n
+        assert_lex_fail_basic!("'\\\n'" => LexErr::UnclosedQuote); // '\[new line]'
         
         // \x test
         assert_lex_basic!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
@@ -900,14 +965,10 @@ mod tests {
         assert_lex_fail_basic!("'\\x0'" => LexErr::InvalidX);  // '\x0'
         assert_lex_fail_basic!("'\\xqq'" => LexErr::InvalidX); // '\xqq'
 
+        // \u test
         assert_lex_basic!("'\\u{0}'" => vec![Token::Char('\0')]); // '\u{0}'
         assert_lex_basic!("'\\u{1f97a}'" => vec![Token::Char('\u{1f97a}')]); // '\u{1f97a}'
         assert_lex_fail_basic!("'\\u{21f97a}'" => LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
         assert_lex_fail_basic!("'\\u{0000000}'" => LexErr::InvalidU); // '\u{0000000}'
-    }
-
-    #[test]
-    fn token_pos_lex() {
-
     }
 }
