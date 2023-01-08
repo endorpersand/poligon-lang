@@ -315,29 +315,38 @@ pub mod err {
 }
 use err::*;
 
-/// Fallible evaluation in runtime
+/// A [`Result`] type for operations in runtime execution. 
+/// 
+/// This is for functions that compute during runtime. 
+/// For operations whose normal runtime flow may be interrupted
+/// (where `return`, `break`, and `continue` have observable effects),
+/// see [`RtTraversal`].
 pub type RtResult<T> = Result<T, RuntimeErr>;
 
-/// Operations that result in interruption of normal program flow
-pub enum TermOp<T, E> {
-    /// An error occurred
+/// Operations that result in interruption of normal program flow.
+pub enum TermOp<R, E> {
+    /// An error occurred (This is propagated to the program).
     Err(E),
 
-    /// A value was returned
-    Return(T),
+    /// A value was returned (This is propagated to the top of the function block).
+    Return(R),
 
-    /// `break` was called
+    /// `break` was called (This is propagated to the top of the loop block).
     Break,
 
-    /// `continue` was called
+    /// `continue` was called (This is propagated to the top of the loop block).
     Continue
 }
+
 impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
     fn from(e: E) -> Self {
         TermOp::Err(e.into())
     }
 }
-/// Evaluation in runtime that could interrupt normal program flow
+/// An evaluation type for operations in runtime that may
+/// have their normal runtime flow broken.
+/// 
+/// If the function's flow is interrupted, [`TermOp`] is returned.
 pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
 
 /// This trait enables the traversal of a program tree.

@@ -99,7 +99,7 @@ impl GonErr for ParseErr {
         }
     }
 }
-/// Fallible result in the lexing process
+/// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullGonErr<ParseErr>>;
 
 macro_rules! left_assoc_op {

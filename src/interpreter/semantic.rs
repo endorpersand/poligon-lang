@@ -82,7 +82,7 @@ impl GonErr for ResolveErr {
     }
 }
 
-/// Fallible result in the variable resolution process.
+/// A [`Result`] type for operations in the static resolution process.
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
 impl ResolveState {
