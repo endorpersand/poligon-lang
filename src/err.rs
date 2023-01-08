@@ -45,14 +45,17 @@ pub trait GonErr {
         FullGonErr::new(self, ErrPos::from_range(range))
     }
 
-
+    /// Designate that this error occurred at an unknown position in the code
+    fn at_unknown(self) -> FullGonErr<Self>
+        where Self: Sized
+    {
+        FullGonErr::new(self, ErrPos::Unknown)
+    }
 }
 
-// TODO: this impl is only here to be used for debug purposes.
-// it should be deleted once everything has been implemented.
 impl<E: GonErr> From<E> for FullGonErr<E> {
     fn from(err: E) -> Self {
-        err.at((0, 0))
+        err.at_unknown()
     }
 }
 
@@ -69,10 +72,20 @@ type Point = (usize /* line */, usize /* line */);
 
 #[derive(PartialEq, Eq, Debug)]
 enum ErrPos {
+    /// Error occurred at a specific point
     Point(Point),
+
+    /// Error occurred at a few specific points
     Points(Vec<Point>),
+
+    /// Error occurred at an inclusive range of points
     Range(RangeInclusive<Point>),
-    RangeFrom(RangeFrom<Point>)
+
+    /// Error occurred at an range of points, going to the end
+    RangeFrom(RangeFrom<Point>),
+
+    /// Error occurred somewhere, unknown where
+    Unknown
 }
 
 impl ErrPos {
@@ -208,6 +221,8 @@ impl<E: GonErr> FullGonErr<E> {
                 let (start_lno, start_cno) = start;
                 format!("{}:{}-..", start_lno, start_cno)
             },
+
+            ErrPos::Unknown => String::new()
         };
 
         if !line_fmt.is_empty() {
@@ -251,6 +266,7 @@ impl<E: GonErr> FullGonErr<E> {
             },
             ErrPos::Range(r) => lines.extend(ptrs_range(orig_txt, r)),
             ErrPos::RangeFrom(r) => lines.extend(ptrs_range(orig_txt, r)),
+            ErrPos::Unknown => { lines.pop(); }
         }
 
         lines.join("\n")
