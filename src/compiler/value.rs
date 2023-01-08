@@ -4,7 +4,7 @@ use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidTyp
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, ArrayValue, BasicMetadataValueEnum};
 
 use super::Compiler;
-use super::resolve::plir;
+use super::plir;
 
 macro_rules! apply_bv {
     (let $i:ident = $e:expr => $fn:expr) => {

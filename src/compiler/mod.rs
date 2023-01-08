@@ -1,5 +1,6 @@
-pub mod value;
-pub mod resolve;
+mod value;
+pub mod codegen;
+pub mod plir;
 
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -15,8 +16,8 @@ use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicVa
 
 use crate::ast::{op, Literal};
 
-use self::resolve::plir;
-use self::value::{TypeLayout, GonValue, apply_bv};
+pub use self::value::*;
+use self::value::apply_bv;
 
 use lazy_static::lazy_static;
 
@@ -188,7 +189,7 @@ pub enum IRErr {
     CannotDetermineMain,
     LLVMErr(LLVMString)
 }
-type IRResult<T> = Result<T, IRErr>;
+pub type IRResult<T> = Result<T, IRErr>;
 
 trait TraverseIR<'ctx> {
     type Return;
@@ -664,8 +665,8 @@ mod tests {
     use crate::parser;
 
     use super::Compiler;
-    use super::resolve;
-    use super::resolve::plir;
+    use super::codegen;
+    use super::plir;
 
     fn file(input: impl AsRef<Path>) -> String {
         fs::read_to_string(input.as_ref()).unwrap()
@@ -682,7 +683,7 @@ mod tests {
 
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
-        let plired = resolve::codegen(parsed).unwrap();
+        let plired = codegen::codegen(parsed).unwrap();
 
         if verbose {
             println!("{plired}");
@@ -705,7 +706,7 @@ mod tests {
 
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
-        let plired = resolve::codegen(parsed).unwrap();
+        let plired = codegen::codegen(parsed).unwrap();
 
         if verbose {
             println!("{plired}");
@@ -723,7 +724,7 @@ mod tests {
 
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
-        let plired = resolve::codegen(parsed).unwrap();
+        let plired = codegen::codegen(parsed).unwrap();
 
         compiler.jit_compile::<T>(plired).unwrap()
     }
@@ -958,7 +959,7 @@ mod tests {
 
         let lexed  = lexer::tokenize(&file("_test_files/lexical_scope_ll.gon")).unwrap();
         let parsed = parser::parse(lexed).unwrap();
-        let plired = resolve::codegen(parsed).unwrap();
+        let plired = codegen::codegen(parsed).unwrap();
 
         compiler.jit_compile::<bool>(plired).unwrap();
     }

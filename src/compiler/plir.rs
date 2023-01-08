@@ -1,4 +1,4 @@
-pub mod display;
+mod display;
 mod types;
 
 use crate::ast::{op, self};

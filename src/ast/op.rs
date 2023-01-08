@@ -2,36 +2,86 @@ use std::fmt::Display;
 
 use crate::lexer::token::{Token, token};
 
+/// A unary operator AST node.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Unary {
+    /// Unary plus (`+x`)
     Plus,
+
+    /// Unary minus (`-x`)
     Minus,
+
+    /// Logical not (`!x`)
     LogNot,
+
+    /// Bitwise not (`~x`)
     BitNot
 }
 
+/// A binary operator AST node.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Binary {
+    /// Binary plus (`x + y`)
     Add,
+
+    /// Binary subtract (`x - y`)
     Sub,
+
+    /// Multiplication (`x * y`) 
     Mul,
+
+    /// Division (`x / y`)
     Div,
+
+    /// Modulo (`x % y`)
     Mod,
+
+    /// Shift left (`x << y`)
     Shl,
+
+    /// Shift right (`x >> y`)
     Shr,
+
+    /// Bitwise or (`x | y`)
     BitOr,
+
+    /// Bitwise and (`x & y`)
     BitAnd,
+
+    /// Bitwise xor (`x ^ y`)
     BitXor,
+
+    /// Logical and (`x && y`)
     LogAnd,
+
+    /// Logical or (`x || y`)
     LogOr
 }
 
+/// A comparison operator AST node.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Cmp {
-    Lt, Gt, Le, Ge, Eq, Ne
+    /// Less than (`<`)
+    Lt, 
+    
+    /// Greater than (`>`)
+    Gt, 
+    
+    /// Less than or equal (`<=`)
+    Le, 
+    
+    /// Greater than or equal (`>=`)
+    Ge, 
+    
+    /// Equal (`==`)
+    Eq, 
+    
+    /// Not equal (`!=`)
+    Ne
 }
 
 impl Cmp {
+    /// Apply comparison operator to a partially ordered type
     pub fn cmp<E>(&self, l: E, r: E) -> bool
         where E: PartialOrd + PartialEq
     {
@@ -45,11 +95,14 @@ impl Cmp {
         }
     }
 
+    /// Check if comparison operator is an order comparison (`true`) 
+    /// or an equality comparison (`false`)
     pub fn is_ord_cmp(&self) -> bool {
         matches!(self, Cmp::Lt | Cmp::Gt | Cmp::Le | Cmp::Ge)
     }
 }
 
+/// Casting a token to an operator node failed.
 #[derive(Debug)]
 pub struct TokenOpCastErr(&'static str);
 

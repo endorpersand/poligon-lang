@@ -1,6 +1,6 @@
 use inkwell::values::{IntValue, FloatValue};
 
-use crate::compiler::resolve::plir;
+use crate::compiler::plir;
 use crate::compiler::{Compiler, IRResult, IRErr, TraverseIR};
 use crate::ast::op;
 

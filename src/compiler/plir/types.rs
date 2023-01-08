@@ -238,15 +238,15 @@ impl Type {
 
 macro_rules! ty {
     ($e:expr) => {
-        $crate::compiler::resolve::plir::Type::Prim(String::from($e))
+        $crate::compiler::plir::Type::Prim(String::from($e))
     };
 
     ($e:expr, [$($p:expr),+]) => {
-        $crate::compiler::resolve::plir::Type::Generic(String::from($e), vec![$($p),+])
+        $crate::compiler::plir::Type::Generic(String::from($e), vec![$($p),+])
     };
 
     ([$($p:expr),+]) => {
-        $crate::compiler::resolve::plir::Type::Tuple(vec![$($p),+])
+        $crate::compiler::plir::Type::Tuple(vec![$($p),+])
     };
 }
 pub(crate) use ty;

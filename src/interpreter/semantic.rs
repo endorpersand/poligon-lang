@@ -41,12 +41,6 @@ impl Local {
         self.vars.contains(s)
     }
 }
-#[derive(Debug, PartialEq, Eq)]
-pub struct ResolveState {
-    steps: HashMap<*const ast::Expr, usize>,
-    locals: Vec<Local>,
-    global_subs: Vec<SubType>,
-}
 
 /// An error that occurs in the variable resolution process.
 #[derive(Debug, PartialEq, Eq)]
@@ -84,6 +78,13 @@ impl GonErr for ResolveErr {
 
 /// A [`Result`] type for operations in the static resolution process.
 pub type ResolveResult<T> = Result<T, ResolveErr>;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResolveState {
+    steps: HashMap<*const ast::Expr, usize>,
+    locals: Vec<Local>,
+    global_subs: Vec<SubType>,
+}
 
 impl ResolveState {
     pub fn new() -> Self {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::ast::{self, ReasgType, MutType};
 
-pub mod plir;
+use super::plir;
 
 pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
     let mut cg = CodeGenerator::new();
@@ -235,7 +235,7 @@ impl Var {
     }
 }
 
-struct CodeGenerator {
+pub struct CodeGenerator {
     program: InsertBlock,
     blocks: Vec<InsertBlock>,
     var_id: usize,
