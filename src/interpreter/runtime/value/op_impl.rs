@@ -79,12 +79,12 @@ macro_rules! cannot_binary {
 }
 
 impl Value {
-    pub fn apply_binary(self, o: &op::Binary, rhs: Self) -> super::RtResult<Value> {
+    pub fn apply_binary(self, o: op::Binary, rhs: Self) -> super::RtResult<Value> {
         macro_rules! int_only_op {
             ($l:ident $t:tt $r:ident) => {
                 match as_int_pairs($l, $r) {
                     Ok((a, b)) => Ok(Value::Int(a $t b)),
-                    Err((a, b)) => Err(cannot_binary!(*o, a, b)),
+                    Err((a, b)) => Err(cannot_binary!(o, a, b)),
                 }
             }
         }
@@ -92,12 +92,12 @@ impl Value {
             op::Binary::Add => match NumOperands::new(self, rhs) {
                 NumOperands::Float(a, b) => Ok(Value::Float(a + b)),
                 NumOperands::Int(a, b)   => Ok(Value::Int(a + b)),
-                NumOperands::Neither(a, b) => Err(cannot_binary!(*o, a, b)),
+                NumOperands::Neither(a, b) => Err(cannot_binary!(o, a, b)),
             },
             op::Binary::Sub => match NumOperands::new(self, rhs) {
                 NumOperands::Float(a, b)   => Ok(Value::Float(a - b)),
                 NumOperands::Int(a, b)     => Ok(Value::Int(a - b)),
-                NumOperands::Neither(a, b) => Err(cannot_binary!(*o, a, b)),
+                NumOperands::Neither(a, b) => Err(cannot_binary!(o, a, b)),
             },
             op::Binary::Mul => match NumOperands::new(self, rhs) {
                 // numeric
@@ -112,21 +112,21 @@ impl Value {
                         (a, CollValue::Not(Value::Int(b))) => a.repeat(b).ok(),
                         (CollValue::Not(Value::Int(a)), b) => b.repeat(a).ok(),
                         _ => None
-                    }.ok_or(TypeErr::CannotApplyBinary(*o, aty, bty).into())
+                    }.ok_or(TypeErr::CannotApplyBinary(o, aty, bty).into())
                 },
             },
 
             // int -> float for div
             op::Binary::Div => match as_float_pairs(self, rhs) {
                 Ok((a, b)) => Ok(Value::Float(a / b)),
-                Err((a, b)) => Err(cannot_binary!(*o, a, b))
+                Err((a, b)) => Err(cannot_binary!(o, a, b))
             },
             op::Binary::Mod => match NumOperands::new(self, rhs) {
                 NumOperands::Float(a, b) => Ok(Value::Float(a % b)),
                 NumOperands::Int(a, b) => a.checked_rem(b)
                     .map(Value::Int)
                     .ok_or_else(|| ValueErr::DivisionByZero.into()),
-                NumOperands::Neither(a, b) => Err(cannot_binary!(*o, a, b)),
+                NumOperands::Neither(a, b) => Err(cannot_binary!(o, a, b)),
             },
 
             // <<, >>
@@ -148,7 +148,7 @@ impl Value {
     
                         Ok(Value::new_list(lst))
                     },
-                    (a, b) => Err(cannot_binary!(*o, a.revert(), b.revert())),
+                    (a, b) => Err(cannot_binary!(o, a.revert(), b.revert())),
                 },
             },
             op::Binary::BitAnd => int_only_op!(self & rhs),

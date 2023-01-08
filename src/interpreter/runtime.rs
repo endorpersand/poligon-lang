@@ -70,7 +70,7 @@ macro_rules! cast {
 
 impl tree::Expr {
     /// Evaluate an expression and then apply the unary operator for it.
-    pub fn apply_unary(&self, o: &op::Unary, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn apply_unary(&self, o: op::Unary, ctx: &mut BlockContext) -> RtTraversal<Value> {
         self.traverse_rt(ctx)
             .and_then(|v| cast! { v.apply_unary(o) })
     }
@@ -78,7 +78,7 @@ impl tree::Expr {
     /// Evaluate the two arguments to the binary operator and then apply the operator to it.
     /// 
     /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
-    pub fn apply_binary(&self, o: &op::Binary, right: &Self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn apply_binary(&self, o: op::Binary, right: &Self, ctx: &mut BlockContext) -> RtTraversal<Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
@@ -391,7 +391,7 @@ impl TraverseRt for tree::Expr {
                 let mut ops_iter = ops.iter().rev();
         
                 // ops should always have at least 1 unary op, so this should always be true
-                let mut e = if let Some(op) = ops_iter.next() {
+                let mut e = if let Some(&op) = ops_iter.next() {
                     expr.apply_unary(op, ctx)
                 } else {
                     // should never happen, but in case it does
@@ -399,13 +399,13 @@ impl TraverseRt for tree::Expr {
                 }?;
 
                 // apply the rest:
-                for op in ops_iter {
+                for &op in ops_iter {
                     e = e.apply_unary(op)?;
                 }
 
                 Ok(e)
             },
-            tree::Expr::BinaryOp { op, left, right } => left.apply_binary(op, right, ctx),
+            tree::Expr::BinaryOp { op, left, right } => left.apply_binary(*op, right, ctx),
             tree::Expr::Comparison { left, rights } => {
                 let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
@@ -414,7 +414,7 @@ impl TraverseRt for tree::Expr {
                 for (cmp, rexpr) in rights {
                     let rval = rexpr.traverse_rt(ctx)?;
 
-                    if lval.apply_cmp(cmp, &rval)? {
+                    if lval.apply_cmp(*cmp, &rval)? {
                         lval = rval;
                     } else {
                         return Ok(Value::Bool(false));

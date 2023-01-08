@@ -392,16 +392,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::Path(_) => todo!(),
             plir::ExprType::UnaryOps { ops, expr } => {
                 match ops.split_last() {
-                    Some(((tail_op, _), head)) => {
+                    Some((&(tail_op, _), head)) => {
                         let first = compiler.apply_unary(&**expr, tail_op)?;
                         head.iter()
-                            .try_rfold(first, |e, (op, _)| compiler.apply_unary(e, op))
+                            .try_rfold(first, |e, &(op, _)| compiler.apply_unary(e, op))
                     },
                     None => expr.write_ir(compiler),
                 }
             },
             plir::ExprType::BinaryOp { op, left, right } => {
-                compiler.apply_binary(&**left, op, &**right)
+                compiler.apply_binary(&**left, *op, &**right)
             },
             plir::ExprType::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
@@ -415,7 +415,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         for (cmp, rexpr) in head {
                             // eval comparison
                             let rval = rexpr.write_ir(compiler)?;
-                            let result = compiler.apply_cmp(lval, cmp, rval)?;
+                            let result = compiler.apply_cmp(lval, *cmp, rval)?;
                             
                             // branch depending on T/F
                             let then_bb = compiler.ctx.prepend_basic_block(post_bb, "cmp_true");
@@ -431,7 +431,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         
                         // last block
                         let rval = last_rexpr.write_ir(compiler)?;
-                        let result = compiler.apply_cmp(lval, last_cmp, rval)?;
+                        let result = compiler.apply_cmp(lval, *last_cmp, rval)?;
                         // add to phi
                         incoming.push((result, compiler.get_insert_block()));
 

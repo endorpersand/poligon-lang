@@ -73,7 +73,7 @@ impl ListRepr {
 }
 
 /// Utility to cast values onto float and compare them
-fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: &op::Cmp) -> Option<bool> {
+fn float_cmp(a: impl TryInto<f64>, b: impl TryInto<f64>, o: op::Cmp) -> Option<bool> {
     if let (Ok(af), Ok(bf)) = (a.try_into(), b.try_into()) {
         Some(o.cmp(af, bf))
     } else {
@@ -281,7 +281,7 @@ impl Value {
     }
 
     /// Apply a unary operator to a computed value.
-    pub fn apply_unary(self, o: &op::Unary) -> super::RtResult<Value> {
+    pub fn apply_unary(self, o: op::Unary) -> super::RtResult<Value> {
         let ty = self.ty();
         match o {
             op::Unary::Plus   => if self.is_numeric() { Some(self) } else { None },
@@ -292,11 +292,11 @@ impl Value {
             },
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
-        }.ok_or(TypeErr::CannotApplyUnary(*o, ty).into())
+        }.ok_or(TypeErr::CannotApplyUnary(o, ty).into())
     }
     
     /// Apply a comparison operator between two computed values.
-    pub fn apply_cmp(&self, o: &op::Cmp, right: &Self) -> super::RtResult<bool> {
+    pub fn apply_cmp(&self, o: op::Cmp, right: &Self) -> super::RtResult<bool> {
         match o {
             op::Cmp::Lt | op::Cmp::Gt | op::Cmp::Le | op::Cmp::Ge => {
                 match (self, right) {
@@ -332,7 +332,7 @@ impl Value {
                     _ => None
                 }
             },
-        }.ok_or_else(|| TypeErr::CannotCompare(*o, self.ty(), right.ty()).into())
+        }.ok_or_else(|| TypeErr::CannotCompare(o, self.ty(), right.ty()).into())
     }
 
     /// Copies item directly. For lists, this means that this value 

@@ -142,16 +142,16 @@ impl Type {
         }
     }
 
-    pub fn resolve_unary_type(op: &op::Unary, ty: &Type) -> Result<Type, OpErr> {
+    pub fn resolve_unary_type(op: op::Unary, ty: &Type) -> Result<Type, OpErr> {
         match op {
             op::Unary::Plus   => ty.is_numeric().then(|| ty.clone()),
             op::Unary::Minus  => ty.is_numeric().then(|| ty.clone()),
             op::Unary::LogNot => Some(ty!(Type::S_BOOL)),
             op::Unary::BitNot => ty.is_int().then(|| ty.clone()),
-        }.ok_or_else(|| OpErr::CannotUnary(*op, ty.clone()))
+        }.ok_or_else(|| OpErr::CannotUnary(op, ty.clone()))
     }
 
-    pub fn resolve_binary_type(op: &op::Binary, left: &Type, right: &Type) -> Result<Type, OpErr> {
+    pub fn resolve_binary_type(op: op::Binary, left: &Type, right: &Type) -> Result<Type, OpErr> {
         #[inline]
         fn bin_op(ty: TypeRef, left: &Type, right: &Type) -> Option<Type> {
             (left.as_ref() == ty && right.as_ref() == ty).then(|| ty.to_owned())
@@ -177,7 +177,7 @@ impl Type {
             | op::Binary::Mod
             => numeric_op_else!(
                 left, right,
-                (_, _) => Err(OpErr::CannotBinary(*op, left.clone(), right.clone()))
+                (_, _) => Err(OpErr::CannotBinary(op, left.clone(), right.clone()))
             ),
 
             op::Binary::Shl
@@ -186,7 +186,7 @@ impl Type {
             | op::Binary::BitOr
             | op::Binary::BitXor
             => bin_op(TypeRef::Prim(Type::S_INT), left, right)
-                .ok_or_else(|| OpErr::CannotBinary(*op, left.clone(), right.clone())),
+                .ok_or_else(|| OpErr::CannotBinary(op, left.clone(), right.clone())),
 
             // TODO: &&, || typing
             op::Binary::LogAnd => Ok(ty!(Type::S_BOOL)),
@@ -194,7 +194,7 @@ impl Type {
         }
     }
 
-    // pub fn resolve_cmp_type(_: &op::Cmp, left: Type, right: Type) -> Option<Type> {
+    // pub fn resolve_cmp_type(_: op::Cmp, left: Type, right: Type) -> Option<Type> {
     //     let comparable = (left.is_numeric() && right.is_numeric()) || (left == right);
 
     //     comparable.then(|| Type::bool())
