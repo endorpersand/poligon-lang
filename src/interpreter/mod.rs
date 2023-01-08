@@ -6,7 +6,6 @@
 //! via the interpreter's runtime.
 //! - [`semantic`], [`runtime`]: Modules which execute an AST
 
-use std::fmt::Display;
 use std::{io, fs};
 use std::path::Path;
 
@@ -32,15 +31,12 @@ pub struct Interpreter {
     source: String
 }
 
-#[derive(Debug)]
-pub struct InterpretErr(String);
-
-pub type InterpretResult<T> = Result<T, InterpretErr>;
+type InterpretResult<T> = Result<T, String>;
 
 impl Interpreter {
     pub fn from_string(s: &str) -> Self {
         Self {
-            source: s.to_string()
+            source: String::from(s)
         }
     }
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
@@ -53,7 +49,6 @@ impl Interpreter {
     pub fn lex(&self) -> InterpretResult<Vec<lexer::token::FullToken>> {
         lexer::tokenize(&self.source)
             .map_err(|err| err.full_msg(&self.source))
-            .map_err(InterpretErr)
     }
 
     pub fn parse(&self) -> InterpretResult<tree::Program> {
@@ -61,7 +56,6 @@ impl Interpreter {
 
         parser::parse(lexed)
             .map_err(|err| err.full_msg(&self.source))
-            .map_err(InterpretErr)
     }
 
     pub fn run(&self) -> InterpretResult<Value> {
@@ -69,12 +63,5 @@ impl Interpreter {
         
         parsed.run()
             .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
-            .map_err(InterpretErr)
-    }
-}
-
-impl Display for InterpretErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
     }
 }
