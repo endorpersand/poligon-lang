@@ -1146,7 +1146,7 @@ mod tests {
         }" => program![
             Stmt::Expr(Expr::If {
                 conditionals: vec![
-                    ((Expr::Literal(Literal::Bool(true)), Block(vec![])))
+                    (Expr::Literal(Literal::Bool(true)), Block(vec![]))
                 ],
                 last: None
             })

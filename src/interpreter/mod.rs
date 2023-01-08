@@ -23,10 +23,9 @@ mod repl;
 /// This struct creates an AST out of a provided string, and directly runs it 
 /// through a traversal sequence and runtime processed through Rust's runtime.
 /// 
-/// As such, this struct may be more limited than the [compiler] form.
+/// As such, this struct may be more limited than the [compiler][crate::compiler] form.
 /// 
 /// TODO!: usage example
-/// [compiler]: crate::compiler
 pub struct Interpreter {
     source: String
 }

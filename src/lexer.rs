@@ -171,7 +171,7 @@ impl CharClass {
     }
 
     fn of_or_err(c: char, pt: (usize, usize)) -> LexResult<Self> {
-        Self::of(c).ok_or(LexErr::UnknownChar(c).at(pt))
+        Self::of(c).ok_or_else(|| LexErr::UnknownChar(c).at(pt))
     }
 }
 
