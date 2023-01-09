@@ -167,17 +167,17 @@ pub mod err {
     /// An error caused by type mismatches
     #[derive(Debug)]
     pub enum TypeErr {
-        /// These two types can't be compared using the given operation.
-        CannotCompare(op::Cmp, ValueType, ValueType),
-
         /// The unary operator cannot be applied to this type.
-        CannotApplyUnary(op::Unary, ValueType),
+        CannotUnary(op::Unary, ValueType),
 
         /// The binary operator cannot be applied between these two types.
-        CannotApplyBinary(op::Binary, ValueType, ValueType),
+        CannotBinary(op::Binary, ValueType, ValueType),
 
+        /// These two types can't be compared using the given operation.
+        CannotCmp(op::Cmp, ValueType, ValueType),
+        
         /// Cannot compute a range between these two types.
-        CannotApplyRange(ValueType, ValueType),
+        CannotRange(ValueType, ValueType),
 
         /// Cannot iterate over this type.
         NotIterable(ValueType),
@@ -205,10 +205,10 @@ pub mod err {
 
         fn message(&self) -> String {
             match self {
-                TypeErr::CannotCompare(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
-                TypeErr::CannotApplyUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
-                TypeErr::CannotApplyBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
-                TypeErr::CannotApplyRange(t1, t2) => format!("cannot create range {t1}..{t2}"),
+                TypeErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+                TypeErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+                TypeErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+                TypeErr::CannotRange(t1, t2) => format!("cannot create range {t1}..{t2}"),
                 TypeErr::NotIterable(t1) => format!("{t1} is not iterable"),
                 TypeErr::ExpectedType(t1) => format!("expected {t1}"),
                 TypeErr::CannotIndex(t1) => format!("cannot index {t1}"),
@@ -468,7 +468,7 @@ impl TraverseRt for ast::Expr {
 
                         Ok(Value::new_list(values))
                     },
-                    _ => Err(TypeErr::CannotApplyRange(l.ty(), r.ty()))?
+                    _ => Err(TypeErr::CannotRange(l.ty(), r.ty()))?
                 }
             },
             ast::Expr::If { conditionals, last } => {

@@ -2,26 +2,42 @@ use crate::ast::{op, self};
 
 use super::{Split, Expr, ExprType};
 
+/// An operation between types failed.
 #[derive(Debug)]
 pub enum OpErr {
+    /// The unary operator cannot be applied to this type.
     CannotUnary(op::Unary, Type),
+    /// The binary operator cannot be applied between these two types.
     CannotBinary(op::Binary, Type, Type),
+    /// These two types can't be compared using the given operation.
     CannotCmp(op::Cmp, Type, Type),
+    /// Cannot index this type.
     CannotIndex(Type),
+    /// Cannot index this type using the other type.
     CannotIndexWith(Type, Type),
-    
+    /// Type is a tuple, and cannot be indexed by a non-literal.
     TupleIndexNonLiteral(Type),
+    /// Type is a tuple, and the index provided was out of bounds.
     TupleIndexOOB(Type, isize),
+    /// Type cannot be split properly using this split.
     InvalidSplit(Type, Split)
 }
 
+/// A type expression.
+/// 
+/// This corresponds to [`ast::Type`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
+    /// A type without type parameters (e.g. `string`, `int`).
     Prim(String),
+    /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
     Generic(String, Vec<Type>),
+    /// A tuple of types (e.g. `[int, int, int]`).
     Tuple(Vec<Type>),
+    /// A function (e.g. `() -> int`, `str -> int`).
     Fun(Vec<Type>, Box<Type>)
 }
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum TypeRef<'a> {
     Prim(&'a str),
@@ -67,12 +83,18 @@ impl Type {
         }
     }
 
-    pub fn is_never(&self) -> bool {
+    /// Test if this type is `never`.
+    #[inline]
+    fn is_never(&self) -> bool {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_NEVER))
     }
+    
+    /// Test if this type is a numeric type (`int`, `float`).
     pub fn is_numeric(&self) -> bool {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
     }
+
+    /// Test if this type is `int`.
     #[inline]
     fn is_int(&self) -> bool {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_INT))

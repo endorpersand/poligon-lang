@@ -1,3 +1,14 @@
+//! The components of the PLIR (Poligon Intermediate Representation) tree, 
+//! which is derived from the [AST].
+//! 
+//! The AST is compiled to the PLIR AST via the [`codegen`][`crate::compiler::codegen`] module,
+//! which is then compiled to LLVM via the [`compiler`][`crate::compiler`] module.
+//! 
+//! Many of the structs here are similar (or identical) to those in [AST], 
+//! usually with extra type checking.
+//! 
+//! [AST]: crate::ast
+
 mod display;
 mod types;
 
@@ -5,9 +16,25 @@ use crate::ast::{op, self};
 pub use types::*;
 pub(crate) use types::ty;
 
+/// A complete program.
+/// 
+/// This struct corresponds to [`ast::Program`].
 #[derive(Debug, PartialEq)]
 pub struct Program(pub Vec<Stmt>);
 
+/// An enclosed scope with a list of statements.
+/// 
+/// This struct corresponds to [`ast::Block`], 
+/// with an extra Type parameter to indicate the block's return type.
+/// 
+/// # Example
+/// ```text
+/// {
+///     let a: int = <int>1;
+///     let b: int = <int>2;
+///     exit a + b;
+/// }
+/// ```
 #[derive(Debug, PartialEq)]
 pub struct Block(pub Type, pub Vec<Stmt>);
 
@@ -17,66 +44,215 @@ impl Default for Block {
     }
 }
 
+/// A statement.
+///
+/// This enum corresponds to [`ast::Stmt`].
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
+    /// A variable declaration with a value initializer.
+    /// 
+    /// See [`Decl`] for examples.
     Decl(Decl),
+    
+    /// A return statement that signals to exit the function body.
+    /// 
+    /// This return statement can return nothing (`void`), 
+    /// or return a value from a given expression.
+    /// 
+    /// # Examples
+    /// ```text
+    /// return; // no expr
+    /// return <int>2; // with expr
+    /// ```
     Return(Option<Expr>),
+
+    /// `break`
     Break,
+
+    /// `continue`
     Continue,
+
+    /// A statement that signals to exit the current block.
+    /// 
+    /// This statement can exit the block with nothing (`void`), 
+    /// or with a value from a given expression.
     Exit(Option<Expr>),
+
+    /// A function declaration with a defined body.
+    /// 
+    /// See [`FunDecl`] for examples.
     FunDecl(FunDecl),
+
+    /// A function declaration without a specified body
+    /// 
+    /// In the compiler, this is used to call functions from libc.
+    /// 
+    /// # Example
+    /// ```text
+    /// extern fun puts(s: string) -> int;
+    /// ```
     ExternFunDecl(FunSignature),
+
+    /// An expression.
     Expr(Expr)
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Decl {
-    pub rt: ast::ReasgType,
-    pub mt: ast::MutType, // No pattern matching
-    pub ident: String, // No pattern matching
-    pub ty: Type, // Explicit type
-    pub val: Expr
-}
-#[derive(Debug, PartialEq, Eq)]
-pub struct Param {
-    pub rt: ast::ReasgType,
-    pub mt: ast::MutType,
-    pub ident: String,
-    pub ty: Type // Explicit type
+impl Stmt {
+    /// Test if this statement ends with a block.
+    /// 
+    /// This function corresponds to [`ast::Stmt::ends_with_block`].
+    pub fn ends_with_block(&self) -> bool {
+        matches!(self, 
+            | Stmt::FunDecl(_)
+            | Stmt::Expr(Expr { expr: ExprType::Block(_), .. })
+            | Stmt::Expr(Expr { expr: ExprType::If { .. }, .. })
+            | Stmt::Expr(Expr { expr: ExprType::While { .. }, .. })
+            | Stmt::Expr(Expr { expr: ExprType::For { .. }, .. })
+        )
+    }
 }
 
+/// A variable declaration.
+/// 
+/// This struct also requires a value initializer.
+/// 
+/// This struct corresponds to [`ast::Decl`],
+/// with a required Type parameter that explicitly declares the variable's type.
+/// 
+/// Additionally, pattern matching is not supported with PLIR's version of Decl.
+/// 
+/// # Examples
+/// ```text
+/// let a: int = <int>1;
+/// const b: int = <int>2;
+/// let mut c: int = <int>3;
+/// const mut d: int = <int>4;
+/// let e: int = <int>5;
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct Decl {
+    /// Whether the variable can be reassigned later
+    pub rt: ast::ReasgType,
+
+    /// Whether the variable can be mutated
+    pub mt: ast::MutType,
+
+    /// The variable to declare to
+    pub ident: String,
+
+    /// The type of the variable
+    pub ty: Type,
+
+    /// The value to declare the variable to
+    pub val: Expr
+}
+
+/// A function parameter.
+/// 
+/// This struct corresponds to [`ast::Param`],
+/// with a required Type parameter that explicitly declares the variable's type.
+/// 
+/// # Example
+/// ```text
+/// fun funny(
+///     a: int, 
+///     const b: float, 
+///     mut c: string, 
+///     const mut d: list<string>
+/// ) {}
+/// ```
+#[derive(Debug, PartialEq, Eq)]
+pub struct Param {
+    /// Whether the parameter variable can be reassigned later
+    pub rt: ast::ReasgType,
+
+    /// Whether the parameter variable can be mutated
+    pub mt: ast::MutType,
+
+    /// The parameter variable
+    pub ident: String,
+
+    /// The type of the parameter variable
+    pub ty: Type
+}
+
+/// The function header / signature.
+/// 
+/// This struct corresponds to [`ast::FunSignature`],
+/// with the return type being explicitly evaluated.
+/// 
+/// # Examples
+/// ```text
+/// fun abc(a: int) -> void;
+/// fun def(a: int) -> string;
+/// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
+        /// The function's identifier
     pub ident: String,
+        /// The function's parameters
     pub params: Vec<Param>,
-    pub ret: Type, // Explicit type
+        /// The function's return type
+    pub ret: Type
 }
+
+/// A complete function declaration with a function body.
+/// 
+/// This struct corresponds to [`ast::FunDecl`].
+/// 
+/// # Example
+/// ```text
+/// fun double(n: int) -> int {
+///     return <int>(<int>n * <int>2);
+/// }
+/// ```
 #[derive(Debug, PartialEq)]
 pub struct FunDecl {
+    /// The function's signature
     pub sig: FunSignature,
+    /// The function's body
     pub block: Block
 }
 
+/// A typed expression.
+/// 
+/// This does not correspond exactly to [`ast::Expr`]. 
+/// Instead, [`ExprType`] corresponds to [`ast::Expr`] 
+/// and this struct provides the expression's type information.
 #[derive(Debug, PartialEq)]
 pub struct Expr {
-    pub ty: Type, // Explicit type
+    /// Value type of the expression
+    pub ty: Type,
+
+    /// The specific expression
     pub expr: ExprType
 }
 
 impl Expr {
+    /// Create a new expression.
     pub fn new(ty: Type, expr: ExprType) -> Self {
         Expr { ty, expr }
     }
 }
+
+/// An expression.
+/// 
+/// This corresponds to [`ast::Expr`], however cannot be used in the PLIR AST directly.
+/// 
+/// See [`plir::Expr`][`Expr`].
 #[derive(Debug, PartialEq)]
 pub enum ExprType {
     /// Variable access.
     Ident(String),
 
     /// A block of statements.
+    /// 
+    /// See [`Block`] for examples.
     Block(Block),
 
     /// An int, float, char, or string literal.
+    /// 
+    /// See [`ast::Literal`] for examples.
     Literal(ast::Literal),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
@@ -89,9 +265,19 @@ pub enum ExprType {
     DictLiteral(Vec<(Expr, Expr)>),
 
     /// An assignment operation.
+    /// 
+    /// Unlike [`ast::Expr::Assign`], this cannot be a pattern.
+    /// 
+    /// # Examples
+    /// ```text
+    /// a = <int>1;
+    /// b[0] = <int>3;
+    /// ```
     Assign(AsgUnit, Box<Expr>),
 
-    /// A path (e.g. `obj.prop.prop.prop`).
+    /// A path.
+    /// 
+    /// See [`Path`] for examples.
     Path(Path),
 
     /// A chain of unary operations (e.g. `+-+-~!+e`).
@@ -170,7 +356,9 @@ pub enum ExprType {
         /// The parameters to the function call.
         params: Vec<Expr>
     },
-    /// An index operation (e.g. `lst[0]`).
+    /// An index operation.
+    /// 
+    /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
     Spread(Option<Box<Expr>>),
@@ -178,44 +366,56 @@ pub enum ExprType {
     Split(String, Split)
 }
 
+/// A path.
+/// 
+/// This struct corresponds to [`ast::Path`],
+/// with an additional type parameter in the attributes to
+/// indicate the type of the access.
 #[derive(Debug, PartialEq)]
 pub struct Path {
+    /// The expression to access an attribute of
     pub obj: Box<Expr>,
 
-    // the attribute, whether or not it's static, and the type of the subexpression
-    // a.b.c.d vs a::b::c::d
+    /// The chain of attributes, 
+    /// whether the specific accesses were static, 
+    /// and the value type of the access.
     pub attrs: Vec<(String, bool, Type)>
 }
 
+/// Value indexing.
+/// 
+/// This struct corresponds to [`ast::Index`].
+/// # Examples
+/// ```text
+/// (<list<unk>> lst)[<int>0]
+/// (<dict<string, unk>> dct)[<string>"hello"]
+/// ```
 #[derive(Debug, PartialEq)]
 pub struct Index {
+    /// The expression to index
     pub expr: Box<Expr>,
+    /// The index
     pub index: Box<Expr>
 }
 
-impl Stmt {
-    pub fn ends_with_block(&self) -> bool {
-        matches!(self, 
-            | Stmt::FunDecl(_)
-            | Stmt::Expr(Expr { expr: ExprType::Block(_), .. })
-            | Stmt::Expr(Expr { expr: ExprType::If { .. }, .. })
-            | Stmt::Expr(Expr { expr: ExprType::While { .. }, .. })
-            | Stmt::Expr(Expr { expr: ExprType::For { .. }, .. })
-        )
-    }
-}
-
+/// A literal index used for splitting patterns.
 // TODO: can this be combined with Index?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Split {
+    /// Index from the left (first is 0)
     Left(usize),
+    /// Index from the middle, starting from .0 (inclusive) and ending at .1 (inclusive)
     Middle(usize, usize),
+    /// Index from the right (last is 0)
     Right(usize)
 }
 
+/// A unit to assign to.
+/// 
+/// This corresponds to [`ast::AsgUnit`].
 #[derive(Debug, PartialEq)]
 pub enum AsgUnit {
-    Ident(String),
-    Path(Path),
-    Index(Index),
+    #[allow(missing_docs)] Ident(String),
+    #[allow(missing_docs)] Path(Path),
+    #[allow(missing_docs)] Index(Index),
 }

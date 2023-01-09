@@ -75,7 +75,7 @@ fn as_int_pairs(lhs: Value, rhs: Value) -> Result<(isize, isize), (Value, Value)
 }
 
 macro_rules! cannot_binary {
-    ($e:expr, $l:expr, $r:expr) => { TypeErr::CannotApplyBinary($e, $l.ty(), $r.ty()).into() }
+    ($e:expr, $l:expr, $r:expr) => { TypeErr::CannotBinary($e, $l.ty(), $r.ty()).into() }
 }
 
 impl Value {
@@ -113,7 +113,7 @@ impl Value {
                         (a, CollValue::Not(Value::Int(b))) => a.repeat(b).ok(),
                         (CollValue::Not(Value::Int(a)), b) => b.repeat(a).ok(),
                         _ => None
-                    }.ok_or(TypeErr::CannotApplyBinary(o, aty, bty).into())
+                    }.ok_or(TypeErr::CannotBinary(o, aty, bty).into())
                 },
             },
 

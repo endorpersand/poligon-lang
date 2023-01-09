@@ -1,3 +1,11 @@
+//! The operator AST nodes.
+//! 
+//! This differs from [operator tokens][crate::lexer::token] 
+//! because these nodes have established meanings within the Poligon language
+//! and can be used to apply operations in runtimes.
+//! 
+//! TODO!: usage
+
 use std::fmt::Display;
 
 use crate::lexer::token::{Token, token};

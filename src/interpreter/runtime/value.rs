@@ -315,7 +315,7 @@ impl Value {
             },
             op::Unary::LogNot => Some(Value::Bool(!self.truth())),
             op::Unary::BitNot => if let Value::Int(e) = self { Some(Value::Int(!e)) } else { None },
-        }.ok_or(TypeErr::CannotApplyUnary(o, ty).into())
+        }.ok_or(TypeErr::CannotUnary(o, ty).into())
     }
     
     /// Apply a comparison operator between two computed values.
@@ -355,7 +355,7 @@ impl Value {
                     _ => None
                 }
             },
-        }.ok_or_else(|| TypeErr::CannotCompare(o, self.ty(), right.ty()).into())
+        }.ok_or_else(|| TypeErr::CannotCmp(o, self.ty(), right.ty()).into())
     }
 
     /// Deep copies the value. For lists, this means that this value 
