@@ -43,7 +43,7 @@ impl CollValue {
         match self {
             CollValue::Str(s)  => Ok(Value::Str(s.repeat(n))),
             CollValue::List(l) => Ok(Value::new_list(
-                l.clone_inner().into_iter()
+                l.clone_deep().into_iter()
                     .cycle()
                     .take(l.borrow().len() * n)
                     .collect()
@@ -142,9 +142,9 @@ impl Value {
                         Ok(Value::Str(s1))
                     },
                     (CollValue::List(l1), CollValue::List(l2)) => {
-                        let lst = l1.clone_inner()
+                        let lst = l1.clone_deep()
                             .into_iter()
-                            .chain(l2.clone_inner())
+                            .chain(l2.clone_deep())
                             .collect();
     
                         Ok(Value::new_list(lst))

@@ -169,7 +169,7 @@ impl Value {
         matches!(self, Value::Int(_) | Value::Float(_))
     }
 
-    /// Get the type of the current value
+    /// Get the concrete type of the current value.
     pub fn ty(&self) -> ValueType {
         match self {
             Value::Int(_)   => ValueType::Int,

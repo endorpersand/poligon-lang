@@ -704,7 +704,7 @@ impl CodeGenerator {
                 let mut op_stack = vec![];
 
                 for op in ops.into_iter().rev() {
-                    top_ty = plir::Type::resolve_unary_type(op, &top_ty)?;
+                    top_ty = top_ty.resolve_unary_type(op)?;
                     op_stack.push((op, top_ty.clone()));
                 }
 
@@ -719,7 +719,7 @@ impl CodeGenerator {
                 let left = self.consume_expr_and_box(*left)?;
                 let right = self.consume_expr_and_box(*right)?;
 
-                let ty = plir::Type::resolve_binary_type(op, &left.ty, &right.ty)?;
+                let ty = left.ty.resolve_binary_type(op, &right.ty)?;
                 Ok(plir::Expr::new(
                     ty,
                     plir::ExprType::BinaryOp { op, left, right }
@@ -826,7 +826,7 @@ impl CodeGenerator {
         let expr = self.consume_expr_and_box(*expr)?;
         let index = self.consume_expr_and_box(*index)?;
 
-        let idx_ty = plir::Type::resolve_index_type(&expr.ty, &index)?;
+        let idx_ty = expr.ty.resolve_index_type(&index)?;
         Ok((idx_ty, plir::Index { expr, index }))
     }
 }

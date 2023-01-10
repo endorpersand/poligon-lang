@@ -3,6 +3,16 @@ use std::rc::Rc;
 
 use crate::err::GonErr;
 
+/// This is a utility type used by Poligon's interpreter
+/// to create values that are passed by reference.
+/// 
+/// These follow the same borrow rules as `RefCell`,
+/// meaning a mutable reference cannot be held at the same
+/// time as an immutable reference.
+/// 
+/// It is expected that a reference can only be created
+/// for a quick operation and dropped when the operation
+/// is complete.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RefValue<T> {
     pub(crate) rc: Rc<RefCell<T>>,
@@ -38,20 +48,23 @@ impl From<BorrowMutError> for RvErr {
 }
 
 impl<T> RefValue<T> {
+    /// Create a reference value from a structural value.
+    /// 
+    /// If this value is immutable, attempts to mutably borrow will cause an error.
     pub fn new(t: T, mutable: bool) -> Self {
         Self { rc: Rc::new(RefCell::new(t)), mutable }
     }
 
-    pub fn wrap(rc: Rc<RefCell<T>>, mutable: bool) -> Self {
-        Self { rc, mutable }
-    }
-
+    /// Immutably borrow this value. 
+    /// This is used to compute operations to the inner value.
     pub fn borrow(&self) -> Ref<'_, T> {
         self.rc.borrow()
     }
 
-    // borrow muts should not be held. 
-    // they should only be used for the one update they need and then they should be released.
+    /// Mutably borrow this value.
+    /// This is used to mutate the inner value.
+    /// 
+    /// This reference should be dropped once the operation is complete.
     pub fn try_borrow_mut(&self) -> Result<RefMut<'_, T>, RvErr> {
         if self.mutable {
             Ok(self.rc.try_borrow_mut()?)
@@ -60,21 +73,31 @@ impl<T> RefValue<T> {
         }
     }
 
+    /// Check if the values are equal by identity. 
+    /// 
+    /// For value equality, use [`RefValue::eq`].
     pub fn ref_eq(&self, other: &RefValue<T>) -> bool {
         Rc::ptr_eq(&self.rc, &other.rc)
     }
 
+    /// Create a immutable reference clone to the value.
+    /// 
+    /// The cloned value cannot be mutably borrowed.
     pub fn clone_immut(&self) -> Self {
         Self { rc: Rc::clone(&self.rc), mutable: false }
     }
 
-    pub fn mutable(&self) -> bool {
-        self.mutable
-    }
-
-    pub fn clone_inner(&self) -> T
+    /// Create a structural clone to the value.
+    /// 
+    /// The new value will *not* be equal by identity.
+    pub fn clone_deep(&self) -> T
         where T: Clone
     {
         self.rc.borrow().clone()
+    }
+
+    /// Check if this value can be mutably borrowed.
+    pub fn mutable(&self) -> bool {
+        self.mutable
     }
 }

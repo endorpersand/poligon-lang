@@ -5,6 +5,7 @@ use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, Resol
 
 use super::{VArbType, Value};
 
+/// A function that can be called in Poligon's runtime.
 #[derive(PartialEq, Clone, Debug)]
 pub struct GonFun {
     pub(super) ident: Option<String>,
@@ -12,11 +13,20 @@ pub struct GonFun {
     pub(super) fun: GInternalFun
 }
 
+/// The type of the function. 
+/// 
+/// This struct includes the parameter types and the return type.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FunType(pub(super) Box<FunParamType>, pub(super) Box<VArbType>);
+
+/// The types of the parameters of a given function.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum FunParamType {
+    /// There are no spread types in the parameter list
+    /// (e.g. `(int, int, int) -> ...`).
     Positional(Vec<VArbType>), // (int, int, int) -> ..
+    /// There are spread types in the parameter list
+    /// (e.g. `(int, int, ..int[]) -> ...`).
     PosSpread(Vec<VArbType>, VArbType) // (int, int, ..int) -> ..
 }
 
@@ -27,6 +37,10 @@ pub(super) enum GInternalFun {
 }
 
 impl GonFun {
+    /// Find the arity of the function.
+    /// 
+    /// This returns None if there is a spread argument 
+    /// (which means that any number of elements are allowed).
     pub fn arity(&self) -> Option<usize> {
         let FunType(params, _) = &self.ty;
         match &**params {
@@ -35,6 +49,10 @@ impl GonFun {
         }
     }
 
+    /// Call this function with a list of expressions.
+    /// 
+    /// In specification, this would only compute the expressions needed for the function.
+    /// In implementation, this computes all the expressions before inserting them to the function.
     pub fn call(&self, params: &[ast::Expr], ctx: &mut BlockContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
@@ -51,6 +69,7 @@ impl GonFun {
         self.call_computed(pvals, ctx)
     }
 
+    /// Call this function with a list of computed values.
     pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut BlockContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
@@ -82,6 +101,7 @@ impl GonFun {
 }
 
 impl FunType {
+    /// Create a new function type.
     pub fn new(params: FunParamType, ret: VArbType) -> Self {
         Self (
             Box::new(params),
@@ -90,6 +110,7 @@ impl FunType {
     }
 }
 
+/// A macro that makes the syntax for creating [`FunType`]s simpler.
 macro_rules! fun_type {
     (($($e:expr),*) -> $r:expr) => {
         FunType::new(FunParamType::Positional(vec![$($e),*]), $r)

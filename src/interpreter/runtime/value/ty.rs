@@ -4,12 +4,38 @@ use crate::ast;
 
 use super::{FunType, FunParamType};
 
+/// A concrete type in Poligon's runtime.
+/// 
+/// A value will be resolved to have one of these types.
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum ValueType { Int, Float, Char, Str, Bool, List(Box<VArbType>), Unit, Fun(FunType) }
+pub enum ValueType {
+    /// An integer
+    Int,
+    /// A float
+    Float,
+    /// A character
+    Char,
+    /// A string
+    Str,
+    /// A boolean
+    Bool,
+    /// A list (parameter specifies element type)
+    List(Box<VArbType>),
+    /// Void
+    Unit,
+    /// A function (parameter specifies the function type)
+    Fun(FunType)
+}
 
+/// An arbitrary type in Poligon's runtime.
+/// 
+/// Variables (and any holders that can be assigned 
+/// to a value) can have any of these types.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum VArbType {
+    /// A concrete type.
     Value(ValueType),
+    /// `unknown`, the top type. Anything can be assigned here.
     Unk
 }
 
@@ -56,6 +82,7 @@ impl Display for VArbType {
 }
 
 impl VArbType {
+    /// Determine which arbitrary type a given [`ast::Type`] represents.
     pub fn lookup(t: &ast::Type) -> Self {
         // TODO, consider generics + resolve properly if not found
         
