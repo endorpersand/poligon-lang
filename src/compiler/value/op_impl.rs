@@ -1,7 +1,7 @@
 use inkwell::values::{IntValue, FloatValue};
 
 use crate::compiler::plir;
-use crate::compiler::{Compiler, IRResult, IRErr, TraverseIR};
+use crate::compiler::{Compiler, CompileResult, CompileErr, TraverseIR};
 use crate::ast::op;
 
 use self::internal::*;
@@ -46,7 +46,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn apply_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
         left.apply_cmp(op, right, self)
     }
-    
+
     /// Calculate the boolean value (the truth value) of some given value.
     pub fn truth<T: Truth<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
         left.truth(self)
@@ -79,7 +79,7 @@ impl<'ctx> NumericArgs<'ctx> {
     }
 }
 impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
-    type Output = IRResult<GonValue<'ctx>>;
+    type Output = CompileResult<GonValue<'ctx>>;
 
     fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
@@ -87,18 +87,18 @@ impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
             op => match self {
                 GonValue::Float(v) => match v.unary_internal(op, c) {
                     Ok(f) => Ok(GonValue::Float(f)),
-                    Err(IOpErr::WrongType) => Err(IRErr::CannotUnary(op, self.type_layout())),
+                    Err(IOpErr::WrongType) => Err(CompileErr::CannotUnary(op, self.type_layout())),
                 },
                 GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
                 GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate int/bool
                 GonValue::Str(_)   => todo!(),
-                GonValue::Unit     => Err(IRErr::CannotUnary(op, self.type_layout())),
+                GonValue::Unit     => Err(CompileErr::CannotUnary(op, self.type_layout())),
             }
         }
     }
 }
 impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
-    type Output = IRResult<GonValue<'ctx>>;
+    type Output = CompileResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         macro_rules! num_args_else {
@@ -106,7 +106,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
                 match NumericArgs::new(c, self, right) {
                     NumericArgs::Float(f1, f2) => match f1.binary_internal(op, f2, c) {
                         Ok(t) => Ok(GonValue::Float(t)),
-                        Err(IOpErr::WrongType) => Err(IRErr::CannotBinary(op, self.type_layout(), right.type_layout())),
+                        Err(IOpErr::WrongType) => Err(CompileErr::CannotBinary(op, self.type_layout(), right.type_layout())),
                     },
                     NumericArgs::Int(i1, i2) => {
                         Ok(GonValue::Int(i1.binary_internal(op, i2, c)))
@@ -124,7 +124,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
             | op::Binary::Shl
             | op::Binary::Shr
             => num_args_else!{
-                NumericArgs::Other(o1, o2) => Err(IRErr::CannotBinary(op, o1.type_layout(), o2.type_layout()))
+                NumericArgs::Other(o1, o2) => Err(CompileErr::CannotBinary(op, o1.type_layout(), o2.type_layout()))
             },
 
             // numeric mul, collection repeat
@@ -202,7 +202,7 @@ impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
     }
 }
 impl<'ctx> Cmp<'ctx> for GonValue<'ctx> {
-    type Output = IRResult<IntValue<'ctx> /* bool */>;
+    type Output = CompileResult<IntValue<'ctx> /* bool */>;
 
     fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match NumericArgs::new(c, self, right) {
@@ -225,7 +225,7 @@ impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
 }
 
 impl<'ctx> Unary<'ctx> for &plir::Expr {
-    type Output = IRResult<GonValue<'ctx>>;
+    type Output = CompileResult<GonValue<'ctx>>;
 
     fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
         let val = self.write_ir(c)?;
@@ -233,7 +233,7 @@ impl<'ctx> Unary<'ctx> for &plir::Expr {
     }
 }
 impl<'ctx> Binary<'ctx> for &plir::Expr {
-    type Output = IRResult<GonValue<'ctx>>;
+    type Output = CompileResult<GonValue<'ctx>>;
 
     fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {

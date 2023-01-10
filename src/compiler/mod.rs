@@ -40,14 +40,14 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     #[allow(unused)]
-    fn jit_compile<T>(&mut self, prog: plir::Program) -> IRResult<T> {
+    fn jit_compile<T>(&mut self, prog: plir::Program) -> CompileResult<T> {
         let fun = self.compile(&prog)?;
         let fn_name = fun.get_name()
             .to_str()
             .unwrap();
 
         let jit = self.module.create_jit_execution_engine(OptimizationLevel::Default)
-            .map_err(IRErr::LLVMErr)?;
+            .map_err(CompileErr::LLVMErr)?;
 
         unsafe {
             let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
@@ -108,13 +108,13 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    fn get_val(&self, ident: &str, ty: &plir::Type) -> IRResult<GonValue<'ctx>> {
+    fn get_val(&self, ident: &str, ty: &plir::Type) -> CompileResult<GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
                 let val = self.builder.build_load(ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
-            None => Err(IRErr::UndefinedVariable(String::from(ident))),
+            None => Err(CompileErr::UndefinedVar(String::from(ident))),
         }
     }
 
@@ -130,7 +130,7 @@ impl<'ctx> Compiler<'ctx> {
         phi.add_incoming(&vec);
     }
 
-    fn write_block<F>(&mut self, block: &plir::Block, close: F) -> IRResult<GonValue<'ctx>>
+    fn write_block<F>(&mut self, block: &plir::Block, close: F) -> CompileResult<GonValue<'ctx>>
         where F: FnOnce(&mut Self, GonValue<'ctx>)
     {
         match block.1.split_last() {
@@ -175,21 +175,32 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
     phi.add_incoming(&vec);
 }
 
+/// Errors that occur during compilation to LLVM.
 #[derive(Debug)]
-pub enum IRErr {
-    UndefinedVariable(String),
-    UndefinedFunction(String),
+pub enum CompileErr {
+    /// Variable was not declared.
+    UndefinedVar(String),
+    /// Function was not declared.
+    UndefinedFun(String),
+    /// Wrong number of parameters were put into this function.
     WrongArity(usize /* expected */, usize /* got */),
-    InvalidFunction,
+    /// The function created was invalid.
+    InvalidFun,
+    /// The given PLIR type could not be resolved into a type in LLVM.
     UnresolvedType(plir::Type),
+    /// The unary operator cannot be applied to this type.
     CannotUnary(op::Unary, TypeLayout),
+    /// The binary operator cannot be applied between these two types.
     CannotBinary(op::Binary, TypeLayout, TypeLayout),
+    /// These two types can't be compared using the given operation.
     CannotCmp(op::Cmp, TypeLayout, TypeLayout),
-
+    /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
+    /// An error occurred within LLVM.
     LLVMErr(LLVMString)
 }
-pub type IRResult<T> = Result<T, IRErr>;
+/// A [`Result`] type for operations in compilation to LLVM.
+pub type CompileResult<T> = Result<T, CompileErr>;
 
 trait TraverseIR<'ctx> {
     type Return;
@@ -213,7 +224,7 @@ trait TraverseIR<'ctx> {
 // }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = IRResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<FunctionValue<'ctx>>;
 
     /// To create a program from a script, we must determine the given `main` endpoint.
     /// 
@@ -271,13 +282,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 // the program is the "main" function in fun_decls
                 _ => {
                     funs.into_iter().find(|f| f.get_name() == CS_MAIN.as_c_str())
-                        .ok_or(IRErr::CannotDetermineMain)
+                        .ok_or(CompileErr::CannotDetermineMain)
                 }
             }
         } else {
             // the program is the anonymous statements
             if funs.iter().any(|f| f.get_name() == CS_MAIN.as_c_str()) {
-                Err(IRErr::CannotDetermineMain)
+                Err(CompileErr::CannotDetermineMain)
             } else {
                 let main = compiler.module.add_function(
                     "main", 
@@ -296,7 +307,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 if main.verify(true) {
                     Ok(main)
                 } else {
-                    Err(IRErr::InvalidFunction)
+                    Err(CompileErr::InvalidFun)
                 }
             }
         }
@@ -304,7 +315,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
-    type Return = IRResult<GonValue<'ctx>>;
+    type Return = CompileResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
@@ -349,12 +360,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Expr {
-    type Return = IRResult<GonValue<'ctx>>;
+    type Return = CompileResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
         let expr_layout = TypeLayout::of(expr_ty)
-            .ok_or_else(|| IRErr::UnresolvedType(expr_ty.clone()))?;
+            .ok_or_else(|| CompileErr::UnresolvedType(expr_ty.clone()))?;
 
         match expr {
             plir::ExprType::Ident(ident) => compiler.get_val(ident, expr_ty),
@@ -383,7 +394,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     plir::AsgUnit::Ident(ident) => {
                         let val = expr.write_ir(compiler)?;
                         compiler.store_val(ident, val)
-                            .ok_or_else(|| IRErr::UndefinedVariable(ident.clone()))?;
+                            .ok_or_else(|| CompileErr::UndefinedVar(ident.clone()))?;
                         Ok(val)
                     },
                     plir::AsgUnit::Path(_)  => todo!(),
@@ -541,7 +552,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::Call { funct, params } => {
                 let fun = if let plir::ExprType::Ident(ident) = &funct.expr {
                     compiler.module.get_function(ident)
-                        .ok_or_else(|| IRErr::UndefinedFunction(ident.clone()))?
+                        .ok_or_else(|| CompileErr::UndefinedFun(ident.clone()))?
                 } else {
                     todo!()
                 };
@@ -564,7 +575,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         None => Ok(GonValue::Unit),
                     }
                 } else {
-                    Err(IRErr::WrongArity(fun_params, expr_params))
+                    Err(CompileErr::WrongArity(fun_params, expr_params))
                 }
             },
             plir::ExprType::Index(_) => todo!(),
@@ -575,7 +586,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 }
 
 impl<'ctx> TraverseIR<'ctx> for Literal {
-    type Return = IRResult<GonValue<'ctx>>;
+    type Return = CompileResult<GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let value = match self {
@@ -591,7 +602,7 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
-    type Return = IRResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunSignature { ident, params, ret } = self;
@@ -602,13 +613,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
         let arg_llvm_tys: Vec<_> = arg_plir_tys.iter()
             .map(|&ty| {
                 let layout = TypeLayout::of(ty)
-                    .ok_or_else(|| IRErr::UnresolvedType(ty.clone()))?;
+                    .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))?;
                 Ok(layout.basic_type(compiler).into())
             })
             .collect::<Result<_, _>>()?;
 
         let ret_llvm_ty = TypeLayout::of(ret)
-            .ok_or_else(|| IRErr::UnresolvedType(ret.clone()))?;
+            .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
 
         let fun_llvm_ty = ret_llvm_ty.fn_type(compiler, &arg_llvm_tys, false);
 
@@ -623,7 +634,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     }
 }
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
-    type Return = IRResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
@@ -649,7 +660,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         } else {
             // SAFETY: Not used after.
             unsafe { fun.delete() }
-            Err(IRErr::InvalidFunction)
+            Err(CompileErr::InvalidFun)
         }
     }
 }
