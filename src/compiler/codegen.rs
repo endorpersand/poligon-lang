@@ -4,6 +4,7 @@ use crate::ast::{self, ReasgType, MutType};
 
 use super::plir;
 
+/// Produce the PLIR tree from the AST tree.
 pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
     let mut cg = CodeGenerator::new();
     cg.consume_program(t)?;
@@ -26,23 +27,41 @@ fn create_splits<T>(pats: &[ast::Pat<T>]) -> Vec<plir::Split> {
     }
 }
 
+/// Errors that can occur during the PLIR creation process.
 #[derive(Debug)]
 pub enum PLIRErr {
+    /// Cannot call `break` from this block.
     CannotBreak,
+    /// Cannot call `continue` from this block.
     CannotContinue,
+    /// Cannot call `return` from this block.
     CannotReturn,
+    // TODO: split into Covariant, Invariant, and Contravariant
+    /// Expected one type, but found a different type
+    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
+    /// Could not determine the type of the expression
+    CannotResolveType,
+    /// Variable is not defined
+    UndefinedVar(String),
+    /// Cannot call given type
+    CannotCall(plir::Type),
+    /// Cannot spread here.
+    CannotSpread,
+    /// Operation between two types cannot be computed.
+    OpErr(plir::OpErr),
+
+    // TODO: These are developer errors, so consider whether these should be Result or panic.
+    /// An insert block was opened, but was not properly closed.
+    /// 
+    /// This is a developer error.
     UnclosedBlock,
 
-    // TODO: split into Covariant, Invariant, and Contravariant
-    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
-    CannotResolveType,
-    UndefinedVar(String),
-    CannotCall,
+    /// AST was used and cannot be consumed into PLIR.
+    /// 
+    /// This is a developer error.
     PoisonedTree,
-    CannotSpread,
-    CannotSpreadMultiple,
-    OpErr(plir::OpErr)
 }
+/// A [`Result`] type for operations in the PLIR tree creation process.
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 
 impl From<plir::OpErr> for PLIRErr {
@@ -784,7 +803,7 @@ impl CodeGenerator {
                     plir::Type::Fun(_, ret) => Ok(plir::Expr::new(
                         (**ret).clone(), plir::ExprType::Call { funct, params }
                     )),
-                    _ => Err(PLIRErr::CannotCall)
+                    t => Err(PLIRErr::CannotCall(t.clone()))
                 }
             },
             ast::Expr::Index(idx) => {
