@@ -12,9 +12,19 @@ use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{self, PatErr};
 
+/// Parses a sequence of tokens to an isolated parseable program tree. 
+/// This should be used for reading files.
+/// 
+/// The difference between this function and [`parse_repl`] is that
+/// this function does not allow semicolons to be omitted at the end of blocks.
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens, false).parse()
 }
+/// Parses a sequence of tokens to a parseable program tree.
+/// This should be used for a REPL.
+/// 
+/// The difference between this function and [`parse`] is that
+/// this function allows semicolons to be omitted at the end of blocks.
 pub fn parse_repl(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens, true).parse()
 }

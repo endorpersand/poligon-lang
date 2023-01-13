@@ -40,6 +40,9 @@ impl BlockContext<'_> {
             rs: Rc::clone(&self.rs)
         }
     }
+
+    /// Create a new scope, branching off of a 
+    /// scope that is further up the scope list.
     pub fn fun_body_scope_at(&mut self, idx: usize) -> BlockContext {
         let mv = self.vars.goto_idx(idx);
 
@@ -49,9 +52,14 @@ impl BlockContext<'_> {
         }).unwrap()
     }
 
+    /// Get the variable specified by the identifier parameter,
+    /// with the static resolution for the given expression.
     pub fn get_var(&self, ident: &str, e: &ast::Expr) -> Option<&Value> {
         self.vars.get_indexed(ident, self.rs.get_steps(e))
     }
+
+    /// Set the variable specified by the identifier parameter,
+    /// with the static resolution for the given expression.
     pub fn set_var(&mut self, ident: &str, v: Value, e: &ast::Expr) -> RtResult<Value> {
         self.vars.set_indexed(ident, v, self.rs.get_steps(e))
     }
@@ -97,17 +105,29 @@ impl ast::Expr {
 }
 
 impl ast::Program {
-    pub fn run(self) -> RtResult<Value> {
+    /// Executes the program and returns the output.
+    /// 
+    /// This first resolves the program via the 
+    /// [`semantic`][`crate::interpreter::semantic`] module,
+    /// then executes the program in runtime with the
+    /// [`runtime`][`crate::interpreter::runtime`] module.
+    pub fn run(&self) -> RtResult<Value> {
         self.run_with_ctx(&mut BlockContext::new())
     }
 
-    pub fn run_with_ctx(self, ctx: &mut BlockContext) -> RtResult<Value> {
+    /// Executes the program with a predefined variable context.
+    /// 
+    /// This first resolves the program via the 
+    /// [`semantic`][`crate::interpreter::semantic`] module,
+    /// then executes the program in runtime with the
+    /// [`runtime`][`crate::interpreter::runtime`] module.
+    pub fn run_with_ctx(&self, ctx: &mut BlockContext) -> RtResult<Value> {
         // Semantic traversal
         let rs = Rc::get_mut(&mut ctx.rs)
             .expect("Cannot resolve while in traversal");
         
         rs.clear();
-        rs.traverse_tree(&self)?;
+        rs.traverse_tree(self)?;
 
         // Runtime traversal
         self.traverse_rt(ctx).map_err(into_err)
@@ -749,54 +769,40 @@ impl TraverseRt for ast::FunDecl {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::Interpreter;
-
-    #[test]
-    fn lexical_scope_test() -> std::io::Result<()> {
-        Interpreter::from_file("_test_files/lexical_scope.gon")?
-            .run()
-            .unwrap();
-
-        Ok(())
-    }
-}
-
-impl<T> ast::Pat<T> {
-    pub fn unpack<F>(&self, rhs: Value, mut unit_mapper: F) -> RtResult<Value>
-        where F: FnMut(&T, Value) -> RtResult<Value>
-    {
-        self.unpack_mut(rhs, &mut unit_mapper)
-    }
+/// Given a pattern and a value, traverse the pattern
+/// and apply the mapper function to the individual units.
+pub fn unpack_pat<T>(
+    pat: &ast::Pat<T>, 
+    rhs: Value, 
+    mut unit_mapper: impl FnMut(&T, Value) -> RtResult<Value>
+) -> RtResult<Value> {
+    return unpack_mut(pat, rhs, &mut unit_mapper);
 
     /// Unpack with a mutable reference to a closure.
     /// This is necessary because the mutable reference is passed several times.
-    /// 
-    /// This function is used to implement `unpack`.
-    fn unpack_mut<F>(&self, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
+    fn unpack_mut<T, F>(pat: &ast::Pat<T>, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
-        match self {
+        match pat {
             ast::Pat::Unit(unit) => unit_mapper(unit, rhs),
             ast::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
                     .ok_or_else(|| TypeErr::NotIterable(rhs.ty()))?;
-    
-                let has_spread = pats.iter().any(|p| matches!(p, Self::Spread(_)));
+
+                let has_spread = pats.iter().any(|p| matches!(p, ast::Pat::Spread(_)));
                 let mut left_values = vec![];
                 let mut right_values = vec![];
                 let mut consumed = 0;
-    
+
                 for (i, p) in pats.iter().enumerate() {
-                    if matches!(p, Self::Spread(_)) {
+                    if matches!(p, ast::Pat::Spread(_)) {
                         consumed = i;
                         break;
                     } else if let Some(t) = it.next() {
                         left_values.push(t);
                     } else {
                         // we ran out of elements:
-    
+
                         if has_spread {
                             Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i))
                         } else {
@@ -804,11 +810,11 @@ impl<T> ast::Pat<T> {
                         }?
                     };
                 }
-    
+
                 if has_spread {
                     // do the reverse pass:
                     for (i, p) in std::iter::zip(consumed.., pats.iter().rev()) {
-                        if matches!(p, Self::Spread(_)) {
+                        if matches!(p, ast::Pat::Spread(_)) {
                             break;
                         } else if let Some(t) = it.next_back() {
                             right_values.push(t);
@@ -825,19 +831,19 @@ impl<T> ast::Pat<T> {
                 }
                 
                 let middle_values = Value::new_list(it.collect());
-    
+
                 let val_chain = left_values.into_iter()
                     .chain(std::iter::once(middle_values))
                     .chain(right_values);
                 
                 for (pat, val) in std::iter::zip(pats, val_chain) {
-                    pat.unpack_mut(val, unit_mapper)?;
+                    unpack_mut(pat, val, unit_mapper)?;
                 }
                 
                 Ok(rhs)
             },
             ast::Pat::Spread(mp) => match mp {
-                Some(p) => p.unpack_mut(rhs, unit_mapper),
+                Some(p) => unpack_mut(p, rhs, unit_mapper),
                 None => Ok(rhs), // we can dispose if spread is None, TODO!: what does a no-spread return?
             },
         }
@@ -845,7 +851,7 @@ impl<T> ast::Pat<T> {
 }
 
 fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast::Expr) -> RtResult<Value> {
-    pat.unpack(rhs, |unit, rhs| match unit {
+    unpack_pat(pat, rhs, |unit, rhs| match unit {
         ast::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
         },
@@ -862,10 +868,24 @@ fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast:
 }
 
 fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: ast::ReasgType) -> RtResult<Value> {
-    pat.unpack(rhs, |ast::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
+    unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
         String::from(ident), 
         rhs,
         rt,
         *mt
     ).cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Interpreter;
+
+    #[test]
+    fn lexical_scope_test() -> std::io::Result<()> {
+        Interpreter::from_file("_test_files/lexical_scope.gon")?
+            .run()
+            .unwrap();
+
+        Ok(())
+    }
 }

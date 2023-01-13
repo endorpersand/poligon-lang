@@ -1,3 +1,18 @@
+//! The compiler, which takes an AST tree and reads it into LLVM code 
+//! which can be compiled into an executable.
+//! 
+//! The compiler has two steps: converting into PLIR, then compiling into LLVM
+//! 
+//! # PLIR
+//! PLIR, the intermediate language, simplifies the main language in order to make
+//! it simpler to compiler to LLVM.
+//! 
+//! PLIR can be generated from AST via the [`codegen::codegen`] function,
+//! or using the [`codegen::CodeGenerator`] struct.
+//! 
+//! # LLVM
+//! The PLIR is then compiled to LLVM via the [`Compiler`] struct.
+
 mod value;
 pub mod codegen;
 pub mod plir;
@@ -21,6 +36,7 @@ use self::value::apply_bv;
 
 use lazy_static::lazy_static;
 
+/// This struct converts from PLIR to LLVM.
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
@@ -30,6 +46,7 @@ pub struct Compiler<'ctx> {
 }
 
 impl<'ctx> Compiler<'ctx> {
+    /// Create a new Compiler, using a [`Context`] from inkwell.
     pub fn from_ctx(ctx: &'ctx Context) -> Self {
         Self {
             ctx,

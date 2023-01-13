@@ -1,3 +1,11 @@
+//! Static variable resolver for the interpreter runtime.
+//! 
+//! When executing a [`ast::Program`], the static resolver is executed first
+//! to lexically scope variables validate `return`, `break`, `continue`, etc.
+//! 
+//! Instead of being run via program flow, the resolver scans the code statically
+//! (which enables lexical scope and other things).
+
 use std::collections::{HashMap, HashSet};
 
 use crate::err::GonErr;
@@ -79,14 +87,20 @@ impl GonErr for ResolveErr {
 /// A [`Result`] type for operations in the static resolution process.
 pub type ResolveResult<T> = Result<T, ResolveErr>;
 
+/// A struct that holds the resolved variables during the static resolution process.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ResolveState {
+    /// For every expression with a defined variable reference, 
+    /// this map indicates the number of blocks up where this variable is defined
     steps: HashMap<*const ast::Expr, usize>,
+    /// The local scope settings
     locals: Vec<Local>,
+    /// Global scope settings
     global_subs: Vec<SubType>,
 }
 
 impl ResolveState {
+    /// Create a new ResolveState.
     pub fn new() -> Self {
         Self { steps: HashMap::new(), locals: vec![], global_subs: vec![] }
     }
@@ -168,15 +182,22 @@ impl ResolveState {
         }
     }
 
+    /// Wipe all defined variables and scope settings from this ResolveState.
     pub fn clear(&mut self) {
         self.steps.clear();
         self.locals.clear();
+        self.global_subs.clear();
     }
-
+    
+    /// Statically traverse over a tree and add it to the resolve state.
     pub fn traverse_tree(&mut self, t: &ast::Program) -> ResolveResult<()> {
         t.traverse_rs(self)
     }
 
+    /// If this expression has a variable, return the number of blocks
+    /// up where this variable is defined.
+    /// 
+    /// Otherwise return None.
     pub fn get_steps(&self, t: &ast::Expr) -> Option<usize> {
         self.steps.get(&(t as *const _)).copied()
     }
@@ -188,7 +209,11 @@ impl Default for ResolveState {
     }
 }
 
+/// This trait is implemented for values that can be traversed in the runtime process.
 pub trait TraverseResolve {
+    /// Traverses through this node, adding whatever information from the node to the ResolveState.
+    /// 
+    /// This function is fallible, returning Err if it fails.
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()>;
 }
 trait TRsDependent {

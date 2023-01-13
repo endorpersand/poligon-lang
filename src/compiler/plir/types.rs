@@ -267,6 +267,7 @@ impl Type {
     }
 }
 
+/// Utility macro to make PLIR type expressions easier to read.
 macro_rules! ty {
     ($e:expr) => {
         $crate::compiler::plir::Type::Prim(String::from($e))

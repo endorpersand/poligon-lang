@@ -1,3 +1,11 @@
+//! Converts the AST tree into an intermediate language 
+//! (Poligon Language Intermediate Representation).
+//! 
+//! This makes it simpler to later convert into LLVM.
+//! 
+//! The main function that performs the conversion is [`codegen`], 
+//! which utilizes the [`CodeGenerator`] struct.
+
 use std::collections::HashMap;
 
 use crate::ast::{self, ReasgType, MutType};
@@ -254,6 +262,7 @@ impl Var {
     }
 }
 
+/// This struct does the actual conversion from AST to PLIR.
 pub struct CodeGenerator {
     program: InsertBlock,
     blocks: Vec<InsertBlock>,
@@ -263,7 +272,8 @@ pub struct CodeGenerator {
 }
 
 impl CodeGenerator {
-    fn new() -> Self {
+    /// Creates a new instance of the CodeGenerator.
+    pub fn new() -> Self {
         Self { 
             program: InsertBlock::new(), 
             blocks: vec![], 
@@ -271,7 +281,9 @@ impl CodeGenerator {
             // steps: HashMap::new()
         }
     }
-    fn unwrap(self) -> PLIRResult<plir::Program> {
+
+    /// Takes out the generated [`plir::Program`] from this struct.
+    pub fn unwrap(self) -> PLIRResult<plir::Program> {
         if !self.blocks.is_empty() {
             Err(PLIRErr::UnclosedBlock)?;
         }
@@ -332,7 +344,8 @@ impl CodeGenerator {
         }
     }
 
-    fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
+    /// Convert a program into PLIR, and attach it to the CodeGenerator.
+    pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
         self.consume_stmts(prog.0.0)
     }
 
@@ -828,6 +841,12 @@ impl CodeGenerator {
 
         let idx_ty = expr.ty.resolve_index_type(&index)?;
         Ok((idx_ty, plir::Index { expr, index }))
+    }
+}
+
+impl Default for CodeGenerator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
