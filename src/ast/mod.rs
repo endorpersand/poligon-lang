@@ -1,8 +1,8 @@
 //! The components of the AST generated through the [parser][`crate::parser`] module.
 //! These structs are used to construct an AST within Rust.
 //! 
-//! The AST is *not* computed (this is done in the runtime),
-//! so values are not known at this point.
+//! The AST only holds the expressions. It does *not* hold computed values 
+//! (this is done in runtime).
 //! 
 //! The complete tree is the [`Program`] struct.
 //! 
@@ -469,8 +469,11 @@ pub struct DeclUnit(pub String, pub MutType);
 
 /// A pattern.
 /// 
+/// A pattern is a syntactic structure which 
+/// simulates the structures of the language and can be unpacked.
+/// 
 /// This is used in [declarations][`Decl`] and [assignments][`Expr::Assign`], 
-/// and can be unpacked to perform the needed operation.
+/// and can be unpacked to perform the needed declaration or assignment.
 #[derive(Debug, PartialEq)]
 pub enum Pat<T> {
     /// An indivisible unit. This can be directly assigned to.

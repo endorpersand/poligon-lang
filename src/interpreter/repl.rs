@@ -1,5 +1,5 @@
 use crate::FullGonErr;
-use crate::Lexer;
+use crate::lexer::Lexer;
 use crate::parser::parse_repl;
 use super::runtime::BlockContext;
 
