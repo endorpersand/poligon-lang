@@ -371,7 +371,7 @@ pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
 
 /// This trait enables the traversal of a program tree.
 pub trait TraverseRt {
-    /// Apply the effects of this node, and evaluate any of the children nodes to do so.
+    /// Evaluate this node in runtime, possibly creating side effects.
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value>;
 }
 
@@ -868,12 +868,9 @@ fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast:
 }
 
 fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: ast::ReasgType) -> RtResult<Value> {
-    unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| ctx.vars.declare_full(
-        String::from(ident), 
-        rhs,
-        rt,
-        *mt
-    ).cloned())
+    unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| {
+        ctx.vars.declare_full(String::from(ident), rhs, rt, *mt).cloned()
+    })
 }
 
 #[cfg(test)]

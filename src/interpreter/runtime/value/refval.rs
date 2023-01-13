@@ -73,7 +73,7 @@ impl<T> RefValue<T> {
         }
     }
 
-    /// Check if the values are equal by identity. 
+    /// Test if the values are equal by identity. 
     /// 
     /// For value equality, use [`RefValue::eq`].
     pub fn ref_eq(&self, other: &RefValue<T>) -> bool {
@@ -96,7 +96,7 @@ impl<T> RefValue<T> {
         self.rc.borrow().clone()
     }
 
-    /// Check if this value can be mutably borrowed.
+    /// Test if this value can be mutably borrowed.
     pub fn mutable(&self) -> bool {
         self.mutable
     }

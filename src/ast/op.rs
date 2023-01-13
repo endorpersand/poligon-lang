@@ -89,7 +89,7 @@ pub enum Cmp {
 }
 
 impl Cmp {
-    /// Apply comparison operator to a partially ordered type
+    /// Apply the operator to a partially ordered type.
     pub fn cmp<E>(&self, l: E, r: E) -> bool
         where E: PartialOrd + PartialEq
     {
@@ -103,8 +103,8 @@ impl Cmp {
         }
     }
 
-    /// Check if comparison operator is an order comparison (`true`) 
-    /// or an equality comparison (`false`)
+    /// Test if comparison operator is an order comparison (`true`) 
+    /// or an equality comparison (`false`).
     pub fn is_ord_cmp(&self) -> bool {
         matches!(self, Cmp::Lt | Cmp::Gt | Cmp::Le | Cmp::Ge)
     }

@@ -23,7 +23,7 @@ impl Repl<'_> {
         Self { lexer: None, ctx: BlockContext::new(), code: String::new() }
     }
 
-    /// Check if the previous input is awaiting another line
+    /// Test if the previous input is awaiting another line.
     /// 
     /// If true, this input is awaiting another line.
     /// If false, [`process_line`] will start executing from a new line.

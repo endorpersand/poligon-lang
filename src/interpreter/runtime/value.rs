@@ -164,7 +164,7 @@ impl Value {
         }
     }
 
-    /// Check if the current value is an int/float (numeric) or not
+    /// Test if the current value is an int/float (numeric) or not.
     pub fn is_numeric(&self) -> bool {
         matches!(self, Value::Int(_) | Value::Float(_))
     }
@@ -211,7 +211,7 @@ impl Value {
         }
     }
 
-    /// Produce the code representation of this value
+    /// Produce the Poligon code representation of this value.
     pub fn repr(&self) -> String {
         match self {
             Value::Int(i)   => i.to_string(),
@@ -228,7 +228,7 @@ impl Value {
         }
     }
 
-    /// Produce the string representation of this value
+    /// Produce the string representation of this value.
     pub fn str(&self) -> String {
         match self {
             Value::Char(c) => c.to_string(),
@@ -244,7 +244,7 @@ impl Value {
         }
     }
 
-    /// Try to index this value
+    /// Try to index this value.
     pub fn get_index(&self, idx: Value) -> RtResult<Value> {
         match self {
             // There is a more efficient method of indexing lists 
@@ -279,7 +279,7 @@ impl Value {
         }
     }
 
-    /// Try to set an index of this value
+    /// Try to set an index of this value.
     pub fn set_index(&mut self, idx: Value, nv: Value) -> RtResult<Value> {
         match self {
             e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
