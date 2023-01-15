@@ -64,14 +64,14 @@ impl Repl<'_> {
             let mut input = String::from("\n");
             input.push_str(line);
 
-            lx.append_input(&input);
+            lx.append(&input);
             lx
         } else {
             Lexer::new(line)
         };
 
         // Lex the current data in lexer, and check to make sure there's no syntax errors:
-        consume_err! { lx.partial_lex() };
+        consume_err! { lx.lex() };
 
         // We can't finish lexing, implying there's an open delimiter:
         if lx.try_close().is_err() {

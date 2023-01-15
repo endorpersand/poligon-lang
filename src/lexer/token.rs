@@ -1,6 +1,6 @@
 //! The tokens that the string can be parsed into.
 //! 
-//! See [Token] for more information.
+//! See [`Token`] for more information.
 
 use std::fmt::{Debug, Display};
 use std::collections::BTreeMap;
@@ -234,6 +234,8 @@ define_operators_and_delimiters! {
     }
 }
 
+/// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
+#[macro_export]
 macro_rules! token {
     (let)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Let)      };
     (const)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Const)    };
@@ -303,9 +305,8 @@ macro_rules! token {
 
     (;) => { $crate::lexer::token::Token::LineSep };
 }
-
-#[allow(unused_imports)]
-pub(crate) use token;
+#[doc(inline)]
+pub use token;
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

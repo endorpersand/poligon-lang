@@ -1,10 +1,11 @@
 //! Converts strings to sequences of tokens.
 //! 
-//! This module provides:
-//! - [`tokenize`]: A utility function that opaquely does the lexing from string to tokens
-//! - [`Lexer`]: A struct which does the entire lexing process
+//! In a general sense, lexing is performed by reading the string, 
+//! and repeatedly matching specific token patterns until the entire string is consumed.
 //! 
-//! TODO! code example
+//! This module provides:
+//! - [`tokenize`]: A utility function that opaquely does the lexing from string to tokens.
+//! - [`Lexer`]: The struct which does the entire lexing process.
 
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
@@ -22,7 +23,9 @@ pub mod token;
 /// 
 /// For more control, see the [`Lexer`] struct.
 pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
-    Lexer::new(input).lex()
+    let mut lx = Lexer::new(input);
+    lx.lex()?;
+    lx.close()
 }
 
 /// An error that occurs in the lexing process.
@@ -175,27 +178,25 @@ impl CharClass {
     }
 }
 
-/// Buffer that computes a string literal
-/// 
-/// This also handles escapes.
+/// A buffer that computes string and char literals 
+/// and specially deals with escapes.
 struct LiteralBuffer<'lx> {
     lexer: &'lx mut Lexer,
 
-    /// Character which ends the literal
+    /// Character which ends the literal.
     terminal: char,
 
-    /// Buffer that represents what the literal holds
-    /// 
-    /// This will never contain an unescaped terminal character.
+    /// Buffer that represents what the literal holds.
+    /// This should not contain the unescaped terminal character.
     buf: String
 }
 
 /// Methods for an attempt to add to the buffer to halt
 enum LCErr {
-    /// Cannot add because the next character is an unescaped terminal
+    /// Cannot add because the next character is an unescaped terminal.
     HitTerminal,
 
-    /// Cannot add because there are no more characters to parse
+    /// Cannot add because there are no more characters to parse.
     HitEOF,
 
     /// [`LexErr::InvalidX`]
@@ -208,12 +209,12 @@ enum LCErr {
 type LiteralCharResult<T> = Result<T, LCErr>;
 
 impl<'lx> LiteralBuffer<'lx> {
-    /// Borrow the lexer to create a LiteralBuffer
+    /// Borrow the lexer to create a LiteralBuffer.
     fn new(lexer: &'lx mut Lexer, terminal: char) -> Self {
         Self { lexer, terminal, buf: String::new() }
     }
 
-    /// Attempt to add characters to the buffer
+    /// Attempt to add characters to the buffer.
     fn try_add(&mut self) -> LiteralCharResult<()> {
         match self.lexer.peek() {
             Some('\\') => self.try_add_esc(),
@@ -231,7 +232,7 @@ impl<'lx> LiteralBuffer<'lx> {
         }
     }
 
-    /// Parse an escape at the front of the lexer buffer and add to the buffer
+    /// Parse an escape at the front of the lexer buffer and add to the literal buffer.
     fn try_add_esc(&mut self) -> LiteralCharResult<()> {
         lazy_static! {
             static ref BASIC_ESCAPES: HashMap<char, &'static str> = {
@@ -304,7 +305,7 @@ impl<'lx> LiteralBuffer<'lx> {
         }
     }
 
-    /// Pull the next character from the lexer buffer
+    /// Pull the next character from the lexer buffer.
     fn next_raw(&mut self, allow_term: bool) -> LiteralCharResult<char> {
         match self.lexer.peek() {
             Some(c) if c == self.terminal && !allow_term => { Err(LCErr::HitTerminal) }
@@ -324,26 +325,26 @@ impl<'lx> LiteralBuffer<'lx> {
     }
 }
 
-/// The struct which does the full lexing process.
+/// The struct does the full lexing process.
 pub struct Lexer {
-    /// The tokens that are generated from the string
+    /// The tokens generated from the string.
     tokens: Vec<FullToken>,
     /// A stack to keep track of delimiters (and their original position)
     delimiters: Vec<(Cursor, Delimiter)>,
     
-    /// The current position of the _current char
+    /// The current position of the _current char.
     cursor: Cursor,
-    /// The char that was last read
+    /// The char that was last read.
     _current: Option<char>,
 
-    /// The start position of the current token being evaluated
+    /// The start position of the current token being evaluated.
     token_start: Cursor,
-    /// The remaining characters to be read
+    /// The remaining characters in the buffer to be read.
     remaining: VecDeque<char>,
 }
 
 impl Lexer {
-    /// Create a new lexer using the given input
+    /// Create a new lexer with an initial string input.
     pub fn new(input: &str) -> Self {
         Self {
             tokens: vec![],
@@ -356,16 +357,8 @@ impl Lexer {
         }
     }
 
-    /// Perform the actual lexing. 
-    /// 
-    /// Takes a string and converts it into a list of tokens.
-    pub fn lex(mut self) -> LexResult<Vec<FullToken>> {
-        self.partial_lex()?;
-        self.close()
-    }
-
-    /// Lex whatever is currently in the input, but do not consume the lexer.
-    pub fn partial_lex(&mut self) -> LexResult<()> {
+    /// Lex what is currently in the input.
+    pub fn lex(&mut self) -> LexResult<()> {
         while let Some(chr) = self.peek() {
             self.token_start = self.peek_cursor();
             let cls = CharClass::of_or_err(chr, self.token_start)?;
@@ -420,14 +413,13 @@ impl Lexer {
         Ok(())
     }
 
-    /// Insert extra characters at the end of the lexer's input buffer.
-    pub fn append_input(&mut self, input: &str) {
-        self.remaining.extend(input.chars());
-    }
-
     /// Check if the lexer can be consumed without error.
     /// 
-    /// Lexer cannot be consumed if it has any unclosed delimiters.
+    /// Lexer cannot be consumed if:
+    /// - There are any unclosed delimiters.
+    /// 
+    /// This is used by [`Repl`][`crate::interpreter::Repl`] 
+    /// to determine whether or not the lexer should be preserved between lines.
     pub fn try_close(&self) -> LexResult<()> {
         if let Some((p, _)) = self.delimiters.last() {
             return Err(LexErr::UnclosedDelimiter.at(*p));
@@ -435,13 +427,20 @@ impl Lexer {
 
         Ok(())
     }
-    /// Consume the lexer and return the tokens in it if the lexer is in a closable state ([`Lexer::try_close`]).
+
+    /// Consume the lexer, returning the tokens in it 
+    /// if the lexer is in a closable state ([`Lexer::try_close`]).
     pub fn close(self) -> LexResult<Vec<FullToken>> {
         self.try_close()?;
         Ok(self.tokens)
     }
 
-    /// Check the cursor of the next character in the input.
+    /// Append extra characters to the end of the lexer's input buffer.
+    pub fn append(&mut self, input: &str) {
+        self.remaining.extend(input.chars());
+    }
+
+    /// Look at the cursor of the next character in the input.
     fn peek_cursor(&self) -> Cursor {
         advance_cursor(self.cursor, self._current, &[])
     }
@@ -462,7 +461,7 @@ impl Lexer {
         mcd
     }
 
-    /// Consume the next n characters in the input and return them.
+    /// Consume the next `n` characters in the input and return them.
     fn next_n(&mut self, n: usize) -> VecDeque<char> {
         let mut front = self.remaining.split_off(n);
         std::mem::swap(&mut self.remaining, &mut front);

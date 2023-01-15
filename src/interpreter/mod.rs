@@ -1,5 +1,12 @@
 //! Converts text into a running program via interpreting.
 //! 
+//! This differs from compilation because the AST is directly used
+//! in runtime to execute the program. The AST needs to be
+//! recreated in order to run the program again.
+//! 
+//! In compilation, this AST is compiled to lower-level executable code,
+//! which can be executed as many times as needed.
+//! 
 //! This module provides:
 //! - [`Interpreter`]: A struct which does the full interpreting from string to execution.
 //! - [`Repl`]: A struct which performs read-eval-print loop evaluation in the command line 
@@ -25,7 +32,51 @@ mod repl;
 /// 
 /// As such, this struct may be more limited than the [compiler][crate::compiler] form.
 /// 
-/// TODO!: usage example
+/// # Usage
+/// 
+/// The Interpreter struct is a useful 
+/// for performing operations from a string.
+/// 
+/// It can lex from a string:
+/// ```
+/// use poligon_lang::Interpreter;
+/// use poligon_lang::lexer::token::{Token, token};
+/// 
+/// let interpreter = Interpreter::from_string("print(0);");
+/// assert_eq!(interpreter.lex().unwrap(), vec![
+///     Token::Ident(String::from("print")),
+///     token!["("],
+///     Token::Numeric(String::from("0")),
+///     token![")"],
+///     token![;]
+/// ]);
+/// ```
+/// 
+/// It can parse from a string:
+/// ```
+/// # use poligon_lang::Interpreter;
+/// use poligon_lang::ast::*;
+/// 
+/// # let interpreter = Interpreter::from_string("print(0);");
+/// assert_eq!(interpreter.parse().unwrap(), Program(Block(vec![
+///     Stmt::Expr(Expr::Call {
+///         funct: Box::new(Expr::Ident(String::from("print"))),
+///         params: vec![
+///             Expr::Literal(Literal::Int(0))
+///         ]
+///     })
+/// ])));
+/// ```
+/// 
+/// And it can also execute from a string:
+/// ```
+/// # use poligon_lang::Interpreter;
+/// use poligon_lang::interpreter::runtime::Value;
+/// 
+/// # let interpreter = Interpreter::from_string("print(0);");
+/// // prints 0
+/// assert_eq!(interpreter.run().unwrap(), Value::Unit);
+/// ```
 pub struct Interpreter {
     source: String
 }

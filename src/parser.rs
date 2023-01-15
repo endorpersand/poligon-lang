@@ -1,6 +1,14 @@
-//! Converts sequences of tokens to a parseable program tree.
+//! Converts sequences of tokens to an AST.
 //! 
-//! TODO! more doc
+//! The parser is implemented as a recursive descent parser.
+//! This parser has grammatical rules, which break down into smaller grammatical rules.
+//! The string is assigned the top-most rule (`program`) and the individual units of
+//! this rule are computed by recursive statements.
+//! 
+//! This module provides:
+//! - [`parse`]: A function to parse [a list of lexed tokens][`crate::lexer`] into an AST.
+//! - [`parse_repl`]: Similar to `parse`, but adjusted for [`Repl`][`crate::interpreter::Repl`] use.
+//! - [`Parser`]: The struct that does all the parsing.
 
 use lazy_static::lazy_static;
 
@@ -30,6 +38,8 @@ pub fn parse_repl(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast:
 }
 
 /// A struct that does the conversion of tokens to a parseable program tree.
+/// 
+/// 
 pub struct Parser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
@@ -158,7 +168,11 @@ fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T
 }
 
 impl Parser {
-    fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
+    /// Create a new Parser to read a given set of tokens.
+    /// 
+    /// The `repl_mode` parameter indicates whether or not the final semicolon in blocks is necessary.
+    /// See [`parse`] and [`parse_repl`] for more details.
+    pub fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
             .collect();
@@ -171,6 +185,20 @@ impl Parser {
         };
 
         Self { tokens, repl_mode, eof }
+    }
+
+    /// Consumes the parser and converts the tokens into an AST.
+    pub fn parse(mut self) -> ParseResult<ast::Program> {
+        let program = self.expect_stmts()?;
+
+        if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
+            // there are more tokens left that couldn't be parsed as a program.
+            // we have an issue.
+
+            Err(expected_tokens![;].at_range(loc.clone()))
+        } else {
+            Ok(ast::Program(program))
+        }
     }
 
     // General terminology:
@@ -287,21 +315,6 @@ impl Parser {
             )
     }
     
-    /// The parsing function.
-    /// Takes a list of tokens and converts it into a parse tree.
-    fn parse(mut self) -> ParseResult<ast::Program> {
-        let program = self.expect_stmts()?;
-
-        if let Some(FullToken { loc, .. }) = self.tokens.get(0) {
-            // there are more tokens left that couldn't be parsed as a program.
-            // we have an issue.
-
-            Err(expected_tokens![;].at_range(loc.clone()))
-        } else {
-            Ok(ast::Program(program))
-        }
-    }
-
     /// Expect that the next tokens represent a vector of statements.
     /// 
     /// Return the block enclosing the vector of statements,

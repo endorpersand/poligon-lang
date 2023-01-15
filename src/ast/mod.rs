@@ -1,12 +1,15 @@
 //! The components of the AST generated through the [parser][`crate::parser`] module.
 //! These structs are used to construct an AST within Rust.
 //! 
+//! A full program is described as [`Program`] struct.
+//! 
+//! # Further notes
+//! 
 //! The AST only holds the expressions. It does *not* hold computed values 
-//! (this is done in runtime).
+//! (this is done in [runtime][crate::interpreter::runtime]).
 //! 
-//! The complete tree is the [`Program`] struct.
-//! 
-//! TODO!: usage
+//! Typically, an AST should not be defined manually because it is painful. 
+//! Instead, [`crate::lexer`] and [`crate::parser`] should be used to create one from a string.
 
 use std::rc::Rc;
 
@@ -178,7 +181,7 @@ pub struct Param {
     pub ty: Option<Type>
 }
 
-/// The reassignment types for variables, parameters, etc.
+/// Reassignment types for variables, parameters, etc.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ReasgType {
     /// `let`. This variable can be reassigned later.
@@ -187,7 +190,7 @@ pub enum ReasgType {
     Const 
 }
 
-/// The mutability types for variables, parameters, etc.
+/// Mutability types for variables, parameters, etc.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MutType {
     /// `mut`. This variable can be mutated and changed (e.g. list mutation).
@@ -207,7 +210,7 @@ pub enum MutType {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type(pub String, pub Vec<Type>);
 
-/// The function header / signature.
+/// A function header / signature.
 /// 
 /// If a return type is not provided, it is assumed to be `void`.
 /// 
