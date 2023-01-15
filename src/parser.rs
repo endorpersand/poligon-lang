@@ -148,6 +148,8 @@ macro_rules! expected_tokens {
     }
 }
 
+/// Combine two ranges, such that the new range at least spans over the two provided ranges.
+/// `l` should be left of `r`.
 fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T>) -> std::ops::RangeInclusive<T> {
     let (start, _) = l.into_inner();
     let (_, end) = r.into_inner();
@@ -225,6 +227,8 @@ impl Parser {
         }.is_some()
     }
 
+    /// Match a left angle bracket in type expressions (`<`). 
+    /// This can split [`<<`] into two tokens.
     fn match_langle(&mut self) -> bool {
         // if the next token matches <, then done
         // also have to check for <<
@@ -244,6 +248,8 @@ impl Parser {
         }
     }
 
+    /// Match a right angle bracket in type expressions (`>`). 
+    /// This can split [`>>`] into two tokens.
     fn match_rangle(&mut self) -> bool {
         // if they match >, then done
         // also have to check for >>
@@ -262,12 +268,17 @@ impl Parser {
         }
     }
 
+    /// Look at the next token in the input if present.
     fn peek_token(&self) -> Option<&Token> {
         self.tokens.get(0).map(|FullToken {tt, ..}| tt)
     }
+
+    /// Consume the next token in the input and return it if present.
     fn next_token(&mut self) -> Option<Token> {
         self.tokens.pop_front().map(|FullToken {tt, ..}| tt)
     }
+
+    /// Look at the range of the next token in the input (or return EOF).
     fn peek_loc(&self) -> std::ops::RangeInclusive<(usize, usize)> {
         self.tokens.get(0)
             .map_or(
@@ -638,7 +649,6 @@ impl Parser {
 
         let mut pats = vec![];
 
-        // TODO: better positioning
         let mut pat_pos = self.peek_loc();
         let mut last = self.match_lor()?;
         // TODO: asg ops
