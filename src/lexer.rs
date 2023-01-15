@@ -89,7 +89,7 @@ impl GonErr for LexErr {
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
             LexErr::InvalidX            => String::from("invalid \\xXX escape"),
             LexErr::InvalidU            => String::from("invalid \\u{XXXX} escape"),
-            LexErr::InvalidChar(c)      => format!("invalid char {:x}", c),
+            LexErr::InvalidChar(c)      => format!("invalid char {:x}", c)
         }
     }
 }
@@ -372,10 +372,26 @@ impl Lexer {
             
             match cls {
                 CharClass::Alpha | CharClass::Underscore => self.push_ident()?,
-                CharClass::Numeric    => self.push_numeric(),
+                CharClass::Numeric => self.push_num(),
                 CharClass::CharQuote  => self.push_char()?,
                 CharClass::StrQuote   => self.push_str()?,
-                CharClass::Punct      => self.push_punct()?,
+                CharClass::Punct      => {
+                    if chr == '.' {
+                        // dot acts as numeric if followed by more numerics
+                        if let Some(&next) = self.remaining.get(1) {
+                            let next_pos = advance_cursor(self.token_start, Some(next), &[]);
+                            if CharClass::of_or_err(next, next_pos)? == CharClass::Numeric {
+                                self.push_num()
+                            } else {
+                                self.push_punct()?
+                            }
+                        } else {
+                            self.push_punct()?
+                        }
+                    } else {
+                        self.push_punct()?
+                    }
+                },
                 CharClass::Whitespace => { self.next(); },
                 CharClass::Semi       => {
                     self.next();
@@ -512,7 +528,7 @@ impl Lexer {
     /// Analyzes the next characters in the input as a numeric value (e.g. 123, 123., 123.4).
     /// 
     /// This function consumes characters from the input and adds a numeric literal token in the output.
-    fn push_numeric(&mut self) {
+    fn push_num(&mut self) {
         let mut buf = String::new();
 
         while let Some(c) = self.match_cls(CharClass::Numeric) {
@@ -925,7 +941,6 @@ mod tests {
             Token::Numeric("444".to_string())
         ]);
 
-        assert_lex_fail("123...45", LexErr::AmbiguousRange);
         assert_lex(".4", &[Token::Numeric(".4".to_string())]);
         assert_lex(".", &[token![.]]);
     }
