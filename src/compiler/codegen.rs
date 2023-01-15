@@ -56,18 +56,7 @@ pub enum PLIRErr {
     /// Cannot spread here.
     CannotSpread,
     /// Operation between two types cannot be computed.
-    OpErr(plir::OpErr),
-
-    // TODO: These are developer errors, so consider whether these should be Result or panic.
-    /// An insert block was opened, but was not properly closed.
-    /// 
-    /// This is a developer error.
-    UnclosedBlock,
-
-    /// AST was used and cannot be consumed into PLIR.
-    /// 
-    /// This is a developer error.
-    PoisonedTree,
+    OpErr(plir::OpErr)
 }
 /// A [`Result`] type for operations in the PLIR tree creation process.
 pub type PLIRResult<T> = Result<T, PLIRErr>;
@@ -285,7 +274,7 @@ impl CodeGenerator {
     /// Takes out the generated [`plir::Program`] from this struct.
     pub fn unwrap(self) -> PLIRResult<plir::Program> {
         if !self.blocks.is_empty() {
-            Err(PLIRErr::UnclosedBlock)?;
+            panic!("Could not create program. Insert block was opened but not properly closed.");
         }
         let InsertBlock { block, exits, .. } = self.program;
 
@@ -578,7 +567,7 @@ impl CodeGenerator {
         let sig = self.consume_fun_sig(sig)?;
 
         let old_block = std::rc::Rc::try_unwrap(block)
-            .map_err(|_| PLIRErr::PoisonedTree)?;
+            .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
 
         let block = {
             self.push_block();
