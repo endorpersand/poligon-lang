@@ -790,47 +790,44 @@ impl Lexer {
 mod tests {
     use super::*;
 
+    /// Assert that the string provided lexes into the vector of tokens.
     #[allow(unused)]
-    macro_rules! assert_lex {
-        ($e1:literal => $e2:expr) => {
-            assert_eq!(tokenize($e1), Ok($e2))
+    fn assert_lex(input: &str, result: &[Token]) {
+        match tokenize(input) {
+            Ok(t)  => {
+                let tokens: Vec<_> = t.into_iter()
+                    .map(|t| t.tt)
+                    .collect();
+                assert_eq!(&tokens, result)
+            },
+            Err(e) => panic!("{}", e.full_msg(input))
         }
     }
 
-    macro_rules! assert_lex_basic {
-        ($e1:literal => $e2:expr) => {
-            assert_eq!(
-                tokenize($e1)
-                    .map(|vec| {
-                        vec.into_iter()
-                        .map(|t| t.tt)
-                        .collect()
-                    }),
-                Ok($e2))
+    #[allow(unused)]
+    fn assert_lex_fail(input: &str, result: LexErr) {
+        match tokenize(input) {
+            Ok(_)  => panic!("Lexing did not error."),
+            Err(e) => assert_eq!(&e.err, &result)
         }
     }
 
-    macro_rules! assert_lex_fail {
-        ($e1:literal => $e2:expr) => {
-            assert_eq!(tokenize($e1), Err($e2))
+    /// Assert that the string provided lexes into the vector of FullTokens (token & location).
+    #[allow(unused)]
+    fn assert_lex_vb(input: &str, result: &[FullToken]) {
+        match tokenize(input) {
+            Ok(t) => assert_eq!(&t, result),
+            Err(e) => panic!("{}", e.full_msg(input)),
         }
     }
 
-    macro_rules! assert_lex_fail_basic {
-        ($e1:literal => $e2:expr) => {
-            if let Err(e) = tokenize($e1) {
-                assert_eq!(&e.err, &$e2)
-            } else {
-                assert!(false, "Lexing did not result in error.");
-            }
-
-
-        }
+    fn assert_lex_fail_vb(input: &str, result: FullLexErr) {
+        assert_eq!(tokenize(input), Err(result))
     }
 
     #[test]
-    fn basic_lex() {
-        assert_lex_basic!("123 + abc * def" => vec![
+    fn ident_lex() {
+        assert_lex("123 + abc * def", &[
             Token::Numeric("123".to_string()),
             token![+],
             Token::Ident("abc".to_string()),
@@ -839,13 +836,38 @@ mod tests {
         ])
     }
 
+    /// Tests operator resolution.
     #[test]
-    fn multiline_lex() {
-        assert_lex_basic!("
-        let x = 1;
-        const y = abc;
-        const mut z = 5;
-        " => vec![
+    fn op_lex() {
+        assert_lex("!~==!~&&.=+-*<><<3", &[
+            token![!],
+            token![~],
+            token![==],
+            token![!],
+            token![~],
+            token![&&],
+            token![.],
+            token![=],
+            token![+],
+            token![-],
+            token![*],
+            token![<],
+            token![>],
+            token![<<],
+            Token::Numeric("3".to_string())
+        ]);
+
+        assert_lex("<<<", &[token![<<], token![<]]);
+    }
+
+    /// Tests keywords, multiple lines, semicolon detection.
+    #[test]
+    fn declaration_lex() {
+        assert_lex("
+            let x = 1;
+            const y = abc;
+            const mut z = 5;
+        ", &[
             token![let],
             Token::Ident("x".to_string()),
             token![=],
@@ -867,108 +889,129 @@ mod tests {
         ])
     }
 
+    /// Tests delimiter matching & mismatching.
     #[test]
     fn delimiter_lex() {
-        assert_lex_basic!("(1)" => vec![
+        assert_lex("(1)", &[
             token!["("],
             Token::Numeric("1".to_string()),
             token![")"]
         ]);
-        assert_lex_fail!("(1" => LexErr::UnclosedDelimiter.at((0, 0)));
-        assert_lex_fail!("1)" => LexErr::MismatchedDelimiter.at((0, 1)));
-        assert_lex_fail!("(1]" => LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
+
+        assert_lex_fail_vb("(1", LexErr::UnclosedDelimiter.at((0, 0)));
+        assert_lex_fail_vb("1)", LexErr::MismatchedDelimiter.at((0, 1)));
+        assert_lex_fail_vb("(1]", LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
     }
 
+    /// Tests numeric edge cases.
     #[test]
     fn numeric_lex() {
-        assert_lex_basic!("123.444"    => vec![
+        assert_lex("123.444", &[
             Token::Numeric("123.444".to_string())
         ]);
-        assert_lex_basic!("123.ident"  => vec![
+        assert_lex("123.ident", &[
             Token::Numeric("123".to_string()), 
             token![.], 
             Token::Ident("ident".to_string())
         ]);
-        assert_lex_basic!("123..444"   => vec![
+        assert_lex("123..444", &[
             Token::Numeric("123".to_string()),
             token![..],
             Token::Numeric("444".to_string())
         ]);
-        assert_lex_basic!("123. + 444" => vec![
+        assert_lex("123. + 444", &[
             Token::Numeric("123.".to_string()),
             token![+],
             Token::Numeric("444".to_string())
         ]);
+
+        assert_lex_fail("123...45", LexErr::AmbiguousRange);
+        assert_lex(".4", &[Token::Numeric(".4".to_string())]);
+        assert_lex(".", &[token![.]]);
     }
 
     #[test]
     fn comment_lex() {
-        // assert_lex!("
-        // // abc 123! :)               
-        // 1;" => vec![
-        //     Token::Comment("abc 123! :)".to_string(), true),
-        //     Token::Numeric("1".to_string()),
-        //     token![;]
-        // ]);
+        // single line
+        assert_lex("
+            // there is whitespace up to here v
+            // abc 123! :)                     
+            1;
+        ", &[
+            Token::Comment("there is whitespace up to here v".to_string(), true),
+            Token::Comment("abc 123! :)".to_string(), true),
+            Token::Numeric("1".to_string()),
+            token![;]
+        ]);
 
-        // assert_lex!("
-        // /* multiline :O */
-        // 2;" => vec![
-        //     Token::Comment("multiline :O".to_string(), false),
-        //     Token::Numeric("2".to_string()),
-        //     token![;]
-        // ]);
+        // multiline
+        assert_lex("
+            /* multiline :O */
+            2;
+        ", &[
+            Token::Comment("multiline :O".to_string(), false),
+            Token::Numeric("2".to_string()),
+            token![;]
+        ]);
 
 
-        // assert_lex!("
-        // /*
-        //     line!
-        // */
-        // 3;
-        // " => vec![
-        //     Token::Comment("line!".to_string(), false),
-        //     Token::Numeric("3".to_string()),
-        //     token![;]
-        // ]);
+        assert_lex("
+            /*
+                edge whitespace should be trimmed.
+            */
+            3;
+        ", &[
+            Token::Comment("edge whitespace should be trimmed.".to_string(), false),
+            Token::Numeric("3".to_string()),
+            token![;]
+        ]);
 
-        assert_lex_basic!("
-        /* /* 
-            comments in comments :)
-        */ */
-        recursive;
-        " => vec![
+        // recursive comments
+        assert_lex("
+            /* /* 
+                comments in comments :)
+            */ */
+            recursive;
+        ", &[
             Token::Comment("/* 
-            comments in comments :)
-        */".to_string(), false),
+                comments in comments :)
+            */".to_string(), false),
             Token::Ident("recursive".to_string()),
             token![;],
         ]);
+
+        assert_lex_fail("
+            /*
+            /*
+                unclosed comment
+            */
+        ", LexErr::UnclosedComment);
     }
 
     #[test]
     fn char_lex() {
         // basic char checks
-        assert_lex_basic!("'a'" => vec![Token::Char('a')]);
-        assert_lex_fail!("'ab'" => LexErr::ExpectedChar('\'').at((0, 2)));
-        assert_lex_fail!("''" => LexErr::EmptyChar.at((0, 0)));
+        assert_lex("'a'", &[Token::Char('a')]);
+        assert_lex_fail_vb("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
+        assert_lex_fail_vb("''", LexErr::EmptyChar.at((0, 0)));
 
         // basic escape tests
-        assert_lex_basic!("'\\''" => vec![Token::Char('\'')]); // '\''
-        assert_lex_basic!("'\\n'" => vec![Token::Char('\n')]); // '\n'
-        assert_lex_basic!("\"\\e\"" => vec![Token::Str(String::from("\\e"))]); // '\e'
-        assert_lex_fail_basic!("'\\n" => LexErr::UnclosedQuote); // '\n
-        assert_lex_fail_basic!("'\\\n'" => LexErr::UnclosedQuote); // '\[new line]'
+        assert_lex("'\\''", &[Token::Char('\'')]); // '\''
+        assert_lex("'\\n'", &[Token::Char('\n')]); // '\n'
+        assert_lex("\"\\e\"", &[Token::Str(String::from("\\e"))]); // '\e'
+        assert_lex_fail("'\\n", LexErr::UnclosedQuote); // '\n
+        assert_lex_fail("'\\\n'", LexErr::UnclosedQuote); // '\[new line]'
         
         // \x test
-        assert_lex_basic!("'\\x14'" => vec![Token::Char('\x14')]);   // '\x14'
-        assert_lex_fail_basic!("'\\x'" => LexErr::InvalidX);   // '\x'
-        assert_lex_fail_basic!("'\\x0'" => LexErr::InvalidX);  // '\x0'
-        assert_lex_fail_basic!("'\\xqq'" => LexErr::InvalidX); // '\xqq'
+        assert_lex("'\\x14'", &[Token::Char('\x14')]);   // '\x14'
+        assert_lex_fail("'\\x'", LexErr::InvalidX);   // '\x'
+        assert_lex_fail("'\\x0'", LexErr::InvalidX);  // '\x0'
+        assert_lex_fail("'\\xqq'", LexErr::InvalidX); // '\xqq'
 
         // \u test
-        assert_lex_basic!("'\\u{0}'" => vec![Token::Char('\0')]); // '\u{0}'
-        assert_lex_basic!("'\\u{1f97a}'" => vec![Token::Char('\u{1f97a}')]); // '\u{1f97a}'
-        assert_lex_fail_basic!("'\\u{21f97a}'" => LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
-        assert_lex_fail_basic!("'\\u{0000000}'" => LexErr::InvalidU); // '\u{0000000}'
+        assert_lex("'\\u{0}'", &[Token::Char('\0')]); // '\u{0}'
+        assert_lex("'\\u{1f97a}'", &[Token::Char('\u{1f97a}')]); // '\u{1f97a}'
+        assert_lex_fail("'\\u{21f97a}'", LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
+        assert_lex_fail("'\\u{0000000}'", LexErr::InvalidU); // '\u{0000000}'
     }
 }
