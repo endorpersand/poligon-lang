@@ -820,10 +820,11 @@ mod tests {
         }
     }
 
+    /// Assert that the string provided errors with the given error when lexed.
     #[allow(unused)]
     fn assert_lex_fail(input: &str, result: LexErr) {
         match tokenize(input) {
-            Ok(_)  => panic!("Lexing did not error."),
+            Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
             Err(e) => assert_eq!(&e.err, &result)
         }
     }
