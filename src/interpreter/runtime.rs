@@ -369,7 +369,7 @@ impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
 /// If the function's flow is interrupted, [`TermOp`] is returned.
 pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
 
-/// This trait enables the traversal of a program tree.
+/// This trait is implemented for values that can be traversed in runtime.
 pub trait TraverseRt {
     /// Evaluate this node in runtime, possibly creating side effects.
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value>;

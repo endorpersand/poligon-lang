@@ -33,22 +33,22 @@ pub trait Truth<'ctx> {
 
 impl<'ctx> Compiler<'ctx> {
     /// Create an instruction computing the unary operation on a given value.
-    pub fn apply_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
+    pub(crate) fn apply_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
         left.apply_unary(op, self)
     }
 
     /// Create an instruction computing the binary operation on two values.
-    pub fn apply_binary<T: Binary<'ctx, U>, U>(&mut self, left: T, op: op::Binary, right: U) -> T::Output {
+    pub(crate) fn apply_binary<T: Binary<'ctx, U>, U>(&mut self, left: T, op: op::Binary, right: U) -> T::Output {
         left.apply_binary(op, right, self)
     }
 
     /// Create an instruction comparing two values.
-    pub fn apply_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
+    pub(crate) fn apply_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
         left.apply_cmp(op, right, self)
     }
 
     /// Calculate the boolean value (the truth value) of some given value.
-    pub fn truth<T: Truth<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
+    pub(crate) fn truth<T: Truth<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
         left.truth(self)
     }
 }
