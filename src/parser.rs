@@ -112,7 +112,8 @@ impl GonErr for ParseErr {
     }
 }
 /// A [`Result`] type for operations in the parsing process.
-pub type ParseResult<T> = Result<T, FullGonErr<ParseErr>>;
+pub type ParseResult<T> = Result<T, FullParseErr>;
+type FullParseErr = FullGonErr<ParseErr>;
 
 macro_rules! left_assoc_op {
     ($n:ident = $ds:ident (($($op:tt),+) $_:ident)*;) => {
@@ -1165,10 +1166,13 @@ mod tests {
     }
     /// Assert that the string provided errors with the given error when parsed.
     #[allow(unused)]
-    fn assert_parse_fail(input: &str, result: ParseErr) {
+    fn assert_parse_fail<E>(input: &str, result: E) 
+        where E: std::fmt::Debug,
+            FullParseErr: PartialEq<E>
+    {
         match parse_str(input) {
             Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
-            Err(e) => assert_eq!(&e.err, &result)
+            Err(e) => assert_eq!(e, result)
         }
     }
 

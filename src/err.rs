@@ -272,3 +272,9 @@ impl<E: GonErr> FullGonErr<E> {
         lines.join("\n")
     }
 }
+
+impl<E: GonErr + PartialEq> PartialEq<E> for FullGonErr<E> {
+    fn eq(&self, other: &E) -> bool {
+        &self.err == other
+    }
+}

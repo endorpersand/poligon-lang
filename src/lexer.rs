@@ -807,38 +807,26 @@ mod tests {
 
     /// Assert that the string provided lexes into the vector of tokens.
     #[allow(unused)]
-    fn assert_lex(input: &str, result: &[Token]) {
-        match tokenize(input) {
-            Ok(t)  => {
-                let tokens: Vec<_> = t.into_iter()
-                    .map(|t| t.tt)
-                    .collect();
-                assert_eq!(&tokens, result)
-            },
-            Err(e) => panic!("{}", e.full_msg(input))
-        }
-    }
-
-    /// Assert that the string provided errors with the given error when lexed.
-    #[allow(unused)]
-    fn assert_lex_fail(input: &str, result: LexErr) {
-        match tokenize(input) {
-            Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
-            Err(e) => assert_eq!(&e.err, &result)
-        }
-    }
-
-    /// Assert that the string provided lexes into the vector of FullTokens (token & location).
-    #[allow(unused)]
-    fn assert_lex_vb(input: &str, result: &[FullToken]) {
+    fn assert_lex<T>(input: &str, result: &[T]) 
+        where T: std::fmt::Debug,
+            FullToken: PartialEq<T>
+    {
         match tokenize(input) {
             Ok(t) => assert_eq!(&t, result),
             Err(e) => panic!("{}", e.full_msg(input)),
         }
     }
 
-    fn assert_lex_fail_vb(input: &str, result: FullLexErr) {
-        assert_eq!(tokenize(input), Err(result))
+    /// Assert that the string provided errors with the given error when lexed.
+    #[allow(unused)]
+    fn assert_lex_fail<E>(input: &str, result: E) 
+        where E: std::fmt::Debug,
+            FullLexErr: PartialEq<E>
+    {
+        match tokenize(input) {
+            Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
+            Err(e) => assert_eq!(e, result)
+        }
     }
 
     #[test]
@@ -914,9 +902,9 @@ mod tests {
             token![")"]
         ]);
 
-        assert_lex_fail_vb("(1", LexErr::UnclosedDelimiter.at((0, 0)));
-        assert_lex_fail_vb("1)", LexErr::MismatchedDelimiter.at((0, 1)));
-        assert_lex_fail_vb("(1]", LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
+        assert_lex_fail("(1", LexErr::UnclosedDelimiter.at((0, 0)));
+        assert_lex_fail("1)", LexErr::MismatchedDelimiter.at((0, 1)));
+        assert_lex_fail("(1]", LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
     }
 
     /// Tests numeric edge cases.
@@ -1007,8 +995,8 @@ mod tests {
     fn char_lex() {
         // basic char checks
         assert_lex("'a'", &[Token::Char('a')]);
-        assert_lex_fail_vb("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
-        assert_lex_fail_vb("''", LexErr::EmptyChar.at((0, 0)));
+        assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
+        assert_lex_fail("''", LexErr::EmptyChar.at((0, 0)));
 
         // basic escape tests
         assert_lex("'\\''", &[Token::Char('\'')]); // '\''

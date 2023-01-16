@@ -51,6 +51,18 @@ impl FullToken {
         Self { loc, tt }
     }
 }
+
+impl PartialEq<Token> for FullToken {
+    fn eq(&self, other: &Token) -> bool {
+        &self.tt == other
+    }
+}
+impl PartialEq<FullToken> for Token {
+    fn eq(&self, other: &FullToken) -> bool {
+        self == &other.tt
+    }
+}
+
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
         /// Enum that provides all the given Poligon keywords
