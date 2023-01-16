@@ -55,6 +55,9 @@ pub enum LexErr {
     /// A bracket was not closed (e.g. `( ... `)
     UnclosedDelimiter,
 
+    /// A delimiter was never opened (e.g. ` ... )`)
+    UnmatchedDelimiter,
+
     /// A delimiter got closed with a semicolon (e.g. `( ...; `)
     DelimiterClosedSemi,
 
@@ -88,6 +91,7 @@ impl GonErr for LexErr {
             LexErr::UnknownOp(op)       => format!("operator \"{}\" does not exist", op),
             LexErr::MismatchedDelimiter => String::from("mismatched delimiter"),
             LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
+            LexErr::UnmatchedDelimiter  => String::from("delimiter was never opened"),
             LexErr::DelimiterClosedSemi => String::from("unexpected ';'"),
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
             LexErr::InvalidX            => String::from("invalid \\xXX escape"),
@@ -796,7 +800,7 @@ impl Lexer {
                 Ok(())
             },
             Some((p, _)) => Err(LexErr::MismatchedDelimiter.at_points(&[*p, pos])),
-            None => Err(LexErr::MismatchedDelimiter.at(pos)),
+            None => Err(LexErr::UnmatchedDelimiter.at(pos)),
         }
     }
 }
@@ -903,7 +907,7 @@ mod tests {
         ]);
 
         assert_lex_fail("(1", LexErr::UnclosedDelimiter.at((0, 0)));
-        assert_lex_fail("1)", LexErr::MismatchedDelimiter.at((0, 1)));
+        assert_lex_fail("1)", LexErr::UnmatchedDelimiter.at((0, 1)));
         assert_lex_fail("(1]", LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
     }
 
