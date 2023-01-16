@@ -1,7 +1,7 @@
 //! Static variable resolver for the interpreter runtime.
 //! 
 //! When executing a [`ast::Program`], the static resolver is executed first
-//! to lexically scope variables validate `return`, `break`, `continue`, etc.
+//! to lexically scope variables, validate `return`, `break`, `continue`, etc.
 //! 
 //! Instead of being run via program flow, the resolver scans the code statically
 //! (which enables lexical scope and other things).
@@ -190,7 +190,7 @@ impl ResolveState {
     }
     
     /// Statically traverse over a tree and add it to the resolve state.
-    pub fn traverse_tree(&mut self, t: &ast::Program) -> ResolveResult<()> {
+    pub fn traverse<T: TraverseResolve>(&mut self, t: &T) -> ResolveResult<()> {
         t.traverse_rs(self)
     }
 
@@ -210,6 +210,9 @@ impl Default for ResolveState {
 }
 
 /// This trait is implemented for values that can be traversed in the runtime process.
+/// 
+/// A traversal can be initiated either with the [`TraverseResolve::traverse_rs`] method 
+/// or [`ResolveState::traverse`].
 pub trait TraverseResolve {
     /// Traverses through this node, adding whatever information from the node to the ResolveState.
     /// 
@@ -491,7 +494,7 @@ mod tests {
         ];
 
         let mut state = ResolveState::new();
-        state.traverse_tree(&program)?;
+        state.traverse(&program)?;
 
         assert_eq!(&state.steps, &map!{});
         Ok(())
@@ -510,7 +513,7 @@ mod tests {
         ];
 
         let mut state = ResolveState::new();
-        state.traverse_tree(&program)?;
+        state.traverse(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
@@ -525,7 +528,7 @@ mod tests {
         ];
 
         let mut state = ResolveState::new();
-        state.traverse_tree(&program)?;
+        state.traverse(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
@@ -548,7 +551,7 @@ mod tests {
         } else { unreachable!() };
 
         let mut state = ResolveState::new();
-        state.traverse_tree(&program)?;
+        state.traverse(&program)?;
 
         let steps = map! {
             a as _ => 1
@@ -577,7 +580,7 @@ mod tests {
         ").parse().ok().unwrap();
 
         let mut state = ResolveState::new();
-        state.traverse_tree(&program)?;
+        state.traverse(&program)?;
 
         println!("{:?}", state);
         Ok(())

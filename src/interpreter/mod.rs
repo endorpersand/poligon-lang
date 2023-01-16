@@ -18,7 +18,7 @@ use std::path::Path;
 
 use crate::{lexer, parser, FullGonErr, ast};
 use runtime::Value;
-use runtime::{BlockContext, TraverseRt};
+use runtime::{RuntimeContext, TraverseRt};
 pub use repl::Repl;
 
 pub mod semantic;

@@ -15,14 +15,15 @@ pub(crate) mod value;
 mod vars;
 mod gstd;
 
-/// Struct that holds all of the state information 
-/// of the current scope (variables, functions, etc).
-pub struct BlockContext<'ctx> {
+/// Struct that holds state and scope in runtime.
+/// It can be used to access variables and functions
+/// once a static resolution has occurred.
+pub struct RuntimeContext<'ctx> {
     vars: VarContext<'ctx>,
     rs: Rc<ResolveState>
 }
 
-impl BlockContext<'_> {
+impl RuntimeContext<'_> {
     /// Create a new context.
     pub fn new() -> Self {
         Self {
@@ -31,11 +32,23 @@ impl BlockContext<'_> {
         }
     }
 
+    /// Get the resolve state held by this context 
+    /// (or panicking if it is accessed while traversing)
+    pub fn resolve_state(&mut self) -> &mut ResolveState {
+        Rc::get_mut(&mut self.rs)
+            .expect("Resolve state was accessed while in traversal")
+    }
+
+    /// Compute the given tree, modifying the context if necessary.
+    pub fn execute<T: TraverseRt>(&mut self, t: &T) -> RtTraversal<Value> {
+        t.traverse_rt(self)
+    }
+
     /// Create a new scope. 
     /// 
-    /// As long as the child scope is in use, this scope cannot be used.
-    pub fn child(&mut self) -> BlockContext {
-        BlockContext {
+    /// As long as the child scope is in use, the original cannot be used.
+    pub fn child(&mut self) -> RuntimeContext {
+        RuntimeContext {
             vars: self.vars.child(),
             rs: Rc::clone(&self.rs)
         }
@@ -43,10 +56,13 @@ impl BlockContext<'_> {
 
     /// Create a new scope, branching off of a 
     /// scope that is further up the scope list.
-    pub fn fun_body_scope_at(&mut self, idx: usize) -> BlockContext {
+    /// 
+    /// This is useful for switching to the lexical scope during
+    /// a function call.
+    pub fn branch_at(&mut self, idx: usize) -> RuntimeContext {
         let mv = self.vars.goto_idx(idx);
 
-        mv.map(|v| BlockContext {
+        mv.map(|v| RuntimeContext {
             vars: v.child(),
             rs: Rc::clone(&self.rs)
         }).unwrap()
@@ -65,7 +81,7 @@ impl BlockContext<'_> {
     }
 }
 
-impl Default for BlockContext<'_> {
+impl Default for RuntimeContext<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -77,7 +93,7 @@ macro_rules! cast {
 
 impl ast::Expr {
     /// Evaluate an expression and then apply the unary operator for it.
-    pub fn apply_unary(&self, o: op::Unary, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn apply_unary(&self, o: op::Unary, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         self.traverse_rt(ctx)
             .and_then(|v| cast! { v.apply_unary(o) })
     }
@@ -85,7 +101,7 @@ impl ast::Expr {
     /// Evaluate the two arguments to the binary operator and then apply the operator to it.
     /// 
     /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
-    pub fn apply_binary(&self, o: op::Binary, right: &Self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    pub fn apply_binary(&self, o: op::Binary, right: &Self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
@@ -112,7 +128,7 @@ impl ast::Program {
     /// then executes the program in runtime with the
     /// [`runtime`][`crate::interpreter::runtime`] module.
     pub fn run(&self) -> RtResult<Value> {
-        self.run_with_ctx(&mut BlockContext::new())
+        self.run_with_ctx(&mut RuntimeContext::new())
     }
 
     /// Executes the program with a predefined variable context.
@@ -121,16 +137,12 @@ impl ast::Program {
     /// [`semantic`][`crate::interpreter::semantic`] module,
     /// then executes the program in runtime with the
     /// [`runtime`][`crate::interpreter::runtime`] module.
-    pub fn run_with_ctx(&self, ctx: &mut BlockContext) -> RtResult<Value> {
-        // Semantic traversal
-        let rs = Rc::get_mut(&mut ctx.rs)
-            .expect("Cannot resolve while in traversal");
-        
+    pub fn run_with_ctx(&self, ctx: &mut RuntimeContext) -> RtResult<Value> {
+        let rs = ctx.resolve_state();
         rs.clear();
-        rs.traverse_tree(self)?;
+        rs.traverse(self)?;
 
-        // Runtime traversal
-        self.traverse_rt(ctx).map_err(into_err)
+        ctx.execute(self).map_err(into_err)
     }
 }
 
@@ -370,13 +382,16 @@ impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
 pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
 
 /// This trait is implemented for values that can be traversed in runtime.
+/// 
+/// A traversal can be initiated either with the [`TraverseRt::traverse_rt`] method 
+/// or [`RuntimeContext::execute`].
 pub trait TraverseRt {
     /// Evaluate this node in runtime, possibly creating side effects.
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value>;
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value>;
 }
 
 impl TraverseRt for ast::Expr {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         match self {
             ast::Expr::Ident(ident) => {
                 ctx.get_var(ident, self)
@@ -674,13 +689,13 @@ fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
 }
 
 impl TraverseRt for ast::Literal {
-    fn traverse_rt(&self, _ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, _ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         Ok(self.clone().into())
     }
 }
 
 impl TraverseRt for Vec<ast::Stmt> {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         match self.split_last() {
             Some((tail, head)) => {
                 for stmt in head {
@@ -693,18 +708,18 @@ impl TraverseRt for Vec<ast::Stmt> {
     }
 }
 impl TraverseRt for ast::Program {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         self.0.traverse_rt(ctx)
     }
 }
 impl TraverseRt for ast::Block {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         self.0.traverse_rt(ctx)
     }
 }
 
 impl TraverseRt for ast::Stmt {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         match self {
             ast::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
             ast::Stmt::Return(mt) => {
@@ -726,7 +741,7 @@ impl TraverseRt for ast::Stmt {
 }
 
 impl TraverseRt for ast::Decl {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         let rhs = self.val.traverse_rt(ctx)?;
         
         declare_pat(&self.pat, rhs, ctx, self.rt)
@@ -735,7 +750,7 @@ impl TraverseRt for ast::Decl {
 }
 
 impl TraverseRt for ast::FunDecl {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+    fn traverse_rt(&self, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
         let ast::FunDecl { sig: ast::FunSignature { ident, params, ret }, block } = self;
         
         let mut param_types = vec![];
@@ -854,7 +869,7 @@ pub fn unpack_pat<T>(
     }
 }
 
-fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast::Expr) -> RtResult<Value> {
+fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut RuntimeContext, from: &ast::Expr) -> RtResult<Value> {
     unpack_pat(pat, rhs, |unit, rhs| match unit {
         ast::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
@@ -871,7 +886,7 @@ fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut BlockContext, from: &ast:
     })
 }
 
-fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut BlockContext, rt: ast::ReasgType) -> RtResult<Value> {
+fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut RuntimeContext, rt: ast::ReasgType) -> RtResult<Value> {
     unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| {
         ctx.vars.declare_full(String::from(ident), rhs, rt, *mt).cloned()
     })
