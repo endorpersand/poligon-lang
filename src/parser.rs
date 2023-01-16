@@ -316,11 +316,11 @@ impl Parser {
             )
     }
     
-    /// Expect that the next tokens represent a vector of statements.
+    /// Expect that the next tokens represent a list of statements.
     /// 
-    /// Return the block enclosing the vector of statements,
+    /// Return the list of statements,
     /// or error if the tokens do not represent a vector of statements.
-    fn expect_stmts(&mut self) -> ParseResult<ast::Block> {
+    fn expect_stmts(&mut self) -> ParseResult<Vec<ast::Stmt>> {
         let mut stmts = vec![];
 
         /*
@@ -365,7 +365,7 @@ impl Parser {
             }
         }
 
-        Ok(ast::Block(stmts))
+        Ok(stmts)
     }
 
     /// Expect that the next tokens represent a block.
@@ -376,7 +376,7 @@ impl Parser {
         self.expect1(token!["{"])?;
         let p = self.expect_stmts()?;
         self.expect1(token!["}"])?;
-        Ok(p)
+        Ok(ast::Block(p))
     }
 
     /// Expect that the next tokens represent a statement.
@@ -1144,7 +1144,7 @@ mod tests {
 
     macro_rules! program {
         ($($e:expr),*) => {
-            Program(Block(vec![$($e),*]))
+            Program(vec![$($e),*])
         }
     }
 

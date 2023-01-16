@@ -33,7 +33,7 @@ mod display;
 ///  }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Block);
+pub struct Program(pub Vec<Stmt>);
 
 /// An enclosed scope with a list of statements.
 /// 

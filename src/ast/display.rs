@@ -50,7 +50,7 @@ impl Display for BlockDisplay<'_> {
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, &self.0.0)
+        fmt_stmt_list(f, &self.0)
     }
 }
 

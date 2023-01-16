@@ -335,7 +335,7 @@ impl CodeGenerator {
 
     /// Convert a program into PLIR, and attach it to the CodeGenerator.
     pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
-        self.consume_stmts(prog.0.0)
+        self.consume_stmts(prog.0)
     }
 
     /// Consume an iterator of statements into the current insert block.

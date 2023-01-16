@@ -679,15 +679,9 @@ impl TraverseRt for ast::Literal {
     }
 }
 
-impl TraverseRt for ast::Program {
+impl TraverseRt for Vec<ast::Stmt> {
     fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        self.0.traverse_rt(ctx)
-    }
-}
-
-impl TraverseRt for ast::Block {
-    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
-        match self.0.split_last() {
+        match self.split_last() {
             Some((tail, head)) => {
                 for stmt in head {
                     stmt.traverse_rt(ctx)?;
@@ -696,6 +690,16 @@ impl TraverseRt for ast::Block {
             }
             None => Ok(Value::Unit),
         }
+    }
+}
+impl TraverseRt for ast::Program {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        self.0.traverse_rt(ctx)
+    }
+}
+impl TraverseRt for ast::Block {
+    fn traverse_rt(&self, ctx: &mut BlockContext) -> RtTraversal<Value> {
+        self.0.traverse_rt(ctx)
     }
 }
 

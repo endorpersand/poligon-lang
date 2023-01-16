@@ -251,7 +251,7 @@ impl<T: TRsDependent> TRsDependent for [T] {
 // As a program, we do not want to create another scope.
 impl TraverseResolve for ast::Program {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        self.0.0.traverse_rs(map)
+        self.0.traverse_rs(map)
     }
 }
 
@@ -463,7 +463,7 @@ mod tests {
 
     macro_rules! program {
         ($($e:expr),*) => {
-            Program(Block(vec![$($e),*]))
+            Program(vec![$($e),*])
         }
     }
 
@@ -541,7 +541,7 @@ mod tests {
             ])))
         ];
 
-        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0.0[0] {
+        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0[0] {
             if let Stmt::Expr(Expr::Block(prog)) = &prog.0[1] { 
                 if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
             } else { unreachable!() }
