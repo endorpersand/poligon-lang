@@ -396,8 +396,8 @@ impl Parser {
     /// matched values and a bool value indicating whether the tuple had a terminating comma.
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`.
-    pub fn expect_tuple_of<T, F>(&mut self, f: F) -> ParseResult<(Vec<T>, bool /* ended in comma? */)> 
-        where F: Fn(&mut Self) -> ParseResult<Option<T>>
+    pub fn expect_tuple_of<T, F>(&mut self, mut f: F) -> ParseResult<(Vec<T>, bool /* ended in comma? */)> 
+        where F: FnMut(&mut Self) -> ParseResult<Option<T>>
     {
         let mut exprs = vec![];
         let mut comma_end = true;
@@ -417,6 +417,9 @@ impl Parser {
 
     /// Expect that the next tokens in input represent expressions separated by commas 
     /// (optionally a terminating comma), and ending with the closer token.
+    /// 
+    /// For example, if the closer was `}`, then `1, 2, 3, 4 }` would be valid here.
+    /// The `{` would need to be [matched][Parser::match1] before this function is called.
     pub fn expect_closing_tuple(&mut self, closer: Token) -> ParseResult<Vec<ast::Expr>> 
     {
         self.expect_closing_tuple_of(Parser::match_expr, closer, ParseErr::ExpectedExpr)
@@ -425,12 +428,15 @@ impl Parser {
     /// Expect that the next tokens in input represent values of type `T` separated by commas 
     /// (optionally a terminating comma), and ending with the closer token.
     /// 
+    /// For example, if the closer was `}`, then `t, t, t, t }` would be valid here.
+    /// The `{` would need to be [matched][Parser::match1] before this function is called.
+    /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`,
     /// and an error to raise if a match was not found.
     pub fn expect_closing_tuple_of<T, F>(
         &mut self, f: F, closer: Token, or_else: ParseErr
     ) -> ParseResult<Vec<T>> 
-        where F: Fn(&mut Self) -> ParseResult<Option<T>>
+        where F: FnMut(&mut Self) -> ParseResult<Option<T>>
     {
         let (exprs, comma_end) = self.expect_tuple_of(f)?;
 
@@ -448,7 +454,7 @@ impl Parser {
             Err(e.at_range(self.peek_loc()))
         }
     }
-    
+
     /// Match a left angle bracket in type expressions (`<`). 
     /// 
     /// This function differs from [`parser::match1(token![<])`][Parser::match1] 
