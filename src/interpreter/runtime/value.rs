@@ -1,3 +1,10 @@
+//! Values in the runtime.
+//!
+//! This module provides:
+//! - [`Value`]: A value in runtime
+//! - [`VArbType`], [`ValueType`]: Value types
+//! - [`GonFun`]: A function in runtime
+
 use std::cell::Ref;
 use std::collections::HashSet;
 use std::rc::Rc;

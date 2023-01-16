@@ -1,7 +1,7 @@
 use crate::FullGonErr;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use super::runtime::RuntimeContext;
+use super::runtime::RtContext;
 
 /// Read-eval-print loop
 /// 
@@ -27,7 +27,7 @@ use super::runtime::RuntimeContext;
 /// [`process_line`]: Repl::process_line
 pub struct Repl<'ctx> {
     lexer: Option<Lexer>,
-    ctx: RuntimeContext<'ctx>,
+    ctx: RtContext<'ctx>,
     code: String,
 
     succ_last: bool
@@ -49,7 +49,7 @@ impl Repl<'_> {
     pub fn new() -> Self {
         Self { 
             lexer: None, 
-            ctx: RuntimeContext::new(), 
+            ctx: RtContext::new(), 
             code: String::new(), 
             succ_last: true
         }

@@ -5,6 +5,8 @@
 //! 
 //! Instead of being run via program flow, the resolver scans the code statically
 //! (which enables lexical scope and other things).
+//! 
+//! The main item of this module is [`TraverseResolve`], the trait enabling semantic traversal.
 
 use std::collections::{HashMap, HashSet};
 

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::interpreter::{RuntimeContext, TraverseRt, ast};
+use crate::interpreter::{RtContext, TraverseRt, ast};
 use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr};
 
 use super::{VArbType, Value};
@@ -53,7 +53,7 @@ impl GonFun {
     /// 
     /// In specification, this would only compute the expressions needed for the function.
     /// In implementation, this computes all the expressions before inserting them to the function.
-    pub fn call(&self, params: &[ast::Expr], ctx: &mut RuntimeContext) -> RtTraversal<Value> {
+    pub fn call(&self, params: &[ast::Expr], ctx: &mut RtContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {
@@ -70,7 +70,7 @@ impl GonFun {
     }
 
     /// Call this function with a list of computed values.
-    pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut RuntimeContext) -> RtTraversal<Value> {
+    pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut RtContext) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if pvals.len() != arity {
