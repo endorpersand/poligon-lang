@@ -63,7 +63,7 @@ pub enum LexErr {
     /// A char literal was empty (`''`).
     EmptyChar,
 
-    /// The string of characters are punctuation but they don't create a valid operator ('@')
+    /// The string of characters are punctuation but they don't create a valid operator (e.g. `@`)
     UnknownOp(String),
 
     /// A delimiter was closed with the wrong type (e.g. `[ ... )`)
@@ -84,10 +84,10 @@ pub enum LexErr {
     /// There is still input to be lexed in the lexer
     NotFullyLexed,
 
-    /// Escape of the form '\x00' was invalid
+    /// Escape of the form `'\x00'` was invalid
     InvalidX,
 
-    /// Escape of the form '\u{000000}' was invalid
+    /// Escape of the form '`\u{000000}'` was invalid
     InvalidU,
 
     /// Character with given hex does not exist
