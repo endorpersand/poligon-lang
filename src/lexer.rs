@@ -22,6 +22,23 @@ pub mod token;
 /// Convert a string and lex it into a sequence of tokens.
 /// 
 /// For more control, see the [`Lexer`] struct.
+/// 
+/// # Example
+/// ```
+/// # use poligon_lang::lexer::tokenize;
+/// use poligon_lang::lexer::token::{Token, token};
+/// 
+/// let code = "a + b + c + d";
+/// assert_eq!(tokenize(code).unwrap(), vec![
+///     Token::Ident(String::from("a")),
+///     token![+],
+///     Token::Ident(String::from("b")),
+///     token![+],
+///     Token::Ident(String::from("c")),
+///     token![+],
+///     Token::Ident(String::from("d"))
+/// ]);
+/// ```
 pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
     let mut lx = Lexer::new(input, false);
     lx.lex()?;
@@ -362,6 +379,26 @@ impl ReplMode {
 }
 
 /// The struct does the full lexing process.
+/// 
+/// # Example
+/// ```
+/// # use poligon_lang::lexer::Lexer;
+/// use poligon_lang::lexer::token::{Token, token};
+/// 
+/// let code = "a + b + c + d";
+/// 
+/// let mut lx = Lexer::new(code, false);
+/// lx.lex().unwrap();
+/// assert_eq!(lx.close().unwrap(), vec![
+///     Token::Ident(String::from("a")),
+///     token![+],
+///     Token::Ident(String::from("b")),
+///     token![+],
+///     Token::Ident(String::from("c")),
+///     token![+],
+///     Token::Ident(String::from("d"))
+/// ]);
+/// ```
 pub struct Lexer {
     /// The tokens generated from the string.
     tokens: Vec<FullToken>,
@@ -387,6 +424,24 @@ impl Lexer {
     /// The `repl_mode` parameter alters some parser functionality 
     /// to better support the [REPL][`crate::interpreter::Repl`].
     /// In particular, string literals and comments do not immediately error in REPL mode.
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::lexer::Lexer;
+    /// use poligon_lang::lexer::LexErr;
+    /// use poligon_lang::lexer::token::Token;
+    ///
+    /// // Not REPL mode
+    /// let mut lx = Lexer::new("/*", false);
+    /// assert_eq!(lx.lex().unwrap_err(), LexErr::UnclosedComment);
+    /// 
+    /// // REPL mode
+    /// let mut lx = Lexer::new("/*", true);
+    /// lx.lex().unwrap();
+    /// lx.append("*/");
+    /// lx.lex().unwrap();
+    /// assert_eq!(lx.close().unwrap(), vec![Token::Comment(String::new(), false)]);
+    /// ```
     pub fn new(input: &str, repl_mode: bool) -> Self {
         Self {
             tokens: vec![],
@@ -402,6 +457,17 @@ impl Lexer {
     }
 
     /// Lex what is currently in the input.
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::lexer::Lexer;
+    /// use poligon_lang::lexer::LexErr;
+    /// 
+    /// let mut lx = Lexer::new("abc", false);
+    /// lx.lex().unwrap();
+    /// lx.append("}");
+    /// assert_eq!(lx.lex().unwrap_err(), LexErr::UnmatchedDelimiter);
+    /// ```
     pub fn lex(&mut self) -> LexResult<()> {
         // if in repl mode, divert normal lex process to finish unprocessed token
         match self.repl_mode.take() {
@@ -474,6 +540,19 @@ impl Lexer {
     /// 
     /// This is used by [`Repl`][`crate::interpreter::Repl`] 
     /// to determine whether or not the lexer should be preserved between lines.
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::lexer::Lexer;
+    /// use poligon_lang::lexer::LexErr;
+    /// 
+    /// let mut lx = Lexer::new("[ 1, 2, 3 ", false);
+    /// 
+    /// // lexes perfectly fine
+    /// lx.lex().unwrap();
+    /// // cannot be closed
+    /// assert_eq!(lx.try_close().unwrap_err(), LexErr::UnclosedDelimiter);
+    /// ```
     pub fn try_close(&self) -> LexResult<()> {
         if let Some((p, _)) = self.delimiters.last() {
             return Err(LexErr::UnclosedDelimiter.at(*p));
@@ -495,14 +574,59 @@ impl Lexer {
 
     /// Consume the lexer, returning the tokens in it 
     /// if the lexer is in a closable state ([`Lexer::try_close`]).
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::lexer::Lexer;
+    /// use poligon_lang::lexer::LexErr;
+    /// use poligon_lang::lexer::token::Token;
+    /// 
+    /// let mut lx = Lexer::new("hello", false);
+    /// lx.lex().unwrap();
+    /// assert_eq!(lx.close().unwrap(), vec![
+    ///     Token::Ident(String::from("hello"))
+    /// ]);
+    /// // -- lx can't be used after this point --
+    /// 
+    /// let mut lx2 = Lexer::new("(hello", false);
+    /// lx2.lex().unwrap();
+    /// assert_eq!(lx2.close().unwrap_err(), LexErr::UnclosedDelimiter);
+    /// // -- error occurred, but lx2 still can't be used after this point --
+    /// ```
     pub fn close(self) -> LexResult<Vec<FullToken>> {
         self.try_close()?;
         Ok(self.tokens)
     }
 
     /// Append extra characters to the end of the lexer's input buffer.
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::lexer::Lexer;
+    /// use poligon_lang::lexer::token::{Token, token};
+    /// 
+    /// let mut lx = Lexer::new("hello", false);
+    /// lx.lex().unwrap();
+    /// 
+    /// lx.append("+ hi");
+    /// lx.append("+ howdy");
+    /// lx.lex().unwrap();
+    /// 
+    /// assert_eq!(lx.close().unwrap(), vec![
+    ///     Token::Ident(String::from("hello")),
+    ///     token![+],
+    ///     Token::Ident(String::from("hi")),
+    ///     token![+],
+    ///     Token::Ident(String::from("howdy"))
+    /// ]);
+    /// ```
     pub fn append(&mut self, input: &str) {
         self.remaining.extend(input.chars());
+    }
+
+    /// Tests if lexer is in REPL mode or normal mode.
+    fn in_repl_mode(&self) -> bool {
+        self.repl_mode != ReplMode::NotRepl
     }
 
     /// Look at the cursor of the next character in the input.
@@ -563,10 +687,6 @@ impl Lexer {
         } else {
             None
         }
-    }
-
-    fn in_repl_mode(&self) -> bool {
-        self.repl_mode != ReplMode::NotRepl
     }
 
     /// Analyzes the next characters in the input as an identifier (e.g. abc, ade, aVariable, a123, a_).
