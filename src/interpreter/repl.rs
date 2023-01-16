@@ -28,39 +28,50 @@ use super::runtime::BlockContext;
 pub struct Repl<'ctx> {
     lexer: Option<Lexer>,
     ctx: BlockContext<'ctx>,
-    code: String
+    code: String,
+
+    succ_last: bool
 }
 
 impl Repl<'_> {
     /// Create a new instance of the REPL.
     /// 
+    /// # Example
+    /// 
     /// ```
     /// # use poligon_lang::interpreter::Repl;
-    /// 
+    /// #
     /// let mut repl = Repl::new();
     /// repl.process_line("1 + 2"); // prints 3
     /// repl.process_line("2 + 3"); // prints 5
     /// repl.process_line("3 + 4"); // prints 7
     /// ```
     pub fn new() -> Self {
-        Self { lexer: None, ctx: BlockContext::new(), code: String::new() }
+        Self { 
+            lexer: None, 
+            ctx: BlockContext::new(), 
+            code: String::new(), 
+            succ_last: true
+        }
     }
 
     /// Test if the current input spans more than one line.
     /// 
+    /// # Example
+    /// 
     /// ```
     /// # use poligon_lang::interpreter::Repl;
-    /// 
+    /// #
     /// let mut repl = Repl::new();
     /// repl.process_line("1 + 2");
-    /// assert_eq!(repl.line_continues(), false);
+    /// assert!(!repl.line_continues());
     /// 
     /// repl.process_line("[");
-    /// assert_eq!(repl.line_continues(), true);
+    /// assert!(repl.line_continues());
     /// repl.process_line("1, 2, 3, 4");
-    /// assert_eq!(repl.line_continues(), true);
+    /// assert!(repl.line_continues());
     /// repl.process_line("]");
-    /// assert_eq!(repl.line_continues(), false);
+    /// assert!(!repl.line_continues());
     /// ```
     pub fn line_continues(&self) -> bool {
         self.lexer.is_some()
@@ -72,9 +83,11 @@ impl Repl<'_> {
     /// However, in situations with unclosed delimiters, the REPL may wait for more lines
     /// so that the delimiter can be closed.
     /// 
+    /// # Example
+    /// 
     /// ```
     /// # use poligon_lang::interpreter::Repl;
-    /// 
+    /// #
     /// let mut repl = Repl::new();
     /// 
     /// repl.process_line("1 + 2 + 3"); // returns 6
@@ -102,6 +115,7 @@ impl Repl<'_> {
                     Err(e) => {
                         eprintln!("{}", FullGonErr::from(e).full_msg(&self.code));
                         self.code.clear();
+                        self.succ_last = false;
                         return;
                     }
                 }
@@ -134,13 +148,177 @@ impl Repl<'_> {
 
         // success!
         self.code.clear();
+        self.succ_last = true;
         println!("{}", result.repr());
+    }
 
+    /// Test if the last executed line was successful.
+    /// 
+    /// # Example
+    /// ```
+    /// # use poligon_lang::interpreter::Repl;
+    /// #
+    /// let mut repl = Repl::new();
+    /// 
+    /// repl.process_line("1 + 2 + 3"); // returns 6
+    /// assert!(repl.exec_successful());
+    /// 
+    /// repl.process_line("1 + 'q'"); // type error
+    /// assert!(!repl.exec_successful());
+    /// ```
+    pub fn exec_successful(&self) -> bool {
+        self.succ_last
     }
 }
 
 impl Default for Repl<'_> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::interpreter::repl::*;
+
+    #[test]
+    fn basic_repl() {
+        let mut repl = Repl::new();
+
+        // normal
+        repl.process_line("2 + 2");
+        assert!(repl.exec_successful());
+        repl.process_line("2 + 3");
+        assert!(repl.exec_successful());
+
+        // errors to eprintln
+        repl.process_line("(;");
+        assert!(!repl.exec_successful());
+        repl.process_line("2 % 0");
+        assert!(!repl.exec_successful());
+
+        // can proceed as normal
+        repl.process_line("2 + 4");
+        assert!(repl.exec_successful());
+    }
+    #[test]
+    fn multiline_sq_bracket() {
+        let mut repl = Repl::new();
+
+        repl.process_line("[1, 2, 3, 4]");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+        
+        repl.process_line("[");
+        assert!(repl.line_continues());
+        repl.process_line("1,");
+        assert!(repl.line_continues());
+        repl.process_line("2,");
+        assert!(repl.line_continues());
+        repl.process_line("3,");
+        assert!(repl.line_continues());
+        repl.process_line("4");
+        assert!(repl.line_continues());
+        repl.process_line("]");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+    }
+
+    #[test]
+    fn multiline_paren() {
+        let mut repl = Repl::new();
+
+        repl.process_line("(1 + 2)");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+
+        repl.process_line("(");
+        assert!(repl.line_continues());
+        repl.process_line("1 + 2");
+        assert!(repl.line_continues());
+        repl.process_line(")");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+
+        repl.process_line("(");
+        assert!(repl.line_continues());
+        repl.process_line("1");
+        assert!(repl.line_continues());
+        repl.process_line("+");
+        assert!(repl.line_continues());
+        repl.process_line("2");
+        assert!(repl.line_continues());
+        repl.process_line(")");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+    }
+
+    #[test]
+    fn multiline_curly() {
+        let mut repl = Repl::new();
+
+        repl.process_line("{print(1); print(2); print(3);}");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+
+        repl.process_line("{");
+        assert!(repl.line_continues());
+        repl.process_line("print(1);");
+        assert!(repl.line_continues());
+        repl.process_line("print(2);");
+        assert!(repl.line_continues());
+        repl.process_line("print(3);");
+        assert!(repl.line_continues());
+        repl.process_line("}");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+    }
+
+    #[test]
+    fn multiline_string() {
+        let mut repl = Repl::new();
+
+        // "
+        // a
+        // b
+        // c
+        // "
+
+        repl.process_line("\"");
+        assert!(repl.line_continues());
+        repl.process_line("a");
+        assert!(repl.line_continues());
+        repl.process_line("b");
+        assert!(repl.line_continues());
+        repl.process_line("c");
+        assert!(repl.line_continues());
+        repl.process_line("\"");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+    }
+
+    #[test]
+    fn multiline_comment() {
+        let mut repl = Repl::new();
+
+        repl.process_line("/* /* /* */ */ */");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+
+        repl.process_line("/*");
+        assert!(repl.line_continues());
+        repl.process_line("/*");
+        assert!(repl.line_continues());
+        repl.process_line("/*");
+        assert!(repl.line_continues());
+        repl.process_line("*/");
+        assert!(repl.line_continues());
+        repl.process_line("*/");
+        assert!(repl.line_continues());
+        repl.process_line("*/");
+        assert!(!repl.line_continues());
+        assert!(repl.exec_successful());
+        repl.process_line("*/");
+        assert!(!repl.exec_successful());
     }
 }
