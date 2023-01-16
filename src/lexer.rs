@@ -23,7 +23,7 @@ pub mod token;
 /// 
 /// For more control, see the [`Lexer`] struct.
 pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
-    let mut lx = Lexer::new(input);
+    let mut lx = Lexer::new(input, false);
     lx.lex()?;
     lx.close()
 }
@@ -64,6 +64,9 @@ pub enum LexErr {
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
 
+    /// There is still input to be lexed in the lexer
+    NotFullyLexed,
+
     /// Escape of the form '\x00' was invalid
     InvalidX,
 
@@ -94,6 +97,7 @@ impl GonErr for LexErr {
             LexErr::UnmatchedDelimiter  => String::from("delimiter was never opened"),
             LexErr::DelimiterClosedSemi => String::from("unexpected ';'"),
             LexErr::UnclosedComment     => String::from("comment was never terminated"),
+            LexErr::NotFullyLexed       => String::from("input not fully read"),
             LexErr::InvalidX            => String::from("invalid \\xXX escape"),
             LexErr::InvalidU            => String::from("invalid \\u{XXXX} escape"),
             LexErr::InvalidChar(c)      => format!("invalid char {:x}", c)
@@ -215,7 +219,12 @@ type LiteralCharResult<T> = Result<T, LCErr>;
 impl<'lx> LiteralBuffer<'lx> {
     /// Borrow the lexer to create a LiteralBuffer.
     fn new(lexer: &'lx mut Lexer, terminal: char) -> Self {
-        Self { lexer, terminal, buf: String::new() }
+        Self::new_with_buf(lexer, terminal, String::new())
+    }
+    
+    /// Borrow the lexer to create a LiteralBuffer, inputting a String into the output buffer.
+    fn new_with_buf(lexer: &'lx mut Lexer, terminal: char, buf: String) -> Self {
+        Self { lexer, terminal, buf }
     }
 
     /// Attempt to add characters to the buffer.
@@ -329,6 +338,29 @@ impl<'lx> LiteralBuffer<'lx> {
     }
 }
 
+// Used in REPL mode in order to hold tokens that are waiting for more input
+#[derive(PartialEq, Eq)]
+enum ReplMode {
+    /// Not in REPL mode
+    NotRepl,
+    /// Not awaiting for anything
+    NotPending,
+    /// Waiting for a string literal
+    String(String, char),
+    /// Waiting for a multiline comment
+    Comment(String)
+}
+impl ReplMode {
+    fn take(&mut self) -> Self {
+        let insert = match self {
+            ReplMode::NotRepl => ReplMode::NotRepl,
+            _ => ReplMode::NotPending
+        };
+
+        std::mem::replace(self, insert)
+    }
+}
+
 /// The struct does the full lexing process.
 pub struct Lexer {
     /// The tokens generated from the string.
@@ -345,11 +377,17 @@ pub struct Lexer {
     token_start: Cursor,
     /// The remaining characters in the buffer to be read.
     remaining: VecDeque<char>,
+
+    repl_mode: ReplMode
 }
 
 impl Lexer {
     /// Create a new lexer with an initial string input.
-    pub fn new(input: &str) -> Self {
+    /// 
+    /// The `repl_mode` parameter alters some parser functionality 
+    /// to better support the [REPL][`crate::interpreter::Repl`].
+    /// In particular, string literals and comments do not immediately error in REPL mode.
+    pub fn new(input: &str, repl_mode: bool) -> Self {
         Self {
             tokens: vec![],
             delimiters: vec![],
@@ -358,11 +396,22 @@ impl Lexer {
             token_start: (0, 0),
             _current: None,
             remaining: input.chars().collect(), 
+
+            repl_mode: if repl_mode { ReplMode::NotPending } else { ReplMode::NotRepl }
         }
     }
 
     /// Lex what is currently in the input.
     pub fn lex(&mut self) -> LexResult<()> {
+        // if in repl mode, divert normal lex process to finish unprocessed token
+        match self.repl_mode.take() {
+            ReplMode::NotRepl => {},
+            ReplMode::NotPending => {},
+            ReplMode::String(buf, qt) => self.push_str_with_buf(buf, qt)?,
+            ReplMode::Comment(buf) => self.push_multi_comment(buf)?,
+        }
+
+        // repeatedly check the next token type and consume
         while let Some(chr) = self.peek() {
             self.token_start = self.peek_cursor();
             let cls = CharClass::of_or_err(chr, self.token_start)?;
@@ -421,12 +470,24 @@ impl Lexer {
     /// 
     /// Lexer cannot be consumed if:
     /// - There are any unclosed delimiters.
+    /// - There is anything left in the buffers.
     /// 
     /// This is used by [`Repl`][`crate::interpreter::Repl`] 
     /// to determine whether or not the lexer should be preserved between lines.
     pub fn try_close(&self) -> LexResult<()> {
         if let Some((p, _)) = self.delimiters.last() {
             return Err(LexErr::UnclosedDelimiter.at(*p));
+        } 
+        
+        if !self.remaining.is_empty() {
+            return Err(LexErr::NotFullyLexed.at(self.cursor));
+        }
+        
+        match self.repl_mode {
+            | ReplMode::String(..)
+            | ReplMode::Comment(_) 
+            => return Err(LexErr::NotFullyLexed.at(self.cursor)),
+            _ => {}
         }
 
         Ok(())
@@ -504,6 +565,10 @@ impl Lexer {
         }
     }
 
+    fn in_repl_mode(&self) -> bool {
+        self.repl_mode != ReplMode::NotRepl
+    }
+
     /// Analyzes the next characters in the input as an identifier (e.g. abc, ade, aVariable, a123, a_).
     /// 
     /// This function consumes characters from the input and adds an identifier token in the output.
@@ -577,8 +642,11 @@ impl Lexer {
     fn push_str(&mut self) -> LexResult<()> {
         // UNWRAP: this should only be called if there's a quote character
         let qt = self.next().unwrap();
-        
-        let mut reader = LiteralBuffer::new(self, qt);
+        self.push_str_with_buf(String::new(), qt)
+    }
+
+    fn push_str_with_buf(&mut self, buf: String, qt: char) -> LexResult<()> {
+        let mut reader = LiteralBuffer::new_with_buf(self, qt, buf);
         let buf = loop {
             let chr_cursor = cur_shift(reader.cursor(), 1);
             match reader.try_add() {
@@ -586,7 +654,18 @@ impl Lexer {
                 Err(e) => Err(match e {
                     LCErr::HitTerminal => break reader.buf,
                     LCErr::HitEOF => {
-                        LexErr::UnclosedQuote.at_range(reader.cursor_range())
+                        // in REPL mode: save the buffer
+                        // not in REPL mode: error
+                        let range = reader.cursor_range();
+                        let buf = reader.buf;
+
+                        if self.in_repl_mode() {
+                            self.repl_mode = ReplMode::String(buf, qt);
+                            return Ok(());
+                        } else {
+                            // this is a return to assert that the HitEOF branch is !
+                            return Err(LexErr::UnclosedQuote.at_range(range));
+                        }
                     },
                     LCErr::InvalidX         => LexErr::InvalidX.at_range(chr_cursor..reader.cursor()),
                     LCErr::InvalidU         => LexErr::InvalidU.at_range(chr_cursor..reader.cursor()),
@@ -711,7 +790,7 @@ impl Lexer {
     /// `push_punct`'s leftover string buffer and characters in the input.
     /// 
     /// This function consumes characters from the input and adds a line comment 
-    /// (a comment that goes to the end of a line) to the output.
+    /// (`// a comment that goes to the end of a line`) to the output.
     fn push_line_comment(&mut self, mut buf: String) -> LexResult<()> {
         while let Some(chr) = self.next() {
             if chr == '\n' { break; }
@@ -727,7 +806,7 @@ impl Lexer {
     /// `push_punct`'s leftover string buffer and characters in the input.
     /// 
     /// This function consumes characters from the input and adds a multi-line comment 
-    /// (/* this kind of comment */) to the output.
+    /// (`/* this kind of comment */`) to the output.
     fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
         lazy_static! {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
@@ -769,9 +848,20 @@ impl Lexer {
                 }
             }
 
-            // if we got here, the entire string got consumed... 
+            // if we got here, the entire string got consumed...
             // and the comment is still open.
-            return Err(LexErr::UnclosedComment.at_range(self.token_start..=self.cursor));
+            if self.in_repl_mode() {
+                self.repl_mode = ReplMode::Comment(buf);
+
+                // get rid of all /* in delim stack except the first, to correct the buffer
+                if let Some(pos) = self.delimiters.iter().position(|&(_, dl)| dl == Delimiter::LComment) {
+                    self.delimiters.drain(pos + 1 ..);
+                }
+
+                return Ok(());
+            } else {
+                return Err(LexErr::UnclosedComment.at_range(self.token_start..=self.cursor));
+            }
         }
 
         // there is a */ remaining:

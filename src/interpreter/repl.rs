@@ -115,7 +115,7 @@ impl Repl<'_> {
             lx.append(&input);
             lx
         } else {
-            Lexer::new(line)
+            Lexer::new(line, true)
         };
 
         // Lex the current data in lexer, and check to make sure there's no syntax errors:
