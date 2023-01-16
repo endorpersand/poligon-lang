@@ -20,12 +20,46 @@ use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{self, PatErr};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
-/// This should be used for reading files.
+/// 
+/// For more control, see [`Parser`].
+/// 
+/// # Example
+/// ```
+/// use poligon_lang::lexer::tokenize;
+/// # use poligon_lang::parser::parse;
+/// use poligon_lang::ast::*;
+/// 
+/// let tokens = tokenize("hello;").unwrap();
+/// let program = parse(tokens).unwrap();
+/// assert_eq!(program, Program(vec![Stmt::Expr(Expr::Ident(String::from("hello")))]));
+/// ```
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens, false).parse()
 }
 
 /// A struct that does the conversion of tokens to a parseable program tree.
+/// 
+/// This struct uses some terminology in its function declarations:
+/// - For functions which "expect X," the next set of tokens should represent X, 
+/// otherwise the function errors.
+/// - For functions which "match X," if the next tokens represent X, those tokens are consumed,
+/// otherwise nothing occurs.
+/// 
+/// Additionally, functions which match an expression don't only match one type of expression, 
+/// but rather can match that one type of expression and expressions which take precedence
+/// (for example, [`match_addsub`][Parser::match_addsub] matches (`+`) and (`-`) expressions
+/// but also (`*`), (`/`), etc. expressions.)
+/// 
+/// # Example
+/// ```
+/// use poligon_lang::lexer::tokenize;
+/// # use poligon_lang::parser::Parser;
+/// use poligon_lang::ast::*;
+/// 
+/// let tokens = tokenize("hello;").unwrap();
+/// let program = Parser::new(tokens, false).parse().unwrap();
+/// assert_eq!(program, Program(vec![Stmt::Expr(Expr::Ident(String::from("hello")))]));
+/// ```
 pub struct Parser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
@@ -160,6 +194,27 @@ impl Parser {
     /// The `repl_mode` parameter alters some parser functionality 
     /// to better support the [REPL][`crate::interpreter::Repl`].
     /// In particular, semicolons are not required at the end of blocks.
+    /// 
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// # use poligon_lang::parser::Parser;
+    /// # use poligon_lang::ast::*;
+    /// #
+    /// # let result = Program(vec![
+    /// #     Stmt::Expr(Expr::Ident(String::from("hello")))
+    /// # ]);
+    /// 
+    /// // Not REPL mode
+    /// let tokens = tokenize("hello;").unwrap();
+    /// let program = Parser::new(tokens, false).parse().unwrap();
+    /// # assert_eq!(program, result);
+    /// 
+    /// // REPL mode
+    /// let tokens = tokenize("hello").unwrap();
+    /// let program = Parser::new(tokens, true).parse().unwrap();
+    /// # assert_eq!(program, result);
+    /// ```
     pub fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
@@ -175,7 +230,18 @@ impl Parser {
         Self { tokens, repl_mode, eof }
     }
 
-    /// Consumes the parser and converts the tokens into an AST.
+    /// Consumes the parser and converts the tokens into an [`ast::Program`].
+    /// 
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// # use poligon_lang::parser::Parser;
+    /// use poligon_lang::ast::*;
+    /// 
+    /// let tokens = tokenize("hello;").unwrap();
+    /// let program = Parser::new(tokens, false).parse().unwrap();
+    /// assert_eq!(program, Program(vec![Stmt::Expr(Expr::Ident(String::from("hello")))]));
+    /// ```
     pub fn parse(mut self) -> ParseResult<ast::Program> {
         let program = self.expect_stmts()?;
 
@@ -189,29 +255,22 @@ impl Parser {
         }
     }
 
-    // General terminology:
-    // "expect X": The next set of tokens must represent X, otherwise error.
-    // "match X": If the next set of tokens represent X, consume those tokens. 
-    //     Otherwise, do & return nothing.
-
-    /// Expect that the next token is in the specified list of tokens.
+    /// Expect that the next token in the input is in the specified token, 
+    /// erroring if the next token does not match.
     /// 
-    /// Return the next token if it is a token in the list, 
-    /// or error if the next token is not a token in the list.
-    // fn expect(&mut self, one_of: &[Token]) -> ParseResult<Token> {
-    //     if let Some(t) = self.tokens.pop_front() {
-    //         if one_of.contains(&t) {
-    //             return Ok(t)
-    //         }
-    //     }
-    
-    //     Err(ParseErr::ExpectedTokens(one_of.into()))
-    // }
-
-    /// Expect that the next token is in the specified token.
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
     /// 
-    /// Error if the next token is not the specified token.
-    fn expect1(&mut self, u: Token) -> ParseResult<()> {
+    /// let mut tokens = tokenize("return true && false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect1(token![return]).is_ok());
+    /// assert!(parser.expect1(token![true]).is_ok());
+    /// assert!(parser.expect1(token![||]).is_err());
+    /// ```
+    pub fn expect1(&mut self, u: Token) -> ParseResult<()> {
         if let Some(FullToken {tt: t, loc}) = self.tokens.pop_front() {
             if t == u {
                 Ok(())
@@ -223,24 +282,80 @@ impl Parser {
         }
     }
 
-    /// If the next token is in the specified list of tokens, 
-    /// consume the token from input and return it.
+    /// Expect that the next token in the input is in the specified list of tokens.
+    /// If it is, the token is returned, otherwise an error occurs.
     /// 
-    /// Return None if it is not in the specified list of tokens.
-    fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
-        match self.peek_token() {
-            Some(t) if one_of.contains(t) => self.tokens.pop_front(),
-            _ => None,
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true + false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect1(token![return]).is_ok());
+    /// assert_eq!(parser.expect_n(&[token![true], token![false]]).unwrap(), token![true]);
+    /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
+    /// ```
+    pub fn expect_n(&mut self, one_of: &[Token]) -> ParseResult<FullToken> {
+        if let Some(ft) = self.tokens.pop_front() {
+            if one_of.contains(&ft.tt) {
+                Ok(ft)
+            } else {
+                Err(ParseErr::ExpectedTokens(vec![ft.tt]).at_range(ft.loc))
+            }
+        } else {
+            Err(ParseErr::ExpectedTokens(one_of.into()).at(self.eof))
         }
     }
 
-    /// Return whether the next token matches the specified token, 
-    /// and consume the token from input if it does.
-    fn match1(&mut self, u: Token) -> bool {
+    /// Test whether the next token in the input matches the specified token,
+    /// and consume the token if it does.
+    /// 
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(!parser.match1(token![break]));
+    /// assert!(!parser.match1(token![continue]));
+    /// assert!(parser.match1(token![return]));
+    /// assert!(parser.match1(token![true]));
+    /// ```
+    pub fn match1(&mut self, u: Token) -> bool {
         match self.peek_token() {
             Some(t) if t == &u => self.tokens.pop_front(),
             _ => None,
         }.is_some()
+    }
+
+    /// Check whether the next token in the input is in the specified list of tokens, 
+    /// consuming and returning the token if it is.
+    /// 
+    /// # Example
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true + false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert_eq!(
+    ///     parser.match_n(&[token![break], token![continue], token![return]]).unwrap(), 
+    ///     token![return]
+    /// );
+    /// assert!(parser.match1(token![true]));
+    /// assert_eq!(parser.match_n(&[token![&&], token![||]]), None);
+    /// assert_eq!(parser.match_n(&[token![+], token![-]]).unwrap(), token![+]);
+    /// ```
+    pub fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
+        match self.peek_token() {
+            Some(t) if one_of.contains(t) => self.tokens.pop_front(),
+            _ => None,
+        }
     }
 
     /// Match a left angle bracket in type expressions (`<`). 

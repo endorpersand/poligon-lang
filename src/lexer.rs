@@ -388,7 +388,7 @@ impl ReplMode {
 /// let code = "a + b + c + d";
 /// 
 /// let mut lx = Lexer::new(code, false);
-/// lx.lex().unwrap();
+/// assert!(lx.lex().is_ok());
 /// assert_eq!(lx.close().unwrap(), vec![
 ///     Token::Ident(String::from("a")),
 ///     token![+],
@@ -437,9 +437,9 @@ impl Lexer {
     /// 
     /// // REPL mode
     /// let mut lx = Lexer::new("/*", true);
-    /// lx.lex().unwrap();
+    /// assert!(lx.lex().is_ok());
     /// lx.append("*/");
-    /// lx.lex().unwrap();
+    /// assert!(lx.lex().is_ok());
     /// assert_eq!(lx.close().unwrap(), vec![Token::Comment(String::new(), false)]);
     /// ```
     pub fn new(input: &str, repl_mode: bool) -> Self {
@@ -464,7 +464,7 @@ impl Lexer {
     /// use poligon_lang::lexer::LexErr;
     /// 
     /// let mut lx = Lexer::new("abc", false);
-    /// lx.lex().unwrap();
+    /// assert!(lx.lex().is_ok());
     /// lx.append("}");
     /// assert_eq!(lx.lex().unwrap_err(), LexErr::UnmatchedDelimiter);
     /// ```
@@ -549,7 +549,7 @@ impl Lexer {
     /// let mut lx = Lexer::new("[ 1, 2, 3 ", false);
     /// 
     /// // lexes perfectly fine
-    /// lx.lex().unwrap();
+    /// assert!(lx.lex().is_ok());
     /// // cannot be closed
     /// assert_eq!(lx.try_close().unwrap_err(), LexErr::UnclosedDelimiter);
     /// ```
