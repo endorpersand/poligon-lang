@@ -729,7 +729,7 @@ impl Lexer {
             static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
         }
 
-        // since it is not possible to get \n from anything here it is safe to use in this function only
+        // is used in this function only, because the uses here are ensured not to run into \n
         fn cur_shift_back((lno, cno): Cursor, chars: usize) -> Cursor {
             (lno, cno - chars)
         }

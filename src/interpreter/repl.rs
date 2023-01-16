@@ -1,6 +1,6 @@
 use crate::FullGonErr;
 use crate::lexer::Lexer;
-use crate::parser::parse_repl;
+use crate::parser::Parser;
 use super::runtime::BlockContext;
 
 /// Read-eval-print loop
@@ -8,7 +8,21 @@ use super::runtime::BlockContext;
 /// This REPL is a command-line utility that can read individual lines ([`process_line`]),
 /// execute them, and print out their value.
 /// 
-/// TODO! code 
+/// A very simple REPL implementation (and almost how the REPL is implemented) can be done as so:
+/// ```no_run
+/// # use poligon_lang::interpreter::Repl;
+/// use std::io::{self, stdin, BufRead};
+/// 
+/// fn main() -> io::Result<()> {
+///     let mut repl = Repl::new();
+///     
+///     for line in stdin().lock().lines() {
+///         repl.process_line(&line?);
+///     }
+/// 
+///     Ok(())
+/// }
+/// ```
 /// 
 /// [`process_line`]: Repl::process_line
 pub struct Repl<'ctx> {
@@ -19,24 +33,58 @@ pub struct Repl<'ctx> {
 
 impl Repl<'_> {
     /// Create a new instance of the REPL.
+    /// 
+    /// ```
+    /// # use poligon_lang::interpreter::Repl;
+    /// 
+    /// let mut repl = Repl::new();
+    /// repl.process_line("1 + 2"); // prints 3
+    /// repl.process_line("2 + 3"); // prints 5
+    /// repl.process_line("3 + 4"); // prints 7
+    /// ```
     pub fn new() -> Self {
         Self { lexer: None, ctx: BlockContext::new(), code: String::new() }
     }
 
-    /// Test if the previous input is awaiting another line.
+    /// Test if the current input spans more than one line.
     /// 
-    /// If true, this input is awaiting another line.
-    /// If false, [`process_line`] will start executing from a new line.
+    /// ```
+    /// # use poligon_lang::interpreter::Repl;
     /// 
-    /// [`process_line`]: Repl::process_line
+    /// let mut repl = Repl::new();
+    /// repl.process_line("1 + 2");
+    /// assert_eq!(repl.line_continues(), false);
+    /// 
+    /// repl.process_line("[");
+    /// assert_eq!(repl.line_continues(), true);
+    /// repl.process_line("1, 2, 3, 4");
+    /// assert_eq!(repl.line_continues(), true);
+    /// repl.process_line("]");
+    /// assert_eq!(repl.line_continues(), false);
+    /// ```
     pub fn line_continues(&self) -> bool {
         self.lexer.is_some()
     }
 
     /// Execute the line given.
     /// 
-    /// If the line has an unclosed delimiter, then the REPL will wait 
-    /// until the delimiter is closed to execute the line.
+    /// Typically, this will parse the line in full and execute it.
+    /// However, in situations with unclosed delimiters, the REPL may wait for more lines
+    /// so that the delimiter can be closed.
+    /// 
+    /// ```
+    /// # use poligon_lang::interpreter::Repl;
+    /// 
+    /// let mut repl = Repl::new();
+    /// 
+    /// repl.process_line("1 + 2 + 3"); // returns 6
+    /// 
+    /// repl.process_line("let a = 1"); // returns void
+    /// 
+    /// repl.process_line("[");
+    /// repl.process_line("a, a, a, a");
+    /// repl.process_line("]"); // returns [1, 1, 1, 1]
+    /// ```
     pub fn process_line(&mut self, line: &str) {
         // If lexer exists, then the previous line is continues onto this line:
 
@@ -81,7 +129,7 @@ impl Repl<'_> {
 
         // if we got here, we should be able to close:
         let tokens = consume_err! { lx.close() };
-        let tree   = consume_err! { parse_repl(tokens) };
+        let tree   = consume_err! { Parser::new(tokens, true).parse() };
         let result = consume_err! { tree.run_with_ctx(&mut self.ctx) };
 
         // success!

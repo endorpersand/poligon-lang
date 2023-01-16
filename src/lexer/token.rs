@@ -23,9 +23,13 @@ pub enum Token {
     Char(char), // 'a'
 
     /// A comment (e.g. `// text`, `/* text */`)
+    /// 
+    /// The second parameter indicates if the comment is multiline.
     Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
     
-    /// Keywords (e.g. `let`, `const`, `fun`). These cannot be identifiers in any circumstance.
+    /// Keywords (e.g. `let`, `const`, `fun`). 
+    /// 
+    /// These cannot be identifiers in any circumstance.
     Keyword(Keyword),
 
     /// Operators (e.g. `+`, `-`, `/`)
@@ -38,7 +42,7 @@ pub enum Token {
     LineSep
 }
 
-/// A token with position information
+/// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
     pub(crate) loc: RangeInclusive<(usize, usize)>,
@@ -46,7 +50,7 @@ pub struct FullToken {
 }
 
 impl FullToken {
-    /// Create a FullToken using a token and its given position
+    /// Create a FullToken using a token and its given position.
     pub fn new(tt: Token, loc: RangeInclusive<(usize, usize)>) -> Self {
         Self { loc, tt }
     }
@@ -74,9 +78,8 @@ macro_rules! define_keywords {
         }
 
         impl Keyword {
-            /// If the string is a keyword, return the Token it represents.
-            /// 
-            /// Else, return None
+            /// If the string is a keyword, return the `Token` it represents 
+            /// or `None` if it does not represent a token.
             pub fn get_kw(s: &str) -> Option<Token> {
                 match s {
                     $(
@@ -102,7 +105,7 @@ macro_rules! define_operators_and_delimiters {
         operators: {$($id:ident: $ex:literal),*},
         delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
     ) => {
-        /// Enum that provides all the defined Poligon operators
+        /// The defined Poligon operators.
         #[derive(PartialEq, Eq, Debug, Clone)]
         pub enum Operator {
             $(
@@ -118,7 +121,7 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
-        /// Enum that provides all the defined Poligon delimiters (`()`, `[]`, etc.)
+        /// The defined Poligon delimiters (`()`, `[]`, etc.).
         #[derive(PartialEq, Eq, Debug, Clone, Copy)]
         pub enum Delimiter {
             $(
@@ -128,8 +131,8 @@ macro_rules! define_operators_and_delimiters {
         }
 
         impl Delimiter {
-            /// If this delimiter is a left variant, get the corresponding right variant.
-            /// If this delimiter is a right variant, get the corresponding left variant.
+            /// "Reverses" the bracket, providing the left variant if given the right and
+            /// the right variant if given the left.
             pub fn reversed(&self) -> Self {
                 match self {
                     $(Self::$idl => Self::$idr),+,
@@ -137,7 +140,7 @@ macro_rules! define_operators_and_delimiters {
                 }
             }
 
-            /// Check that this variant is the right variant.
+            /// Test if this variant is a right bracket.
             pub fn is_right(&self) -> bool {
                 match self {
                     $(Self::$idl => false),+,

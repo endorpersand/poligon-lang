@@ -42,7 +42,7 @@ impl Interpreter {
     /// 
     /// ```
     /// # use poligon_lang::Interpreter;
-    /// 
+    /// #
     /// let interpreter = Interpreter::from_string("
     ///     for i in 1..10 {
     ///         print(i);
@@ -66,6 +66,8 @@ impl Interpreter {
     /// fn main() -> io::Result<()> {
     ///     let interpreter = Interpreter::from_file("foo.gon")?;
     ///     println!("{:?}", interpreter.run().unwrap());
+    /// 
+    ///     Ok(())
     /// }
     /// ```
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {

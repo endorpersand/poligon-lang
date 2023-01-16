@@ -7,7 +7,6 @@
 //! 
 //! This module provides:
 //! - [`parse`]: A function to parse [a list of lexed tokens][`crate::lexer`] into an AST.
-//! - [`parse_repl`]: Similar to `parse`, but adjusted for [`Repl`][`crate::interpreter::Repl`] use.
 //! - [`Parser`]: The struct that does all the parsing.
 
 use lazy_static::lazy_static;
@@ -22,24 +21,11 @@ use crate::ast::{self, PatErr};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// This should be used for reading files.
-/// 
-/// The difference between this function and [`parse_repl`] is that
-/// this function does not allow semicolons to be omitted at the end of blocks.
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens, false).parse()
 }
-/// Parses a sequence of tokens to a parseable program tree.
-/// This should be used for a REPL.
-/// 
-/// The difference between this function and [`parse`] is that
-/// this function allows semicolons to be omitted at the end of blocks.
-pub fn parse_repl(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
-    Parser::new(tokens, true).parse()
-}
 
 /// A struct that does the conversion of tokens to a parseable program tree.
-/// 
-/// 
 pub struct Parser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
@@ -171,8 +157,9 @@ fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T
 impl Parser {
     /// Create a new Parser to read a given set of tokens.
     /// 
-    /// The `repl_mode` parameter indicates whether or not the final semicolon in blocks is necessary.
-    /// See [`parse`] and [`parse_repl`] for more details.
+    /// The `repl_mode` parameter alters some parser functionality 
+    /// to better support the [REPL][`crate::interpreter::Repl`].
+    /// In particular, semicolons are not required at the end of blocks.
     pub fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
