@@ -31,52 +31,6 @@ mod repl;
 /// through a traversal sequence and runtime processed through Rust's runtime.
 /// 
 /// As such, this struct may be more limited than the [compiler][crate::compiler] form.
-/// 
-/// # Usage
-/// 
-/// The Interpreter struct is a useful 
-/// for performing operations from a string.
-/// 
-/// It can lex from a string:
-/// ```
-/// use poligon_lang::Interpreter;
-/// use poligon_lang::lexer::token::{Token, token};
-/// 
-/// let interpreter = Interpreter::from_string("print(0);");
-/// assert_eq!(interpreter.lex().unwrap(), vec![
-///     Token::Ident(String::from("print")),
-///     token!["("],
-///     Token::Numeric(String::from("0")),
-///     token![")"],
-///     token![;]
-/// ]);
-/// ```
-/// 
-/// It can parse from a string:
-/// ```
-/// # use poligon_lang::Interpreter;
-/// use poligon_lang::ast::*;
-/// 
-/// # let interpreter = Interpreter::from_string("print(0);");
-/// assert_eq!(interpreter.parse().unwrap(), Program(Block(vec![
-///     Stmt::Expr(Expr::Call {
-///         funct: Box::new(Expr::Ident(String::from("print"))),
-///         params: vec![
-///             Expr::Literal(Literal::Int(0))
-///         ]
-///     })
-/// ])));
-/// ```
-/// 
-/// And it can also execute from a string:
-/// ```
-/// # use poligon_lang::Interpreter;
-/// use poligon_lang::interpreter::runtime::Value;
-/// 
-/// # let interpreter = Interpreter::from_string("print(0);");
-/// // prints 0
-/// assert_eq!(interpreter.run().unwrap(), Value::Unit);
-/// ```
 pub struct Interpreter {
     source: String
 }
@@ -84,25 +38,80 @@ pub struct Interpreter {
 type InterpretResult<T> = Result<T, String>;
 
 impl Interpreter {
-    /// Create an interpreter from a string
+    /// Create an interpreter from a string.
+    /// 
+    /// ```
+    /// # use poligon_lang::Interpreter;
+    /// 
+    /// let interpreter = Interpreter::from_string("
+    ///     for i in 1..10 {
+    ///         print(i);
+    ///     }
+    /// ");
+    /// 
+    /// interpreter.run().unwrap();
+    /// ```
     pub fn from_string(s: &str) -> Self {
         Self {
             source: String::from(s)
         }
     }
 
-    /// Read the text from a file and create an interpreter out of it if successfully read
+    /// Read the text from a file and create an interpreter out of it if successfully read.
+    /// 
+    /// ```no_run
+    /// use poligon_lang::Interpreter;
+    /// use std::io;
+    /// 
+    /// fn main() -> io::Result<()> {
+    ///     let interpreter = Interpreter::from_file("foo.gon")?;
+    ///     println!("{:?}", interpreter.run().unwrap());
+    /// }
+    /// ```
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
         fs::read_to_string(fp).map(|source| Self { source })
     }
 
     /// Lex the source string.
+    /// 
+    /// # Usage
+    /// ```
+    /// # use poligon_lang::Interpreter;
+    /// use poligon_lang::lexer::token::{Token, token};
+    /// 
+    /// let interpreter = Interpreter::from_string("print(0);");
+    /// 
+    /// assert_eq!(interpreter.lex().unwrap(), vec![
+    ///     Token::Ident(String::from("print")),
+    ///     token!["("],
+    ///     Token::Numeric(String::from("0")),
+    ///     token![")"],
+    ///     token![;]
+    /// ]);
+    /// ```
     pub fn lex(&self) -> InterpretResult<Vec<lexer::token::FullToken>> {
         lexer::tokenize(&self.source)
             .map_err(|err| err.full_msg(&self.source))
     }
 
     /// Parse the source string.
+    /// 
+    /// # Usage
+    /// ```
+    /// # use poligon_lang::Interpreter;
+    /// use poligon_lang::ast::*;
+    /// 
+    /// let interpreter = Interpreter::from_string("print(0);");
+    /// 
+    /// assert_eq!(interpreter.parse().unwrap(), Program(vec![
+    ///     Stmt::Expr(Expr::Call {
+    ///         funct: Box::new(Expr::Ident(String::from("print"))),
+    ///         params: vec![
+    ///             Expr::Literal(Literal::Int(0))
+    ///         ]
+    ///     })
+    /// ]));
+    /// ```
     pub fn parse(&self) -> InterpretResult<ast::Program> {
         let lexed = self.lex()?;
 
@@ -111,6 +120,17 @@ impl Interpreter {
     }
 
     /// Execute the source string.
+    /// 
+    /// # Usage
+    /// ```
+    /// # use poligon_lang::Interpreter;
+    /// use poligon_lang::interpreter::runtime::Value;
+    /// 
+    /// let interpreter = Interpreter::from_string("2 - 2;");
+    /// 
+    /// // prints 0
+    /// assert_eq!(interpreter.run().unwrap(), Value::Int(0));
+    /// ```
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
         
