@@ -30,6 +30,7 @@ use inkwell::support::LLVMString;
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
 
 use crate::ast::{op, Literal};
+use crate::err::GonErr;
 
 pub use self::value::*;
 use self::value::apply_bv;
@@ -55,7 +56,7 @@ impl<'ctx> Compiler<'ctx> {
             vars: HashMap::new()
         }
     }
-
+    
     /// Compiles a program, executes it JIT, and returns the resulting value.
     /// 
     /// # Safety
@@ -235,6 +236,47 @@ pub enum CompileErr {
 }
 /// A [`Result`] type for operations in compilation to LLVM.
 pub type CompileResult<T> = Result<T, CompileErr>;
+
+impl GonErr for CompileErr {
+    fn err_name(&self) -> &'static str {
+        match self {
+            | CompileErr::UndefinedVar(_)
+            | CompileErr::UndefinedFun(_)
+            => "name error",
+
+            | CompileErr::WrongArity(_, _)
+            => "value error",
+
+            | CompileErr::InvalidFun
+            | CompileErr::CannotDetermineMain
+            => "syntax error",
+
+            CompileErr::UnresolvedType(_) => todo!(),
+            | CompileErr::CannotUnary(_, _)
+            | CompileErr::CannotBinary(_, _, _)
+            | CompileErr::CannotCmp(_, _, _)
+            => "type error",
+            
+            | CompileErr::LLVMErr(_) 
+            => "llvm error",
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            Self::UndefinedFun(name) => format!("could not find function '{name}'"),
+            Self::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
+            Self::InvalidFun => String::from("could not create function"),
+            Self::UnresolvedType(t) => format!("'{t}' is missing an LLVM representation"),
+            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
+            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
+            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
+            Self::CannotDetermineMain => String::from("could not determine entry point"),
+            Self::LLVMErr(e) => format!("{e}"),
+        }
+    }
+}
 
 /// This trait is implemented for values that can be traversed in order to 
 /// create an LLVM representation or write values into the compiler.

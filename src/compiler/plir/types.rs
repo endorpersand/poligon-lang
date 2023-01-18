@@ -1,4 +1,5 @@
 use crate::ast::{op, self};
+use crate::err::GonErr;
 
 use super::{Split, Expr, ExprType};
 
@@ -23,6 +24,28 @@ pub enum OpErr {
     InvalidSplit(Type, Split)
 }
 
+impl GonErr for OpErr {
+    fn err_name(&self) -> &'static str {
+        "type error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+            Self::CannotIndex(t1) => format!("cannot index {t1}"),
+            Self::CannotIndexWith(t1, t2) => format!("cannot index {t1} with {t2}"),
+            Self::TupleIndexNonLiteral(t) => format!("cannot index type '{t}' with a non-literal"),
+            Self::TupleIndexOOB(t, i) => format!("index out of bounds: {t}[{i}]"),
+            Self::InvalidSplit(t, s) => format!("cannot index: {t}~[{}]", match s {
+                Split::Left(l) => format!("{l}"),
+                Split::Middle(l, r) => format!("{l}..-{r}"),
+                Split::Right(r) => format!("{r}")
+            }),
+        }
+    }
+}
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].

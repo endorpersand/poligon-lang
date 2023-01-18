@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{self, ReasgType, MutType};
+use crate::err::GonErr;
 
 use super::plir;
 
@@ -64,6 +65,43 @@ pub type PLIRResult<T> = Result<T, PLIRErr>;
 impl From<plir::OpErr> for PLIRErr {
     fn from(err: plir::OpErr) -> Self {
         Self::OpErr(err)
+    }
+}
+
+impl GonErr for PLIRErr {
+    fn err_name(&self) -> &'static str {
+        match self {
+            | PLIRErr::CannotBreak
+            | PLIRErr::CannotContinue
+            | PLIRErr::CannotReturn 
+            | PLIRErr::CannotSpread
+            => "syntax error",
+            
+            | PLIRErr::ExpectedType(_, _)
+            | PLIRErr::CannotResolveType
+            | PLIRErr::CannotCall(_)
+            => "type error",
+            
+            | PLIRErr::UndefinedVar(_)
+            => "name error",
+            
+            |PLIRErr::OpErr(e)
+            => e.err_name(),
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            PLIRErr::CannotBreak => String::from("cannot 'break' here"),
+            PLIRErr::CannotContinue => String::from("cannot 'continue' here"),
+            PLIRErr::CannotReturn => String::from("cannot 'return' here"),
+            PLIRErr::ExpectedType(e, f) => format!("expected type '{e}', but got '{f}'"),
+            PLIRErr::CannotResolveType => String::from("cannot determine type"),
+            PLIRErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
+            PLIRErr::CannotSpread => String::from("cannot spread here"),
+            PLIRErr::OpErr(e) => e.message(),
+        }
     }
 }
 
