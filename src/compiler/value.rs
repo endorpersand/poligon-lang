@@ -1,7 +1,8 @@
 mod op_impl;
+mod internals;
 
 use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType};
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, ArrayValue, BasicMetadataValueEnum};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue};
 
 use super::Compiler;
 use super::plir;
@@ -50,8 +51,8 @@ pub enum GonValue<'ctx> {
     /// A `bool`.
     Bool(IntValue<'ctx> /* i1 */),
     /// A `string`.
-    Str(ArrayValue<'ctx> /* [n x i8] */),
-    /// A `void`. 
+    Str(StructValue<'ctx> /* internals::string_type */),
+    /// `void`. 
     /// 
     /// This can either be represented 
     /// as `void` or `()` depending 
@@ -82,7 +83,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Float(_) => TypeLayout::Float,
             GonValue::Int(_)   => TypeLayout::Int,
             GonValue::Bool(_)  => TypeLayout::Bool,
-            GonValue::Str(a)   => TypeLayout::Str(Some(a.get_type().len())),
+            GonValue::Str(_)   => TypeLayout::Str,
             GonValue::Unit     => TypeLayout::Unit,
         }
     }
@@ -107,10 +108,23 @@ impl<'ctx> GonValue<'ctx> {
 
         let bytes: Vec<_> = s.as_bytes().iter()
             .copied()
-            .chain(std::iter::once(0))
+            .chain(std::iter::once(0)) // null terminated string for C
             .map(|byte| c.ctx.i8_type().const_int(byte as u64, false))
             .collect();
-        Self::Str(c.ctx.i8_type().const_array(&bytes))
+        let len = bytes.len();
+        
+        let array = c.ctx.i8_type().const_array(&bytes);
+        
+        let ptr = c.builder.build_bitcast(
+            array, 
+            c.ctx.i8_type().ptr_type(Default::default()), 
+            "strptr"
+        );
+        
+        Self::Str(c.string_type().const_named_struct(&[
+            ptr.into(),
+            c.ctx.i64_type().const_int(len as u64, true).into()
+        ]))
     }
 
     /// Produce a basic LLVM value for this `GonValue`.
@@ -123,31 +137,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Int(i)   => i.as_basic_value_enum(),
             GonValue::Bool(b)  => b.as_basic_value_enum(),
             GonValue::Str(s)   => s.as_basic_value_enum(),
-            GonValue::Unit     => c.ctx.struct_type(&[], true).const_zero().as_basic_value_enum(),
-        }
-    }
-
-    /// Produce a basic LLVM value for this `GonValue`.
-    /// 
-    /// This should be used instead of [`GonValue::basic_value`]
-    /// when the value is being inserted into a function call.
-    pub fn param_value(self, c: &mut Compiler<'ctx>) -> BasicMetadataValueEnum<'ctx> {
-        match self {
-            GonValue::Str(_) => {
-                // HACK: Forgive me father, for I have sinned.
-
-                // Okay, now seriously,
-                // All str parameters should be i8*, so any str values (which are of the type [n x i8])
-                // need to be converted to i8*, which can be done through GEP.
-                // That being said, there's a definitely a better way than storing a new pointer every time.
-
-                let ptr = c.alloca_and_store("str", self);
-                let zero = c.ctx.i32_type().const_zero();
-                unsafe {
-                    c.builder.build_in_bounds_gep(ptr, &[zero, zero], "gep").into()
-                }
-            },
-            val => val.basic_value(c).into()
+            GonValue::Unit     => c.ctx.const_struct(&[], true).as_basic_value_enum(),
         }
     }
 
@@ -170,7 +160,7 @@ impl<'ctx> GonValue<'ctx> {
             plir::TypeRef::Prim(plir::Type::S_INT)   => Self::Int(v.into_int_value()),
             plir::TypeRef::Prim(plir::Type::S_BOOL)  => Self::Bool(v.into_int_value()),
             plir::TypeRef::Prim(plir::Type::S_VOID)  => Self::Unit,
-            plir::TypeRef::Prim(plir::Type::S_STR)   => Self::Str(v.into_array_value()),
+            plir::TypeRef::Prim(plir::Type::S_STR)   => Self::Str(v.into_struct_value()),
             // TODO: not panic
             _ => panic!("Cannot reconstruct value from type")
         }
@@ -202,8 +192,14 @@ pub enum TypeLayout {
     Unit, 
     /// The fixed string format.
     /// 
-    /// This is formatted as a fixed array of chars (`[n x i8]`) or a char pointer (`i8*`) in LLVM.
-    Str(Option<u32>)
+    /// This is formatted as the following struct in LLVM:
+    /// ```text
+    /// %string = {
+    ///     i8*,  ; buffer
+    ///     i64   ; length
+    /// }
+    /// ```
+    Str
 }
 
 impl TypeLayout {
@@ -215,7 +211,7 @@ impl TypeLayout {
                 plir::Type::S_INT   => Some(TypeLayout::Int),
                 plir::Type::S_BOOL  => Some(TypeLayout::Bool),
                 plir::Type::S_VOID  => Some(TypeLayout::Unit),
-                plir::Type::S_STR   => Some(TypeLayout::Str(None)),
+                plir::Type::S_STR   => Some(TypeLayout::Str),
                 _ => todo!("type layout of {ty}")
             },
             _ => todo!("type layout of {ty}")
@@ -227,13 +223,10 @@ impl TypeLayout {
     /// In certain contexts, [`TypeLayout::basic_type_or_void`] may be more applicable.
     pub fn basic_type<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
         match self {
-            TypeLayout::Float     => c.ctx.f64_type().into(),
-            TypeLayout::Int       => c.ctx.i64_type().into(),
-            TypeLayout::Bool      => c.ctx.bool_type().into(),
-            TypeLayout::Str(mlen) => match mlen.as_ref() {
-                Some(&len) => c.ctx.i8_type().array_type(len).into(), // [n x i8]
-                None => c.ctx.i8_type().ptr_type(Default::default()).into(), // *i8
-            },
+            TypeLayout::Float => c.ctx.f64_type().into(),
+            TypeLayout::Int   => c.ctx.i64_type().into(),
+            TypeLayout::Bool  => c.ctx.bool_type().into(),
+            TypeLayout::Str   => c.string_type().into(),
             TypeLayout::Unit => c.ctx.struct_type(&[], true).into(),
         }
     }

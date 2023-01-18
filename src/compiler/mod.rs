@@ -605,7 +605,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let expr_params = params.len();
                 if fun_params == expr_params {
                     let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| gv.param_value(compiler)))
+                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(compiler).into()))
                         .collect::<Result<_, _>>()?;
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
