@@ -12,12 +12,12 @@ use super::plir;
 macro_rules! apply_bv {
     (let $i:ident = $e:expr => $fn:expr) => {
         match $e {
-            BasicValueEnum::ArrayValue($i)   => $fn,
-            BasicValueEnum::IntValue($i)     => $fn,
-            BasicValueEnum::FloatValue($i)   => $fn,
-            BasicValueEnum::PointerValue($i) => $fn,
-            BasicValueEnum::StructValue($i)  => $fn,
-            BasicValueEnum::VectorValue($i)  => $fn,
+            inkwell::values::BasicValueEnum::ArrayValue($i)   => $fn,
+            inkwell::values::BasicValueEnum::IntValue($i)     => $fn,
+            inkwell::values::BasicValueEnum::FloatValue($i)   => $fn,
+            inkwell::values::BasicValueEnum::PointerValue($i) => $fn,
+            inkwell::values::BasicValueEnum::StructValue($i)  => $fn,
+            inkwell::values::BasicValueEnum::VectorValue($i)  => $fn,
         }
     }
 }
@@ -26,12 +26,12 @@ macro_rules! apply_bv {
 macro_rules! apply_bt {
     (let $i:ident = $e:expr => $fn:expr) => {
         match $e {
-            BasicTypeEnum::ArrayType($i)   => $fn,
-            BasicTypeEnum::IntType($i)     => $fn,
-            BasicTypeEnum::FloatType($i)   => $fn,
-            BasicTypeEnum::PointerType($i) => $fn,
-            BasicTypeEnum::StructType($i)  => $fn,
-            BasicTypeEnum::VectorType($i)  => $fn,
+            inkwell::types::BasicTypeEnum::ArrayType($i)   => $fn,
+            inkwell::types::BasicTypeEnum::IntType($i)     => $fn,
+            inkwell::types::BasicTypeEnum::FloatType($i)   => $fn,
+            inkwell::types::BasicTypeEnum::PointerType($i) => $fn,
+            inkwell::types::BasicTypeEnum::StructType($i)  => $fn,
+            inkwell::types::BasicTypeEnum::VectorType($i)  => $fn,
         }
     }
 }
@@ -114,17 +114,19 @@ impl<'ctx> GonValue<'ctx> {
         let len = bytes.len();
         
         let array = c.ctx.i8_type().const_array(&bytes);
-        
+        let array_ptr = c.builder.build_alloca(array.get_type(), "strstore");
+        c.builder.build_store(array_ptr, array);
+
         let ptr = c.builder.build_bitcast(
-            array, 
+            array_ptr, 
             c.ctx.i8_type().ptr_type(Default::default()), 
             "strptr"
         );
         
-        Self::Str(c.string_type().const_named_struct(&[
+        Self::Str(c.create_struct_value(c.string_type(), &[
             ptr.into(),
             c.ctx.i64_type().const_int(len as u64, true).into()
-        ]))
+        ]).unwrap())
     }
 
     /// Produce a basic LLVM value for this `GonValue`.
@@ -190,7 +192,7 @@ pub enum TypeLayout {
     /// 
     /// This is formatted as a `void` or `()` in LLVM.
     Unit, 
-    /// The fixed string format.
+    /// The string format.
     /// 
     /// This is formatted as the following struct in LLVM:
     /// ```text
@@ -199,7 +201,9 @@ pub enum TypeLayout {
     ///     i64   ; length
     /// }
     /// ```
-    Str
+    Str,
+
+    CharPtr
 }
 
 impl TypeLayout {
@@ -212,6 +216,7 @@ impl TypeLayout {
                 plir::Type::S_BOOL  => Some(TypeLayout::Bool),
                 plir::Type::S_VOID  => Some(TypeLayout::Unit),
                 plir::Type::S_STR   => Some(TypeLayout::Str),
+                "charptr" => Some(TypeLayout::CharPtr),
                 _ => todo!("type layout of {ty}")
             },
             _ => todo!("type layout of {ty}")
@@ -227,7 +232,8 @@ impl TypeLayout {
             TypeLayout::Int   => c.ctx.i64_type().into(),
             TypeLayout::Bool  => c.ctx.bool_type().into(),
             TypeLayout::Str   => c.string_type().into(),
-            TypeLayout::Unit => c.ctx.struct_type(&[], true).into(),
+            TypeLayout::Unit  => c.ctx.struct_type(&[], true).into(),
+            TypeLayout::CharPtr => c.ctx.i8_type().ptr_type(Default::default()).into(),
         }
     }
 

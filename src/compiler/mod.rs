@@ -18,7 +18,7 @@ pub mod codegen;
 pub mod plir;
 
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::CStr;
 use std::iter;
 
 use inkwell::OptimizationLevel;
@@ -27,15 +27,14 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum};
+use inkwell::types::StructType;
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
 
 pub use self::value::*;
 use self::value::apply_bv;
-
-use lazy_static::lazy_static;
 
 /// This struct converts from PLIR to LLVM.
 pub struct Compiler<'ctx> {
@@ -57,15 +56,18 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
     
-    /// Compiles a program, executes it JIT, and returns the resulting value.
+    pub fn get_module(&self) -> &Module<'ctx> {
+        &self.module
+    }
+
+    /// Executes a compiled program JIT, and returns the resulting value.
     /// 
     /// # Safety
     /// Currently, any type can be returned from this function. 
     /// Any calls to this function should ensure that the value returned in Poligon
     /// would align to the provided type in Rust.
     #[allow(unused)]
-    pub unsafe fn jit_compile<T>(&mut self, prog: plir::Program) -> CompileResult<T> {
-        let fun = self.compile(&prog)?;
+    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> CompileResult<T> {
         let fn_name = fun.get_name()
             .to_str()
             .unwrap();
@@ -193,6 +195,24 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_unconditional_branch(bb);
         self.builder.position_at_end(bb);
     }
+
+    pub fn create_struct_value(
+        &self, 
+        ty: StructType<'ctx>,
+        values: &[BasicValueEnum<'ctx>]
+    ) -> CompileResult<StructValue<'ctx>> {
+        let ptr = self.builder.build_alloca(ty, "struct");
+        let result = ty.const_zero();
+        self.builder.build_store(ptr, result);
+
+        for (i, &fval) in values.iter().enumerate() {
+            let field_ptr = self.builder.build_struct_gep(ptr, i as u32, "field")
+                .map_err(|_| CompileErr::StructIndexOOB(i))?;
+            self.builder.build_store(field_ptr, fval);
+        }
+        
+        Ok(self.builder.build_load(ptr, "struct_load").into_struct_value())
+    }
 }
 
 fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
@@ -232,7 +252,9 @@ pub enum CompileErr {
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
     /// An error occurred within LLVM.
-    LLVMErr(LLVMString)
+    LLVMErr(LLVMString),
+
+    StructIndexOOB(usize)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
 pub type CompileResult<T> = Result<T, CompileErr>;
@@ -255,6 +277,7 @@ impl GonErr for CompileErr {
             | CompileErr::CannotUnary(_, _)
             | CompileErr::CannotBinary(_, _, _)
             | CompileErr::CannotCmp(_, _, _)
+            | CompileErr::StructIndexOOB(_)
             => "type error",
             
             | CompileErr::LLVMErr(_) 
@@ -272,6 +295,7 @@ impl GonErr for CompileErr {
             Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
             Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
             Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
+            Self::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
             Self::CannotDetermineMain => String::from("could not determine entry point"),
             Self::LLVMErr(e) => format!("{e}"),
         }
@@ -319,8 +343,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// 2. If there is only one function, then that function is the program.
     /// 3. If there are any functions named main, then that function is the program.
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        lazy_static! {
-            static ref CS_MAIN: CString = CString::new("main").unwrap();
+        fn is_main(cs: &CStr) -> bool {
+            match cs.to_str() {
+                Ok(s) => s == "main",
+                Err(_) => false,
+            }
         }
 
         // split the functions from everything else:
@@ -330,7 +357,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         for stmt in &self.0 {
             match stmt {
                 plir::Stmt::FunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
-                plir::Stmt::ExternFunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
+                plir::Stmt::ExternFunDecl(dcl) => funs.push(import(compiler, dcl)?),
                 stmt => rest.push(stmt)
             }
         }
@@ -362,13 +389,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 
                 // the program is the "main" function in fun_decls
                 _ => {
-                    funs.into_iter().find(|f| f.get_name() == CS_MAIN.as_c_str())
+                    funs.into_iter().find(|f| is_main(f.get_name()))
                         .ok_or(CompileErr::CannotDetermineMain)
                 }
             }
         } else {
             // the program is the anonymous statements
-            if funs.iter().any(|f| f.get_name() == CS_MAIN.as_c_str()) {
+            if funs.iter().any(|f| is_main(f.get_name())) {
                 Err(CompileErr::CannotDetermineMain)
             } else {
                 let main = compiler.module.add_function(
@@ -430,7 +457,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 Ok(GonValue::Unit)
             },
             plir::Stmt::ExternFunDecl(fs) => {
-                fs.write_ir(compiler)?;
+                import(compiler, fs)?;
                 Ok(GonValue::Unit)
             },
             plir::Stmt::Expr(e) => {
@@ -688,23 +715,19 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunSignature { ident, params, ret } = self;
 
-        let arg_plir_tys: Vec<_> = params.iter()
-            .map(|p| &p.ty)
-            .collect();
-        let arg_llvm_tys: Vec<_> = arg_plir_tys.iter()
-            .map(|&ty| {
-                let layout = TypeLayout::of(ty)
-                    .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))?;
+        let arg_tys: Vec<_> = params.iter()
+            .map(|p| {
+                let layout = TypeLayout::of(&p.ty)
+                    .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
                 Ok(layout.basic_type(compiler).into())
             })
             .collect::<Result<_, _>>()?;
 
-        let ret_llvm_ty = TypeLayout::of(ret)
+        let ret_ty = TypeLayout::of(ret)
             .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
 
-        let fun_llvm_ty = ret_llvm_ty.fn_type(compiler, &arg_llvm_tys, false);
-
-        let fun = compiler.module.add_function(ident, fun_llvm_ty, None);
+        let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);
+        let fun = compiler.module.add_function(ident, fun_ty, None);
 
         // set arguments names
         for (param, arg) in iter::zip(params, fun.get_param_iter()) {
@@ -714,6 +737,27 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
         Ok(fun)
     }
 }
+
+// TODO: clean up
+fn import<'ctx>(compiler: &Compiler<'ctx>, sig: &plir::FunSignature) -> CompileResult<FunctionValue<'ctx>> {
+    let plir::FunSignature { ident, params, ret } = sig;
+
+    let arg_tys: Vec<_> = params.iter()
+        .map(|p| {
+            let layout = TypeLayout::of(&p.ty)
+                .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
+            Ok(layout.basic_type(compiler).into())
+        })
+        .collect::<Result<_, _>>()?;
+
+    let ret_ty = TypeLayout::of(ret)
+        .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
+
+    let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);
+
+    compiler.import_fun(ident, fun_ty)
+}
+
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     type Return = CompileResult<FunctionValue<'ctx>>;
 
@@ -739,6 +783,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         if fun.verify(true) {
             Ok(fun)
         } else {
+            println!();
+            println!("=== the module ===");
+            println!("{}", compiler.module.print_to_string().to_string());
             // SAFETY: Not used after.
             unsafe { fun.delete() }
             Err(CompileErr::InvalidFun)
@@ -817,8 +864,9 @@ mod tests {
         let lexed  = lexer::tokenize(input).unwrap();
         let parsed = parser::parse(lexed).unwrap();
         let plired = codegen::codegen(parsed).unwrap();
+        let fun = compiler.compile(&plired).unwrap();
 
-        unsafe { compiler.jit_compile::<T>(plired).unwrap() }
+        unsafe { compiler.jit_run::<T>(fun).unwrap() }
     }
 
     #[test]
@@ -1052,7 +1100,8 @@ mod tests {
         let lexed  = lexer::tokenize(&file("_test_files/lexical_scope_ll.gon")).unwrap();
         let parsed = parser::parse(lexed).unwrap();
         let plired = codegen::codegen(parsed).unwrap();
+        let main_fun = compiler.compile(&plired).unwrap();
 
-        unsafe { compiler.jit_compile::<bool>(plired).unwrap(); }
+        unsafe { compiler.jit_run::<bool>(main_fun).unwrap(); }
     }
 }

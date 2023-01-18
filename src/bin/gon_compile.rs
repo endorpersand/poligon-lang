@@ -1,7 +1,9 @@
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 use std::{io, fs};
 
 use inkwell::context::Context;
-use inkwell::values::AnyValue;
 use poligon_lang::compiler::{codegen, Compiler};
 use poligon_lang::{lexer, parser};
 use poligon_lang::err::FullGonErr;
@@ -13,7 +15,7 @@ fn main() -> io::Result<()> {
     match mfp {
         Some(fp) => {
             let code = fs::read_to_string(fp)?;
-            
+
             macro_rules! unwrap_or_exit {
                 ($r:expr) => {
                     match $r {
@@ -34,17 +36,15 @@ fn main() -> io::Result<()> {
             let mut compiler = Compiler::from_ctx(&ctx);
 
             let fun = unwrap_or_exit! { compiler.compile(&plir) };
-            println!("{}", fun.print_to_string().to_string());
-            // let ir = Interpreter::from_file(fp)?;
             
-            // match ir.run() {
-            //     Ok(_) => (),
-            //     Err(e) => {
-            //         eprintln!("{}", e);
-            //         std::process::exit(1);
-            //     },
-            // };
+            let path: &Path = fp.as_ref();
+            let mut path = path.to_owned();
+            path.set_extension("ll");
 
+            let mut f = File::create(path)?;
+            f.write(compiler.get_module().print_to_string().to_bytes())?;
+
+            unwrap_or_exit! { unsafe { compiler.jit_run::<()>(fun) } }
             Ok(())
         },
         None => panic!("Missing file"),
