@@ -203,9 +203,7 @@ pub enum TypeLayout {
     ///     i64   ; length
     /// }
     /// ```
-    Str,
-
-    CharPtr
+    Str
 }
 
 impl TypeLayout {
@@ -218,7 +216,6 @@ impl TypeLayout {
                 plir::Type::S_BOOL  => Some(TypeLayout::Bool),
                 plir::Type::S_VOID  => Some(TypeLayout::Unit),
                 plir::Type::S_STR   => Some(TypeLayout::Str),
-                "charptr" => Some(TypeLayout::CharPtr),
                 _ => todo!("type layout of {ty}")
             },
             _ => todo!("type layout of {ty}")
@@ -234,8 +231,7 @@ impl TypeLayout {
             TypeLayout::Int   => c.ctx.i64_type().into(),
             TypeLayout::Bool  => c.ctx.bool_type().into(),
             TypeLayout::Str   => c.string_type().into(),
-            TypeLayout::Unit  => c.ctx.struct_type(&[], true).into(),
-            TypeLayout::CharPtr => c.ctx.i8_type().ptr_type(Default::default()).into(),
+            TypeLayout::Unit  => c.ctx.struct_type(&[], true).into()
         }
     }
 
