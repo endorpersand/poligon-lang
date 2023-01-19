@@ -653,7 +653,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 })?; 
 
                 compiler.builder.position_at_end(exit_loop_bb);
-                Ok(GonValue::new_bool(compiler, true)) // TODO
+                Ok(compiler.new_bool(true)) // TODO
 
             },
             plir::ExprType::For { .. } => todo!(),
@@ -698,11 +698,11 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let value = match self {
-            Literal::Int(i)   => GonValue::new_int(compiler,   *i),
-            Literal::Float(f) => GonValue::new_float(compiler, *f),
+            Literal::Int(i)   => compiler.new_int(*i),
+            Literal::Float(f) => compiler.new_float(*f),
             Literal::Char(_)  => todo!("char literal"),
-            Literal::Str(s)   => GonValue::new_str(compiler, s),
-            Literal::Bool(b)  => GonValue::new_bool(compiler,  *b),
+            Literal::Str(s)   => compiler.new_str(s),
+            Literal::Bool(b)  => compiler.new_bool(*b),
         };
 
         Ok(value)

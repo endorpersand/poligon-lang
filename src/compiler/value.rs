@@ -60,6 +60,49 @@ pub enum GonValue<'ctx> {
     Unit,
 }
 
+impl<'ctx> Compiler<'ctx> {
+    /// Create a new int value using an int from Rust.
+    pub fn new_int(&self, v: isize) -> GonValue<'ctx> {
+        GonValue::Int(self.ctx.i64_type().const_int(v as u64, true))
+    }
+    /// Create a new bool value using a bool from Rust.
+    pub fn new_bool(&self, v: bool) -> GonValue<'ctx> {
+        GonValue::Bool(self.ctx.bool_type().const_int(v as u64, true))
+    }
+    /// Create a new float value using a float from Rust.
+    pub fn new_float(&self, f: f64) -> GonValue<'ctx> {
+        GonValue::Float(self.ctx.f64_type().const_float(f))
+    }
+    /// Create a new string value using a string slice from Rust.
+    pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
+        // todo: null-terminated fix
+        // todo: UTF-8 unicode support
+        // i love c
+
+        let bytes: Vec<_> = s.as_bytes().iter()
+            .copied()
+            .chain(std::iter::once(0)) // null terminated string for C
+            .map(|byte| self.ctx.i8_type().const_int(byte as u64, false))
+            .collect();
+        let len = bytes.len();
+        
+        let array = self.ctx.i8_type().const_array(&bytes);
+        let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
+        self.builder.build_store(array_ptr, array);
+
+        let ptr = self.builder.build_bitcast(
+            array_ptr, 
+            self.ctx.i8_type().ptr_type(Default::default()), 
+            "strptr"
+        );
+        
+        GonValue::Str(self.create_struct_value(self.string_type(), &[
+            ptr.into(),
+            self.ctx.i64_type().const_int(len as u64, true).into()
+        ]).unwrap())
+    }
+}
+
 impl<'ctx> GonValue<'ctx> {
     /// The PLIR type for this value.
     /// 
@@ -86,47 +129,6 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Str(_)   => TypeLayout::Str,
             GonValue::Unit     => TypeLayout::Unit,
         }
-    }
-
-    /// Create a new int value using an int in Rust.
-    pub fn new_int(c: &Compiler<'ctx>, v: isize) -> Self {
-        Self::Int(c.ctx.i64_type().const_int(v as u64, true))
-    }
-    /// Create a new bool value using a bool in Rust.
-    pub fn new_bool(c: &Compiler<'ctx>, v: bool) -> Self {
-        Self::Bool(c.ctx.bool_type().const_int(v as u64, true))
-    }
-    /// Create a new float value using a float in Rust.
-    pub fn new_float(c: &Compiler<'ctx>, f: f64) -> Self {
-        Self::Float(c.ctx.f64_type().const_float(f))
-    }
-    /// Create a new string value using a string slice in Rust.
-    pub fn new_str(c: &Compiler<'ctx>, s: &str) -> Self {
-        // todo: null-terminated fix
-        // todo: UTF-8 unicode support
-        // i love c
-
-        let bytes: Vec<_> = s.as_bytes().iter()
-            .copied()
-            .chain(std::iter::once(0)) // null terminated string for C
-            .map(|byte| c.ctx.i8_type().const_int(byte as u64, false))
-            .collect();
-        let len = bytes.len();
-        
-        let array = c.ctx.i8_type().const_array(&bytes);
-        let array_ptr = c.builder.build_alloca(array.get_type(), "strstore");
-        c.builder.build_store(array_ptr, array);
-
-        let ptr = c.builder.build_bitcast(
-            array_ptr, 
-            c.ctx.i8_type().ptr_type(Default::default()), 
-            "strptr"
-        );
-        
-        Self::Str(c.create_struct_value(c.string_type(), &[
-            ptr.into(),
-            c.ctx.i64_type().const_int(len as u64, true).into()
-        ]).unwrap())
     }
 
     /// Produce a basic LLVM value for this `GonValue`.
