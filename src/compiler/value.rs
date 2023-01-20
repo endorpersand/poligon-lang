@@ -76,17 +76,17 @@ impl<'ctx> Compiler<'ctx> {
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
         // todo: null-terminated fix
-        // todo: UTF-8 unicode support
         // i love c
 
-        let bytes: Vec<_> = s.as_bytes().iter()
-            .copied()
+        let bytes: Vec<_> = s.bytes()
             .chain(std::iter::once(0)) // null terminated string for C
             .map(|byte| self.ctx.i8_type().const_int(byte as u64, false))
             .collect();
         let len = bytes.len();
-        
+
+        // TODO: replace with const_string once that is fixed
         let array = self.ctx.i8_type().const_array(&bytes);
+
         let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
         self.builder.build_store(array_ptr, array);
 
