@@ -243,18 +243,12 @@ pub enum CompileErr<'ctx> {
     InvalidFun,
     /// The given PLIR type could not be resolved into a type in LLVM.
     UnresolvedType(plir::Type),
-    /// The unary operator cannot be applied to this type.
-    CannotUnary(op::Unary, TypeLayout),
-    /// The binary operator cannot be applied between these two types.
-    CannotBinary(op::Binary, TypeLayout, TypeLayout),
-    /// These two types can't be compared using the given operation.
-    CannotCmp(op::Cmp, TypeLayout, TypeLayout),
-    /// The unary operator cannot be applied to this type.
-    CannotUnary2(op::Unary, BasicTypeEnum<'ctx>),
-    /// The binary operator cannot be applied between these two types.
-    CannotBinary2(op::Binary, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
-    /// These two types can't be compared using the given operation.
-    CannotCmp2(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    /// The unary operator cannot be applied to this LLVM type.
+    CannotUnary(op::Unary, BasicTypeEnum<'ctx>),
+    /// The binary operator cannot be applied between these two LLVM types.
+    CannotBinary(op::Binary, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    /// These two LLVM types can't be compared using the given operation.
+    CannotCmp(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
     /// Cannot perform a type cast from A to B
     CannotCast(plir::Type, plir::Type),
     /// Endpoint for LLVM (main function) could not be resolved.
@@ -285,12 +279,9 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             | CompileErr::CannotUnary(_, _)
             | CompileErr::CannotBinary(_, _, _)
             | CompileErr::CannotCmp(_, _, _)
-            | CompileErr::CannotUnary2(_, _)
-            | CompileErr::CannotBinary2(_, _, _)
-            | CompileErr::CannotCmp2(_, _, _)
             | CompileErr::CannotCast(_, _)
             | CompileErr::StructIndexOOB(_)
-            => "type error",
+            => "llvm type error",
             
             | CompileErr::LLVMErr(_) 
             => "llvm error",
@@ -304,12 +295,9 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             Self::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
             Self::InvalidFun => String::from("could not create function"),
             Self::UnresolvedType(t) => format!("'{t}' is missing an LLVM representation"),
-            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
-            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
-            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
-            Self::CannotUnary2(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
-            Self::CannotBinary2(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
-            Self::CannotCmp2(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
+            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
             Self::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
             Self::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
             Self::CannotDetermineMain => String::from("could not determine entry point"),

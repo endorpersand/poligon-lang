@@ -67,13 +67,13 @@ impl <'ctx, T: TruthBool<'ctx>> Truth<'ctx> for T {
 }
 
 fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotUnary2(op, left.into().get_type()))
+    Err(CompileErr::CannotUnary(op, left.into().get_type()))
 }
 fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotBinary2(op, left.into().get_type(), right.into().get_type()))
+    Err(CompileErr::CannotBinary(op, left.into().get_type(), right.into().get_type()))
 }
 fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotCmp2(op, left.into().get_type(), right.into().get_type()))
+    Err(CompileErr::CannotCmp(op, left.into().get_type(), right.into().get_type()))
 }
 
 impl<'ctx> Compiler<'ctx> {
