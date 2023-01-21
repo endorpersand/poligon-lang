@@ -42,7 +42,7 @@ fn main() -> io::Result<()> {
             path.set_extension("ll");
 
             let mut f = File::create(path)?;
-            f.write(compiler.get_module().print_to_string().to_bytes())?;
+            f.write_all(compiler.get_module().print_to_string().to_bytes())?;
 
             unwrap_or_exit! { unsafe { compiler.jit_run::<()>(fun) } }
             Ok(())

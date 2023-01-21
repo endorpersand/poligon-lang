@@ -10,29 +10,29 @@ use crate::ast::op;
 use super::{GonValue, apply_bv};
 
 pub trait AsBV<'ctx> {
-    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>>;
+    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>>;
 }
 pub trait AsBVInfallible<'ctx> {
-    fn as_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx>;
+    fn into_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx>;
 }
 
 impl<'ctx, V: AsBVInfallible<'ctx>> AsBV<'ctx> for V {
-    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
-        Ok(self.as_bvi(c))
+    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+        Ok(self.into_bvi(c))
     }
 }
 impl<'ctx> AsBV<'ctx> for &plir::Expr {
-    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
-        c.compile(self).and_then(|gv| gv.as_bv(c))
+    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+        c.compile(self).and_then(|gv| gv.into_bv(c))
     }
 }
 impl<'ctx> AsBVInfallible<'ctx> for GonValue<'ctx> {
-    fn as_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx> {
+    fn into_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx> {
         self.basic_value(c)
     }
 }
 impl<'ctx> AsBVInfallible<'ctx> for BV<'ctx> {
-    fn as_bvi(self, _: &Compiler<'ctx>) -> BV<'ctx> {
+    fn into_bvi(self, _: &Compiler<'ctx>) -> BV<'ctx> {
         self
     }
 }
@@ -80,7 +80,7 @@ impl<'ctx> Compiler<'ctx> {
         left: T, 
         op: op::Unary
     ) -> <BV<'ctx> as Unary<'ctx>>::Output {
-        left.as_bv(self)?.apply_unary(op, self)
+        left.into_bv(self)?.apply_unary(op, self)
     }
 
     /// Create an instruction computing the binary operation on two values.
@@ -90,7 +90,7 @@ impl<'ctx> Compiler<'ctx> {
         op: op::Binary, 
         right: U
     ) -> <BV<'ctx> as Binary<'ctx, U>>::Output {
-        left.as_bv(self)?.apply_binary(op, right, self)
+        left.into_bv(self)?.apply_binary(op, right, self)
     }
 
     /// Create an instruction comparing two values.
@@ -100,12 +100,12 @@ impl<'ctx> Compiler<'ctx> {
         op: op::Cmp, 
         right: U
     ) -> <BV<'ctx> as Cmp<'ctx, U>>::Output {
-        left.as_bv(self)?.apply_cmp(op, right, self)
+        left.into_bv(self)?.apply_cmp(op, right, self)
     }
 
     /// Calculate the boolean value (the truth value) of some given value.
     pub(crate) fn truth<T: AsBVInfallible<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
-        left.as_bvi(self).truth(self)
+        left.into_bvi(self).truth(self)
     }
 
     pub(crate) fn raw_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
@@ -145,7 +145,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 c.builder.build_conditional_branch(self.truth(c), then_bb, merge_bb);
                 
                 c.builder.position_at_end(then_bb);
-                let rhs = right.as_bv(c)?;
+                let rhs = right.into_bv(c)?;
                 c.builder.build_unconditional_branch(merge_bb);
                 then_bb = c.builder.get_insert_block().unwrap();
 
@@ -171,7 +171,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 c.builder.build_conditional_branch(self.truth(c), merge_bb, else_bb);
                 
                 c.builder.position_at_end(else_bb);
-                let rhs = right.as_bv(c)?;
+                let rhs = right.into_bv(c)?;
                 c.builder.build_unconditional_branch(merge_bb);
                 else_bb = c.builder.get_insert_block().unwrap();
 
@@ -188,7 +188,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 Ok(phi.as_basic_value())
             },
             _ => {
-                let rhs = right.as_bv(c)?;
+                let rhs = right.into_bv(c)?;
                 
                 macro_rules! cast_rhs {
                     () => {{
@@ -215,7 +215,7 @@ impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
     type Output = CompileResult<'ctx, IntValue<'ctx>>;
 
     fn apply_cmp(self, op: op::Cmp, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
-        let rhs = right.as_bv(c)?;
+        let rhs = right.into_bv(c)?;
 
         macro_rules! cast_rhs {
             () => {{
