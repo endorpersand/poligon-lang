@@ -27,7 +27,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
-use inkwell::types::StructType;
+use inkwell::types::{StructType, BasicTypeEnum};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue};
 
 use crate::ast::{op, Literal};
@@ -67,7 +67,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Any calls to this function should ensure that the value returned in Poligon
     /// would align to the provided type in Rust.
     #[allow(unused)]
-    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> CompileResult<T> {
+    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, T> {
         let fn_name = fun.get_name()
             .to_str()
             .unwrap();
@@ -136,7 +136,7 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    fn get_val(&self, ident: &str, ty: &plir::Type) -> CompileResult<GonValue<'ctx>> {
+    fn get_val(&self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
                 let val = self.builder.build_load(ptr, "load");
@@ -167,7 +167,7 @@ impl<'ctx> Compiler<'ctx> {
     /// if this block exits with the `exit` statement.
     /// This is useful, for example, for adding an unconditional branch to an LLVM block
     /// but only if there was no return statement already emitted.
-    pub fn write_block<F>(&mut self, block: &plir::Block, close: F) -> CompileResult<GonValue<'ctx>>
+    pub fn write_block<F>(&mut self, block: &plir::Block, close: F) -> CompileResult<'ctx, GonValue<'ctx>>
         where F: FnOnce(&mut Self, GonValue<'ctx>)
     {
         match block.1.split_last() {
@@ -200,7 +200,7 @@ impl<'ctx> Compiler<'ctx> {
         &self, 
         ty: StructType<'ctx>,
         values: &[BasicValueEnum<'ctx>]
-    ) -> CompileResult<StructValue<'ctx>> {
+    ) -> CompileResult<'ctx, StructValue<'ctx>> {
         let ptr = self.builder.build_alloca(ty, "struct");
         let result = ty.const_zero();
         self.builder.build_store(ptr, result);
@@ -232,7 +232,7 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
 
 /// Errors that occur during compilation to LLVM.
 #[derive(Debug)]
-pub enum CompileErr {
+pub enum CompileErr<'ctx> {
     /// Variable was not declared.
     UndefinedVar(String),
     /// Function was not declared.
@@ -249,6 +249,12 @@ pub enum CompileErr {
     CannotBinary(op::Binary, TypeLayout, TypeLayout),
     /// These two types can't be compared using the given operation.
     CannotCmp(op::Cmp, TypeLayout, TypeLayout),
+    /// The unary operator cannot be applied to this type.
+    CannotUnary2(op::Unary, BasicTypeEnum<'ctx>),
+    /// The binary operator cannot be applied between these two types.
+    CannotBinary2(op::Binary, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    /// These two types can't be compared using the given operation.
+    CannotCmp2(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
     /// An error occurred within LLVM.
@@ -257,9 +263,9 @@ pub enum CompileErr {
     StructIndexOOB(usize)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
-pub type CompileResult<T> = Result<T, CompileErr>;
+pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
 
-impl GonErr for CompileErr {
+impl<'ctx> GonErr for CompileErr<'ctx> {
     fn err_name(&self) -> &'static str {
         match self {
             | CompileErr::UndefinedVar(_)
@@ -277,6 +283,9 @@ impl GonErr for CompileErr {
             | CompileErr::CannotUnary(_, _)
             | CompileErr::CannotBinary(_, _, _)
             | CompileErr::CannotCmp(_, _, _)
+            | CompileErr::CannotUnary2(_, _)
+            | CompileErr::CannotBinary2(_, _, _)
+            | CompileErr::CannotCmp2(_, _, _)
             | CompileErr::StructIndexOOB(_)
             => "type error",
             
@@ -295,6 +304,9 @@ impl GonErr for CompileErr {
             Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
             Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
             Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
+            Self::CannotUnary2(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
+            Self::CannotBinary2(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
+            Self::CannotCmp2(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
             Self::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
             Self::CannotDetermineMain => String::from("could not determine entry point"),
             Self::LLVMErr(e) => format!("{e}"),
@@ -329,7 +341,7 @@ pub trait TraverseIR<'ctx> {
 // }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = CompileResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
 
     /// To create a program from a script, we must determine the given `main` endpoint.
     /// 
@@ -423,7 +435,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
-    type Return = CompileResult<GonValue<'ctx>>;
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         match self {
@@ -468,7 +480,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Expr {
-    type Return = CompileResult<GonValue<'ctx>>;
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
@@ -515,13 +527,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     Some((&(tail_op, _), head)) => {
                         let first = compiler.apply_unary(&**expr, tail_op)?;
                         head.iter()
-                            .try_rfold(first, |e, &(op, _)| compiler.apply_unary(e, op))
+                            .try_rfold(first, |e, &(op, _)| compiler.raw_unary(e, op))
+                            .map(|bv| GonValue::reconstruct(expr_ty, bv))
                     },
                     None => expr.write_ir(compiler),
                 }
             },
             plir::ExprType::BinaryOp { op, left, right } => {
-                compiler.apply_binary(&**left, *op, &**right)
+                compiler.apply_binary(&**left, *op, &**right).map(|bv| GonValue::reconstruct(expr_ty, bv))
             },
             plir::ExprType::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
@@ -694,7 +707,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 }
 
 impl<'ctx> TraverseIR<'ctx> for Literal {
-    type Return = CompileResult<GonValue<'ctx>>;
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let value = match self {
@@ -710,7 +723,7 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
-    type Return = CompileResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunSignature { ident, params, ret } = self;
@@ -739,7 +752,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 }
 
 // TODO: clean up
-fn import<'ctx>(compiler: &Compiler<'ctx>, sig: &plir::FunSignature) -> CompileResult<FunctionValue<'ctx>> {
+fn import<'ctx>(compiler: &Compiler<'ctx>, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
     let plir::FunSignature { ident, params, ret } = sig;
 
     let arg_tys: Vec<_> = params.iter()
@@ -759,7 +772,7 @@ fn import<'ctx>(compiler: &Compiler<'ctx>, sig: &plir::FunSignature) -> CompileR
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
-    type Return = CompileResult<FunctionValue<'ctx>>;
+    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;

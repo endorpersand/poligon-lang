@@ -1,12 +1,41 @@
-use inkwell::values::{IntValue, FloatValue};
+use std::convert::Infallible;
+
+use inkwell::{FloatPredicate, IntPredicate};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
 use crate::compiler::plir;
-use crate::compiler::{Compiler, CompileResult, CompileErr, TraverseIR};
+use crate::compiler::{Compiler, CompileResult, CompileErr};
 use crate::ast::op;
 
-use self::internal::*;
+use super::{GonValue, apply_bv};
 
-use super::GonValue;
+pub trait AsBV<'ctx> {
+    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>>;
+}
+pub trait AsBVInfallible<'ctx> {
+    fn as_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx>;
+}
+
+impl<'ctx, V: AsBVInfallible<'ctx>> AsBV<'ctx> for V {
+    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+        Ok(self.as_bvi(c))
+    }
+}
+impl<'ctx> AsBV<'ctx> for &plir::Expr {
+    fn as_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+        c.compile(self).and_then(|gv| gv.as_bv(c))
+    }
+}
+impl<'ctx> AsBVInfallible<'ctx> for GonValue<'ctx> {
+    fn as_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx> {
+        self.basic_value(c)
+    }
+}
+impl<'ctx> AsBVInfallible<'ctx> for BV<'ctx> {
+    fn as_bvi(self, _: &Compiler<'ctx>) -> BV<'ctx> {
+        self
+    }
+}
 
 pub trait Unary<'ctx> {
     type Output;
@@ -31,432 +60,331 @@ pub trait Truth<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */;
 }
 
+fn cannot_unary<'ctx>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+    Err(CompileErr::CannotUnary2(op, left.into().get_type()))
+}
+fn cannot_binary<'ctx>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+    Err(CompileErr::CannotBinary2(op, left.into().get_type(), right.into().get_type()))
+}
+fn cannot_cmp<'ctx>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+    Err(CompileErr::CannotCmp2(op, left.into().get_type(), right.into().get_type()))
+}
+macro_rules! err {
+    ($e:expr) => {match $e? {}}
+}
+
 impl<'ctx> Compiler<'ctx> {
     /// Create an instruction computing the unary operation on a given value.
-    pub(crate) fn apply_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
-        left.apply_unary(op, self)
+    pub(crate) fn apply_unary<T: AsBV<'ctx>>(
+        &mut self, 
+        left: T, 
+        op: op::Unary
+    ) -> <BV<'ctx> as Unary<'ctx>>::Output {
+        left.as_bv(self)?.apply_unary(op, self)
     }
 
     /// Create an instruction computing the binary operation on two values.
-    pub(crate) fn apply_binary<T: Binary<'ctx, U>, U>(&mut self, left: T, op: op::Binary, right: U) -> T::Output {
-        left.apply_binary(op, right, self)
+    pub(crate) fn apply_binary<T: AsBV<'ctx>, U: AsBV<'ctx>>(
+        &mut self, 
+        left: T, 
+        op: op::Binary, 
+        right: U
+    ) -> <BV<'ctx> as Binary<'ctx, U>>::Output {
+        left.as_bv(self)?.apply_binary(op, right, self)
     }
 
     /// Create an instruction comparing two values.
-    pub(crate) fn apply_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
-        left.apply_cmp(op, right, self)
+    pub(crate) fn apply_cmp<T: AsBV<'ctx>, U: AsBV<'ctx>>(
+        &mut self, 
+        left: T, 
+        op: op::Cmp, 
+        right: U
+    ) -> <BV<'ctx> as Cmp<'ctx, U>>::Output {
+        left.as_bv(self)?.apply_cmp(op, right, self)
     }
 
     /// Calculate the boolean value (the truth value) of some given value.
-    pub(crate) fn truth<T: Truth<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
-        left.truth(self)
+    pub(crate) fn truth<T: AsBVInfallible<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
+        left.as_bvi(self).truth(self)
+    }
+
+    pub(crate) fn raw_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
+        left.apply_unary(op, self)
     }
 }
 
-enum NumericArgs<'ctx> {
-    Float(FloatValue<'ctx>, FloatValue<'ctx>),
-    Int(IntValue<'ctx>, IntValue<'ctx>),
-    Other(GonValue<'ctx>, GonValue<'ctx>)
-}
-
-impl<'ctx> NumericArgs<'ctx> {
-    fn new(c: &Compiler<'ctx>, lhs: GonValue<'ctx>, rhs: GonValue<'ctx>) -> Self {
-        match (lhs, rhs) {
-            (GonValue::Float(f1), GonValue::Float(f2)) => Self::Float(f1, f2),
-            
-            (GonValue::Float(f1), GonValue::Int(i2)) => {
-                let f2 = c.builder.build_signed_int_to_float(i2, f1.get_type(), "num_op_cast_implicit");
-                Self::Float(f1, f2)
-            },
-            (GonValue::Int(i1), GonValue::Float(f2)) => {
-                let f1 = c.builder.build_signed_int_to_float(i1, f2.get_type(), "num_op_cast_implicit");
-                Self::Float(f1, f2)
-            },
-            
-            (GonValue::Int(i1), GonValue::Int(i2)) => Self::Int(i1, i2),
-            (a, b) => Self::Other(a, b)
-        }
-    }
-}
-impl<'ctx> Unary<'ctx> for GonValue<'ctx> {
-    type Output = CompileResult<GonValue<'ctx>>;
+impl<'ctx> Unary<'ctx> for BV<'ctx> {
+    type Output = CompileResult<'ctx, BV<'ctx>>;
 
     fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
-            op::Unary::LogNot => Ok(GonValue::Bool(c.builder.build_not(self.truth(c), "log_not"))),
-            op => match self {
-                GonValue::Float(v) => match v.unary_internal(op, c) {
-                    Ok(f) => Ok(GonValue::Float(f)),
-                    Err(IOpErr::WrongType) => Err(CompileErr::CannotUnary(op, self.type_layout())),
-                },
-                GonValue::Int(v)   => Ok(GonValue::Int(v.unary_internal(op, c))),
-                GonValue::Bool(v)  => Ok(GonValue::Int(v.unary_internal(op, c))), // TODO: separate int/bool
-                GonValue::Str(_)   => todo!(),
-                GonValue::Unit     => Err(CompileErr::CannotUnary(op, self.type_layout())),
+            op::Unary::LogNot => Ok(c.builder.build_not(self.truth(c), "l_not").into()),
+            _ => match self {
+                BV::IntValue(v)     => Ok(v.apply_unary(op, c).into()),
+                BV::FloatValue(v)   => v.apply_unary(op, c).map(Into::into),
+                BV::ArrayValue(_)   => Err(CompileErr::CannotUnary2(op, self.get_type())),
+                BV::PointerValue(_) => Err(CompileErr::CannotUnary2(op, self.get_type())),
+                BV::StructValue(_)  => Err(CompileErr::CannotUnary2(op, self.get_type())),
+                BV::VectorValue(_)  => Err(CompileErr::CannotUnary2(op, self.get_type())),
             }
         }
     }
 }
-impl<'ctx> Binary<'ctx> for GonValue<'ctx> {
-    type Output = CompileResult<GonValue<'ctx>>;
+impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
+    type Output = CompileResult<'ctx, BV<'ctx>>;
 
-    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-        macro_rules! num_args_else {
-            ($($p:pat => $e:expr),*) => {
-                match NumericArgs::new(c, self, right) {
-                    NumericArgs::Float(f1, f2) => match f1.binary_internal(op, f2, c) {
-                        Ok(t) => Ok(GonValue::Float(t)),
-                        Err(IOpErr::WrongType) => Err(CompileErr::CannotBinary(op, self.type_layout(), right.type_layout())),
-                    },
-                    NumericArgs::Int(i1, i2) => {
-                        Ok(GonValue::Int(i1.binary_internal(op, i2, c)))
-                    },
-                    $($p => $e),*
-                }
-            }
-        }
-        match op {
-            // numeric add
-            | op::Binary::Add 
-            | op::Binary::Sub
-            | op::Binary::Div
-            | op::Binary::Mod
-            | op::Binary::Shl
-            | op::Binary::Shr
-            => num_args_else!{
-                NumericArgs::Other(o1, o2) => Err(CompileErr::CannotBinary(op, o1.type_layout(), o2.type_layout()))
-            },
-
-            // numeric mul, collection repeat
-            op::Binary::Mul => num_args_else! {
-                NumericArgs::Other(_, _) => todo!()
-            },
-
-            // bitwise or, collection concat
-            op::Binary::BitOr => num_args_else! {
-                NumericArgs::Other(_, _) => todo!()
-            },
-
-            // bitwise and
-            op::Binary::BitAnd => num_args_else! {
-                NumericArgs::Other(_, _) => todo!()
-            },
-
-            // bitwise xor
-            op::Binary::BitXor => num_args_else! {
-                NumericArgs::Other(_, _) => todo!()
-            },
-
-            // logical and
-            op::Binary::LogAnd => {
-                let fun = c.parent_fn();
-                let mut bb = c.get_insert_block();
-                let merge_bb = c.ctx.append_basic_block(fun, "post_logand_eager");
-
-                let mut rhs_bb = c.ctx.append_basic_block(fun, "logand_eager_true");
-                
-                c.builder.position_at_end(rhs_bb);
-                c.builder.build_unconditional_branch(merge_bb);
-                rhs_bb = c.builder.get_insert_block().unwrap();
-                
-                c.builder.position_at_end(bb);
-                c.builder.build_conditional_branch(self.truth(c), rhs_bb, merge_bb);
-                bb = c.builder.get_insert_block().unwrap();
-
-                c.builder.position_at_end(merge_bb);
-
-                let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logand_eager_result");
-                phi.add_incoming(&[
-                    (&self.basic_value(c), bb),
-                    (&right.basic_value(c), rhs_bb),
-                ]);
-                Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
-            },
-
-            // logical or
-            op::Binary::LogOr => {
-                let fun = c.parent_fn();
-                let mut bb = c.get_insert_block();
-                let merge_bb = c.ctx.append_basic_block(fun, "post_logor_eager");
-
-                let mut rhs_bb = c.ctx.append_basic_block(fun, "logor_eager_false");
-
-                c.builder.position_at_end(rhs_bb);
-                c.builder.build_unconditional_branch(merge_bb);
-                rhs_bb = c.builder.get_insert_block().unwrap();
-                
-                c.builder.position_at_end(bb);
-                c.builder.build_conditional_branch(self.truth(c), merge_bb, rhs_bb);
-                bb = c.builder.get_insert_block().unwrap();
-
-                c.builder.position_at_end(merge_bb);
-
-                let phi = c.builder.build_phi(self.type_layout().basic_type(c), "logor_eager_result");
-                phi.add_incoming(&[
-                    (&self.basic_value(c), bb),
-                    (&right.basic_value(c), rhs_bb),
-                ]);
-                Ok(GonValue::reconstruct(&self.plir_type(), phi.as_basic_value()))
-            },
-        }
-    }
-}
-impl<'ctx> Cmp<'ctx> for GonValue<'ctx> {
-    type Output = CompileResult<IntValue<'ctx> /* bool */>;
-
-    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-        match NumericArgs::new(c, self, right) {
-            NumericArgs::Float(f1, f2) => Ok(f1.cmp_internal(op, f2, c)),
-            NumericArgs::Int(i1, i2)   => Ok(i1.cmp_internal(op, i2, c)),
-            NumericArgs::Other(_, _)   => todo!(),
-        }
-    }
-}
-impl<'ctx> Truth<'ctx> for GonValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */ {
-        match self {
-            GonValue::Float(f) => f.truth_internal(c),
-            GonValue::Int(i)   => i.truth_internal(c),
-            GonValue::Bool(b)  => b,
-            GonValue::Str(_)   => todo!(),
-            GonValue::Unit     => c.ctx.bool_type().const_int(0, true),
-        }
-    }
-}
-
-impl<'ctx> Unary<'ctx> for &plir::Expr {
-    type Output = CompileResult<GonValue<'ctx>>;
-
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
-        let val = self.write_ir(c)?;
-        c.apply_unary(val, op)
-    }
-}
-impl<'ctx> Binary<'ctx> for &plir::Expr {
-    type Output = CompileResult<GonValue<'ctx>>;
-
-    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_binary(self, op: op::Binary, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
             op::Binary::LogAnd => {
                 let parent = c.parent_fn();
                 let bb = c.get_insert_block();
 
-                let lhs = self.write_ir(c)?;
-
                 // lhs ? rhs : lhs
                 let mut then_bb = c.ctx.append_basic_block(parent, "logand_true");
                 let merge_bb = c.ctx.append_basic_block(parent, "logand_merge");
-                c.builder.build_conditional_branch(lhs.truth(c), then_bb, merge_bb);
+                c.builder.build_conditional_branch(self.truth(c), then_bb, merge_bb);
                 
                 c.builder.position_at_end(then_bb);
-                let rhs = right.write_ir(c)?;
+                let rhs = right.as_bv(c)?;
                 c.builder.build_unconditional_branch(merge_bb);
                 then_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logand_result"); // TODO, properly type
+                // TODO: properly type
+                let phi = c.builder.build_phi(self.get_type(), "logand_result");
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&rhs.basic_value(c), then_bb),
+                    (&rhs, then_bb),
                     // if LHS was false
-                    (&lhs.basic_value(c), bb),
+                    (&self, bb),
                 ]);
 
-                Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))
+                Ok(phi.as_basic_value())
             },
             op::Binary::LogOr  => {
                 let parent = c.parent_fn();
                 let bb = c.get_insert_block();
 
-                let lhs = self.write_ir(c)?;
-
                 // lhs ? lhs : rhs
                 let mut else_bb = c.ctx.append_basic_block(parent, "logor_false");
                 let merge_bb = c.ctx.append_basic_block(parent, "logor_merge");
-                c.builder.build_conditional_branch(lhs.truth(c), merge_bb, else_bb);
+                c.builder.build_conditional_branch(self.truth(c), merge_bb, else_bb);
                 
                 c.builder.position_at_end(else_bb);
-                let rhs = right.write_ir(c)?;
+                let rhs = right.as_bv(c)?;
                 c.builder.build_unconditional_branch(merge_bb);
                 else_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                let phi = c.builder.build_phi(lhs.type_layout().basic_type(c), "logor_result"); // TODO, properly type
+                // TODO, properly type
+                let phi = c.builder.build_phi(self.get_type(), "logor_result");
                 phi.add_incoming(&[
                     // if LHS was true
-                    (&lhs.basic_value(c), bb),
+                    (&self, bb),
                     // if LHS was false
-                    (&rhs.basic_value(c), else_bb)
+                    (&rhs, else_bb)
                 ]);
 
-                Ok(GonValue::reconstruct(&lhs.plir_type(), phi.as_basic_value()))
+                Ok(phi.as_basic_value())
             },
+            _ => {
+                let rhs = right.as_bv(c)?;
+                
+                macro_rules! cast_rhs {
+                    () => {{
+                        match rhs.try_into() {
+                            Ok(t) => t,
+                            Err(_) => err! { cannot_binary(op, self, rhs) }
+                        }
+                    }}
+                }
 
-            // eager eval
-            b => {
-                let left = self.write_ir(c)?;
-                let right = right.write_ir(c)?;
-
-                left.apply_binary(b, right, c)
+                match self {
+                    BV::ArrayValue(_)   => todo!(),
+                    BV::IntValue(v)     => Ok(v.apply_binary(op, cast_rhs!(), c).into()),
+                    BV::FloatValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
+                    BV::PointerValue(_) => err! { cannot_binary(op, self, rhs) },
+                    BV::StructValue(_)  => err! { cannot_binary(op, self, rhs) },
+                    BV::VectorValue(_)  => err! { cannot_binary(op, self, rhs) },
+                }
             }
         }
     }
 }
+impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
+    type Output = CompileResult<'ctx, IntValue<'ctx>>;
 
-mod internal {
-    use inkwell::{FloatPredicate, IntPredicate};
-    use inkwell::values::{FloatValue, IntValue};
+    fn apply_cmp(self, op: op::Cmp, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
+        let rhs = right.as_bv(c)?;
 
-    use crate::compiler::Compiler;
-    use crate::ast::op;
+        macro_rules! cast_rhs {
+            () => {{
+                match rhs.try_into() {
+                    Ok(t) => t,
+                    Err(_) => err! { cannot_cmp(op, self, rhs) }
+                }
+            }}
+        }
 
-    pub(super) enum IOpErr {
-        WrongType
+        match self {
+            BV::ArrayValue(_)   => todo!(),
+            BV::IntValue(v)     => Ok(v.apply_cmp(op, cast_rhs!(), c)),
+            BV::FloatValue(v)   => Ok(v.apply_cmp(op, cast_rhs!(), c)),
+            BV::PointerValue(_) => err! { cannot_cmp(op, self, rhs) },
+            BV::StructValue(_)  => err! { cannot_cmp(op, self, rhs) },
+            BV::VectorValue(_)  => err! { cannot_cmp(op, self, rhs) },
+        }
+        // apply_bv!(let bv = self => bv.apply_cmp(op, right.as_bv(c)?.try_into().unwrap(), c))
     }
+}
+impl<'ctx> Truth<'ctx> for BV<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        apply_bv!(let bv = self => bv.truth(c))
+    }
+}
 
-    type IOpResult<T> = Result<T, IOpErr>;
+impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
+    type Output = CompileResult<'ctx, Self>;
 
-    pub(super) trait ValueUnary<'ctx> {
-        type Output;
-    
-        fn unary_internal(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output;
+    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Unary::Plus   => Ok(self),
+            op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
+            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
+            op::Unary::BitNot => Err(CompileErr::CannotUnary2(op, self.get_type().into())),
+        }
     }
-    pub(super) trait ValueBinary<'ctx, Rhs=Self> {
-        type Output;
-    
-        fn binary_internal(self, op: op::Binary, right: Rhs, c: &mut Compiler<'ctx>) -> Self::Output;
-    }
-    pub(super) trait ValueCmp<'ctx, Rhs=Self> {
-        type Output;
-    
-        fn cmp_internal(self, op: op::Cmp, right: Rhs, c: &mut Compiler<'ctx>) -> Self::Output;
-    }
-    pub(super) trait ValueTruth<'ctx> {
-        fn truth_internal(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */;
-    }
+}
 
-    impl<'ctx> ValueUnary<'ctx> for FloatValue<'ctx> {
-        type Output = IOpResult<Self>;
-    
-        fn unary_internal(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
-            match op {
-                op::Unary::Plus   => Ok(self),
-                op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
-                op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-                op::Unary::BitNot => Err(IOpErr::WrongType),
-            }
+impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
+    type Output = CompileResult<'ctx, Self>;
+
+    fn apply_binary(self, op: op::Binary, right: FloatValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Binary::Add => Ok(c.builder.build_float_add(self, right, "f_add")),
+            op::Binary::Sub => Ok(c.builder.build_float_sub(self, right, "f_sub")),
+            op::Binary::Mul => Ok(c.builder.build_float_mul(self, right, "f_mul")),
+            op::Binary::Div => Ok(c.builder.build_float_div(self, right, "f_div")),
+            op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_mod")),
+            op::Binary::Shl => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::Shr => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::BitOr => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::BitAnd => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::BitXor => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
+            op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
         }
     }
-    
-    impl<'ctx> ValueBinary<'ctx> for FloatValue<'ctx> {
-        type Output = IOpResult<Self>;
-    
-        fn binary_internal(self, op: op::Binary, right: FloatValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
-            match op {
-                op::Binary::Add => Ok(c.builder.build_float_add(self, right, "f_add")),
-                op::Binary::Sub => Ok(c.builder.build_float_sub(self, right, "f_sub")),
-                op::Binary::Mul => Ok(c.builder.build_float_mul(self, right, "f_mul")),
-                op::Binary::Div => Ok(c.builder.build_float_div(self, right, "f_div")),
-                op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_mod")),
-                op::Binary::Shl => Err(IOpErr::WrongType),
-                op::Binary::Shr => Err(IOpErr::WrongType),
-                op::Binary::BitOr => Err(IOpErr::WrongType),
-                op::Binary::BitAnd => Err(IOpErr::WrongType),
-                op::Binary::BitXor => Err(IOpErr::WrongType),
-                op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
-                op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
-            }
+}
+
+impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
+    type Output = IntValue<'ctx> /* bool */;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        // todo: investigate OXX and UXX
+        let (pred, name) = match op {
+            op::Cmp::Lt => (FloatPredicate::OLT, "f_lt"),
+            op::Cmp::Gt => (FloatPredicate::OGT, "f_gt"),
+            op::Cmp::Le => (FloatPredicate::OLE, "f_le"),
+            op::Cmp::Ge => (FloatPredicate::OGE, "f_ge"),
+            op::Cmp::Eq => (FloatPredicate::OEQ, "f_eq"),
+            op::Cmp::Ne => (FloatPredicate::ONE, "f_ne"),
+        };
+
+        c.builder.build_float_compare(pred, self, right, name)
+    }
+}
+
+impl<'ctx> Truth<'ctx> for FloatValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
+        let zero = c.ctx.f64_type().const_zero();
+        c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
+    }
+}
+
+impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Unary::Plus   => self,
+            op::Unary::Minus  => c.builder.build_int_neg(self, "i_neg"),
+            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
+            op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
         }
     }
-    
-    impl<'ctx> ValueCmp<'ctx> for FloatValue<'ctx> {
-        type Output = IntValue<'ctx> /* bool */;
-    
-        fn cmp_internal(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-            // todo: investigate OXX and UXX
-            let (pred, name) = match op {
-                op::Cmp::Lt => (FloatPredicate::OLT, "f_lt"),
-                op::Cmp::Gt => (FloatPredicate::OGT, "f_gt"),
-                op::Cmp::Le => (FloatPredicate::OLE, "f_le"),
-                op::Cmp::Ge => (FloatPredicate::OGE, "f_ge"),
-                op::Cmp::Eq => (FloatPredicate::OEQ, "f_eq"),
-                op::Cmp::Ne => (FloatPredicate::ONE, "f_ne"),
-            };
-    
-            c.builder.build_float_compare(pred, self, right, name)
+}
+
+impl<'ctx> Binary<'ctx> for IntValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_binary(self, op: op::Binary, right: IntValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
+        // TODO: _add vs _nsw_add vs _nuw_add
+        match op {
+            op::Binary::Add => c.builder.build_int_add(self, right, "i_add"),
+            op::Binary::Sub => c.builder.build_int_sub(self, right, "i_sub"),
+            op::Binary::Mul => c.builder.build_int_mul(self, right, "i_mul"),
+            op::Binary::Div => {
+                // TODO: deal with div by 0
+                c.builder.build_int_signed_div(self, right, "i_div")
+            },
+            op::Binary::Mod => {
+                // TODO: deal with div by 0
+                c.builder.build_int_signed_rem(self, right, "i_mod")
+            },
+            op::Binary::Shl => c.builder.build_left_shift(self, right, "i_shl"),
+            // TODO, arith shr vs logical shr
+            op::Binary::Shr => c.builder.build_right_shift(self, right, true, "i_shr"),
+            op::Binary::BitOr => c.builder.build_or(self, right, "i_or"),
+            op::Binary::BitAnd => c.builder.build_and(self, right, "i_and"),
+            op::Binary::BitXor => c.builder.build_xor(self, right, "i_xor"),
+            op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
+            op::Binary::LogOr => unreachable!("logical or was directly computed on {}", self.get_type()),
         }
     }
-    
-    impl<'ctx> ValueTruth<'ctx> for FloatValue<'ctx> {
-        fn truth_internal(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
-            let zero = c.ctx.f64_type().const_zero();
-            c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
-        }
+}
+
+impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        let (pred, name) = match op {
+            op::Cmp::Lt => (IntPredicate::SLT, "i_lt"),
+            op::Cmp::Gt => (IntPredicate::SGT, "i_gt"),
+            op::Cmp::Le => (IntPredicate::SLE, "i_le"),
+            op::Cmp::Ge => (IntPredicate::SGE, "i_ge"),
+            op::Cmp::Eq => (IntPredicate::EQ,  "i_eq"),
+            op::Cmp::Ne => (IntPredicate::NE,  "i_ne"),
+        };
+
+        c.builder.build_int_compare(pred, self, right, name)
     }
-    
-    impl<'ctx> ValueUnary<'ctx> for IntValue<'ctx> {
-        type Output = IntValue<'ctx>;
-    
-        fn unary_internal(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
-            match op {
-                op::Unary::Plus   => self,
-                op::Unary::Minus  => c.builder.build_int_neg(self, "i_neg"),
-                op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-                op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
-            }
-        }
+}
+
+impl<'ctx> Truth<'ctx> for IntValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
+        let zero = c.ctx.i64_type().const_zero();
+        c.builder.build_int_compare(IntPredicate::NE, self, zero, "truth")
     }
-    
-    impl<'ctx> ValueBinary<'ctx> for IntValue<'ctx> {
-        type Output = IntValue<'ctx>;
-    
-        fn binary_internal(self, op: op::Binary, right: IntValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
-            // TODO: _add vs _nsw_add vs _nuw_add
-            match op {
-                op::Binary::Add => c.builder.build_int_add(self, right, "i_add"),
-                op::Binary::Sub => c.builder.build_int_sub(self, right, "i_sub"),
-                op::Binary::Mul => c.builder.build_int_mul(self, right, "i_mul"),
-                op::Binary::Div => {
-                    // TODO: deal with div by 0
-                    c.builder.build_int_signed_div(self, right, "i_div")
-                },
-                op::Binary::Mod => {
-                    // TODO: deal with div by 0
-                    c.builder.build_int_signed_rem(self, right, "i_mod")
-                },
-                op::Binary::Shl => c.builder.build_left_shift(self, right, "i_shl"),
-                // TODO, arith shr vs logical shr
-                op::Binary::Shr => c.builder.build_right_shift(self, right, true, "i_shr"),
-                op::Binary::BitOr => c.builder.build_or(self, right, "i_or"),
-                op::Binary::BitAnd => c.builder.build_and(self, right, "i_and"),
-                op::Binary::BitXor => c.builder.build_xor(self, right, "i_xor"),
-                op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
-                op::Binary::LogOr => unreachable!("logical or was directly computed on {}", self.get_type()),
-            }
-        }
+}
+
+impl<'ctx> Truth<'ctx> for ArrayValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        todo!()
     }
-    
-    impl<'ctx> ValueCmp<'ctx> for IntValue<'ctx> {
-        type Output = IntValue<'ctx>;
-    
-        fn cmp_internal(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-            let (pred, name) = match op {
-                op::Cmp::Lt => (IntPredicate::SLT, "i_lt"),
-                op::Cmp::Gt => (IntPredicate::SGT, "i_gt"),
-                op::Cmp::Le => (IntPredicate::SLE, "i_le"),
-                op::Cmp::Ge => (IntPredicate::SGE, "i_ge"),
-                op::Cmp::Eq => (IntPredicate::EQ,  "i_eq"),
-                op::Cmp::Ne => (IntPredicate::NE,  "i_ne"),
-            };
-    
-            c.builder.build_int_compare(pred, self, right, name)
-        }
+}
+impl<'ctx> Truth<'ctx> for StructValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        todo!()
     }
-    
-    impl<'ctx> ValueTruth<'ctx> for IntValue<'ctx> {
-        fn truth_internal(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
-            let zero = c.ctx.i64_type().const_zero();
-            c.builder.build_int_compare(IntPredicate::NE, self, zero, "truth")
-        }
+}
+impl<'ctx> Truth<'ctx> for VectorValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        todo!()
+    }
+}
+impl<'ctx> Truth<'ctx> for PointerValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        todo!()
     }
 }

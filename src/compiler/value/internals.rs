@@ -23,7 +23,7 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<()> {
+    fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let p0 = fun.get_first_param().unwrap().into_struct_value();
         let buf = builder.build_extract_value(p0, 0, "buf").unwrap();
     
@@ -37,7 +37,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    pub fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<FunctionValue<'ctx>> {
+    pub fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
         let fun = self.module.get_function(s).unwrap_or_else(|| self.module.add_function(s, ty, None));
 
         if fun.count_basic_blocks() < 1 {
