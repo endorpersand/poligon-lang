@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
@@ -60,17 +58,14 @@ pub trait Truth<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */;
 }
 
-fn cannot_unary<'ctx>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
     Err(CompileErr::CannotUnary2(op, left.into().get_type()))
 }
-fn cannot_binary<'ctx>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
     Err(CompileErr::CannotBinary2(op, left.into().get_type(), right.into().get_type()))
 }
-fn cannot_cmp<'ctx>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, Infallible> {
+fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
     Err(CompileErr::CannotCmp2(op, left.into().get_type(), right.into().get_type()))
-}
-macro_rules! err {
-    ($e:expr) => {match $e? {}}
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -122,10 +117,10 @@ impl<'ctx> Unary<'ctx> for BV<'ctx> {
             _ => match self {
                 BV::IntValue(v)     => Ok(v.apply_unary(op, c).into()),
                 BV::FloatValue(v)   => v.apply_unary(op, c).map(Into::into),
-                BV::ArrayValue(_)   => Err(CompileErr::CannotUnary2(op, self.get_type())),
-                BV::PointerValue(_) => Err(CompileErr::CannotUnary2(op, self.get_type())),
-                BV::StructValue(_)  => Err(CompileErr::CannotUnary2(op, self.get_type())),
-                BV::VectorValue(_)  => Err(CompileErr::CannotUnary2(op, self.get_type())),
+                BV::ArrayValue(_)   => cannot_unary(op, self),
+                BV::PointerValue(_) => cannot_unary(op, self),
+                BV::StructValue(_)  => cannot_unary(op, self),
+                BV::VectorValue(_)  => cannot_unary(op, self),
             }
         }
     }
@@ -194,7 +189,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                     () => {{
                         match rhs.try_into() {
                             Ok(t) => t,
-                            Err(_) => err! { cannot_binary(op, self, rhs) }
+                            Err(_) => cannot_binary(op, self, rhs)?
                         }
                     }}
                 }
@@ -203,9 +198,9 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                     BV::ArrayValue(_)   => todo!(),
                     BV::IntValue(v)     => Ok(v.apply_binary(op, cast_rhs!(), c).into()),
                     BV::FloatValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
-                    BV::PointerValue(_) => err! { cannot_binary(op, self, rhs) },
-                    BV::StructValue(_)  => err! { cannot_binary(op, self, rhs) },
-                    BV::VectorValue(_)  => err! { cannot_binary(op, self, rhs) },
+                    BV::PointerValue(_) => cannot_binary(op, self, rhs),
+                    BV::StructValue(_)  => cannot_binary(op, self, rhs),
+                    BV::VectorValue(_)  => cannot_binary(op, self, rhs),
                 }
             }
         }
@@ -221,7 +216,7 @@ impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
             () => {{
                 match rhs.try_into() {
                     Ok(t) => t,
-                    Err(_) => err! { cannot_cmp(op, self, rhs) }
+                    Err(_) => cannot_cmp(op, self, rhs)?
                 }
             }}
         }
@@ -230,9 +225,9 @@ impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
             BV::ArrayValue(_)   => todo!(),
             BV::IntValue(v)     => Ok(v.apply_cmp(op, cast_rhs!(), c)),
             BV::FloatValue(v)   => Ok(v.apply_cmp(op, cast_rhs!(), c)),
-            BV::PointerValue(_) => err! { cannot_cmp(op, self, rhs) },
-            BV::StructValue(_)  => err! { cannot_cmp(op, self, rhs) },
-            BV::VectorValue(_)  => err! { cannot_cmp(op, self, rhs) },
+            BV::PointerValue(_) => cannot_cmp(op, self, rhs),
+            BV::StructValue(_)  => cannot_cmp(op, self, rhs),
+            BV::VectorValue(_)  => cannot_cmp(op, self, rhs),
         }
         // apply_bv!(let bv = self => bv.apply_cmp(op, right.as_bv(c)?.try_into().unwrap(), c))
     }
@@ -251,7 +246,7 @@ impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
             op::Unary::Plus   => Ok(self),
             op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
             op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-            op::Unary::BitNot => Err(CompileErr::CannotUnary2(op, self.get_type().into())),
+            op::Unary::BitNot => cannot_unary(op, self),
         }
     }
 }
@@ -266,11 +261,11 @@ impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
             op::Binary::Mul => Ok(c.builder.build_float_mul(self, right, "f_mul")),
             op::Binary::Div => Ok(c.builder.build_float_div(self, right, "f_div")),
             op::Binary::Mod => Ok(c.builder.build_float_rem(self, right, "f_mod")),
-            op::Binary::Shl => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
-            op::Binary::Shr => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
-            op::Binary::BitOr => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
-            op::Binary::BitAnd => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
-            op::Binary::BitXor => Err(CompileErr::CannotBinary2(op, self.get_type().into(), right.get_type().into())),
+            op::Binary::Shl => cannot_binary(op, self, right),
+            op::Binary::Shr => cannot_binary(op, self, right),
+            op::Binary::BitOr => cannot_binary(op, self, right),
+            op::Binary::BitAnd => cannot_binary(op, self, right),
+            op::Binary::BitXor => cannot_binary(op, self, right),
             op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
             op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
         }
