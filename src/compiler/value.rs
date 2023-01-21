@@ -77,15 +77,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
         // todo: null-terminated fix
         // i love c
-
-        let bytes: Vec<_> = s.bytes()
-            .chain(std::iter::once(0)) // null terminated string for C
-            .map(|byte| self.ctx.i8_type().const_int(byte as u64, false))
-            .collect();
-        let len = bytes.len();
-
-        // TODO: replace with const_string once that is fixed
-        let array = self.ctx.i8_type().const_array(&bytes);
+        let array = self.ctx.const_string(s.as_bytes(), true);
 
         let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
         self.builder.build_store(array_ptr, array);
@@ -97,8 +89,8 @@ impl<'ctx> Compiler<'ctx> {
         );
         
         GonValue::Str(self.create_struct_value(self.string_type(), &[
-            ptr.into(),
-            self.ctx.i64_type().const_int(len as u64, true).into()
+            ptr,
+            self.ctx.i64_type().const_int(s.len() as u64, true).into()
         ]).unwrap())
     }
 
