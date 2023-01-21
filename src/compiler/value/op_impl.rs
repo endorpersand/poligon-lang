@@ -5,7 +5,7 @@ use crate::compiler::plir;
 use crate::compiler::{Compiler, CompileResult, CompileErr};
 use crate::ast::op;
 
-use super::{GonValue, apply_bv};
+use super::{GonValue, apply_bv, apply_bt};
 
 pub trait AsBV<'ctx> {
     fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>>;
@@ -56,6 +56,14 @@ pub trait Cmp<'ctx, Rhs=Self> {
 pub trait Truth<'ctx> {
     /// Calculate the boolean value (the truth value) of some given value.
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */;
+}
+trait TruthBool<'ctx> {
+    fn truth_bool(self) -> bool;
+}
+impl <'ctx, T: TruthBool<'ctx>> Truth<'ctx> for T {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+        c.ctx.bool_type().const_int(self.truth_bool() as _, false)
+    }
 }
 
 fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
@@ -195,7 +203,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 }
 
                 match self {
-                    BV::ArrayValue(_)   => todo!(),
+                    BV::ArrayValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
                     BV::IntValue(v)     => Ok(v.apply_binary(op, cast_rhs!(), c).into()),
                     BV::FloatValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
                     BV::PointerValue(_) => cannot_binary(op, self, rhs),
@@ -251,6 +259,19 @@ impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
     }
 }
 
+impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Unary::Plus   => self,
+            op::Unary::Minus  => c.builder.build_int_neg(self, "i_neg"),
+            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
+            op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
+        }
+    }
+}
+
 impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
     type Output = CompileResult<'ctx, Self>;
 
@@ -268,44 +289,6 @@ impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
             op::Binary::BitXor => cannot_binary(op, self, right),
             op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
             op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
-        }
-    }
-}
-
-impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
-    type Output = IntValue<'ctx> /* bool */;
-
-    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-        // todo: investigate OXX and UXX
-        let (pred, name) = match op {
-            op::Cmp::Lt => (FloatPredicate::OLT, "f_lt"),
-            op::Cmp::Gt => (FloatPredicate::OGT, "f_gt"),
-            op::Cmp::Le => (FloatPredicate::OLE, "f_le"),
-            op::Cmp::Ge => (FloatPredicate::OGE, "f_ge"),
-            op::Cmp::Eq => (FloatPredicate::OEQ, "f_eq"),
-            op::Cmp::Ne => (FloatPredicate::ONE, "f_ne"),
-        };
-
-        c.builder.build_float_compare(pred, self, right, name)
-    }
-}
-
-impl<'ctx> Truth<'ctx> for FloatValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
-        let zero = c.ctx.f64_type().const_zero();
-        c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
-    }
-}
-
-impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
-    type Output = IntValue<'ctx>;
-
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
-        match op {
-            op::Unary::Plus   => self,
-            op::Unary::Minus  => c.builder.build_int_neg(self, "i_neg"),
-            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-            op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
         }
     }
 }
@@ -339,6 +322,74 @@ impl<'ctx> Binary<'ctx> for IntValue<'ctx> {
     }
 }
 
+impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
+    type Output = CompileResult<'ctx, Self>;
+
+    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        match op {
+            op::Binary::Add    => {
+                let left_ty  = self.get_type();
+                let right_ty = right.get_type();
+
+                let left_ety  = left_ty.get_element_type();
+                let right_ety = right_ty.get_element_type();
+
+                if left_ety == right_ety {
+                    let result_len = left_ty.len() + right_ty.len();
+                    let result_ty = apply_bt!(let ty = left_ety => ty.array_type(result_len));
+                    
+                    let result_ptr = c.builder.build_alloca(result_ty, "concat");
+                    c.builder.build_store(result_ptr, result_ty.const_zero());
+
+                    // insert L elements into the buffer
+                    let left_insert_ptr = c.builder.build_bitcast(result_ptr, left_ty.ptr_type(Default::default()), "left_insert").into_pointer_value();
+                    c.builder.build_store(left_insert_ptr, self);
+                    
+                    // insert R elements into the buffer
+                    let zero = c.ctx.i32_type().const_zero();
+                    let insert_idx = c.ctx.i32_type().const_int(left_ty.len() as _, false);
+                    let right_insert_el = unsafe { c.builder.build_in_bounds_gep(result_ptr, &[zero, insert_idx], "right_insert_el") };
+                    let right_insert_ptr = c.builder.build_bitcast(right_insert_el, right_ty.ptr_type(Default::default()), "right_insert").into_pointer_value();
+                    c.builder.build_store(right_insert_ptr, right);
+
+                    Ok(c.builder.build_load(result_ptr, "load_concat").into_array_value())
+                } else {
+                    cannot_binary(op, self, right)
+                }
+            },
+            op::Binary::Sub    => cannot_binary(op, self, right),
+            op::Binary::Mul    => cannot_binary(op, self, right),
+            op::Binary::Div    => cannot_binary(op, self, right),
+            op::Binary::Mod    => cannot_binary(op, self, right),
+            op::Binary::Shl    => cannot_binary(op, self, right),
+            op::Binary::Shr    => cannot_binary(op, self, right),
+            op::Binary::BitOr  => cannot_binary(op, self, right),
+            op::Binary::BitAnd => cannot_binary(op, self, right),
+            op::Binary::BitXor => cannot_binary(op, self, right),
+            op::Binary::LogAnd => cannot_binary(op, self, right),
+            op::Binary::LogOr  => cannot_binary(op, self, right),
+        }
+    }
+}
+
+impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
+    type Output = IntValue<'ctx> /* bool */;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        // todo: investigate OXX and UXX
+        let (pred, name) = match op {
+            op::Cmp::Lt => (FloatPredicate::OLT, "f_lt"),
+            op::Cmp::Gt => (FloatPredicate::OGT, "f_gt"),
+            op::Cmp::Le => (FloatPredicate::OLE, "f_le"),
+            op::Cmp::Ge => (FloatPredicate::OGE, "f_ge"),
+            op::Cmp::Eq => (FloatPredicate::OEQ, "f_eq"),
+            op::Cmp::Ne => (FloatPredicate::ONE, "f_ne"),
+        };
+
+        c.builder.build_float_compare(pred, self, right, name)
+    }
+}
+
 impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
     type Output = IntValue<'ctx>;
 
@@ -356,6 +407,13 @@ impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
     }
 }
 
+impl<'ctx> Truth<'ctx> for FloatValue<'ctx> {
+    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
+        let zero = c.ctx.f64_type().const_zero();
+        c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
+    }
+}
+
 impl<'ctx> Truth<'ctx> for IntValue<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
         let zero = c.ctx.i64_type().const_zero();
@@ -363,23 +421,24 @@ impl<'ctx> Truth<'ctx> for IntValue<'ctx> {
     }
 }
 
-impl<'ctx> Truth<'ctx> for ArrayValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
-        todo!()
+impl<'ctx> TruthBool<'ctx> for ArrayValue<'ctx> {
+    fn truth_bool(self) -> bool {
+        // Arrays can go beyond the length, but we will just avoid doing that in Poligon.
+        self.get_type().len() != 0
     }
 }
-impl<'ctx> Truth<'ctx> for StructValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
-        todo!()
+impl<'ctx> TruthBool<'ctx> for StructValue<'ctx> {
+    fn truth_bool(self) -> bool {
+        !self.is_null()
     }
 }
-impl<'ctx> Truth<'ctx> for VectorValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
-        todo!()
+impl<'ctx> TruthBool<'ctx> for VectorValue<'ctx> {
+    fn truth_bool(self) -> bool {
+        self.get_type().get_size() != 0
     }
 }
-impl<'ctx> Truth<'ctx> for PointerValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
-        todo!()
+impl<'ctx> TruthBool<'ctx> for PointerValue<'ctx> {
+    fn truth_bool(self) -> bool {
+        !self.is_null()
     }
 }

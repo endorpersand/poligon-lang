@@ -37,6 +37,7 @@ macro_rules! apply_bt {
 }
 
 pub(crate) use apply_bv;
+pub(crate) use apply_bt;
 
 /// An LLVM representation of the a possible value in Poligon.
 /// 
