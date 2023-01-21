@@ -1,7 +1,7 @@
 mod op_impl;
 mod internals;
 
-use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType};
+use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType, BasicType};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue};
 
 use super::Compiler;
@@ -258,7 +258,7 @@ impl TypeLayout {
     /// Create a function type with this type layout as the return type.
     pub fn fn_type<'ctx>(&self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
         match self.basic_type_or_void(c) {
-            Ok(ty) => apply_bt!(let t = ty => t.fn_type(params, is_var_args)),
+            Ok(ty) => ty.fn_type(params, is_var_args),
             Err(ty) => ty.fn_type(params, is_var_args)
         }
     }
