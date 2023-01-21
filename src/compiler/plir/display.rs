@@ -258,6 +258,7 @@ impl Display for ExprType {
                 }?;
                 write!(f, "]")
             },
+            ExprType::Cast(e) => write!(f, "cast {e}"),
         }
     }
 }

@@ -363,7 +363,11 @@ pub enum ExprType {
     /// A spread operation (e.g. `..`, `..lst`).
     Spread(Option<Box<Expr>>),
     /// Similar to Index but optimized for literal indexing.
-    Split(String, Split)
+    Split(String, Split),
+    /// Change the type of this expression to a new type.
+    /// 
+    /// This enables int to float casts and char to string casts.
+    Cast(Box<Expr>)
 }
 
 /// A path.

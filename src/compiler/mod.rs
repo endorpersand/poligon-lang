@@ -255,6 +255,8 @@ pub enum CompileErr<'ctx> {
     CannotBinary2(op::Binary, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
     /// These two types can't be compared using the given operation.
     CannotCmp2(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    /// Cannot perform a type cast from A to B
+    CannotCast(plir::Type, plir::Type),
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
     /// An error occurred within LLVM.
@@ -286,6 +288,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             | CompileErr::CannotUnary2(_, _)
             | CompileErr::CannotBinary2(_, _, _)
             | CompileErr::CannotCmp2(_, _, _)
+            | CompileErr::CannotCast(_, _)
             | CompileErr::StructIndexOOB(_)
             => "type error",
             
@@ -307,6 +310,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             Self::CannotUnary2(op, t1) => format!("cannot apply '{op}' to {t1:?}"),
             Self::CannotBinary2(op, t1, t2) => format!("cannot apply '{op}' to {t1:?} and {t2:?}"),
             Self::CannotCmp2(op, t1, t2) => format!("cannot compare '{op}' between {t1:?} and {t2:?}"),
+            Self::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
             Self::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
             Self::CannotDetermineMain => String::from("could not determine entry point"),
             Self::LLVMErr(e) => format!("{e}"),
@@ -702,6 +706,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::Index(_) => todo!(),
             plir::ExprType::Spread(_) => todo!(),
             plir::ExprType::Split(_, _) => todo!(),
+            plir::ExprType::Cast(e) => {
+                e.write_ir(compiler)
+                    .map(|val| compiler.cast(val, expr_ty))
+                    .and_then(|r| r.ok_or_else(|| {
+                        CompileErr::CannotCast(e.ty.clone(), expr_ty.clone())
+                    }))
+            },
         }
     }
 }

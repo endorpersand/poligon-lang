@@ -101,6 +101,22 @@ impl<'ctx> Compiler<'ctx> {
             self.ctx.i64_type().const_int(len as u64, true).into()
         ]).unwrap())
     }
+
+    /// Cast a GonValue to another type.
+    /// 
+    /// The only successful casts here are int to float, char to string, anything to unit
+    pub fn cast(&self, v: GonValue<'ctx>, ty: &plir::Type) -> Option<GonValue<'ctx>> {
+        match (v, ty.as_ref()) {
+            (GonValue::Int(i), plir::TypeRef::Prim(plir::Type::S_FLOAT)) => {
+                let ft = TypeLayout::of(ty)?.basic_type(self).into_float_type();
+                let fv = self.builder.build_signed_int_to_float(i, ft, "cast");
+                
+                Some(GonValue::Float(fv))
+            },
+            (_, plir::TypeRef::Prim(plir::Type::S_VOID)) => Some(GonValue::Unit),
+            _ => None
+        }
+    }
 }
 
 impl<'ctx> GonValue<'ctx> {
