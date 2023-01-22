@@ -168,12 +168,14 @@ impl<'ctx> GonValue<'ctx> {
 
     /// Create a [`GonValue`] from a given LLVM value.
     pub fn reconstruct(t: &plir::Type, v: BasicValueEnum<'ctx>) -> Self {
+        use plir::{TypeRef, Type};
+        
         match t.as_ref() {
-            plir::TypeRef::Prim(plir::Type::S_FLOAT) => Self::Float(v.into_float_value()),
-            plir::TypeRef::Prim(plir::Type::S_INT)   => Self::Int(v.into_int_value()),
-            plir::TypeRef::Prim(plir::Type::S_BOOL)  => Self::Bool(v.into_int_value()),
-            plir::TypeRef::Prim(plir::Type::S_VOID)  => Self::Unit,
-            plir::TypeRef::Prim(plir::Type::S_STR)   => Self::Str(v.into_struct_value()),
+            TypeRef::Prim(Type::S_FLOAT) => Self::Float(v.into_float_value()),
+            TypeRef::Prim(Type::S_INT)   => Self::Int(v.into_int_value()),
+            TypeRef::Prim(Type::S_BOOL)  => Self::Bool(v.into_int_value()),
+            TypeRef::Prim(Type::S_VOID)  => Self::Unit,
+            TypeRef::Prim(Type::S_STR)   => Self::Str(v.into_struct_value()),
             // TODO: not panic
             _ => panic!("Cannot reconstruct value from type")
         }
@@ -222,6 +224,7 @@ impl TypeLayout {
         match ty.as_ref() {
             TypeRef::Prim(Type::S_FLOAT) => Some(TypeLayout::Float),
             TypeRef::Prim(Type::S_INT)   => Some(TypeLayout::Int),
+            TypeRef::Prim(Type::S_CHAR)   => Some(TypeLayout::Int),
             TypeRef::Prim(Type::S_BOOL)  => Some(TypeLayout::Bool),
             TypeRef::Prim(Type::S_VOID)  => Some(TypeLayout::Unit),
             TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::Str),

@@ -51,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn std_printd(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn std_printc(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let p0 = fun.get_first_param().unwrap();
     
         let printf = self.import_fun("printf",
@@ -60,11 +60,8 @@ impl<'ctx> Compiler<'ctx> {
             ], true),
         )?;
     
-        let string = self.ctx.const_string(b"%d", true);
-        let alloca = builder.build_alloca(string.get_type(), "alloca");
-        builder.build_store(alloca, string);
-
-        builder.build_call(printf, &[alloca.into(), p0.into()], "");
+        let template = unsafe { builder.build_global_string("%c\0", "printc") };
+        builder.build_call(printf, &[template.as_pointer_value().into(), p0.into()], "");
         builder.build_return(None);
     
         Ok(())
@@ -73,7 +70,7 @@ impl<'ctx> Compiler<'ctx> {
     // HACK
     std_map! {
         "print": std_print,
-        "printd": std_printd
+        "printc": std_printc
     }
 
     pub fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
