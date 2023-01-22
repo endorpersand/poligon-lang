@@ -16,25 +16,13 @@ pub fn apply_cast(e: Expr, ty: &Type) -> Result<Expr, Expr> {
         | (_, TypeRef::Prim(Type::S_BOOL)) 
         | (_, TypeRef::Prim(Type::S_VOID))
     );
+
     match accepted {
         true => Ok(Expr {
             ty: ty.clone(), expr: ExprType::Cast(Box::new(e))
         }),
         false => Err(e),
     }
-}
-
-/// Try to cast the expression to one of the given types (in the order provided), erroring if all casts fail.
-pub fn apply_cast_chain(e: Expr, tys: &[Type]) -> Result<Expr, Expr> {
-    let mut uncast = e;
-    for ty in tys {
-        match apply_cast(uncast, ty) {
-            Ok(t) => return Ok(t),
-            Err(e) => uncast = e,
-        }
-    }
-
-    Err(uncast)
 }
 
 fn uncast(e: Expr) -> Expr {
@@ -45,9 +33,22 @@ fn uncast(e: Expr) -> Expr {
     }
 }
 
-fn try2<T: Copy>(left: Expr, right: Expr, t: T, mut f: impl FnMut(Expr, T) -> Result<Expr, Expr>) -> Result<(Expr, Expr), (Expr, Expr)> {
-    match f(left, t) {
-        Ok(l) => match f(right, t) {
+/// Try the function on each of the function until an Ok result is obtained.
+fn chain<T>(e: T, tys: &[Type], mut f: impl FnMut(T, &Type) -> Result<T, T>) -> Result<T, T> {
+    let mut uncast = e;
+    for ty in tys {
+        match f(uncast, ty) {
+            Ok(t) => return Ok(t),
+            Err(e) => uncast = e,
+        }
+    }
+
+    Err(uncast)
+}
+
+fn apply_cast2((left, right): (Expr, Expr), t: &Type) -> Result<(Expr, Expr), (Expr, Expr)> {
+    match apply_cast(left, t) {
+        Ok(l) => match apply_cast(right, t) {
             Ok(r) => Ok((l, r)),
             Err(r) => Err((uncast(l), uncast(r))),
         }
@@ -59,11 +60,11 @@ pub fn apply_unary(e: Expr, op: op::Unary) -> PLIRResult<Expr> {
     // Check for any valid casts that can be applied here:
     let cast = match op {
         op::Unary::Plus => {
-            apply_cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast)
                 .map_err(|e| OpErr::CannotUnary(op, e.ty))?
         },
         op::Unary::Minus => {
-            apply_cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast)
                 .map_err(|e| OpErr::CannotUnary(op, e.ty))?
         },
         op::Unary::LogNot => {
@@ -110,23 +111,23 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
                 ty!(Type::S_INT),
                 ty!(Type::S_FLOAT)
             ][..];
-            try2(left, right, types, apply_cast_chain)
+            chain((left, right), types, apply_cast2)
                 .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
         },
         op::Binary::Sub => {
-            try2(left, right, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast_chain)
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
                 .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
         },
         op::Binary::Mul => {
-            try2(left, right, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast_chain)
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
                 .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
         },
         op::Binary::Div => {
-            try2(left, right, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast_chain)
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
                 .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
         },
         op::Binary::Mod => {
-            try2(left, right, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast_chain)
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
                 .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
         },
         op::Binary::Shl    => (left, right),
