@@ -231,14 +231,13 @@ impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
         }
 
         match self {
-            BV::ArrayValue(_)   => todo!(),
+            BV::ArrayValue(v)   => Ok(v.apply_cmp(op, cast_rhs!(), c)),
             BV::IntValue(v)     => Ok(v.apply_cmp(op, cast_rhs!(), c)),
             BV::FloatValue(v)   => Ok(v.apply_cmp(op, cast_rhs!(), c)),
-            BV::PointerValue(_) => cannot_cmp(op, self, rhs),
-            BV::StructValue(_)  => cannot_cmp(op, self, rhs),
-            BV::VectorValue(_)  => cannot_cmp(op, self, rhs),
+            BV::PointerValue(v) => Ok(v.apply_cmp(op, cast_rhs!(), c)),
+            BV::StructValue(v)  => v.apply_cmp(op, cast_rhs!(), c),
+            BV::VectorValue(v)  => Ok(v.apply_cmp(op, cast_rhs!(), c)),
         }
-        // apply_bv!(let bv = self => bv.apply_cmp(op, right.as_bv(c)?.try_into().unwrap(), c))
     }
 }
 impl<'ctx> Truth<'ctx> for BV<'ctx> {
@@ -409,6 +408,57 @@ impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
         };
 
         c.builder.build_int_compare(pred, self, right, name)
+    }
+}
+
+impl<'ctx> Cmp<'ctx> for ArrayValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        todo!()
+    }
+}
+impl<'ctx> Cmp<'ctx> for StructValue<'ctx> {
+    type Output = CompileResult<'ctx, IntValue<'ctx>>;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        let struct_ty = self.get_type();
+
+        if struct_ty != right.get_type() { 
+            cannot_cmp(op, self, right)?
+        }
+
+        for (i, f) in std::iter::zip(0u32.., struct_ty.get_field_types()) {
+            let lfield = c.builder.build_extract_value(self,  i, &format!("cmp_field_{i}")).unwrap();
+            let rfield = c.builder.build_extract_value(right, i, &format!("cmp_field_{i}")).unwrap();
+        }
+
+        todo!()
+    }
+}
+impl<'ctx> Cmp<'ctx> for VectorValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        let (_pred, _name) = match op {
+            op::Cmp::Lt => (IntPredicate::SLT, "i_lt"),
+            op::Cmp::Gt => (IntPredicate::SGT, "i_gt"),
+            op::Cmp::Le => (IntPredicate::SLE, "i_le"),
+            op::Cmp::Ge => (IntPredicate::SGE, "i_ge"),
+            op::Cmp::Eq => (IntPredicate::EQ,  "i_eq"),
+            op::Cmp::Ne => (IntPredicate::NE,  "i_ne"),
+        };
+
+        // c.builder.build_int_compare(pred, self, right, name)
+        todo!()
+    }
+}
+impl<'ctx> Cmp<'ctx> for PointerValue<'ctx> {
+    type Output = IntValue<'ctx>;
+
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        let diff = c.builder.build_ptr_diff(c.ctx.i8_type(), self, right, "");
+        diff.apply_cmp(op, diff.get_type().const_zero(), c)
     }
 }
 
