@@ -669,13 +669,8 @@ impl CodeGenerator {
             self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
         };
 
-        // TODO: type contravariant type checking on block
-        if sig.ret == block.0 {
-            let fun_decl = plir::FunDecl { sig, block };
-            Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
-        } else {
-            Err(PLIRErr::ExpectedType(sig.ret, block.0))
-        }
+        let fun_decl = plir::FunDecl { sig, block };
+        Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
     }
 
     fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
