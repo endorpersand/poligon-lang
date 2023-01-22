@@ -342,17 +342,17 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
                     c.builder.build_store(result_ptr, result_ty.const_zero());
 
                     // insert L elements into the buffer
-                    let left_insert_ptr = c.builder.build_bitcast(result_ptr, left_ty.ptr_type(Default::default()), "left_insert").into_pointer_value();
-                    c.builder.build_store(left_insert_ptr, self);
+                    c.builder.build_store(result_ptr, self);
                     
                     // insert R elements into the buffer
                     let zero = c.ctx.i32_type().const_zero();
                     let insert_idx = c.ctx.i32_type().const_int(left_ty.len() as _, false);
-                    let right_insert_el = unsafe { c.builder.build_in_bounds_gep(result_ptr, &[zero, insert_idx], "right_insert_el") };
-                    let right_insert_ptr = c.builder.build_bitcast(right_insert_el, right_ty.ptr_type(Default::default()), "right_insert").into_pointer_value();
+                    let right_insert_ptr = unsafe { 
+                        c.builder.build_in_bounds_gep(result_ty, result_ptr, &[zero, insert_idx], "right_insert") 
+                    };
                     c.builder.build_store(right_insert_ptr, right);
 
-                    Ok(c.builder.build_load(result_ptr, "load_concat").into_array_value())
+                    Ok(c.builder.build_load(result_ty, result_ptr, "load_concat").into_array_value())
                 } else {
                     cannot_binary(op, self, right)
                 }

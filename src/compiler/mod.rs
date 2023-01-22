@@ -139,7 +139,9 @@ impl<'ctx> Compiler<'ctx> {
     fn get_val(&self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
-                let val = self.builder.build_load(ptr, "load");
+                let tyl = TypeLayout::of(ty)
+                    .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))?;
+                let val = self.builder.build_load(tyl.basic_type(self), ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
             None => Err(CompileErr::UndefinedVar(String::from(ident))),
@@ -206,12 +208,12 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_store(ptr, result);
 
         for (i, &fval) in values.iter().enumerate() {
-            let field_ptr = self.builder.build_struct_gep(ptr, i as u32, "field")
+            let field_ptr = self.builder.build_struct_gep(ty, ptr, i as u32, "field")
                 .map_err(|_| CompileErr::StructIndexOOB(i))?;
             self.builder.build_store(field_ptr, fval);
         }
         
-        Ok(self.builder.build_load(ptr, "struct_load").into_struct_value())
+        Ok(self.builder.build_load(ty, ptr, "struct_load").into_struct_value())
     }
 }
 

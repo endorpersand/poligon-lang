@@ -82,15 +82,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
         self.builder.build_store(array_ptr, array);
-
-        let ptr = self.builder.build_bitcast(
-            array_ptr, 
-            self.ctx.i8_type().ptr_type(Default::default()), 
-            "strptr"
-        );
         
         GonValue::Str(self.create_struct_value(self.string_type(), &[
-            ptr,
+            array_ptr.into(),
             self.ctx.i64_type().const_int(s.len() as u64, true).into()
         ]).unwrap())
     }
