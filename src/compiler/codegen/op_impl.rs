@@ -3,21 +3,35 @@ use crate::compiler::plir::*;
 
 use super::PLIRResult;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CastType {
+    All, Decl
+}
 /// Try to cast the expression to the given type, erroring if the cast fails.
 pub fn apply_cast(e: Expr, ty: &Type) -> Result<Expr, Expr> {
+    apply_special_cast(e, ty, CastType::All)
+}
+
+fn accept_cast(left: TypeRef, right: TypeRef, ct: CastType) -> bool {
+    use CastType::*;
+    use TypeRef::*;
+
+    match (left, right) {
+        (Prim(Type::S_INT),  Prim(Type::S_FLOAT)) => matches!(ct, All | Decl),
+        (Prim(Type::S_CHAR), Prim(Type::S_STR))   => matches!(ct, All | Decl),
+        (_, Prim(Type::S_BOOL)) => matches!(ct, All),
+        (_, Prim(Type::S_VOID)) => matches!(ct, All | Decl),
+        _ => false
+    }
+}
+
+pub fn apply_special_cast(e: Expr, ty: &Type, ct: CastType) -> Result<Expr, Expr> {
     let left = e.ty.as_ref();
     let right = ty.as_ref();
 
     if left == right { return Ok(e); }
-    
-    let accepted = matches!((left, right),
-        | (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT)) 
-        | (TypeRef::Prim(Type::S_CHAR), TypeRef::Prim(Type::S_STR)) 
-        | (_, TypeRef::Prim(Type::S_BOOL)) 
-        | (_, TypeRef::Prim(Type::S_VOID))
-    );
 
-    match accepted {
+    match accept_cast(left, right, ct) {
         true => Ok(Expr {
             ty: ty.clone(), expr: ExprType::Cast(Box::new(e))
         }),

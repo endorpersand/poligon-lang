@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
 
+use self::op_impl::CastType;
+
 use super::plir;
 
 /// Produce the PLIR tree from the AST tree.
@@ -423,11 +425,16 @@ impl CodeGenerator {
         }
     }
 
-    fn consume_insert_block(&mut self, block: InsertBlock, btype: BlockBehavior) -> PLIRResult<plir::Block> {
+    fn consume_insert_block(
+        &mut self, 
+        block: InsertBlock, 
+        btype: BlockBehavior, 
+        expected_ty: Option<plir::Type>
+    ) -> PLIRResult<plir::Block> {
         let InsertBlock { mut block, exits, final_exit, vars: _ } = block;
         
         // fill the unconditional exit if necessary:
-        let final_exit = final_exit.unwrap_or_else(|| {
+        let mut final_exit = final_exit.unwrap_or_else(|| {
             // we need to add an explicit exit statement.
 
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
@@ -449,6 +456,35 @@ impl CodeGenerator {
             block.push(plir::Stmt::Exit(exit_expr));
             BlockExit::Exit(exit_ty)
         });
+
+        // Type check block:
+        if let Some(exp_ty) = expected_ty {
+            match &mut final_exit {
+                | BlockExit::Return(exit_ty) 
+                | BlockExit::Exit(exit_ty) 
+                => if exit_ty.as_ref() != exp_ty.as_ref() {
+                    let Some(plir::Stmt::Return(me) | plir::Stmt::Exit(me)) = block.last_mut() else {
+                        unreachable!();
+                    };
+
+                    match me.take() {
+                        Some(e) => match op_impl::apply_special_cast(e, &exp_ty, CastType::Decl) {
+                            Ok(e) => {
+                                // cast was successful so apply it
+                                me.replace(e);
+                                *exit_ty = exp_ty;
+                            },
+                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                        },
+                        // exit_ty is void, and we already checked that exp_ty is not void
+                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                    }
+                },
+                // what is done here?
+                BlockExit::Break => {},
+                BlockExit::Continue => {},
+            }
+        }
 
         // resolve block's types and handle the methods of exiting the block
         let mut type_branches = vec![];
@@ -481,12 +517,17 @@ impl CodeGenerator {
             .ok_or(PLIRErr::CannotResolveType)?;
         Ok(plir::Block(bty, block))
     }
-    fn consume_tree_block(&mut self, block: ast::Block, btype: BlockBehavior) -> PLIRResult<plir::Block> {
+    fn consume_tree_block(
+        &mut self, 
+        block: ast::Block, 
+        btype: BlockBehavior, 
+        expected_ty: Option<plir::Type>
+    ) -> PLIRResult<plir::Block> {
         self.push_block();
         // collect all the statements from this block
         self.consume_stmts(block.0)?;
         let insert_block = self.pop_block().unwrap();
-        self.consume_insert_block(insert_block, btype)
+        self.consume_insert_block(insert_block, btype, expected_ty)
     }
 
     fn unpack_pat<T, E>(
@@ -554,6 +595,11 @@ impl CodeGenerator {
                 let (rt, ty) = extra;
 
                 let ty = ty.unwrap_or_else(|| e.ty.clone());
+                // Type check decl, casting if possible
+                let e = match op_impl::apply_special_cast(e, &ty, CastType::Decl) {
+                    Ok(e) => e,
+                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty)),
+                };
 
                 this.declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
@@ -620,7 +666,7 @@ impl CodeGenerator {
             self.consume_stmts(old_block.0)?;
     
             let insert_block = self.pop_block().unwrap();
-            self.consume_insert_block(insert_block, BlockBehavior::Function)?
+            self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
         };
 
         // TODO: type contravariant type checking on block
@@ -641,7 +687,7 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Block(b) => {
-                let block = self.consume_tree_block(b, BlockBehavior::Bare)?;
+                let block = self.consume_tree_block(b, BlockBehavior::Bare, None)?;
                 
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
@@ -732,7 +778,7 @@ impl CodeGenerator {
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
-                self.consume_insert_block(insert_block, BlockBehavior::Bare)
+                self.consume_insert_block(insert_block, BlockBehavior::Bare, None)
                     .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
             },
             ast::Expr::Path(p) => {
@@ -782,13 +828,13 @@ impl CodeGenerator {
                 let conditionals: Vec<_> = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr(cond)?;
-                        let b = self.consume_tree_block(block, BlockBehavior::Conditional)?;
+                        let b = self.consume_tree_block(block, BlockBehavior::Conditional, None)?;
                         Ok((c, b))
                     })
                     .collect::<PLIRResult<_>>()?;
                 
                 let last = match last {
-                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Conditional)?),
+                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Conditional, None)?),
                     None => None,
                 };
 
@@ -803,7 +849,7 @@ impl CodeGenerator {
             },
             ast::Expr::While { condition, block } => {
                 let condition = self.consume_expr(*condition)?;
-                let block = self.consume_tree_block(block, BlockBehavior::Loop)?;
+                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
@@ -812,7 +858,7 @@ impl CodeGenerator {
             },
             ast::Expr::For { ident, iterator, block } => {
                 let iterator = self.consume_expr_and_box(*iterator)?;
-                let block = self.consume_tree_block(block, BlockBehavior::Loop)?;
+                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_LIST, [block.0.clone()]),

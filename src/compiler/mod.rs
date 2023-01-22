@@ -28,7 +28,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
 use inkwell::types::{StructType, BasicTypeEnum, PointerType};
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
@@ -219,6 +219,11 @@ impl<'ctx> Compiler<'ctx> {
         }
         
         Ok(self.builder.build_load(ty, ptr, "struct_load").into_struct_value())
+    }
+
+    /// Build a function return instruction using a GonValue.
+    pub fn build_return(&self, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
+        self.builder.build_return(gv.basic_value_or_void(self).as_ref().map(|t| t as _))
     }
 }
 
@@ -450,7 +455,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 match me {
                     Some(expr) => {
                         let e = expr.write_ir(compiler)?;
-                        compiler.builder.build_return(Some(&e.basic_value(compiler)))
+                        compiler.build_return(e)
                     }
                     None => compiler.builder.build_return(None)
                 };
@@ -795,8 +800,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
         // return nothing if the return value is Unit
         compiler.write_block(block, |compiler, result| {
-            let rval = result.basic_value_or_void(compiler);
-            compiler.builder.build_return(rval.as_ref().map(|t| t as _));
+            compiler.build_return(result);
         })?;
         
         if fun.verify(true) {

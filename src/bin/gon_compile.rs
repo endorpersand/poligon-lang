@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{io, fs};
 
 use inkwell::context::Context;
@@ -32,15 +32,16 @@ fn main() -> io::Result<()> {
             let ast    = unwrap_or_exit! { parser::parse(tokens)  };
             let plir   = unwrap_or_exit! { codegen::codegen(ast)  };
 
+            let path = change_ext(fp, "plir.gon");
+            let mut f = File::create(path)?;
+            f.write_all(plir.to_string().as_bytes())?;
+
             let ctx = Context::create();
             let mut compiler = Compiler::from_ctx(&ctx);
 
             let fun = unwrap_or_exit! { compiler.compile(&plir) };
             
-            let path: &Path = fp.as_ref();
-            let mut path = path.to_owned();
-            path.set_extension("ll");
-
+            let path = change_ext(fp, "ll");
             let mut f = File::create(path)?;
             f.write_all(compiler.get_module().print_to_string().to_bytes())?;
 
@@ -49,4 +50,11 @@ fn main() -> io::Result<()> {
         },
         None => panic!("Missing file"),
     }
+}
+
+fn change_ext(p: impl AsRef<Path>, ext: &str) -> PathBuf {
+    let mut path = p.as_ref().to_owned();
+    path.set_extension(ext);
+
+    path
 }
