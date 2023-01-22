@@ -1,3 +1,4 @@
+use inkwell::types::BasicType;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
@@ -328,31 +329,35 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
     fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
             op::Binary::Add    => {
-                let left_ty  = self.get_type();
-                let right_ty = right.get_type();
+                let ty1  = self.get_type();
+                let ty2 = right.get_type();
 
-                let left_ety  = left_ty.get_element_type();
-                let right_ety = right_ty.get_element_type();
+                let ety1  = ty1.get_element_type();
+                let ety2 = ty2.get_element_type();
 
-                if left_ety == right_ety {
-                    let result_len = left_ty.len() + right_ty.len();
-                    let result_ty = apply_bt!(let ty = left_ety => ty.array_type(result_len));
+                if ety1 == ety2 {
+                    let result_len = ty1.len().saturating_add(ty2.len());
+                    let extra_len = result_len - ty2.len();
+                    let tyr = apply_bt!(let ty = ety1 => ty.array_type(result_len));
                     
-                    let result_ptr = c.builder.build_alloca(result_ty, "concat");
-                    c.builder.build_store(result_ptr, result_ty.const_zero());
+                    let slice2_ptr = c.builder.build_alloca(ty2, "slice_alloc");
+                    let slice2 = c.builder.build_load(ety2.array_type(extra_len), slice2_ptr, "slice_load");
+
+                    let result_ptr = c.builder.build_alloca(tyr, "concat");
+                    c.builder.build_store(result_ptr, tyr.const_zero());
 
                     // insert L elements into the buffer
                     c.builder.build_store(result_ptr, self);
                     
                     // insert R elements into the buffer
                     let zero = c.ctx.i32_type().const_zero();
-                    let insert_idx = c.ctx.i32_type().const_int(left_ty.len() as _, false);
-                    let right_insert_ptr = unsafe { 
-                        c.builder.build_in_bounds_gep(result_ty, result_ptr, &[zero, insert_idx], "right_insert") 
+                    let insert_idx = c.ctx.i32_type().const_int(ty1.len() as _, false);
+                    let insert_ptr = unsafe { 
+                        c.builder.build_in_bounds_gep(tyr, result_ptr, &[zero, insert_idx], "insert") 
                     };
-                    c.builder.build_store(right_insert_ptr, right);
+                    c.builder.build_store(insert_ptr, slice2);
 
-                    Ok(c.builder.build_load(result_ty, result_ptr, "load_concat").into_array_value())
+                    Ok(c.builder.build_load(tyr, result_ptr, "concat_load").into_array_value())
                 } else {
                     cannot_binary(op, self, right)
                 }
