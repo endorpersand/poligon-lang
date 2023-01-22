@@ -546,17 +546,15 @@ mod tests {
             ])))
         ];
 
-        let a = if let Stmt::Expr(Expr::Block(prog)) = &program.0[0] {
-            if let Stmt::Expr(Expr::Block(prog)) = &prog.0[1] { 
-                if let Stmt::Expr(e) = &prog.0[0] { e } else { unreachable!() }
-            } else { unreachable!() }
-        } else { unreachable!() };
+        let Stmt::Expr(Expr::Block(block)) = &program.0[0] else { unreachable!() };
+        let Stmt::Expr(Expr::Block(block)) = &block.0[1] else { unreachable!() };
+        let Stmt::Expr(e) = &block.0[0] else { unreachable!() };
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
 
         let steps = map! {
-            a as _ => 1
+            e as _ => 1
         };
 
         assert_eq!(&state.steps, &steps);

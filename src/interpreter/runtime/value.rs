@@ -258,7 +258,7 @@ impl Value {
             // than just "conv to iter => get nth item":
             e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
                 let mi = usize::try_from(signed_idx).ok();
-                let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
+                let Value::List(lst) = e else { unreachable!( ) };
 
                 match mi {
                     Some(i) => lst.borrow().get(i).map(Value::clone),
@@ -291,7 +291,7 @@ impl Value {
         match self {
             e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
                 let mi = usize::try_from(signed_idx).ok();
-                let lst = if let Value::List(l) = e { l } else { unreachable!( ) };
+                let Value::List(lst) = e else { unreachable!( ) };
 
                 match mi {
                     Some(i) => {

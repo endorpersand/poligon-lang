@@ -163,14 +163,14 @@ impl Type {
             },
 
             TypeRef::Generic(Type::S_LIST, params) => {
-                if let Some(param) = params.first() {
-                    match sp {
-                        Split::Left(_)
-                        | Split::Right(_) => Ok(param.clone()),
-                        Split::Middle(_, _) => Ok(self.clone()),
-                    }
-                } else {
+                let Some(param) = params.first() else {
                     unreachable!("list cannot be defined without parameters")
+                };
+
+                match sp {
+                    Split::Left(_)
+                    | Split::Right(_) => Ok(param.clone()),
+                    Split::Middle(_, _) => Ok(self.clone()),
                 }
             },
 
