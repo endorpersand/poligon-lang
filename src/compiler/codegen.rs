@@ -889,12 +889,14 @@ impl CodeGenerator {
         todo!()
     }
     fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
-        let ast::Index { expr, index } = idx;
-        let expr = self.consume_expr_and_box(*expr)?;
-        let index = self.consume_expr_and_box(*index)?;
+        // Type signature is needed for assignment.
 
-        let idx_ty = expr.ty.resolve_index_type(&index)?;
-        Ok((idx_ty, plir::Index { expr, index }))
+        let ast::Index { expr, index } = idx;
+
+        let expr = self.consume_expr(*expr)?;
+        let index = self.consume_expr(*index)?;
+        
+        op_impl::apply_index(expr, index)
     }
 }
 

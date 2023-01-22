@@ -115,6 +115,9 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn raw_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
         left.apply_unary(op, self)
     }
+    pub(crate) fn raw_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
+        left.apply_cmp(op, right, self)
+    }
 }
 
 impl<'ctx> Unary<'ctx> for BV<'ctx> {

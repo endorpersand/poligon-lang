@@ -1,7 +1,7 @@
 use crate::ast::{op, self};
 use crate::err::GonErr;
 
-use super::{Split, Expr, ExprType};
+use super::Split;
 
 /// An operation between types failed.
 #[derive(Debug)]
@@ -118,12 +118,6 @@ impl Type {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
     }
 
-    /// Test if this type is `int`.
-    #[inline]
-    fn is_int(&self) -> bool {
-        matches!(self.as_ref(), TypeRef::Prim(Type::S_INT))
-    }
-
     /// Given some types, merge them into what type it could be.
     fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
         let mut it = into_it.into_iter()
@@ -191,43 +185,27 @@ impl Type {
             _ => Err(OpErr::CannotIndex(self.clone()))
         }
     }
+}
 
-    /// Compute the type that would result by indexing a value of this type with a given expression.
-    pub fn resolve_index_type(&self, idx: &Expr) -> Result<Type, OpErr> {
-        let idx_ty = &idx.ty;
-
-        match self.as_ref() {
-            TypeRef::Prim(Type::S_STR) => match idx_ty.is_int() {
-                true  => Ok(ty!(Type::S_CHAR)),
-                false => Err(OpErr::CannotIndexWith(self.clone(), idx_ty.clone())),
-            }
-            TypeRef::Generic(Type::S_LIST, params) => match idx_ty.is_int() {
-                true  => Ok(params[0].clone()),
-                false => Err(OpErr::CannotIndexWith(self.clone(), idx_ty.clone())),
-            }
-            TypeRef::Generic(Type::S_DICT, params) => {
-                let (key, val) = (&params[0], &params[1]);
-                match key == idx_ty {
-                    true  => Ok(val.clone()),
-                    false => Err(OpErr::CannotIndexWith(self.clone(), idx_ty.clone())),
-                }
-            }
-            TypeRef::Tuple(tys) => match idx.expr {
-                ExprType::Literal(ast::Literal::Int(idx_lit)) => {
-                    usize::try_from(idx_lit)
-                        .ok()
-                        .and_then(|idx| tys.get(idx))
-                        .ok_or_else(|| OpErr::TupleIndexOOB(self.clone(), idx_lit))
-                        .map(Clone::clone)
-                },
-                _ => match idx_ty.is_int() {
-                    true  => Err(OpErr::TupleIndexNonLiteral(self.clone())),
-                    false => Err(OpErr::CannotIndexWith(self.clone(), idx_ty.clone()))
-                }
-            }
-            _ => Err(OpErr::CannotIndex(self.clone()))
+impl<'a> PartialEq<TypeRef<'a>> for Type {
+    fn eq(&self, other: &TypeRef) -> bool {
+        match (self, other) {
+            (Self::Prim(t1),        TypeRef::Prim(t2))        => t1 == t2,
+            (Self::Generic(t1, p1), TypeRef::Generic(t2, p2)) => t1 == t2 && p1 == p2,
+            (Self::Tuple(t1),       TypeRef::Tuple(t2))       => t1 == t2,
+            (Self::Fun(p1, r1),     TypeRef::Fun(p2, r2))     => p1 == p2 && **r1 == **r2,
+            _ => false,
         }
     }
+}
+impl<'a> PartialEq<Type> for TypeRef<'a> {
+    fn eq(&self, other: &Type) -> bool { other.eq(self) }
+}
+impl<'a> PartialEq<TypeRef<'a>> for &'a Type {
+    fn eq(&self, other: &TypeRef) -> bool { (*self).eq(other) }
+}
+impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
+    fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
 }
 
 /// Utility macro to make PLIR type expressions easier to read.

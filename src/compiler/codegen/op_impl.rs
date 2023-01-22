@@ -1,4 +1,4 @@
-use crate::ast::op;
+use crate::ast::{op, Literal};
 use crate::compiler::plir::*;
 
 use super::PLIRResult;
@@ -67,6 +67,22 @@ fn apply_cast2((left, right): (Expr, Expr), t: &Type) -> Result<(Expr, Expr), (E
             Err(r) => Err((uncast(l), uncast(r))),
         }
         Err(l) => Err((uncast(l), right)),
+    }
+}
+
+trait ResultFlatten {
+    type Inner;
+    fn flatten(self) -> Self::Inner;
+}
+
+impl<T> ResultFlatten for Result<T, T> {
+    type Inner = T;
+
+    fn flatten(self) -> Self::Inner {
+        match self {
+            Ok(t) => t,
+            Err(t) => t,
+        }
     }
 }
 
@@ -180,4 +196,45 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
 
     // Construct expression:
     Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast), right: Box::new(rcast) }})
+}
+
+pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
+    // Check for any valid casts that can be applied here:
+    let lcast = apply_cast(left, &ty!(Type::S_STR)).flatten();
+
+    let icast = match lcast.ty.as_ref() {
+        | TypeRef::Prim(Type::S_STR)
+        | TypeRef::Generic(Type::S_LIST, _)
+        | TypeRef::Tuple(_)
+        => apply_cast(index, &ty!(Type::S_INT)).flatten(),
+        
+        TypeRef::Generic(Type::S_DICT, [k, _]) => apply_cast(index, k).flatten(),
+        
+        _ => return Err(OpErr::CannotIndex(lcast.ty).into())
+    };
+
+    // Type check and compute resulting expr type:
+    let ty = {
+        let left = lcast.ty.clone();
+        let index = &icast.ty;
+        match (left.as_ref(), index.as_ref()) {
+            (TypeRef::Prim(Type::S_STR), TypeRef::Prim(Type::S_INT)) => ty!(Type::S_CHAR),
+            (TypeRef::Generic(Type::S_LIST, [t]), TypeRef::Prim(Type::S_INT)) => t.clone(),
+            (TypeRef::Generic(Type::S_DICT, [k, v]), idx) if idx == k => v.clone(),
+            (TypeRef::Tuple(tys), TypeRef::Prim(Type::S_INT)) => {
+                let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
+                    return Err(OpErr::TupleIndexNonLiteral(left).into());
+                };
+                let Ok(idx) = usize::try_from(lit) else {
+                    return Err(OpErr::TupleIndexOOB(left, lit).into());
+                };
+
+                tys.get(idx).cloned().ok_or_else(|| OpErr::TupleIndexOOB(left, lit))?
+            },
+            _ => Err(OpErr::CannotIndexWith(left, index.clone()))?
+        }
+    };
+
+    // Construct expression:
+    Ok((ty, Index { expr: Box::new(lcast), index: Box::new(icast) }))
 }

@@ -218,15 +218,13 @@ pub enum TypeLayout {
 impl TypeLayout {
     /// Determine the type layout of a given PLIR type (if it exists).
     pub fn of(ty: &plir::Type) -> Option<Self> {
-        match ty {
-            plir::Type::Prim(prim) => match prim.as_str() {
-                plir::Type::S_FLOAT => Some(TypeLayout::Float),
-                plir::Type::S_INT   => Some(TypeLayout::Int),
-                plir::Type::S_BOOL  => Some(TypeLayout::Bool),
-                plir::Type::S_VOID  => Some(TypeLayout::Unit),
-                plir::Type::S_STR   => Some(TypeLayout::Str),
-                _ => todo!("type layout of {ty}")
-            },
+        use plir::{TypeRef, Type};
+        match ty.as_ref() {
+            TypeRef::Prim(Type::S_FLOAT) => Some(TypeLayout::Float),
+            TypeRef::Prim(Type::S_INT)   => Some(TypeLayout::Int),
+            TypeRef::Prim(Type::S_BOOL)  => Some(TypeLayout::Bool),
+            TypeRef::Prim(Type::S_VOID)  => Some(TypeLayout::Unit),
+            TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::Str),
             _ => todo!("type layout of {ty}")
         }
     }

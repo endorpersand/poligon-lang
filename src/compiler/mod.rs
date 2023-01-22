@@ -268,7 +268,9 @@ pub enum CompileErr<'ctx> {
     /// An error occurred within LLVM.
     LLVMErr(LLVMString),
 
-    StructIndexOOB(usize)
+    StructIndexOOB(usize),
+
+    Generic(&'static str, String)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
 pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
@@ -297,23 +299,27 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             
             | CompileErr::LLVMErr(_) 
             => "llvm error",
+
+            | CompileErr::Generic(t, _)
+            => t,
         }
     }
 
     fn message(&self) -> String {
         match self {
-            Self::UndefinedVar(name) => format!("could not find variable '{name}'"),
-            Self::UndefinedFun(name) => format!("could not find function '{name}'"),
-            Self::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
-            Self::InvalidFun => String::from("could not create function"),
-            Self::UnresolvedType(t) => format!("'{t}' is missing an LLVM representation"),
-            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
-            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
-            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
-            Self::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
-            Self::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
-            Self::CannotDetermineMain => String::from("could not determine entry point"),
-            Self::LLVMErr(e) => format!("{e}"),
+            CompileErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            CompileErr::UndefinedFun(name) => format!("could not find function '{name}'"),
+            CompileErr::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
+            CompileErr::InvalidFun => String::from("could not create function"),
+            CompileErr::UnresolvedType(t) => format!("'{t}' is missing an LLVM representation"),
+            CompileErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+            CompileErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+            CompileErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+            CompileErr::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
+            CompileErr::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
+            CompileErr::CannotDetermineMain => String::from("could not determine entry point"),
+            CompileErr::LLVMErr(e) => format!("{e}"),
+            CompileErr::Generic(_, t) => t.clone(),
         }
     }
 }
@@ -703,7 +709,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     Err(CompileErr::WrongArity(fun_params, expr_params))
                 }
             },
-            plir::ExprType::Index(_) => todo!(),
+            plir::ExprType::Index(idx) => idx.write_ir(compiler),
             plir::ExprType::Spread(_) => todo!(),
             plir::ExprType::Split(_, _) => todo!(),
             plir::ExprType::Cast(e) => {
@@ -730,6 +736,73 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
         };
 
         Ok(value)
+    }
+}
+
+impl<'ctx> TraverseIR<'ctx> for plir::Index {
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        let Self { expr, index } = self;
+
+        let expr = expr.write_ir(compiler)?;
+        let index = index.write_ir(compiler)?;
+
+        // This should be type checked in PLIR:
+        match expr {
+            GonValue::Float(_) => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Int(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Bool(_)  => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Unit     => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Str(s)   => {
+                // TODO: support unicode
+                let buf = compiler.builder.build_extract_value(s, 0, "buf").unwrap().into_pointer_value();
+                let len = compiler.builder.build_extract_value(s, 1, "len").unwrap().into_int_value();
+
+                let i8_type = compiler.ctx.i8_type();
+                let i64_type = compiler.ctx.i64_type();
+                
+                // this should also be type checked in PLIR:
+                let idx = index.basic_value(compiler).into_int_value();
+
+                // bounds check
+                let lower = compiler.raw_cmp(len.get_type().const_zero(), op::Cmp::Le, idx);
+                let upper = compiler.raw_cmp(idx, op::Cmp::Lt, len);
+                
+                let bounds = compiler.builder.build_and(lower, upper, "bounds_check");
+                
+                let bb = compiler.get_insert_block();
+                let safe = compiler.ctx.insert_basic_block_after(bb, "safe_idx");
+                let oob = compiler.ctx.insert_basic_block_after(safe, "oob_idx");
+                let exit = compiler.ctx.insert_basic_block_after(oob, "exit_idx");
+
+                compiler.builder.build_conditional_branch(bounds, safe, oob);
+                
+                compiler.builder.position_at_end(safe);
+                let pos = unsafe {compiler.builder.build_gep(
+                    i8_type.array_type(0), 
+                    buf, 
+                    &[i64_type.const_zero(), idx],
+                    ""
+                ) };
+
+                let val = compiler.builder.build_load(i8_type, pos, "").into_int_value();
+                let val = compiler.builder.build_int_cast(val, i64_type, "");
+                compiler.builder.build_unconditional_branch(exit);
+                
+                compiler.builder.position_at_end(oob);
+                compiler.branch_and_goto(exit);
+                
+                let phi = compiler.builder.build_phi(i64_type, "");
+                phi.add_incoming(&[
+                    (&val, safe),
+                    (&i64_type.const_zero(), oob)
+                ]);
+
+                // TODO: make char
+                Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
+            },
+        }
     }
 }
 
