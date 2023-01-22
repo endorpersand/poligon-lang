@@ -6,6 +6,8 @@
 //! The main function that performs the conversion is [`codegen`], 
 //! which utilizes the [`CodeGenerator`] struct.
 
+mod op_impl;
+
 use std::collections::HashMap;
 
 use crate::ast::{self, ReasgType, MutType};
@@ -738,32 +740,16 @@ impl CodeGenerator {
                     .map(|(ty, path)| plir::Expr::new(ty, plir::ExprType::Path(path)))
             },
             ast::Expr::UnaryOps { ops, expr } => {
-                let expr = self.consume_expr_and_box(*expr)?;
+                let e = self.consume_expr(*expr)?;
                 
-                let mut top_ty = expr.ty.clone();
-                let mut op_stack = vec![];
-
-                for op in ops.into_iter().rev() {
-                    top_ty = top_ty.resolve_unary_type(op)?;
-                    op_stack.push((op, top_ty.clone()));
-                }
-
-                let ops = op_stack.into_iter().rev().collect();
-                
-                Ok(plir::Expr::new(
-                    top_ty,
-                    plir::ExprType::UnaryOps { ops, expr }
-                ))
+                ops.into_iter().rev()
+                    .try_fold(e, op_impl::apply_unary)
             },
             ast::Expr::BinaryOp { op, left, right } => {
-                let left = self.consume_expr_and_box(*left)?;
-                let right = self.consume_expr_and_box(*right)?;
-
-                let ty = left.ty.resolve_binary_type(op, &right.ty)?;
-                Ok(plir::Expr::new(
-                    ty,
-                    plir::ExprType::BinaryOp { op, left, right }
-                ))
+                op_impl::apply_binary(op,
+                    self.consume_expr(*left)?,
+                    self.consume_expr(*right)?,
+                )
             },
             ast::Expr::Comparison { left, rights } => {
                 let left = self.consume_expr_and_box(*left)?;

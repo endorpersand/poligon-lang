@@ -69,6 +69,7 @@ pub(crate) enum TypeRef<'a> {
     Fun(&'a [Type], &'a Type)
 }
 impl TypeRef<'_> {
+    #[allow(unused)]
     pub(crate) fn to_owned(self) -> Type {
         match self {
             TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
@@ -190,67 +191,6 @@ impl Type {
             _ => Err(OpErr::CannotIndex(self.clone()))
         }
     }
-
-    /// Compute the type that would result by applying a unary operator to a value of this type.
-    pub fn resolve_unary_type(&self, op: op::Unary) -> Result<Type, OpErr> {
-        match op {
-            op::Unary::Plus   => self.is_numeric().then(|| self.clone()),
-            op::Unary::Minus  => self.is_numeric().then(|| self.clone()),
-            op::Unary::LogNot => Some(ty!(Type::S_BOOL)),
-            op::Unary::BitNot => self.is_int().then(|| self.clone()),
-        }.ok_or_else(|| OpErr::CannotUnary(op, self.clone()))
-    }
-
-    /// Compute the type that would result by applying a binary operator 
-    /// to a value of this type and a value of another type.
-    pub fn resolve_binary_type(&self, op: op::Binary, right: &Type) -> Result<Type, OpErr> {
-        #[inline]
-        fn bin_op(ty: TypeRef, left: &Type, right: &Type) -> Option<Type> {
-            (left.as_ref() == ty && right.as_ref() == ty).then(|| ty.to_owned())
-        }
-
-        macro_rules! numeric_op_else {
-            ($left:expr, $right:expr, $(($a:pat, $b:pat) => $bl:expr),+) => {
-                match (self.as_ref(), right.as_ref()) {
-                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_FLOAT)) => Ok(ty!(Type::S_FLOAT)),
-                    (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT))   => Ok(ty!(Type::S_FLOAT)),
-                    (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT))   => Ok(ty!(Type::S_FLOAT)),
-                    (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT))     => Ok(ty!(Type::S_INT)),
-                    $(($a, $b) => $bl),+
-                }
-            }
-        }
-
-        match op {
-            op::Binary::Add 
-            | op::Binary::Sub
-            | op::Binary::Mul
-            | op::Binary::Div
-            | op::Binary::Mod
-            => numeric_op_else!(
-                left, right,
-                (_, _) => Err(OpErr::CannotBinary(op, self.clone(), right.clone()))
-            ),
-
-            op::Binary::Shl
-            | op::Binary::Shr
-            | op::Binary::BitAnd
-            | op::Binary::BitOr
-            | op::Binary::BitXor
-            => bin_op(TypeRef::Prim(Type::S_INT), self, right)
-                .ok_or_else(|| OpErr::CannotBinary(op, self.clone(), right.clone())),
-
-            // TODO: &&, || typing
-            op::Binary::LogAnd => Ok(ty!(Type::S_BOOL)),
-            op::Binary::LogOr  => Ok(ty!(Type::S_BOOL)),
-        }
-    }
-
-    // pub fn resolve_cmp_type(_: op::Cmp, left: Type, right: Type) -> Option<Type> {
-    //     let comparable = (left.is_numeric() && right.is_numeric()) || (left == right);
-
-    //     comparable.then(|| Type::bool())
-    // }
 
     /// Compute the type that would result by indexing a value of this type with a given expression.
     pub fn resolve_index_type(&self, idx: &Expr) -> Result<Type, OpErr> {

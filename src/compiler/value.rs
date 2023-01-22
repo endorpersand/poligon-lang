@@ -91,7 +91,11 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Cast a GonValue to another type.
     /// 
-    /// The only successful casts here are int to float, char to string, anything to unit
+    /// The only successful casts here: 
+    /// - int to float
+    /// - char to string
+    /// - anything to unit
+    /// - anything to bool
     pub fn cast(&self, v: GonValue<'ctx>, ty: &plir::Type) -> Option<GonValue<'ctx>> {
         match (v, ty.as_ref()) {
             (GonValue::Int(i), plir::TypeRef::Prim(plir::Type::S_FLOAT)) => {
@@ -100,6 +104,8 @@ impl<'ctx> Compiler<'ctx> {
                 
                 Some(GonValue::Float(fv))
             },
+            // TODO: impl char -> str
+            (_, plir::TypeRef::Prim(plir::Type::S_BOOL)) => Some(GonValue::Bool(self.truth(v))),
             (_, plir::TypeRef::Prim(plir::Type::S_VOID)) => Some(GonValue::Unit),
             _ => None
         }
