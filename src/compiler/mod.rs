@@ -21,13 +21,13 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::iter;
 
-use inkwell::OptimizationLevel;
+use inkwell::{OptimizationLevel, AddressSpace};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
-use inkwell::types::{StructType, BasicTypeEnum};
+use inkwell::types::{StructType, BasicTypeEnum, PointerType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue};
 
 use crate::ast::{op, Literal};
@@ -196,6 +196,11 @@ impl<'ctx> Compiler<'ctx> {
     fn branch_and_goto(&self, bb: BasicBlock<'ctx>) {
         self.builder.build_unconditional_branch(bb);
         self.builder.position_at_end(bb);
+    }
+
+    /// Creates an opaque pointer type.
+    pub fn ptr_type(&self, addr: AddressSpace) -> PointerType<'ctx> {
+        self.ctx.i64_type().ptr_type(addr)
     }
 
     pub fn create_struct_value(

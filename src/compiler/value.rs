@@ -85,7 +85,7 @@ impl<'ctx> Compiler<'ctx> {
         
         GonValue::Str(self.create_struct_value(self.string_type(), &[
             array_ptr.into(),
-            self.ctx.i64_type().const_int(s.len() as u64, true).into()
+            self.ctx.i64_type().const_int(s.len() as u64 + 1, true).into()
         ]).unwrap())
     }
 
