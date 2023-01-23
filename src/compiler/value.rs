@@ -224,7 +224,6 @@ impl TypeLayout {
         match ty.as_ref() {
             TypeRef::Prim(Type::S_FLOAT) => Some(TypeLayout::Float),
             TypeRef::Prim(Type::S_INT)   => Some(TypeLayout::Int),
-            TypeRef::Prim(Type::S_CHAR)   => Some(TypeLayout::Int),
             TypeRef::Prim(Type::S_BOOL)  => Some(TypeLayout::Bool),
             TypeRef::Prim(Type::S_VOID)  => Some(TypeLayout::Unit),
             TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::Str),
