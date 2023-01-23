@@ -143,12 +143,11 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
     fn apply_binary(self, op: op::Binary, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
         match op {
             op::Binary::LogAnd => {
-                let parent = c.parent_fn();
                 let bb = c.get_insert_block();
 
                 // lhs ? rhs : lhs
-                let mut then_bb = c.ctx.append_basic_block(parent, "logand_true");
-                let merge_bb = c.ctx.append_basic_block(parent, "logand_merge");
+                let mut then_bb = c.ctx.insert_basic_block_after(bb, "and_true");
+                let merge_bb = c.ctx.insert_basic_block_after(then_bb, "and_merge");
                 c.builder.build_conditional_branch(self.truth(c), then_bb, merge_bb);
                 
                 c.builder.position_at_end(then_bb);
@@ -158,7 +157,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
 
                 c.builder.position_at_end(merge_bb);
                 // TODO: properly type
-                let phi = c.builder.build_phi(self.get_type(), "logand_result");
+                let phi = c.builder.build_phi(self.get_type(), "and_result");
                 phi.add_incoming(&[
                     // if LHS was true
                     (&rhs, then_bb),
@@ -169,12 +168,11 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 Ok(phi.as_basic_value())
             },
             op::Binary::LogOr  => {
-                let parent = c.parent_fn();
                 let bb = c.get_insert_block();
 
                 // lhs ? lhs : rhs
-                let mut else_bb = c.ctx.append_basic_block(parent, "logor_false");
-                let merge_bb = c.ctx.append_basic_block(parent, "logor_merge");
+                let mut else_bb = c.ctx.insert_basic_block_after(bb, "or_false");
+                let merge_bb = c.ctx.insert_basic_block_after(else_bb, "or_merge");
                 c.builder.build_conditional_branch(self.truth(c), merge_bb, else_bb);
                 
                 c.builder.position_at_end(else_bb);
@@ -184,7 +182,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
 
                 c.builder.position_at_end(merge_bb);
                 // TODO, properly type
-                let phi = c.builder.build_phi(self.get_type(), "logor_result");
+                let phi = c.builder.build_phi(self.get_type(), "or_result");
                 phi.add_incoming(&[
                     // if LHS was true
                     (&self, bb),
