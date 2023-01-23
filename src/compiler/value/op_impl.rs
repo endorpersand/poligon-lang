@@ -467,15 +467,22 @@ impl<'ctx> Cmp<'ctx> for PointerValue<'ctx> {
 
 impl<'ctx> Truth<'ctx> for FloatValue<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
-        let zero = c.ctx.f64_type().const_zero();
+        let zero = self.get_type().const_zero();
         c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
     }
 }
 
 impl<'ctx> Truth<'ctx> for IntValue<'ctx> {
     fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
-        let zero = c.ctx.i64_type().const_zero();
-        c.builder.build_int_compare(IntPredicate::NE, self, zero, "truth")
+        let ty = self.get_type();
+
+        // special exception for bools:
+        if ty.get_bit_width() == 1 { 
+            self 
+        } else {
+            let zero = ty.const_zero();
+            c.builder.build_int_compare(IntPredicate::NE, self, zero, "truth")
+        }
     }
 }
 
