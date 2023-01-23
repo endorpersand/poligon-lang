@@ -66,11 +66,28 @@ impl<'ctx> Compiler<'ctx> {
     
         Ok(())
     }
+    
+    fn std_printd(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let p0 = fun.get_first_param().unwrap();
+    
+        let printf = self.import_fun("printf",
+            TypeLayout::Int.fn_type(self, &[
+                self.ctx.i8_type().ptr_type(Default::default()).into()
+            ], true),
+        )?;
+    
+        let template = unsafe { builder.build_global_string("%d\0", "printd") };
+        builder.build_call(printf, &[template.as_pointer_value().into(), p0.into()], "");
+        builder.build_return(None);
+    
+        Ok(())
+    }
 
     // HACK
     std_map! {
         "print": std_print,
-        "printc": std_printc
+        "printc": std_printc,
+        "printd": std_printd
     }
 
     pub fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
