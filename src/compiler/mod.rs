@@ -289,7 +289,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             | CompileErr::CannotDetermineMain
             => "syntax error",
 
-            CompileErr::UnresolvedType(_) => todo!(),
+            CompileErr::UnresolvedType(_)
             | CompileErr::CannotUnary(_, _)
             | CompileErr::CannotBinary(_, _, _)
             | CompileErr::CannotCmp(_, _, _)

@@ -85,18 +85,18 @@ enum TypeRezError {
     MultipleBranches
 }
 impl Type {
-    pub(crate) const S_INT: &'static str   = "int";
+    pub(crate) const S_INT:   &'static str = "int";
     pub(crate) const S_FLOAT: &'static str = "float";
-    pub(crate) const S_BOOL: &'static str  = "bool";
-    pub(crate) const S_CHAR: &'static str  = "char";
-    pub(crate) const S_STR: &'static str   = "string";
-    pub(crate) const S_VOID: &'static str  = "void";
-    pub(crate) const S_LIST: &'static str  = "list";
-    pub(crate) const S_SET: &'static str   = "set";
-    pub(crate) const S_DICT: &'static str  = "dict";
+    pub(crate) const S_BOOL:  &'static str = "bool";
+    pub(crate) const S_CHAR:  &'static str = "char";
+    pub(crate) const S_STR:   &'static str = "string";
+    pub(crate) const S_VOID:  &'static str = "void";
+    pub(crate) const S_LIST:  &'static str = "list";
+    pub(crate) const S_SET:   &'static str = "set";
+    pub(crate) const S_DICT:  &'static str = "dict";
     pub(crate) const S_RANGE: &'static str = "range";
     pub(crate) const S_NEVER: &'static str = "never";
-    pub(crate) const S_UNK: &'static str   = "unk";
+    pub(crate) const S_UNK:   &'static str = "unk";
 
     pub(crate) fn as_ref(&self) -> TypeRef {
         match self {
