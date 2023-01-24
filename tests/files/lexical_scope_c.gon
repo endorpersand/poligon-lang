@@ -1,4 +1,4 @@
-extern fun puts(c: string) -> int;
+extern fun print(c: string);
 
 fun main() {
     let a = "global";

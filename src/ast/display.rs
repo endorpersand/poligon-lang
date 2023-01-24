@@ -334,14 +334,3 @@ impl Display for Index {
         write!(f, "{expr}[{index}]")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::Interpreter;
-
-    #[test]
-    fn test_basic() {
-        let ir = Interpreter::from_file("_test_files/fib.gon").unwrap();
-        println!("{}", ir.parse().unwrap());
-    }
-}

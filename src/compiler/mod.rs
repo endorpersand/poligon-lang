@@ -1187,17 +1187,4 @@ mod tests {
         assert_main_pass_vb(code, true);
         exec::<()>(code);
     }
-    #[test]
-    fn lexical_scope() {
-        assert_main_pass_vb(&file("_test_files/lexical_scope_ll.gon"), true);
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed  = lexer::tokenize(&file("_test_files/lexical_scope_ll.gon")).unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        let plired = codegen::codegen(parsed).unwrap();
-        let main_fun = compiler.compile(&plired).unwrap();
-
-        unsafe { compiler.jit_run::<bool>(main_fun).unwrap(); }
-    }
 }

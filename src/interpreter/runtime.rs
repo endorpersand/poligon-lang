@@ -895,17 +895,3 @@ fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut RtContext, rt: ast::Rea
         ctx.vars.declare_full(String::from(ident), rhs, rt, *mt).cloned()
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::Interpreter;
-
-    #[test]
-    fn lexical_scope_test() -> std::io::Result<()> {
-        Interpreter::from_file("_test_files/lexical_scope.gon")?
-            .run()
-            .unwrap();
-
-        Ok(())
-    }
-}

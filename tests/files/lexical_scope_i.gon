@@ -1,7 +1,17 @@
+// dynamic scope:
+// global
+// block
+
+// lexical scope:
+// global
+// global
+
+let out = [];
+
 let a = "global";
 {
     fun showA() {
-        print(a);
+        out.push(a);
     }
 
     {
@@ -11,10 +21,4 @@ let a = "global";
     }
 }
 
-// dynamic scope:
-// global
-// block
-
-// lexical scope:
-// global
-// global
+out;
