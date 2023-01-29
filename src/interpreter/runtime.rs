@@ -18,7 +18,7 @@ pub mod value;
 mod vars;
 mod gstd;
 
-pub use rtio::IoRef;
+pub use rtio::IoHook;
 
 /// Struct that holds state and scope in runtime.
 /// It can be used to access variables and functions
@@ -26,7 +26,7 @@ pub use rtio::IoRef;
 pub struct RtContext<'ctx> {
     vars: VarContext<'ctx>,
     rs: Rc<ResolveState>,
-    io: IoRef
+    io: IoHook
 }
 
 pub(crate) mod rtio {
@@ -37,48 +37,94 @@ pub(crate) mod rtio {
     pub trait RW: io::Read + io::Write {}
     impl<S: io::Read + io::Write> RW for S {}
 
-    #[derive(Clone)]
-    pub enum IoRef {
+    /// A hook on IO operations.
+    /// 
+    /// If present, stdin and stdout are read/written to the provided value 
+    /// instead of from stdin and stdout.
+    #[derive(Clone, Default)]
+    pub struct IoHook {
+        // We don't want to expose IoHook implementation.
+        hook: IoHookInner
+    }
+
+    #[derive(Clone, Default)]
+    enum IoHookInner {
+        #[default]
+        N,
         R(Rc<RefCell<dyn io::Read>>),
         W(Rc<RefCell<dyn io::Write>>),
         RW(Rc<RefCell<dyn RW>>)
     }
     
-    impl IoRef {
-        pub fn new_r(t: impl io::Read + 'static) -> Self { IoRef::R(Rc::new(RefCell::new(t))) }
-        pub fn new_w(t: impl io::Write + 'static) -> Self { IoRef::W(Rc::new(RefCell::new(t))) }
-        pub fn new_rw(t: impl RW + 'static) -> Self { IoRef::RW(Rc::new(RefCell::new(t))) }
+    impl IoHook {
+        /// Create a new read hook. 
+        /// Any reads from STDIN are pulled from this value, and
+        /// any writes to STDOUT are sent to STDOUT.
+        pub fn new_r(t: impl io::Read + 'static) -> Self { 
+            IoHook { hook: IoHookInner::R(Rc::new(RefCell::new(t))) }
+        }
+
+        /// Create a new write hook.
+        /// Any reads from STDIN are pulled from STDIN, and
+        /// any writes to STDOUT are sent to this value.
+        pub fn new_w(t: impl io::Write + 'static) -> Self { 
+            IoHook { hook: IoHookInner::W(Rc::new(RefCell::new(t))) }
+        }
+
+        /// Create a new read-write hook.
+        /// Reads and writes from STDIN and STDOUT are sent through this value.
+        pub fn new_rw(t: impl RW + 'static) -> Self { 
+            IoHook { hook: IoHookInner::RW(Rc::new(RefCell::new(t))) }
+        }
     }
-    impl io::Write for IoRef {
+
+    impl io::Write for IoHookInner {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             match self {
-                IoRef::R(_)  => Ok(0),
-                IoRef::W(w)  => w.borrow_mut().write(buf),
-                IoRef::RW(w) => w.borrow_mut().write(buf),
+                | IoHookInner::N
+                | IoHookInner::R(_)
+                => io::stdout().write(buf),
+
+                IoHookInner::W(w)  => w.borrow_mut().write(buf),
+                IoHookInner::RW(w) => w.borrow_mut().write(buf),
             }
         }
 
         fn flush(&mut self) -> io::Result<()> {
             match self {
-                IoRef::R(_)  => Ok(()),
-                IoRef::W(w)  => w.borrow_mut().flush(),
-                IoRef::RW(w) => w.borrow_mut().flush(),
+                | IoHookInner::N
+                | IoHookInner::R(_)
+                => io::stdout().flush(),
+
+                IoHookInner::W(w)  => w.borrow_mut().flush(),
+                IoHookInner::RW(w) => w.borrow_mut().flush(),
             }
         }
     }
-    impl io::Read for IoRef {
+    impl io::Read for IoHookInner {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             match self {
-                IoRef::R(r) => r.borrow_mut().read(buf),
-                IoRef::W(_) => Ok(0),
-                IoRef::RW(r) => r.borrow_mut().read(buf),
+                | IoHookInner::N
+                | IoHookInner::W(_)
+                => io::stdin().read(buf),
+
+                IoHookInner::R(r) => r.borrow_mut().read(buf),
+                IoHookInner::RW(r) => r.borrow_mut().read(buf),
             }
         }
     }
+    impl io::Write for IoHook {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.hook.write(buf)
+        }
 
-    impl Default for IoRef {
-        fn default() -> Self {
-            Self::new_w(io::stdout())
+        fn flush(&mut self) -> io::Result<()> {
+            self.hook.flush()
+        }
+    }
+    impl io::Read for IoHook {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.hook.read(buf)
         }
     }
 }
@@ -89,7 +135,10 @@ impl<'ctx> RtContext<'ctx> {
         Self::new_with_io(Default::default())
     }
 
-    pub fn new_with_io(io: IoRef) -> Self {
+    /// Create a new context, using the provided argument as an IO hook.
+    /// 
+    /// See [`IoHook`] for more details.
+    pub fn new_with_io(io: IoHook) -> Self {
         Self {
             vars: VarContext::new_with_std(),
             rs: Rc::new(ResolveState::new()),

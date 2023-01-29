@@ -32,7 +32,7 @@ pub enum FunParamType {
 
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
-    Rust(fn(rtio::IoRef, Vec<Value>) -> RtResult<Value>),
+    Rust(fn(rtio::IoHook, Vec<Value>) -> RtResult<Value>),
     Poligon(Vec<String>, Rc<ast::Block>, usize /* scope idx */)
 }
 

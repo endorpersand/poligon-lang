@@ -35,7 +35,12 @@ mod repl;
 /// As such, this struct may be more limited than the [compiler][crate::compiler] form.
 pub struct Interpreter {
     source: String,
-    pub ioref: rtio::IoRef
+    /// IO hook for this interpreter. 
+    /// This can be modified before [`Interpreter::run`] 
+    /// is called in order to hook IO.
+    /// 
+    /// See [`runtime::IoHook`] for more details.
+    pub hook: rtio::IoHook
 }
 
 type InterpretResult<T> = Result<T, String>;
@@ -55,7 +60,10 @@ impl Interpreter {
     /// interpreter.run().unwrap();
     /// ```
     pub fn from_string(s: &str) -> Self {
-        Self::from_string_with_io(s, Default::default())
+        Self {
+            source: String::from(s), 
+            hook: Default::default()
+        }
     }
 
     /// Read the text from a file and create an interpreter out of it if successfully read.
@@ -72,17 +80,7 @@ impl Interpreter {
     /// }
     /// ```
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
-        Self::from_file_with_io(fp, Default::default())
-    }
-
-    pub fn from_string_with_io(s: &str, ioref: rtio::IoRef) -> Self {
-        Self {
-            source: String::from(s), ioref
-        }
-    }
-
-    pub fn from_file_with_io(fp: impl AsRef<Path>, ioref: rtio::IoRef) -> io::Result<Self> {
-        fs::read_to_string(fp).map(|source| Self { source, ioref })
+        fs::read_to_string(fp).map(|source| Self { source, hook: Default::default() })
     }
 
     /// Lex the source string.
@@ -137,17 +135,24 @@ impl Interpreter {
     /// # Usage
     /// ```
     /// # use poligon_lang::Interpreter;
-    /// use poligon_lang::interpreter::runtime::Value;
+    /// use poligon_lang::interpreter::runtime::IoHook;
+    /// use std::collections::VecDeque;
+    /// use std::io::{BufReader, BufRead};
     /// 
-    /// let interpreter = Interpreter::from_string("2 - 2;");
+    /// let mut interpreter = Interpreter::from_string("print(2 - 2);");
+    /// interpreter.hook = IoHook::new_rw(VecDeque::new()); // set hook
+    /// interpreter.run().unwrap();
     /// 
-    /// // prints 0
-    /// assert_eq!(interpreter.run().unwrap(), Value::Int(0));
+    /// // read from hook
+    /// let reader = BufReader::new(interpreter.hook);
+    /// let mut lines = reader.lines();
+    /// assert_eq!(lines.next().unwrap().unwrap(), "0");
+    /// assert!(lines.next().is_none());
     /// ```
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
         
-        let mut ctx = RtContext::new_with_io(self.ioref.clone());
+        let mut ctx = RtContext::new_with_io(self.hook.clone());
         parsed.run_with_ctx(&mut ctx)
             .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
     }

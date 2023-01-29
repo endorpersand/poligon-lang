@@ -5,7 +5,7 @@ use std::path::Path;
 
 use inkwell::context::Context;
 use poligon_lang::compiler::{codegen, Compiler};
-use poligon_lang::interpreter::runtime::IoRef;
+use poligon_lang::interpreter::runtime::IoHook;
 use poligon_lang::{Interpreter, lexer, parser};
 
 fn compile_and_run(fp: impl AsRef<Path>) {
@@ -33,10 +33,12 @@ fn display_test() {
 fn lexical_scope_i_test() {
     let dq = VecDeque::new();
 
-    let ir = Interpreter::from_file_with_io("tests/files/lexical_scope_i.gon", IoRef::new_rw(dq)).unwrap();
+    let hook = IoHook::new_rw(dq);
+    let mut ir = Interpreter::from_file("tests/files/lexical_scope_i.gon").unwrap();
+    ir.hook = hook;
     ir.run().unwrap();
 
-    let reader = BufReader::new(ir.ioref);
+    let reader = BufReader::new(ir.hook);
     let mut lines = reader.lines();
     
     assert_eq!(lines.next().unwrap().unwrap(), "global");

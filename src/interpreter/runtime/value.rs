@@ -391,7 +391,7 @@ impl Value {
     }
 
     /// Create a function value, using a function defined in Rust.
-    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(rtio::IoRef, Vec<Value>) -> RtResult<Value>) -> Self {
+    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(rtio::IoHook, Vec<Value>) -> RtResult<Value>) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,
