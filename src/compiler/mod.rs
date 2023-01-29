@@ -140,12 +140,12 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    fn get_val(&self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
+    fn get_val(&mut self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
-                let tyl = TypeLayout::of(ty)
+                let layout = self.load_layout(ty)
                     .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))?;
-                let val = self.builder.build_load(tyl.basic_type(self), ptr, "load");
+                let val = self.builder.build_load(layout.basic_type(self), ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
             None => Err(CompileErr::UndefinedVar(String::from(ident))),
@@ -233,18 +233,18 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Import a function using the provided PLIR function signature.
-    fn import(&self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+    fn import(&mut self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
         let plir::FunSignature { ident, params, ret } = sig;
 
         let arg_tys: Vec<_> = params.iter()
             .map(|p| {
-                let layout = TypeLayout::of(&p.ty)
+                let layout = self.load_layout(&p.ty)
                     .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
                 Ok(layout.basic_type(self).into())
             })
             .collect::<Result<_, _>>()?;
 
-        let ret_ty = TypeLayout::of(ret)
+        let ret_ty = self.load_layout(ret)
             .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
 
         let fun_ty = ret_ty.fn_type(self, &arg_tys, false);
@@ -252,13 +252,39 @@ impl<'ctx> Compiler<'ctx> {
         self.import_fun(ident, fun_ty)
     }
 
+    // TODO: clean up all of these functions:
     fn register_struct(&mut self, gs: GonStruct<'ctx>) {
         self.structs.insert(gs.name.to_string(), gs);
+    }
+
+    fn load_layout(&mut self, ty: &plir::Type) -> Option<TypeLayout> {
+        use plir::{Type, TypeRef};
+        
+        // TODO: be less hacky
+        if let TypeRef::Prim(Type::S_STR) = ty.as_ref() {
+            self.string_type();
+        }
+
+        TypeLayout::of(ty)
     }
 
     fn get_struct(&self, ident: &str) -> &GonStruct<'ctx> {
         self.structs.get(ident)
             .unwrap_or_else(|| panic!("Struct {ident} not present"))
+    }
+
+    fn get_struct_or_init<const N: usize>(
+            &mut self, 
+            ident: &str, 
+            f: impl FnOnce(&mut Self) -> [BasicTypeEnum<'ctx>; N]
+        ) -> &mut GonStruct<'ctx> {
+        if !self.structs.contains_key(ident) {
+            let fields = &f(self)[..];
+            let gs = GonStruct::new(self, ident, fields);
+            self.register_struct(gs);
+        }
+
+        self.structs.get_mut(ident).unwrap()
     }
 }
 
@@ -529,7 +555,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
-        let expr_layout = TypeLayout::of(expr_ty)
+        let expr_layout = compiler.load_layout(expr_ty)
             .ok_or_else(|| CompileErr::UnresolvedType(expr_ty.clone()))?;
 
         match expr {
@@ -849,13 +875,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 
         let arg_tys: Vec<_> = params.iter()
             .map(|p| {
-                let layout = TypeLayout::of(&p.ty)
+                let layout = compiler.load_layout(&p.ty)
                     .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
                 Ok(layout.basic_type(compiler).into())
             })
             .collect::<Result<_, _>>()?;
 
-        let ret_ty = TypeLayout::of(ret)
+        let ret_ty = compiler.load_layout(ret)
             .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
 
         let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);

@@ -77,7 +77,7 @@ impl<'ctx> Compiler<'ctx> {
         GonValue::Float(self.ctx.f64_type().const_float(f))
     }
     /// Create a new string value using a string slice from Rust.
-    pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
+    pub fn new_str(&mut self, s: &str) -> GonValue<'ctx> {
         // todo: null-terminated fix
         // i love c
         let array = self.ctx.const_string(s.as_bytes(), true);
@@ -85,7 +85,8 @@ impl<'ctx> Compiler<'ctx> {
         let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
         self.builder.build_store(array_ptr, array);
         
-        GonValue::Str(self.create_struct_value(self.string_type(), &[
+        let str_ty = self.string_type().struct_type();
+        GonValue::Str(self.create_struct_value(str_ty, &[
             array_ptr.into(),
             self.ctx.i64_type().const_int(s.len() as u64 + 1, true).into()
         ]).unwrap())
@@ -98,10 +99,10 @@ impl<'ctx> Compiler<'ctx> {
     /// - char to string
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&self, v: GonValue<'ctx>, ty: &plir::Type) -> Option<GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> Option<GonValue<'ctx>> {
         match (v, ty.as_ref()) {
             (GonValue::Int(i), plir::TypeRef::Prim(plir::Type::S_FLOAT)) => {
-                let ft = TypeLayout::of(ty)?.basic_type(self).into_float_type();
+                let ft = self.load_layout(ty)?.basic_type(self).into_float_type();
                 let fv = self.builder.build_signed_int_to_float(i, ft, "cast");
                 
                 Some(GonValue::Float(fv))
@@ -137,7 +138,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Float(_) => TypeLayout::Float,
             GonValue::Int(_)   => TypeLayout::Int,
             GonValue::Bool(_)  => TypeLayout::Bool,
-            GonValue::Str(_)   => TypeLayout::Str,
+            GonValue::Str(_)   => TypeLayout::struct_layout("String"),
             GonValue::Unit     => TypeLayout::Unit,
         }
     }
@@ -194,28 +195,21 @@ pub enum TypeLayout {
     /// 
     /// This is formatted as a float in LLVM.
     Float, 
+
     /// The int format.
     /// 
     /// This is formatted as an `iX` in LLVM.
     Int, 
+
     /// THe bool format.
     /// 
     /// This is formatted as a bool (`i1`) in LLVM.
     Bool, 
+
     /// The unit format.
     /// 
     /// This is formatted as a `void` or `()` in LLVM.
     Unit, 
-    /// The string format.
-    /// 
-    /// This is formatted as the following struct in LLVM:
-    /// ```text
-    /// %string = {
-    ///     i8*,  ; buffer
-    ///     i64   ; length
-    /// }
-    /// ```
-    Str,
 
     /// A custom-defined struct.
     /// 
@@ -237,7 +231,7 @@ impl TypeLayout {
             TypeRef::Prim(Type::S_INT)   => Some(TypeLayout::Int),
             TypeRef::Prim(Type::S_BOOL)  => Some(TypeLayout::Bool),
             TypeRef::Prim(Type::S_VOID)  => Some(TypeLayout::Unit),
-            TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::Str),
+            TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::struct_layout("String")),
             TypeRef::Tuple(t) => {
                 t.iter().map(TypeLayout::of)
                     .collect::<Option<Vec<_>>>()
@@ -247,6 +241,8 @@ impl TypeLayout {
         }
     }
 
+    fn struct_layout(s: &str) -> TypeLayout { TypeLayout::Struct(String::from(s)) }
+
     /// Convert the type layout into an LLVM basic type representation.
     /// 
     /// In certain contexts, [`TypeLayout::basic_type_or_void`] may be more applicable.
@@ -255,7 +251,6 @@ impl TypeLayout {
             TypeLayout::Float     => c.ctx.f64_type().into(),
             TypeLayout::Int       => c.ctx.i64_type().into(),
             TypeLayout::Bool      => c.ctx.bool_type().into(),
-            TypeLayout::Str       => c.string_type().into(),
             TypeLayout::Unit      => c.ctx.struct_type(&[], true).into(),
             TypeLayout::Struct(s) => c.get_struct(s).struct_type().into(),
             TypeLayout::Tuple(t)  => {
@@ -293,13 +288,8 @@ pub(crate) struct GonStruct<'ctx> {
     methods: HashMap<String, FunctionValue<'ctx>>
 }
 
-impl<'ctx> Compiler<'ctx> {
-    fn new_struct_type(&self, name: &str, fields: &[BasicTypeEnum<'ctx>]) -> GonStruct<'ctx> {
-        GonStruct::new(self, name, fields)
-    }
-}
 impl<'ctx> GonStruct<'ctx> {
-    fn new(c: &Compiler<'ctx>, name: &str, fields: &[BasicTypeEnum<'ctx>]) -> Self {
+    pub fn new(c: &Compiler<'ctx>, name: &str, fields: &[BasicTypeEnum<'ctx>]) -> Self {
         let ty = c.ctx.opaque_struct_type(name);
         ty.set_body(fields, false);
 

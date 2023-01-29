@@ -1,12 +1,12 @@
 //! Internally defined structs for LLVM representation
 
 use inkwell::builder::Builder;
-use inkwell::types::{StructType, FunctionType};
-use inkwell::values::{FunctionValue};
+use inkwell::types::FunctionType;
+use inkwell::values::FunctionValue;
 
 use crate::compiler::{Compiler, CompileResult};
 
-use super::TypeLayout;
+use super::{TypeLayout, GonStruct};
 
 macro_rules! std_map {
     ($($l:literal: $i:ident),+) => {
@@ -24,14 +24,11 @@ macro_rules! std_map {
 }
 
 impl<'ctx> Compiler<'ctx> {
-    /// [`super::TypeLayout::Str`]
-    pub(super) fn string_type(&self) -> StructType<'ctx> {
-        self.ctx.get_struct_type("String").unwrap_or_else(|| {
-            self.new_struct_type("String", &[
-                self.ctx.i8_type().ptr_type(Default::default()).into(),
-                self.ctx.i64_type().into()
-            ]).struct_type()
-        })
+    pub(in crate::compiler) fn string_type(&mut self) -> &mut GonStruct<'ctx> {
+        self.get_struct_or_init("String", |c| [
+            c.ctx.i8_type().ptr_type(Default::default()).into(),
+            c.ctx.i64_type().into()
+        ])
     }
 
     fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
