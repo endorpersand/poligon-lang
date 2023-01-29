@@ -90,16 +90,13 @@ pub fn apply_unary(e: Expr, op: op::Unary) -> PLIRResult<Expr> {
     // Check for any valid casts that can be applied here:
     let cast = match op {
         op::Unary::Plus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast)
-                .map_err(|e| OpErr::CannotUnary(op, e.ty))?
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).flatten()
         },
         op::Unary::Minus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast)
-                .map_err(|e| OpErr::CannotUnary(op, e.ty))?
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).flatten()
         },
         op::Unary::LogNot => {
-            apply_cast(e, &ty!(Type::S_BOOL))
-                .map_err(|e| OpErr::CannotUnary(op, e.ty))?
+            apply_cast(e, &ty!(Type::S_BOOL)).flatten()
         },
         op::Unary::BitNot => e,
     };
@@ -141,24 +138,19 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
                 ty!(Type::S_INT),
                 ty!(Type::S_FLOAT)
             ][..];
-            chain((left, right), types, apply_cast2)
-                .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
+            chain((left, right), types, apply_cast2).flatten()
         },
         op::Binary::Sub => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
-                .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
         },
         op::Binary::Mul => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
-                .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
         },
         op::Binary::Div => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
-                .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
         },
         op::Binary::Mod => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2)
-                .map_err(|(l, r)| OpErr::CannotBinary(op, l.ty, r.ty))?
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
         },
         op::Binary::Shl    => (left, right),
         op::Binary::Shr    => (left, right),
@@ -188,6 +180,7 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
             (op::Binary::BitOr,  l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
             (op::Binary::BitAnd, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
             (op::Binary::BitXor, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
+            // logical operators:
             (op::Binary::LogAnd, l, r) if l == r => left,
             (op::Binary::LogOr, l, r) if l == r => left,
             _ => Err(OpErr::CannotBinary(op, left, right.clone()))?
