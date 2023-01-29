@@ -233,7 +233,7 @@ impl TypeLayout {
     /// Convert the type layout into an LLVM basic type representation.
     /// 
     /// In certain contexts, [`TypeLayout::basic_type_or_void`] may be more applicable.
-    pub fn basic_type<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
+    pub fn basic_type<'ctx>(self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
         match self {
             TypeLayout::Float => c.ctx.f64_type().into(),
             TypeLayout::Int   => c.ctx.i64_type().into(),
@@ -247,7 +247,7 @@ impl TypeLayout {
     /// 
     /// This should be used over [`TypeLayout::basic_type`] 
     /// when dealing with function return types.
-    pub fn basic_type_or_void<'ctx>(&self, c: &Compiler<'ctx>) -> Result<BasicTypeEnum<'ctx>, VoidType<'ctx>> {
+    pub fn basic_type_or_void<'ctx>(self, c: &Compiler<'ctx>) -> Result<BasicTypeEnum<'ctx>, VoidType<'ctx>> {
         match self {
             TypeLayout::Unit => Err(c.ctx.void_type()),
             ty => Ok(ty.basic_type(c))
@@ -255,7 +255,7 @@ impl TypeLayout {
     }
 
     /// Create a function type with this type layout as the return type.
-    pub fn fn_type<'ctx>(&self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type<'ctx>(self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
         match self.basic_type_or_void(c) {
             Ok(ty) => ty.fn_type(params, is_var_args),
             Err(ty) => ty.fn_type(params, is_var_args)

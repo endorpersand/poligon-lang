@@ -152,7 +152,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn add_incoming_gv<'a>(&self, phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
         let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
-            .map(|(a, b)| (a.basic_value(self), *b))
+            .map(|&(a, b)| (a.basic_value(self), b))
             .unzip();
     
         let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
