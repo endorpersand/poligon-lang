@@ -90,7 +90,12 @@ impl<'ctx> Compiler<'ctx> {
         "printd": std_printd
     }
 
-    pub fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+    /// Import a defined internal function or a libc function.
+    /// 
+    /// Internal functions are currently defined in [`compiler::value::internals`].
+    /// The type signature and identifier need to match exactly, or else defined internals may fail 
+    /// or a segmentation fault may occur.
+    pub(crate) fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
         let fun = self.module.get_function(s).unwrap_or_else(|| self.module.add_function(s, ty, None));
 
         if self.lookup(s) && fun.count_basic_blocks() < 1 {

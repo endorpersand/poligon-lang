@@ -142,8 +142,7 @@ impl<'ctx> GonValue<'ctx> {
 
     /// Produce a basic LLVM value for this `GonValue`.
     /// 
-    /// Depending on context, [`GonValue::param_value`] 
-    /// or [`GonValue::basic_value_or_void`] may be more suitable.
+    /// Depending on context, [`GonValue::basic_value_or_void`] may be more suitable.
     pub fn basic_value(self, c: &Compiler<'ctx>) -> BasicValueEnum<'ctx> {
         match self {
             GonValue::Float(f) => f.as_basic_value_enum(),

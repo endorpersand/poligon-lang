@@ -56,6 +56,8 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
     
+    #[doc(hidden)]
+    /// Obtains the LLVM module being created by the compiler.
     pub fn get_module(&self) -> &Module<'ctx> {
         &self.module
     }
@@ -203,6 +205,8 @@ impl<'ctx> Compiler<'ctx> {
         self.ctx.i64_type().ptr_type(addr)
     }
 
+    /// Initializes a new struct value 
+    /// and assigns all the fields of that struct.
     pub fn create_struct_value(
         &self, 
         ty: StructType<'ctx>,
@@ -224,6 +228,26 @@ impl<'ctx> Compiler<'ctx> {
     /// Build a function return instruction using a GonValue.
     pub fn build_return(&self, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
         self.builder.build_return(gv.basic_value_or_void(self).as_ref().map(|t| t as _))
+    }
+
+    /// Import a function using the provided PLIR function signature.
+    fn import(&self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+        let plir::FunSignature { ident, params, ret } = sig;
+
+        let arg_tys: Vec<_> = params.iter()
+            .map(|p| {
+                let layout = TypeLayout::of(&p.ty)
+                    .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
+                Ok(layout.basic_type(self).into())
+            })
+            .collect::<Result<_, _>>()?;
+
+        let ret_ty = TypeLayout::of(ret)
+            .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
+
+        let fun_ty = ret_ty.fn_type(self, &arg_tys, false);
+
+        self.import_fun(ident, fun_ty)
     }
 }
 
@@ -267,9 +291,9 @@ pub enum CompileErr<'ctx> {
     CannotDetermineMain,
     /// An error occurred within LLVM.
     LLVMErr(LLVMString),
-
+    /// Index out of bounds access on struct occurred
     StructIndexOOB(usize),
-
+    /// Some error occurred that there isn't a defined enum variant for
     Generic(&'static str, String)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
@@ -379,7 +403,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         for stmt in &self.0 {
             match stmt {
                 plir::Stmt::FunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
-                plir::Stmt::ExternFunDecl(dcl) => funs.push(import(compiler, dcl)?),
+                plir::Stmt::ExternFunDecl(dcl) => funs.push(compiler.import(dcl)?),
                 stmt => rest.push(stmt)
             }
         }
@@ -479,7 +503,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 Ok(GonValue::Unit)
             },
             plir::Stmt::ExternFunDecl(fs) => {
-                import(compiler, fs)?;
+                compiler.import(fs)?;
                 Ok(GonValue::Unit)
             },
             plir::Stmt::Expr(e) => {
@@ -833,26 +857,6 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 
         Ok(fun)
     }
-}
-
-// TODO: clean up
-fn import<'ctx>(compiler: &Compiler<'ctx>, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
-    let plir::FunSignature { ident, params, ret } = sig;
-
-    let arg_tys: Vec<_> = params.iter()
-        .map(|p| {
-            let layout = TypeLayout::of(&p.ty)
-                .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
-            Ok(layout.basic_type(compiler).into())
-        })
-        .collect::<Result<_, _>>()?;
-
-    let ret_ty = TypeLayout::of(ret)
-        .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
-
-    let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);
-
-    compiler.import_fun(ident, fun_ty)
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
