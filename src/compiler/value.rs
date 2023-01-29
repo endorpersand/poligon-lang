@@ -1,8 +1,10 @@
 mod op_impl;
 mod internals;
 
-use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType, BasicType};
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue};
+use std::collections::HashMap;
+
+use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType, BasicType, StructType};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue, FunctionValue};
 
 use super::Compiler;
 use super::plir;
@@ -186,7 +188,7 @@ impl<'ctx> GonValue<'ctx> {
 /// Each `GonValue` is represented in some way in LLVM.
 /// This enum defines which representations are needed 
 /// and how they are defined in LLVM.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TypeLayout {
     /// The float format.
     /// 
@@ -213,7 +215,17 @@ pub enum TypeLayout {
     ///     i64   ; length
     /// }
     /// ```
-    Str
+    Str,
+
+    /// A custom-defined struct.
+    /// 
+    /// All structs with a given type layout have to be registered
+    /// using [`Compiler::register_struct`], as this accesses the
+    /// struct using the compiler's defined structs.
+    Struct(String),
+
+    /// A tuple of types.
+    Tuple(Vec<TypeLayout>)
 }
 
 impl TypeLayout {
@@ -226,6 +238,11 @@ impl TypeLayout {
             TypeRef::Prim(Type::S_BOOL)  => Some(TypeLayout::Bool),
             TypeRef::Prim(Type::S_VOID)  => Some(TypeLayout::Unit),
             TypeRef::Prim(Type::S_STR)   => Some(TypeLayout::Str),
+            TypeRef::Tuple(t) => {
+                t.iter().map(TypeLayout::of)
+                    .collect::<Option<Vec<_>>>()
+                    .map(TypeLayout::Tuple)
+            }
             _ => todo!("type layout of {ty}")
         }
     }
@@ -233,13 +250,20 @@ impl TypeLayout {
     /// Convert the type layout into an LLVM basic type representation.
     /// 
     /// In certain contexts, [`TypeLayout::basic_type_or_void`] may be more applicable.
-    pub fn basic_type<'ctx>(self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
+    pub fn basic_type<'ctx>(&self, c: &Compiler<'ctx>) -> BasicTypeEnum<'ctx> {
         match self {
-            TypeLayout::Float => c.ctx.f64_type().into(),
-            TypeLayout::Int   => c.ctx.i64_type().into(),
-            TypeLayout::Bool  => c.ctx.bool_type().into(),
-            TypeLayout::Str   => c.string_type().into(),
-            TypeLayout::Unit  => c.ctx.struct_type(&[], true).into()
+            TypeLayout::Float     => c.ctx.f64_type().into(),
+            TypeLayout::Int       => c.ctx.i64_type().into(),
+            TypeLayout::Bool      => c.ctx.bool_type().into(),
+            TypeLayout::Str       => c.string_type().into(),
+            TypeLayout::Unit      => c.ctx.struct_type(&[], true).into(),
+            TypeLayout::Struct(s) => c.get_struct(s).struct_type().into(),
+            TypeLayout::Tuple(t)  => {
+                let fty = t.iter().map(|t| t.basic_type(c))
+                    .collect::<Vec<_>>();
+
+                c.ctx.struct_type(&fty, false).into()
+            },
         }
     }
 
@@ -247,7 +271,7 @@ impl TypeLayout {
     /// 
     /// This should be used over [`TypeLayout::basic_type`] 
     /// when dealing with function return types.
-    pub fn basic_type_or_void<'ctx>(self, c: &Compiler<'ctx>) -> Result<BasicTypeEnum<'ctx>, VoidType<'ctx>> {
+    pub fn basic_type_or_void<'ctx>(&self, c: &Compiler<'ctx>) -> Result<BasicTypeEnum<'ctx>, VoidType<'ctx>> {
         match self {
             TypeLayout::Unit => Err(c.ctx.void_type()),
             ty => Ok(ty.basic_type(c))
@@ -255,10 +279,38 @@ impl TypeLayout {
     }
 
     /// Create a function type with this type layout as the return type.
-    pub fn fn_type<'ctx>(self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type<'ctx>(&self, c: &Compiler<'ctx>, params: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
         match self.basic_type_or_void(c) {
             Ok(ty) => ty.fn_type(params, is_var_args),
             Err(ty) => ty.fn_type(params, is_var_args)
         }
+    }
+}
+
+pub(crate) struct GonStruct<'ctx> {
+    pub(crate) name: String,
+    ty: StructType<'ctx>,
+    methods: HashMap<String, FunctionValue<'ctx>>
+}
+
+impl<'ctx> Compiler<'ctx> {
+    fn new_struct_type(&self, name: &str, fields: &[BasicTypeEnum<'ctx>]) -> GonStruct<'ctx> {
+        GonStruct::new(self, name, fields)
+    }
+}
+impl<'ctx> GonStruct<'ctx> {
+    fn new(c: &Compiler<'ctx>, name: &str, fields: &[BasicTypeEnum<'ctx>]) -> Self {
+        let ty = c.ctx.opaque_struct_type(name);
+        ty.set_body(fields, false);
+
+        Self { name: name.to_string(), ty, methods: HashMap::new() }
+    }
+
+    pub fn add_method(&mut self, name: &str, f: FunctionValue<'ctx>) {
+        self.methods.insert(name.to_string(), f);
+    }
+
+    pub fn struct_type(&self) -> StructType<'ctx> {
+        self.ty
     }
 }

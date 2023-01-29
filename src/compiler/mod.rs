@@ -41,6 +41,7 @@ pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
+    structs: HashMap<String, GonStruct<'ctx>>,
 
     vars: HashMap<String, PointerValue<'ctx>>
 }
@@ -52,6 +53,7 @@ impl<'ctx> Compiler<'ctx> {
             ctx,
             builder: ctx.create_builder(),
             module: ctx.create_module("eval"),
+            structs: HashMap::new(),
             vars: HashMap::new()
         }
     }
@@ -248,6 +250,15 @@ impl<'ctx> Compiler<'ctx> {
         let fun_ty = ret_ty.fn_type(self, &arg_tys, false);
 
         self.import_fun(ident, fun_ty)
+    }
+
+    fn register_struct(&mut self, gs: GonStruct<'ctx>) {
+        self.structs.insert(gs.name.to_string(), gs);
+    }
+
+    fn get_struct(&self, ident: &str) -> &GonStruct<'ctx> {
+        self.structs.get(ident)
+            .unwrap_or_else(|| panic!("Struct {ident} not present"))
     }
 }
 
