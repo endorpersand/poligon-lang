@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Instant;
 
 use lazy_static::lazy_static;
 
-use super::ValueErr;
+use super::{ValueErr, rtio};
 use super::err::TypeErr;
 use super::RtResult;
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType, fun_type};
@@ -20,17 +21,17 @@ macro_rules! str_map {
     }
 }
 
-fn std_print(args: Vec<Value>) -> RtResult<Value> {
+fn std_print(mut ioref: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     let strs = args.into_iter()
         .map(|v| v.str())
         .collect::<Vec<_>>()
         .join(" ");
 
-    println!("{}", strs);
+    writeln!(ioref, "{}", strs)?;
 
     Ok(Value::Unit)
 }
-fn std_is(args: Vec<Value>) -> RtResult<Value> {
+fn std_is(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     if let [a, b] = &args[..] {
         let eval = match (a, b) {
             (Value::List(al), Value::List(bl)) => al.ref_eq(bl),
@@ -43,7 +44,7 @@ fn std_is(args: Vec<Value>) -> RtResult<Value> {
     }
 }
 
-fn std_type(args: Vec<Value>) -> RtResult<Value> {
+fn std_type(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     if let [a] = &args[..] {
         Ok(Value::Str(a.ty().to_string()))
     } else {
@@ -51,7 +52,7 @@ fn std_type(args: Vec<Value>) -> RtResult<Value> {
     }
 }
 
-fn std_contains(args: Vec<Value>) -> RtResult<Value> {
+fn std_contains(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     if let [collection, item] = &args[..] {
         let b = match collection {
             Value::Char(c1) => match item {
@@ -72,7 +73,7 @@ fn std_contains(args: Vec<Value>) -> RtResult<Value> {
         Err(ValueErr::WrongArity(2))?
     }
 }
-fn std_push(args: Vec<Value>) -> RtResult<Value> {
+fn std_push(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     if let [lst, item] = &args[..] {
         if let Value::List(l) = lst {
             l.try_borrow_mut()?.push(item.clone());
@@ -84,7 +85,7 @@ fn std_push(args: Vec<Value>) -> RtResult<Value> {
         Err(ValueErr::WrongArity(2))?
     }
 }
-fn std_pop(args: Vec<Value>) -> RtResult<Value> {
+fn std_pop(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     if let [lst] = &args[..] {
         if let Value::List(l) = lst {
             Ok(l.try_borrow_mut()?.pop().unwrap_or(Value::Unit))
@@ -97,7 +98,7 @@ fn std_pop(args: Vec<Value>) -> RtResult<Value> {
 }
 
 
-fn std_time(args: Vec<Value>) -> RtResult<Value> {
+fn std_time(_: rtio::IoRef, args: Vec<Value>) -> RtResult<Value> {
     lazy_static! {
         static ref PROGRAM_START: Instant = Instant::now();
     }

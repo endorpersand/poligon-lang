@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
 use std::fs;
+use std::io::{BufReader, BufRead};
 use std::path::Path;
 
 use inkwell::context::Context;
 use poligon_lang::compiler::{codegen, Compiler};
-use poligon_lang::interpreter::runtime::value::Value;
+use poligon_lang::interpreter::runtime::IoRef;
 use poligon_lang::{Interpreter, lexer, parser};
 
 fn compile_and_run(fp: impl AsRef<Path>) {
@@ -29,22 +31,17 @@ fn display_test() {
 
 #[test]
 fn lexical_scope_i_test() {
-    let result = Interpreter::from_file("tests/files/lexical_scope_i.gon").unwrap()
-        .run()
-        .unwrap();
+    let dq = VecDeque::new();
 
-    let val @ Value::List(_) = result else {
-        panic!("Test did not return list, it returned {}", result.repr());
-    };
+    let ir = Interpreter::from_file_with_io("tests/files/lexical_scope_i.gon", IoRef::new_rw(dq)).unwrap();
+    ir.run().unwrap();
 
-    let v0 = val.get_index(Value::Int(0));
-    let v1 = val.get_index(Value::Int(1));
-
-    assert!(v0.is_ok());
-    assert!(v1.is_ok());
-    assert_eq!(v0.unwrap(), Value::Str("global".to_string()));
-    assert_eq!(v1.unwrap(), Value::Str("global".to_string()));
-    assert!(val.get_index(Value::Int(2)).is_err());
+    let reader = BufReader::new(ir.ioref);
+    let mut lines = reader.lines();
+    
+    assert_eq!(lines.next().unwrap().unwrap(), "global");
+    assert_eq!(lines.next().unwrap().unwrap(), "global");
+    assert!(lines.next().is_none());
 }
 
 #[test]

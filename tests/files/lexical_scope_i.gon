@@ -6,12 +6,10 @@
 // global
 // global
 
-let out = [];
-
 let a = "global";
 {
     fun showA() {
-        out.push(a);
+        print(a);
     }
 
     {
@@ -20,5 +18,3 @@ let a = "global";
         showA();
     }
 }
-
-out;

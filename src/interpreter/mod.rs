@@ -21,6 +21,8 @@ use runtime::value::Value;
 use runtime::{RtContext, TraverseRt};
 pub use repl::Repl;
 
+use self::runtime::rtio;
+
 pub mod semantic;
 pub mod runtime;
 mod repl;
@@ -32,7 +34,8 @@ mod repl;
 /// 
 /// As such, this struct may be more limited than the [compiler][crate::compiler] form.
 pub struct Interpreter {
-    source: String
+    source: String,
+    pub ioref: rtio::IoRef
 }
 
 type InterpretResult<T> = Result<T, String>;
@@ -52,9 +55,7 @@ impl Interpreter {
     /// interpreter.run().unwrap();
     /// ```
     pub fn from_string(s: &str) -> Self {
-        Self {
-            source: String::from(s)
-        }
+        Self::from_string_with_io(s, Default::default())
     }
 
     /// Read the text from a file and create an interpreter out of it if successfully read.
@@ -71,7 +72,17 @@ impl Interpreter {
     /// }
     /// ```
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
-        fs::read_to_string(fp).map(|source| Self { source })
+        Self::from_file_with_io(fp, Default::default())
+    }
+
+    pub fn from_string_with_io(s: &str, ioref: rtio::IoRef) -> Self {
+        Self {
+            source: String::from(s), ioref
+        }
+    }
+
+    pub fn from_file_with_io(fp: impl AsRef<Path>, ioref: rtio::IoRef) -> io::Result<Self> {
+        fs::read_to_string(fp).map(|source| Self { source, ioref })
     }
 
     /// Lex the source string.
@@ -136,7 +147,8 @@ impl Interpreter {
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
         
-        parsed.run()
+        let mut ctx = RtContext::new_with_io(self.ioref.clone());
+        parsed.run_with_ctx(&mut ctx)
             .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
     }
 }

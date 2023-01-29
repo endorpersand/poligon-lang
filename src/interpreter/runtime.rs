@@ -18,23 +18,85 @@ pub mod value;
 mod vars;
 mod gstd;
 
+pub use rtio::IoRef;
+
 /// Struct that holds state and scope in runtime.
 /// It can be used to access variables and functions
 /// once a static resolution has occurred.
 pub struct RtContext<'ctx> {
     vars: VarContext<'ctx>,
-    rs: Rc<ResolveState>
+    rs: Rc<ResolveState>,
+    io: IoRef
 }
 
-impl RtContext<'_> {
-    /// Create a new context.
-    pub fn new() -> Self {
-        Self {
-            vars: VarContext::new_with_std(),
-            rs: Rc::new(ResolveState::new())
+pub(crate) mod rtio {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::io;
+
+    pub trait RW: io::Read + io::Write {}
+    impl<S: io::Read + io::Write> RW for S {}
+
+    #[derive(Clone)]
+    pub enum IoRef {
+        R(Rc<RefCell<dyn io::Read>>),
+        W(Rc<RefCell<dyn io::Write>>),
+        RW(Rc<RefCell<dyn RW>>)
+    }
+    
+    impl IoRef {
+        pub fn new_r(t: impl io::Read + 'static) -> Self { IoRef::R(Rc::new(RefCell::new(t))) }
+        pub fn new_w(t: impl io::Write + 'static) -> Self { IoRef::W(Rc::new(RefCell::new(t))) }
+        pub fn new_rw(t: impl RW + 'static) -> Self { IoRef::RW(Rc::new(RefCell::new(t))) }
+    }
+    impl io::Write for IoRef {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            match self {
+                IoRef::R(_)  => Ok(0),
+                IoRef::W(w)  => w.borrow_mut().write(buf),
+                IoRef::RW(w) => w.borrow_mut().write(buf),
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            match self {
+                IoRef::R(_)  => Ok(()),
+                IoRef::W(w)  => w.borrow_mut().flush(),
+                IoRef::RW(w) => w.borrow_mut().flush(),
+            }
+        }
+    }
+    impl io::Read for IoRef {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self {
+                IoRef::R(r) => r.borrow_mut().read(buf),
+                IoRef::W(_) => Ok(0),
+                IoRef::RW(r) => r.borrow_mut().read(buf),
+            }
         }
     }
 
+    impl Default for IoRef {
+        fn default() -> Self {
+            Self::new_w(io::stdout())
+        }
+    }
+}
+
+impl<'ctx> RtContext<'ctx> {
+    /// Create a new context.
+    pub fn new() -> Self {
+        Self::new_with_io(Default::default())
+    }
+
+    pub fn new_with_io(io: IoRef) -> Self {
+        Self {
+            vars: VarContext::new_with_std(),
+            rs: Rc::new(ResolveState::new()),
+            io
+        }
+    }
+    
     /// Get the resolve state held by this context 
     /// (or panicking if it is accessed while traversing)
     pub fn resolve_state(&mut self) -> &mut ResolveState {
@@ -53,7 +115,8 @@ impl RtContext<'_> {
     pub fn child(&mut self) -> RtContext {
         RtContext {
             vars: self.vars.child(),
-            rs: Rc::clone(&self.rs)
+            rs: Rc::clone(&self.rs),
+            io: self.io.clone()
         }
     }
 
@@ -67,7 +130,8 @@ impl RtContext<'_> {
 
         mv.map(|v| RtContext {
             vars: v.child(),
-            rs: Rc::clone(&self.rs)
+            rs: Rc::clone(&self.rs),
+            io: self.io.clone()
         }).unwrap()
     }
 
@@ -160,6 +224,8 @@ pub mod err {
     use super::super::semantic::ResolveErr;
     use crate::GonErr;
 
+    use std::io::Error as IoErr;
+
     macro_rules! rt_err {
         ($($e:ident),*) => {
             /// Errors that occur during runtime evaluation.
@@ -199,7 +265,7 @@ pub mod err {
         }
     }
 
-    rt_err! { TypeErr, ValueErr, NameErr, ResolveErr, RvErr, FeatureErr }
+    rt_err! { TypeErr, ValueErr, NameErr, ResolveErr, RvErr, FeatureErr, IoErr }
 
     /// An error caused by type mismatches
     #[derive(Debug)]
@@ -347,6 +413,16 @@ pub mod err {
                 FeatureErr::Incomplete(s) => format!("not yet implemented - {s}"),
                 FeatureErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
             }
+        }
+    }
+
+    impl GonErr for IoErr {
+        fn err_name(&self) -> &'static str {
+            "io error"
+        }
+
+        fn message(&self) -> String {
+            self.to_string()
         }
     }
 }

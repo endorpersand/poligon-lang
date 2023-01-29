@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use super::{RtResult, TypeErr, ValueErr};
+use super::{RtResult, TypeErr, ValueErr, rtio};
 use crate::ast::{self, op};
 
 mod fun;
@@ -391,7 +391,7 @@ impl Value {
     }
 
     /// Create a function value, using a function defined in Rust.
-    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<Value>) -> Self {
+    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(rtio::IoRef, Vec<Value>) -> RtResult<Value>) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,

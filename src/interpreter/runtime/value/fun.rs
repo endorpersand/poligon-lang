@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::interpreter::{RtContext, TraverseRt, ast};
-use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr};
+use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr, rtio};
 
 use super::{VArbType, Value};
 
@@ -32,7 +32,7 @@ pub enum FunParamType {
 
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
-    Rust(fn(Vec<Value>) -> RtResult<Value>),
+    Rust(fn(rtio::IoRef, Vec<Value>) -> RtResult<Value>),
     Poligon(Vec<String>, Rc<ast::Block>, usize /* scope idx */)
 }
 
@@ -79,7 +79,7 @@ impl GonFun {
         }
 
         match &self.fun {
-            GInternalFun::Rust(f) => (f)(pvals).map_err(TermOp::Err),
+            GInternalFun::Rust(f) => (f)(ctx.io.clone(), pvals).map_err(TermOp::Err),
             GInternalFun::Poligon(params, block, idx) => {
                 let mut fscope = ctx.branch_at(*idx);
                 
