@@ -143,8 +143,7 @@ impl<'ctx> Compiler<'ctx> {
     fn get_val(&mut self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
-                let layout = self.load_layout(ty)
-                    .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))?;
+                let layout = self.load_layout(ty)?;
                 let val = self.builder.build_load(layout.basic_type(self), ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
@@ -238,14 +237,12 @@ impl<'ctx> Compiler<'ctx> {
 
         let arg_tys: Vec<_> = params.iter()
             .map(|p| {
-                let layout = self.load_layout(&p.ty)
-                    .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
+                let layout = self.load_layout(&p.ty)?;
                 Ok(layout.basic_type(self).into())
             })
             .collect::<Result<_, _>>()?;
 
-        let ret_ty = self.load_layout(ret)
-            .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
+        let ret_ty = self.load_layout(ret)?;
 
         let fun_ty = ret_ty.fn_type(self, &arg_tys, false);
 
@@ -257,7 +254,7 @@ impl<'ctx> Compiler<'ctx> {
         self.structs.insert(gs.name.to_string(), gs);
     }
 
-    fn load_layout(&mut self, ty: &plir::Type) -> Option<TypeLayout> {
+    fn load_layout(&mut self, ty: &plir::Type) -> CompileResult<'ctx, TypeLayout> {
         use plir::{Type, TypeRef};
         
         // TODO: be less hacky
@@ -266,6 +263,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         TypeLayout::of(ty)
+            .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
     }
 
     fn get_struct(&self, ident: &str) -> &GonStruct<'ctx> {
@@ -555,8 +553,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
-        let expr_layout = compiler.load_layout(expr_ty)
-            .ok_or_else(|| CompileErr::UnresolvedType(expr_ty.clone()))?;
+        let expr_layout = compiler.load_layout(expr_ty)?;
 
         match expr {
             plir::ExprType::Ident(ident) => compiler.get_val(ident, expr_ty),
@@ -775,10 +772,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::Split(_, _) => todo!(),
             plir::ExprType::Cast(e) => {
                 e.write_ir(compiler)
-                    .map(|val| compiler.cast(val, expr_ty))
-                    .and_then(|r| r.ok_or_else(|| {
-                        CompileErr::CannotCast(e.ty.clone(), expr_ty.clone())
-                    }))
+                    .and_then(|val| compiler.cast(val, expr_ty))
             },
         }
     }
@@ -875,15 +869,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 
         let arg_tys: Vec<_> = params.iter()
             .map(|p| {
-                let layout = compiler.load_layout(&p.ty)
-                    .ok_or_else(|| CompileErr::UnresolvedType(p.ty.clone()))?;
+                let layout = compiler.load_layout(&p.ty)?;
                 Ok(layout.basic_type(compiler).into())
             })
             .collect::<Result<_, _>>()?;
 
-        let ret_ty = compiler.load_layout(ret)
-            .ok_or_else(|| CompileErr::UnresolvedType(ret.clone()))?;
-
+        let ret_ty = compiler.load_layout(ret)?;
         let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);
         let fun = compiler.module.add_function(ident, fun_ty, None);
 

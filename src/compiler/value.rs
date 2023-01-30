@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType, BasicType, StructType};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue, FunctionValue};
 
-use super::Compiler;
+use super::{Compiler, CompileResult, CompileErr};
 use super::plir;
 
 /// Apply a function to a basic value enum 
@@ -99,18 +99,20 @@ impl<'ctx> Compiler<'ctx> {
     /// - char to string
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> Option<GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
+        use plir::{Type, TypeRef};
+
         match (v, ty.as_ref()) {
-            (GonValue::Int(i), plir::TypeRef::Prim(plir::Type::S_FLOAT)) => {
+            (GonValue::Int(i), TypeRef::Prim(Type::S_FLOAT)) => {
                 let ft = self.load_layout(ty)?.basic_type(self).into_float_type();
                 let fv = self.builder.build_signed_int_to_float(i, ft, "cast");
                 
-                Some(GonValue::Float(fv))
+                Ok(GonValue::Float(fv))
             },
             // TODO: impl char -> str
-            (_, plir::TypeRef::Prim(plir::Type::S_BOOL)) => Some(GonValue::Bool(self.truth(v))),
-            (_, plir::TypeRef::Prim(plir::Type::S_VOID)) => Some(GonValue::Unit),
-            _ => None
+            (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
+            (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
+            _ => Err(CompileErr::CannotCast(v.plir_type(), ty.clone()))
         }
     }
 }
