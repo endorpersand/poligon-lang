@@ -1,7 +1,52 @@
 use crate::ast::{op, Literal};
 use crate::compiler::plir::*;
+use crate::err::GonErr;
 
 use super::PLIRResult;
+
+/// An operation between types failed.
+#[derive(Debug)]
+pub enum OpErr {
+    /// The unary operator cannot be applied to this type.
+    CannotUnary(op::Unary, Type),
+    /// The binary operator cannot be applied between these two types.
+    CannotBinary(op::Binary, Type, Type),
+    /// These two types can't be compared using the given operation.
+    CannotCmp(op::Cmp, Type, Type),
+    /// Cannot index this type.
+    CannotIndex(Type),
+    /// Cannot index this type using the other type.
+    CannotIndexWith(Type, Type),
+    /// Type is a tuple, and cannot be indexed by a non-literal.
+    TupleIndexNonLiteral(Type),
+    /// Type is a tuple, and the index provided was out of bounds.
+    TupleIndexOOB(Type, isize),
+    /// Type cannot be split properly using this split.
+    InvalidSplit(Type, Split)
+}
+
+impl GonErr for OpErr {
+    fn err_name(&self) -> &'static str {
+        "type error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+            Self::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+            Self::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+            Self::CannotIndex(t1) => format!("cannot index {t1}"),
+            Self::CannotIndexWith(t1, t2) => format!("cannot index {t1} with {t2}"),
+            Self::TupleIndexNonLiteral(t) => format!("cannot index type '{t}' with a non-literal"),
+            Self::TupleIndexOOB(t, i) => format!("index out of bounds: {t}[{i}]"),
+            Self::InvalidSplit(t, s) => format!("cannot index: {t}~[{}]", match s {
+                Split::Left(l) => format!("{l}"),
+                Split::Middle(l, r) => format!("{l}..-{r}"),
+                Split::Right(r) => format!("{r}")
+            }),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CastType {

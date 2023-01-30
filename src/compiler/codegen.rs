@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
 
-use self::op_impl::CastType;
+pub(crate) use self::op_impl::{CastType, OpErr};
 
 use super::plir;
 
@@ -61,13 +61,13 @@ pub enum PLIRErr {
     /// Cannot spread here.
     CannotSpread,
     /// Operation between two types cannot be computed.
-    OpErr(plir::OpErr)
+    OpErr(OpErr)
 }
 /// A [`Result`] type for operations in the PLIR tree creation process.
 pub type PLIRResult<T> = Result<T, PLIRErr>;
 
-impl From<plir::OpErr> for PLIRErr {
-    fn from(err: plir::OpErr) -> Self {
+impl From<OpErr> for PLIRErr {
+    fn from(err: OpErr) -> Self {
         Self::OpErr(err)
     }
 }
