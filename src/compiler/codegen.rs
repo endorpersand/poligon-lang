@@ -8,7 +8,7 @@
 
 mod op_impl;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
@@ -195,7 +195,8 @@ struct InsertBlock {
     /// If a conditional exit does not pass, this exit is how the block exits.
     final_exit: Option<BlockExit>,
 
-    vars: HashMap<String, plir::Type>
+    vars: HashMap<String, plir::Type>,
+    semifuns: VecDeque<plir::FunSignature>,
 }
 
 impl InsertBlock {
@@ -204,7 +205,8 @@ impl InsertBlock {
             block: vec![],
             exits: vec![],
             final_exit: None,
-            vars: HashMap::new()
+            vars: HashMap::new(),
+            semifuns: VecDeque::new()
         }
     }
 
@@ -384,8 +386,21 @@ impl CodeGenerator {
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=ast::Stmt>) -> PLIRResult<()> {
-        for stmt in stmts.into_iter() {
+    fn consume_stmts(&mut self, mut stmts: Vec<ast::Stmt>) -> PLIRResult<()> {
+        for stmt in stmts.iter_mut() {
+            if let ast::Stmt::FunDecl(fd) = stmt {
+                let sig = std::mem::replace(&mut fd.sig, ast::FunSignature {
+                    ident: String::new(),
+                    params: vec![],
+                    ret: None,
+                });
+                
+                let sig = self.consume_fun_sig(sig)?;
+                self.peek_block().semifuns.push_back(sig);
+            }
+        }
+
+        for stmt in stmts {
             if !self.consume_stmt(stmt)? {
                 break;
             }
@@ -431,7 +446,7 @@ impl CodeGenerator {
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
-        let InsertBlock { mut block, exits, final_exit, vars: _ } = block;
+        let InsertBlock { mut block, exits, final_exit, vars: _, semifuns: _ } = block;
         
         // fill the unconditional exit if necessary:
         let mut final_exit = final_exit.unwrap_or_else(|| {
@@ -649,8 +664,8 @@ impl CodeGenerator {
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
     fn consume_fun_decl(&mut self, decl: ast::FunDecl) -> PLIRResult<bool> {
-        let ast::FunDecl { sig, block } = decl;
-        let sig = self.consume_fun_sig(sig)?;
+        let ast::FunDecl { sig: _, block } = decl;
+        let sig = self.peek_block().semifuns.pop_front().unwrap();
 
         let old_block = std::rc::Rc::try_unwrap(block)
             .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");

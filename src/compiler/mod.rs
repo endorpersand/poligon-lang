@@ -415,7 +415,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// To create a program from a script, we must determine the given `main` endpoint.
     /// 
     /// This is how it is currently implemented:
-    /// First, evaluate all of the function declarations. (TODO!: don't hoist functions?)
+    /// First, evaluate all of the function declarations.
     /// 
     /// We can then determine the program entry point:
     /// 1. If there are any statements outside of function declarations, 
@@ -433,14 +433,22 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 
         // split the functions from everything else:
         let mut funs = vec![];
+        let mut fun_bodies = vec![];
         let mut rest = vec![];
         
         for stmt in &self.0 {
             match stmt {
-                plir::Stmt::FunDecl(dcl) => funs.push(dcl.write_ir(compiler)?),
+                plir::Stmt::FunDecl(dcl) => {
+                    funs.push(dcl.sig.write_ir(compiler)?);
+                    fun_bodies.push(dcl);
+                },
                 plir::Stmt::ExternFunDecl(dcl) => funs.push(compiler.import(dcl)?),
                 stmt => rest.push(stmt)
             }
+        }
+        
+        for bodies in fun_bodies {
+            bodies.write_ir(compiler)?;
         }
 
         // evaluate type of program
@@ -893,7 +901,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
 
-        let fun = sig.write_ir(compiler)?;
+        let fun = compiler.module.get_function(&sig.ident)
+            .unwrap_or_else(|| panic!("function {} should be declared", sig.ident));
 
         let bb = compiler.ctx.append_basic_block(fun, "body");
         compiler.builder.position_at_end(bb);
