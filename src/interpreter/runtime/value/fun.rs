@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::rc::Rc;
 
 use crate::interpreter::{RtContext, TraverseRt, ast};
@@ -32,7 +33,7 @@ pub enum FunParamType {
 
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
-    Rust(fn(rtio::IoHook, Vec<Value>) -> RtResult<Value>),
+    Rust(fn(Vec<Value>) -> RtResult<rtio::Io<Value>>),
     Poligon(Vec<String>, Rc<ast::Block>, usize /* scope idx */)
 }
 
@@ -79,7 +80,11 @@ impl GonFun {
         }
 
         match &self.fun {
-            GInternalFun::Rust(f) => (f)(ctx.io.clone(), pvals).map_err(TermOp::Err),
+            GInternalFun::Rust(f) => {
+                let rtio::Io(out, val) = (f)(pvals).map_err(TermOp::Err)?;
+                ctx.io.write_all(&out)?;
+                Ok(val)
+            },
             GInternalFun::Poligon(params, block, idx) => {
                 let mut fscope = ctx.branch_at(*idx);
                 

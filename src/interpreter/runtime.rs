@@ -26,105 +26,122 @@ pub use rtio::IoHook;
 pub struct RtContext<'ctx> {
     vars: VarContext<'ctx>,
     rs: Rc<ResolveState>,
-    io: IoHook
+    io: IoHook<'ctx>
 }
 
-pub(crate) mod rtio {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+mod rtio {
     use std::io;
+    use std::ptr::NonNull;
 
-    pub trait RW: io::Read + io::Write {}
-    impl<S: io::Read + io::Write> RW for S {}
+    pub struct Io<T>(pub Vec<u8>, pub T);
+
+    impl<T> Io<T> {
+        pub fn pure(t: T) -> Self { Self(vec![], t) }
+    }
+    impl<T> io::Write for Io<T> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.0.flush()
+        }
+    }
 
     /// A hook on IO operations.
     /// 
-    /// If present, stdin and stdout are read/written to the provided value 
-    /// instead of from stdin and stdout.
-    #[derive(Clone, Default)]
-    pub struct IoHook {
-        // We don't want to expose IoHook implementation.
-        hook: IoHookInner
+    /// If present, STDIN and STDOUT are read/written to the provided values
+    /// instead of from STDIN and STDOUT.
+    #[derive(Default)]
+    pub struct IoHook<'ctx> {
+        stdin: Option<NonNull<dyn io::Read + 'ctx>>,
+        stdout: Option<NonNull<dyn io::Write + 'ctx>>
     }
 
-    #[derive(Clone, Default)]
-    enum IoHookInner {
-        #[default]
-        N,
-        R(Rc<RefCell<dyn io::Read>>),
-        W(Rc<RefCell<dyn io::Write>>),
-        RW(Rc<RefCell<dyn RW>>)
-    }
-    
-    impl IoHook {
+    impl<'ctx> IoHook<'ctx> {
         /// Create a new read hook. 
         /// Any reads from STDIN are pulled from this value, and
         /// any writes to STDOUT are sent to STDOUT.
-        pub fn new_r(t: impl io::Read + 'static) -> Self { 
-            IoHook { hook: IoHookInner::R(Rc::new(RefCell::new(t))) }
+        /// 
+        /// The IoHook holds a mutable reference to the reader 
+        /// until it is dropped.
+        pub fn new_r(stdin: &'ctx mut (dyn io::Read + 'ctx)) -> Self { 
+            Self {
+                stdin: Some(NonNull::from(stdin)),
+                ..Default::default()
+            }
         }
 
         /// Create a new write hook.
         /// Any reads from STDIN are pulled from STDIN, and
         /// any writes to STDOUT are sent to this value.
-        pub fn new_w(t: impl io::Write + 'static) -> Self { 
-            IoHook { hook: IoHookInner::W(Rc::new(RefCell::new(t))) }
+        /// 
+        /// The IoHook holds a mutable reference to the writer
+        /// until it is dropped.
+        pub fn new_w(stdout: &'ctx mut (dyn io::Write + 'ctx)) -> Self { 
+            Self {
+                stdout: Some(NonNull::from(stdout)),
+                ..Default::default()
+            }
         }
 
         /// Create a new read-write hook.
-        /// Reads and writes from STDIN and STDOUT are sent through this value.
-        pub fn new_rw(t: impl RW + 'static) -> Self { 
-            IoHook { hook: IoHookInner::RW(Rc::new(RefCell::new(t))) }
+        /// Reads and writes from STDIN and STDOUT are sent through the corresponding values.
+        /// 
+        /// The IoHook holds mutable references to theh reader and writer
+        /// until it is dropped.
+        pub fn new_rw(
+            stdin: &'ctx mut (dyn io::Read + 'ctx), 
+            stdout: &'ctx mut (dyn io::Write + 'ctx)
+        ) -> Self {
+            Self {
+                stdin: Some(NonNull::from(stdin)),
+                stdout: Some(NonNull::from(stdout))
+            }
+        }
+
+        /// Duplicates the IoHook for temporary usage.
+        /// 
+        /// This differs from [`Clone::clone`] because it
+        /// creates a new IoHook which has a shorter lifetime
+        /// and maintains exclusivity until the clone is destroyed.
+        pub fn clone(&mut self) -> IoHook {
+            IoHook {
+                ..(*self)
+            }
         }
     }
 
-    impl io::Write for IoHookInner {
+    impl<'ctx> io::Write for IoHook<'ctx> {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            match self {
-                | IoHookInner::N
-                | IoHookInner::R(_)
-                => io::stdout().write(buf),
-
-                IoHookInner::W(w)  => w.borrow_mut().write(buf),
-                IoHookInner::RW(w) => w.borrow_mut().write(buf),
+            match self.stdout {
+                // SAFETY: IoHook's lifetime is <'ctx>, 
+                // so exclusive access is present until then,
+                // and the data should still be intact.
+                Some(mut w) => unsafe { w.as_mut().write(buf) },
+                None => io::stdout().write(buf),
             }
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            match self {
-                | IoHookInner::N
-                | IoHookInner::R(_)
-                => io::stdout().flush(),
-
-                IoHookInner::W(w)  => w.borrow_mut().flush(),
-                IoHookInner::RW(w) => w.borrow_mut().flush(),
+            match self.stdout {
+                // SAFETY: IoHook's lifetime is <'ctx>, 
+                // so exclusive access is present until then,
+                // and the data should still be intact.
+                Some(mut w) => unsafe { w.as_mut().flush() },
+                None => io::stdout().flush(),
             }
         }
     }
-    impl io::Read for IoHookInner {
+    impl<'ctx> io::Read for IoHook<'ctx> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match self {
-                | IoHookInner::N
-                | IoHookInner::W(_)
-                => io::stdin().read(buf),
-
-                IoHookInner::R(r) => r.borrow_mut().read(buf),
-                IoHookInner::RW(r) => r.borrow_mut().read(buf),
+            match self.stdin {
+                // SAFETY: IoHook's lifetime is <'ctx>, 
+                // so exclusive access is present until then,
+                // and the data should still be intact.
+                Some(mut r) => unsafe { r.as_mut().read(buf) },
+                None => io::stdin().read(buf),
             }
-        }
-    }
-    impl io::Write for IoHook {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.hook.write(buf)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.hook.flush()
-        }
-    }
-    impl io::Read for IoHook {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            self.hook.read(buf)
         }
     }
 }
@@ -138,7 +155,7 @@ impl<'ctx> RtContext<'ctx> {
     /// Create a new context, using the provided argument as an IO hook.
     /// 
     /// See [`IoHook`] for more details.
-    pub fn new_with_io(io: IoHook) -> Self {
+    pub fn new_with_io(io: IoHook<'ctx>) -> Self {
         Self {
             vars: VarContext::new_with_std(),
             rs: Rc::new(ResolveState::new()),

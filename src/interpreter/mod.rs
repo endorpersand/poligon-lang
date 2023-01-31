@@ -21,8 +21,6 @@ use runtime::value::Value;
 use runtime::{RtContext, TraverseRt};
 pub use repl::Repl;
 
-use self::runtime::rtio;
-
 pub mod semantic;
 pub mod runtime;
 mod repl;
@@ -34,13 +32,7 @@ mod repl;
 /// 
 /// As such, this struct may be more limited than the [compiler][crate::compiler] form.
 pub struct Interpreter {
-    source: String,
-    /// IO hook for this interpreter. 
-    /// This can be modified before [`Interpreter::run`] 
-    /// is called in order to hook IO.
-    /// 
-    /// See [`runtime::IoHook`] for more details.
-    pub hook: rtio::IoHook
+    source: String
 }
 
 type InterpretResult<T> = Result<T, String>;
@@ -61,8 +53,7 @@ impl Interpreter {
     /// ```
     pub fn from_string(s: &str) -> Self {
         Self {
-            source: String::from(s), 
-            hook: Default::default()
+            source: String::from(s)
         }
     }
 
@@ -80,7 +71,7 @@ impl Interpreter {
     /// }
     /// ```
     pub fn from_file(fp: impl AsRef<Path>) -> io::Result<Self> {
-        fs::read_to_string(fp).map(|source| Self { source, hook: Default::default() })
+        fs::read_to_string(fp).map(|source| Self { source })
     }
 
     /// Lex the source string.
@@ -135,24 +126,52 @@ impl Interpreter {
     /// # Usage
     /// ```
     /// # use poligon_lang::Interpreter;
-    /// use poligon_lang::interpreter::runtime::IoHook;
-    /// use std::collections::VecDeque;
-    /// use std::io::{BufReader, BufRead};
+    /// # use poligon_lang::interpreter::runtime::value::Value;
     /// 
-    /// let mut interpreter = Interpreter::from_string("print(2 - 2);");
-    /// interpreter.hook = IoHook::new_rw(VecDeque::new()); // set hook
-    /// interpreter.run().unwrap();
-    /// 
-    /// // read from hook
-    /// let reader = BufReader::new(interpreter.hook);
-    /// let mut lines = reader.lines();
-    /// assert_eq!(lines.next().unwrap().unwrap(), "0");
-    /// assert!(lines.next().is_none());
+    /// let interpreter = Interpreter::from_string("2 - 2;");
+    /// assert_eq!(interpreter.run().unwrap(), Value::Int(0));
     /// ```
     pub fn run(&self) -> InterpretResult<Value> {
         let parsed = self.parse()?;
         
-        let mut ctx = RtContext::new_with_io(self.hook.clone());
+        let mut ctx = RtContext::new();
+        parsed.run_with_ctx(&mut ctx)
+            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+    }
+
+    /// Execute the source string.
+    /// 
+    /// # Usage
+    /// ```
+    /// # use poligon_lang::Interpreter;
+    /// use poligon_lang::interpreter::runtime::IoHook;
+    /// use std::collections::VecDeque;
+    /// use std::io::{BufReader, BufRead};
+    /// 
+    /// let mut dq = VecDeque::new();
+    /// let hook = IoHook::new_w(&mut dq);
+    /// let interpreter = Interpreter::from_string("
+    ///     print(0);
+    ///     print(1);
+    ///     print(2);
+    ///     print(3);
+    /// ");
+    /// interpreter.run_with_io(hook).unwrap();
+    /// 
+    /// // read from hook
+    /// let reader = BufReader::new(dq);
+    /// 
+    /// let mut lines = reader.lines();
+    /// assert_eq!(lines.next().unwrap().unwrap(), "0");
+    /// assert_eq!(lines.next().unwrap().unwrap(), "1");
+    /// assert_eq!(lines.next().unwrap().unwrap(), "2");
+    /// assert_eq!(lines.next().unwrap().unwrap(), "3");
+    /// assert!(lines.next().is_none());
+    /// ```
+    pub fn run_with_io(&self, hook: runtime::IoHook) -> InterpretResult<Value> {
+        let parsed = self.parse()?;
+        
+        let mut ctx = RtContext::new_with_io(hook);
         parsed.run_with_ctx(&mut ctx)
             .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
     }

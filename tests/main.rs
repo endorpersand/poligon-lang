@@ -31,14 +31,13 @@ fn display_test() {
 
 #[test]
 fn lexical_scope_i_test() {
-    let dq = VecDeque::new();
+    let mut dq = VecDeque::new();
+    
+    let hook = IoHook::new_w(&mut dq);
+    let ir = Interpreter::from_file("tests/files/lexical_scope_i.gon").unwrap();
+    ir.run_with_io(hook).unwrap();
 
-    let hook = IoHook::new_rw(dq);
-    let mut ir = Interpreter::from_file("tests/files/lexical_scope_i.gon").unwrap();
-    ir.hook = hook;
-    ir.run().unwrap();
-
-    let reader = BufReader::new(ir.hook);
+    let reader = BufReader::new(dq);
     let mut lines = reader.lines();
     
     assert_eq!(lines.next().unwrap().unwrap(), "global");

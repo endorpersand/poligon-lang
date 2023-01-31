@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use lazy_static::lazy_static;
 
-use super::{ValueErr, rtio};
+use super::rtio::Io;
+use super::ValueErr;
 use super::err::TypeErr;
 use super::RtResult;
 use super::value::{Value, FunParamType, VArbType, ValueType, FunType, fun_type};
@@ -21,38 +22,39 @@ macro_rules! str_map {
     }
 }
 
-fn std_print(mut ioref: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_print(args: Vec<Value>) -> RtResult<Io<Value>> {
     let strs = args.into_iter()
         .map(|v| v.str())
         .collect::<Vec<_>>()
         .join(" ");
 
-    writeln!(ioref, "{}", strs)?;
+    let mut io = Io::pure(Value::Unit);
+    writeln!(io, "{}", strs)?;
 
-    Ok(Value::Unit)
+    Ok(io)
 }
-fn std_is(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_is(args: Vec<Value>) -> RtResult<Io<Value>> {
     if let [a, b] = &args[..] {
         let eval = match (a, b) {
             (Value::List(al), Value::List(bl)) => al.ref_eq(bl),
             (av, bv) => av == bv
         };
 
-        Ok(Value::Bool(eval))
+        Ok(Io::pure(Value::Bool(eval)))
     } else {
         Err(ValueErr::WrongArity(2))?
     }
 }
 
-fn std_type(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_type(args: Vec<Value>) -> RtResult<Io<Value>> {
     if let [a] = &args[..] {
-        Ok(Value::Str(a.ty().to_string()))
+        Ok(Io::pure(Value::Str(a.ty().to_string())))
     } else {
         Err(ValueErr::WrongArity(1))?
     }
 }
 
-fn std_contains(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_contains(args: Vec<Value>) -> RtResult<Io<Value>> {
     if let [collection, item] = &args[..] {
         let b = match collection {
             Value::Char(c1) => match item {
@@ -68,16 +70,16 @@ fn std_contains(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
             Value::List(l) => l.borrow().contains(item),
             _ => Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         };
-        Ok(Value::Bool(b))
+        Ok(Io::pure(Value::Bool(b)))
     } else {
         Err(ValueErr::WrongArity(2))?
     }
 }
-fn std_push(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_push(args: Vec<Value>) -> RtResult<Io<Value>> {
     if let [lst, item] = &args[..] {
         if let Value::List(l) = lst {
             l.try_borrow_mut()?.push(item.clone());
-            Ok(Value::Unit)
+            Ok(Io::pure(Value::Unit))
         } else {
             Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         }
@@ -85,10 +87,10 @@ fn std_push(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
         Err(ValueErr::WrongArity(2))?
     }
 }
-fn std_pop(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_pop(args: Vec<Value>) -> RtResult<Io<Value>> {
     if let [lst] = &args[..] {
         if let Value::List(l) = lst {
-            Ok(l.try_borrow_mut()?.pop().unwrap_or(Value::Unit))
+            Ok(Io::pure(l.try_borrow_mut()?.pop().unwrap_or(Value::Unit)))
         } else {
             Err(TypeErr::ExpectedType(ValueType::List(Box::new(VArbType::Unk))))?
         }
@@ -98,13 +100,13 @@ fn std_pop(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
 }
 
 
-fn std_time(_: rtio::IoHook, args: Vec<Value>) -> RtResult<Value> {
+fn std_time(args: Vec<Value>) -> RtResult<Io<Value>> {
     lazy_static! {
         static ref PROGRAM_START: Instant = Instant::now();
     }
     if args.is_empty() {
         let now = Instant::now();
-        Ok(Value::Int((now - *PROGRAM_START).as_millis() as isize))
+        Ok(Io::pure(Value::Int((now - *PROGRAM_START).as_millis() as isize)))
     } else {
         Err(ValueErr::WrongArity(0))?
     }
