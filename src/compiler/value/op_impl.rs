@@ -156,7 +156,6 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 then_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                // TODO: properly type
                 let phi = c.builder.build_phi(self.get_type(), "and_result");
                 phi.add_incoming(&[
                     // if LHS was true
@@ -181,7 +180,6 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                 else_bb = c.builder.get_insert_block().unwrap();
 
                 c.builder.position_at_end(merge_bb);
-                // TODO, properly type
                 let phi = c.builder.build_phi(self.get_type(), "or_result");
                 phi.add_incoming(&[
                     // if LHS was true
