@@ -2,7 +2,7 @@
 
 use inkwell::builder::Builder;
 use inkwell::types::{FunctionType, StructType};
-use inkwell::values::{FunctionValue, StructValue};
+use inkwell::values::FunctionValue;
 
 use crate::compiler::{Compiler, CompileResult};
 

@@ -103,21 +103,12 @@ impl<'ctx> Compiler<'ctx> {
             .expect("No insert block found")
     }
 
-    /// Create an alloca instruction in the entry block of
-    /// the function.  This is used for mutable variables etc.
-    fn create_entry_block_alloca(&mut self, ident: &str, layout: TypeLayout) -> PointerValue<'ctx> {
-        let builder = self.ctx.create_builder();
-
-        let fun_bb = self.parent_fn().get_first_basic_block().expect("Expected function to have block");
-        // reposition this builder to the top of the first block
-        match fun_bb.get_first_instruction() {
-            Some(instr) => builder.position_before(&instr),
-            None => builder.position_at_end(fun_bb),
-        };
-
-        // create alloca
-        let alloca = builder.build_alloca(layout.basic_type(self), ident);
+    /// Create an alloca instruction and also store the value in the allocated pointer
+    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> PointerValue<'ctx>
+    {
+        let alloca = self.builder.build_alloca(val.type_layout().basic_type(self), ident);
         self.vars.insert(String::from(ident), alloca);
+        self.builder.build_store(alloca, val.basic_value(self));
         alloca
     }
 
@@ -129,15 +120,6 @@ impl<'ctx> Compiler<'ctx> {
                 self.builder.build_store(alloca, val.basic_value(self));
                 alloca
             })
-    }
-
-    /// Create an alloca instruction at the top and also store the value at the current insert point
-    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> PointerValue<'ctx>
-    {
-        let alloca = self.create_entry_block_alloca(ident, val.type_layout());
-
-        self.builder.build_store(alloca, val.basic_value(self));
-        alloca
     }
 
     fn get_val(&mut self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
