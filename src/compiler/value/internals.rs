@@ -1,7 +1,7 @@
 //! Internally defined structs for LLVM representation
 
 use inkwell::builder::Builder;
-use inkwell::types::FunctionType;
+use inkwell::types::{FunctionType, StructType};
 use inkwell::values::{FunctionValue, StructValue};
 
 use crate::compiler::{Compiler, CompileResult};
@@ -24,8 +24,8 @@ macro_rules! std_map {
 }
 
 impl<'ctx> Compiler<'ctx> {
-    pub (in crate::compiler) fn void_value(&self) -> StructValue<'ctx> {
-        self.ctx.const_struct(&[], false)
+    pub (in crate::compiler) fn void_value_type(&self) -> StructType<'ctx> {
+        self.ctx.struct_type(&[], false)
     }
 
     pub(in crate::compiler) fn string_type(&mut self) -> &mut GonStruct<'ctx> {

@@ -847,10 +847,15 @@ impl CodeGenerator {
                     Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Conditional, None)?),
                     None => None,
                 };
+                
+                let _void = plir::ty!(plir::Type::S_VOID);
+                let else_ty = last.as_ref()
+                    .map(|b| &b.0)
+                    .unwrap_or(&_void);
 
                 let type_iter = conditionals.iter()
                     .map(|(_, block)| &block.0)
-                    .chain(last.iter().map(|b| &b.0));
+                    .chain(std::iter::once(else_ty));
 
                 Ok(plir::Expr::new(
                     plir::Type::resolve_branches(type_iter).ok_or(PLIRErr::CannotResolveType)?,
@@ -877,14 +882,20 @@ impl CodeGenerator {
             },
             ast::Expr::Call { funct, params } => {
                 let funct = self.consume_expr_and_box(*funct)?;
-                let params = params.into_iter()
-                    .map(|expr| self.consume_expr(expr))
-                    .collect::<Result<_, _>>()?;
-                
                 match &funct.ty {
-                    plir::Type::Fun(_, ret) => Ok(plir::Expr::new(
-                        (**ret).clone(), plir::ExprType::Call { funct, params }
-                    )),
+                    plir::Type::Fun(ptys, ret) => {
+                        let params = std::iter::zip(ptys.iter(), params)
+                            .map(|(pty, expr)| {
+                                let param = self.consume_expr(expr)?;
+                                op_impl::apply_special_cast(param, pty, CastType::Call)
+                                    .map_err(|e| PLIRErr::ExpectedType(pty.clone(), e.ty))
+                            })
+                            .collect::<Result<_, _>>()?;
+
+                        Ok(plir::Expr::new(
+                            (**ret).clone(), plir::ExprType::Call { funct, params }
+                        ))
+                    },
                     t => Err(PLIRErr::CannotCall(t.clone()))
                 }
             },

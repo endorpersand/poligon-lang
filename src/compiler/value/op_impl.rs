@@ -293,7 +293,7 @@ impl<'ctx> Unary<'ctx> for StructValue<'ctx> {
         let call = c.builder.build_call(f, &[self.into()], op_name);
         Ok(match call.try_as_basic_value().left() {
             Some(t) => t,
-            None => c.void_value().into(),
+            None => c.void_value_type().const_zero().into(),
         })
     }
 }
@@ -437,7 +437,7 @@ impl<'ctx> Binary<'ctx> for StructValue<'ctx> {
         let call = c.builder.build_call(f, &[self.into(), right.into()], op_name);
         Ok(match call.try_as_basic_value().left() {
             Some(t) => t,
-            None => c.void_value().into(),
+            None => c.void_value_type().const_zero().into(),
         })
     }
     

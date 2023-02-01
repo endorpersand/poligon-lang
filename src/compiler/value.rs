@@ -154,7 +154,7 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Int(i)   => i.into(),
             GonValue::Bool(b)  => b.into(),
             GonValue::Str(s)   => s.into(),
-            GonValue::Unit     => c.void_value().into(),
+            GonValue::Unit     => c.void_value_type().const_zero().into(),
         }
     }
 
@@ -253,7 +253,7 @@ impl TypeLayout {
             TypeLayout::Float     => c.ctx.f64_type().into(),
             TypeLayout::Int       => c.ctx.i64_type().into(),
             TypeLayout::Bool      => c.ctx.bool_type().into(),
-            TypeLayout::Unit      => c.ctx.struct_type(&[], true).into(),
+            TypeLayout::Unit      => c.void_value_type().into(),
             TypeLayout::Struct(s) => c.get_struct(s).struct_type().into(),
             TypeLayout::Tuple(t)  => {
                 let fty = t.iter().map(|t| t.basic_type(c))

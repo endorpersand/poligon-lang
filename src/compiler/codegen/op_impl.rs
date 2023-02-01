@@ -50,7 +50,7 @@ impl GonErr for OpErr {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CastType {
-    All, Decl
+    All, Decl, Call
 }
 /// Try to cast the expression to the given type, erroring if the cast fails.
 pub fn apply_cast(e: Expr, ty: &Type) -> Result<Expr, Expr> {
@@ -62,10 +62,10 @@ fn accept_cast(left: TypeRef, right: TypeRef, ct: CastType) -> bool {
     use TypeRef::*;
 
     match (left, right) {
-        (Prim(Type::S_INT),  Prim(Type::S_FLOAT)) => matches!(ct, All | Decl),
-        (Prim(Type::S_CHAR), Prim(Type::S_STR))   => matches!(ct, All | Decl),
+        (Prim(Type::S_INT),  Prim(Type::S_FLOAT)) => matches!(ct, All | Decl | Call),
+        (Prim(Type::S_CHAR), Prim(Type::S_STR))   => matches!(ct, All | Decl | Call),
         (_, Prim(Type::S_BOOL)) => matches!(ct, All),
-        (_, Prim(Type::S_VOID)) => matches!(ct, All | Decl),
+        (_, Prim(Type::S_VOID)) => matches!(ct, All | Decl | Call),
         _ => false
     }
 }
