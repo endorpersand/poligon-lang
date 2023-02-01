@@ -131,7 +131,7 @@ impl<'ctx> Unary<'ctx> for BV<'ctx> {
                 BV::FloatValue(v)   => v.apply_unary(op, c).map(Into::into),
                 BV::ArrayValue(_)   => cannot_unary(op, self),
                 BV::PointerValue(_) => cannot_unary(op, self),
-                BV::StructValue(_)  => cannot_unary(op, self),
+                BV::StructValue(v)  => v.apply_unary(op, c),
                 BV::VectorValue(_)  => cannot_unary(op, self),
             }
         }
@@ -207,7 +207,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                     BV::IntValue(v)     => Ok(v.apply_binary(op, cast_rhs!(), c).into()),
                     BV::FloatValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
                     BV::PointerValue(_) => cannot_binary(op, self, rhs),
-                    BV::StructValue(_)  => cannot_binary(op, self, rhs),
+                    BV::StructValue(v)  => v.apply_binary(op, cast_rhs!(), c),
                     BV::VectorValue(_)  => cannot_binary(op, self, rhs),
                 }
             }
@@ -268,6 +268,33 @@ impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
             op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
             op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
         }
+    }
+}
+
+impl<'ctx> Unary<'ctx> for StructValue<'ctx> {
+    type Output = CompileResult<'ctx, BV<'ctx>>;
+    
+    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+        let sty = self.get_type();
+        let Some(st_name) = sty.get_name() else { return cannot_unary(op, self) };
+        let Ok(st_name) = st_name.to_str() else { return cannot_unary(op, self) };
+        
+        let op_name = match op {
+            op::Unary::Plus   => "uplus",
+            op::Unary::Minus  => "uminus",
+            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
+            op::Unary::BitNot => "ubitnot",
+        };
+
+        let Some(f) = c.module.get_function(&format!("__{st_name}_{op_name}")) else {
+            return cannot_unary(op, self)
+        };
+
+        let call = c.builder.build_call(f, &[self.into()], op_name);
+        Ok(match call.try_as_basic_value().left() {
+            Some(t) => t,
+            None => c.void_value().into(),
+        })
     }
 }
 
@@ -369,10 +396,51 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
             op::Binary::BitOr  => cannot_binary(op, self, right),
             op::Binary::BitAnd => cannot_binary(op, self, right),
             op::Binary::BitXor => cannot_binary(op, self, right),
-            op::Binary::LogAnd => cannot_binary(op, self, right),
-            op::Binary::LogOr  => cannot_binary(op, self, right),
+            op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
+            op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
         }
     }
+}
+
+
+impl<'ctx> Binary<'ctx> for StructValue<'ctx> {
+    type Output = CompileResult<'ctx, BV<'ctx>>;
+
+    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+        let lty = self.get_type();
+        let Some(lname) = lty.get_name() else { return cannot_binary(op, self, right) };
+        let Ok(lname) = lname.to_str() else { return cannot_binary(op, self, right) };
+        
+        let rty = self.get_type();
+        let Some(rname) = rty.get_name() else { return cannot_binary(op, self, right) };
+        let Ok(rname) = rname.to_str() else { return cannot_binary(op, self, right) };
+        
+        let op_name = match op {
+            op::Binary::Add    => "badd",
+            op::Binary::Sub    => "bsub",
+            op::Binary::Mul    => "bmul",
+            op::Binary::Div    => "bdiv",
+            op::Binary::Mod    => "bmod",
+            op::Binary::Shl    => "bshl",
+            op::Binary::Shr    => "bshr",
+            op::Binary::BitOr  => "bbitor",
+            op::Binary::BitAnd => "bbitand",
+            op::Binary::BitXor => "bbitxor",
+            op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
+            op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
+        };
+
+        let Some(f) = c.module.get_function(&format!("__{lname}_{op_name}_{rname}")) else {
+            return cannot_binary(op, self, right)
+        };
+
+        let call = c.builder.build_call(f, &[self.into(), right.into()], op_name);
+        Ok(match call.try_as_basic_value().left() {
+            Some(t) => t,
+            None => c.void_value().into(),
+        })
+    }
+    
 }
 
 impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {

@@ -2,7 +2,7 @@
 
 use inkwell::builder::Builder;
 use inkwell::types::FunctionType;
-use inkwell::values::FunctionValue;
+use inkwell::values::{FunctionValue, StructValue};
 
 use crate::compiler::{Compiler, CompileResult};
 
@@ -24,6 +24,10 @@ macro_rules! std_map {
 }
 
 impl<'ctx> Compiler<'ctx> {
+    pub (in crate::compiler) fn void_value(&self) -> StructValue<'ctx> {
+        self.ctx.const_struct(&[], false)
+    }
+
     pub(in crate::compiler) fn string_type(&mut self) -> &mut GonStruct<'ctx> {
         self.get_struct_or_init("String", |c| [
             c.ctx.i8_type().ptr_type(Default::default()).into(),

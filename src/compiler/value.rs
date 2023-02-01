@@ -4,7 +4,7 @@ mod internals;
 use std::collections::HashMap;
 
 use inkwell::types::{BasicTypeEnum, BasicMetadataTypeEnum, FunctionType, VoidType, BasicType, StructType};
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue, StructValue, FunctionValue};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, FunctionValue};
 
 use super::{Compiler, CompileResult, CompileErr};
 use super::plir;
@@ -150,11 +150,11 @@ impl<'ctx> GonValue<'ctx> {
     /// Depending on context, [`GonValue::basic_value_or_void`] may be more suitable.
     pub fn basic_value(self, c: &Compiler<'ctx>) -> BasicValueEnum<'ctx> {
         match self {
-            GonValue::Float(f) => f.as_basic_value_enum(),
-            GonValue::Int(i)   => i.as_basic_value_enum(),
-            GonValue::Bool(b)  => b.as_basic_value_enum(),
-            GonValue::Str(s)   => s.as_basic_value_enum(),
-            GonValue::Unit     => c.ctx.const_struct(&[], true).as_basic_value_enum(),
+            GonValue::Float(f) => f.into(),
+            GonValue::Int(i)   => i.into(),
+            GonValue::Bool(b)  => b.into(),
+            GonValue::Str(s)   => s.into(),
+            GonValue::Unit     => c.void_value().into(),
         }
     }
 
