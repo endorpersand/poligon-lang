@@ -59,6 +59,8 @@ pub enum PLIRErr {
     UndefinedVar(String),
     /// Type/class is not defined
     UndefinedType(String),
+    /// Attribute doesn't exist on type
+    UndefinedAttr(plir::Type, String),
     /// Cannot call given type
     CannotCall(plir::Type),
     /// Cannot spread here.
@@ -91,6 +93,7 @@ impl GonErr for PLIRErr {
             => "type error",
             
             | PLIRErr::UndefinedVar(_)
+            | PLIRErr::UndefinedAttr(_, _)
             => "name error",
             
             |PLIRErr::OpErr(e)
@@ -107,6 +110,7 @@ impl GonErr for PLIRErr {
             PLIRErr::CannotResolveType => String::from("cannot determine type"),
             PLIRErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
             PLIRErr::UndefinedType(name) => format!("could not find type '{name}'"),
+            PLIRErr::UndefinedAttr(t, name) => format!("could not find attribute '{name}' on '{t}'"),
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
             PLIRErr::OpErr(e) => e.message(),
@@ -309,7 +313,7 @@ struct SigKey<'k> {
 }
 
 impl<'k> SigKey<'k> {
-    fn new(ident: &'k str, params: &'k [plir::Type]) -> Self {
+    fn new(ident: impl Into<Cow<'k, str>>, params: impl Into<Cow<'k, [plir::Type]>>) -> Self {
         Self { ident: ident.into(), params: params.into() }
     }
 }
@@ -328,25 +332,33 @@ impl Class {
         }
     }
 
-    pub fn structural(fields: HashMap<String, plir::Type>) -> Self {
+    pub fn structural(fields: HashMap<String, (usize, plir::Type)>) -> Self {
         Self {
             ty: TypeData::Struct { fields },
             methods: Default::default()
         }
     }
 
-    pub fn get_method<'a>(&'a self, ident: &'a str, params: &'a [plir::Type]) -> Option<&'a (String, plir::Type)> {
-        let k = SigKey::new(ident, params);
+    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a (String, plir::Type)> {
+        let k = SigKey::new(ident, vec![]);
         
         self.methods.get(&k)
     }
+
+    pub fn get_field(&self, ident: &str) -> Option<&TypeWithIndex> {
+        match &self.ty {
+            TypeData::Primitive => None,
+            TypeData::Struct { fields } => fields.get(ident),
+        }
+    }
 }
 
+type TypeWithIndex = (usize, plir::Type);
 #[derive(Clone, Debug)]
 enum TypeData {
     Primitive,
     Struct {
-        fields: HashMap<String, plir::Type>
+        fields: HashMap<String, TypeWithIndex>
     }
 }
 
@@ -409,9 +421,12 @@ impl CodeGenerator {
         self.resolve(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
     }
-    fn get_class(&self, ident: &str) -> PLIRResult<&Class> {
-        self.resolve(|ib| ib.classes.get(ident))
-            .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident)))
+    fn get_class(&self, ty: &plir::Type) -> PLIRResult<&Class> {
+        match ty {
+            plir::Type::Prim(ident) => self.resolve(|ib| ib.classes.get(ident))
+                .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident))),
+            _ => todo!()
+        }
     }
 
     fn tmp_var_name(&mut self, ident: &str) -> String {
@@ -977,8 +992,36 @@ impl CodeGenerator {
         self.consume_expr(expr).map(Box::new)
     }
 
-    fn consume_path(&mut self, _p: ast::Path) -> PLIRResult<(plir::Type, plir::Path)> {
-        todo!()
+    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<(plir::Type, plir::Path)> {
+        let ast::Path { obj, attrs } = p;
+        let obj = self.consume_expr_and_box(*obj)?;
+        let mut new_attrs = vec![];
+
+        for (ident, st) in attrs {
+            let top_ty = new_attrs.last().map(|(_, _, t)| t).unwrap_or(&obj.ty);
+            let cls = self.get_class(top_ty)?;
+
+            let ty = if st {
+                // Only static access is thru types
+                todo!()
+            } else {
+                match cls.get_method(&ident) {
+                    Some((_, t)) => {
+                        t.clone()
+                    },
+                    None => {
+                        let (_, fty) = cls.get_field(&ident)
+                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.clone(), ident.clone()))?;
+                        fty.clone()
+                    },
+                }
+            };
+
+            new_attrs.push((ident, st, ty))
+        }
+
+        let last_ty = new_attrs.last().map(|(_, _, ty)| ty).cloned().unwrap();
+        Ok((last_ty, plir::Path { obj, attrs: new_attrs }))
     }
     fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
