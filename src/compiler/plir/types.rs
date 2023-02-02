@@ -6,7 +6,7 @@ use super::Split;
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Type {
     /// A type without type parameters (e.g. `string`, `int`).
     Prim(String),

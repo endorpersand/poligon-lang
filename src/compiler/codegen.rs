@@ -8,6 +8,7 @@
 
 mod op_impl;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 
 use crate::ast::{self, ReasgType, MutType};
@@ -56,6 +57,8 @@ pub enum PLIRErr {
     CannotResolveType,
     /// Variable is not defined
     UndefinedVar(String),
+    /// Type/class is not defined
+    UndefinedType(String),
     /// Cannot call given type
     CannotCall(plir::Type),
     /// Cannot spread here.
@@ -83,6 +86,7 @@ impl GonErr for PLIRErr {
             
             | PLIRErr::ExpectedType(_, _)
             | PLIRErr::CannotResolveType
+            | PLIRErr::UndefinedType(_)
             | PLIRErr::CannotCall(_)
             => "type error",
             
@@ -102,6 +106,7 @@ impl GonErr for PLIRErr {
             PLIRErr::ExpectedType(e, f) => format!("expected type '{e}', but got '{f}'"),
             PLIRErr::CannotResolveType => String::from("cannot determine type"),
             PLIRErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            PLIRErr::UndefinedType(name) => format!("could not find type '{name}'"),
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
             PLIRErr::OpErr(e) => e.message(),
@@ -196,6 +201,7 @@ struct InsertBlock {
     final_exit: Option<BlockExit>,
 
     vars: HashMap<String, plir::Type>,
+    classes: HashMap<String, Class>,
     semifuns: VecDeque<plir::FunSignature>,
 }
 
@@ -206,6 +212,7 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
+            classes: HashMap::new(),
             semifuns: VecDeque::new()
         }
     }
@@ -295,6 +302,54 @@ impl Var {
     }
 }
 
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct SigKey<'k> {
+    ident: Cow<'k, str>,
+    params: Cow<'k, [plir::Type]>
+}
+
+impl<'k> SigKey<'k> {
+    fn new(ident: &'k str, params: &'k [plir::Type]) -> Self {
+        Self { ident: ident.into(), params: params.into() }
+    }
+}
+
+#[derive(Debug)]
+pub struct Class {
+    ty: TypeData,
+    methods: HashMap<SigKey<'static>, (String, plir::Type)>
+}
+
+impl Class {
+    pub fn primitive() -> Self {
+        Self {
+            ty: TypeData::Primitive,
+            methods: Default::default()
+        }
+    }
+
+    pub fn structural(fields: HashMap<String, plir::Type>) -> Self {
+        Self {
+            ty: TypeData::Struct { fields },
+            methods: Default::default()
+        }
+    }
+
+    pub fn get_method<'a>(&'a self, ident: &'a str, params: &'a [plir::Type]) -> Option<&'a (String, plir::Type)> {
+        let k = SigKey::new(ident, params);
+        
+        self.methods.get(&k)
+    }
+}
+
+#[derive(Clone, Debug)]
+enum TypeData {
+    Primitive,
+    Struct {
+        fields: HashMap<String, plir::Type>
+    }
+}
+
 /// This struct does the actual conversion from AST to PLIR.
 pub struct CodeGenerator {
     program: InsertBlock,
@@ -344,11 +399,19 @@ impl CodeGenerator {
     fn declare(&mut self, ident: &str, ty: plir::Type) {
         self.peek_block().vars.insert(String::from(ident), ty);
     }
-    fn get_var_type(&self, ident: &str) -> PLIRResult<&plir::Type> {
+
+    fn resolve<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
         self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
-            .find_map(|ib| ib.vars.get(ident))
+            .find_map(f)
+    }
+    fn get_var_type(&self, ident: &str) -> PLIRResult<&plir::Type> {
+        self.resolve(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
+    }
+    fn get_class(&self, ident: &str) -> PLIRResult<&Class> {
+        self.resolve(|ib| ib.classes.get(ident))
+            .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident)))
     }
 
     fn tmp_var_name(&mut self, ident: &str) -> String {
@@ -446,7 +509,10 @@ impl CodeGenerator {
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
-        let InsertBlock { mut block, exits, final_exit, vars: _, semifuns: _ } = block;
+        let InsertBlock { 
+            mut block, exits, final_exit, 
+            vars: _, classes: _, semifuns: _ 
+        } = block;
         
         // fill the unconditional exit if necessary:
         let mut final_exit = final_exit.unwrap_or_else(|| {
