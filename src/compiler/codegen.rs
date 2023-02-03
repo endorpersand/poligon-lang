@@ -193,6 +193,12 @@ impl BlockBehavior {
     }
 }
 
+fn primitives(prims: &[&str]) -> HashMap<String, Class> {
+    prims.iter()
+        .map(|&s| (String::from(s), Class::primitive()))
+        .collect()
+}
+
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::Stmt>,
@@ -221,6 +227,22 @@ impl InsertBlock {
         }
     }
 
+    fn top() -> Self {
+        Self {
+            block: vec![],
+            exits: vec![],
+            final_exit: None,
+            vars: HashMap::new(),
+            classes: primitives(&[
+                plir::Type::S_INT,
+                plir::Type::S_FLOAT,
+                plir::Type::S_BOOL,
+                plir::Type::S_CHAR,
+                plir::Type::S_STR,
+            ]),
+            semifuns: VecDeque::new()
+        }
+    }
     /// Determine whether another statement can be pushed into the insert block.
     fn is_open(&self) -> bool {
         self.final_exit.is_none()
@@ -332,7 +354,12 @@ impl Class {
         }
     }
 
-    pub fn structural(fields: HashMap<String, (usize, plir::Type)>) -> Self {
+    pub fn structural(fields: impl IntoIterator<Item=(String, plir::Type)>) -> Self {
+        let fields = fields.into_iter()
+            .enumerate()
+            .map(|(i, (ident, ty))| (ident, (i, ty)))
+            .collect();
+
         Self {
             ty: TypeData::Struct { fields },
             methods: Default::default()
@@ -375,8 +402,8 @@ impl CodeGenerator {
     /// Creates a new instance of the CodeGenerator.
     pub fn new() -> Self {
         Self { 
-            program: InsertBlock::new(), 
-            blocks: vec![], 
+            program: InsertBlock::top(), 
+            blocks: vec![],
             var_id: 0,
             // steps: HashMap::new()
         }
@@ -998,30 +1025,36 @@ impl CodeGenerator {
         let mut new_attrs = vec![];
 
         for (ident, st) in attrs {
-            let top_ty = new_attrs.last().map(|(_, _, t)| t).unwrap_or(&obj.ty);
+            let top_ty = new_attrs.last().map(|(_, t)| t).unwrap_or(&obj.ty);
             let cls = self.get_class(top_ty)?;
 
-            let ty = if st {
+            if st {
                 // Only static access is thru types
                 todo!()
             } else {
                 match cls.get_method(&ident) {
-                    Some((_, t)) => {
-                        t.clone()
+                    Some((_, ft)) => {
+                        let p = Box::new(
+                            plir::Expr::new(
+                                top_ty.clone(), 
+                                plir::ExprType::Path(plir::Path::Struct(obj, new_attrs))
+                            )
+                        );
+                        return Ok((ft.clone(), plir::Path::Method(p, ident)));
                     },
                     None => {
-                        let (_, fty) = cls.get_field(&ident)
+                        let field = cls.get_field(&ident)
+                            .cloned()
                             .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.clone(), ident.clone()))?;
-                        fty.clone()
+                        
+                        new_attrs.push(field);
                     },
                 }
             };
-
-            new_attrs.push((ident, st, ty))
         }
 
-        let last_ty = new_attrs.last().map(|(_, _, ty)| ty).cloned().unwrap();
-        Ok((last_ty, plir::Path { obj, attrs: new_attrs }))
+        let last_ty = new_attrs.last().map(|(_, ty)| ty).cloned().unwrap();
+        Ok((last_ty, plir::Path::Struct(obj, new_attrs)))
     }
     fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.

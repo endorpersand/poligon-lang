@@ -295,24 +295,35 @@ impl Display for AsgUnit {
 
 impl Display for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Path { obj, attrs } = self;
-        
-        for (_, _, ty) in attrs {
-            write!(f, "<{ty}>(")?;
+        match self {
+            Path::Static(o, attrs) => match attrs.split_last() {
+                Some(((last, _), rest)) => {
+                    for (_, ty) in rest {
+                        write!(f, "<{ty}>(")?;
+                    }
+                    write!(f, "{o}")?;
+                    for (attr, _) in rest {
+                        write!(f, "::{attr})")?;
+                    }
+                    write!(f, "::{last}")
+                },
+                None => write!(f, "{o}"),
+            },
+            Path::Struct(o, attrs) => match attrs.split_last() {
+                Some(((last, _), rest)) => {
+                    for (_, ty) in rest {
+                        write!(f, "<{ty}>(")?;
+                    }
+                    write!(f, "{o}")?;
+                    for (attr, _) in rest {
+                        write!(f, ".{attr})")?;
+                    }
+                    write!(f, ".{last}")
+                },
+                None => write!(f, "{o}"),
+            },
+            Path::Method(o, method) => write!(f, "{o}.{method}"),
         }
-        write!(f, "{obj}")?;
-
-        for (attr, st, _) in attrs {
-            if *st {
-                write!(f, "::")
-            } else {
-                write!(f, ".")
-            }?;
-
-            write!(f, "{attr})")?;
-        }
-
-        Ok(())
     }
 }
 

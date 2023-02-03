@@ -376,16 +376,24 @@ pub enum ExprType {
 /// with an additional type parameter in the attributes to
 /// indicate the type of the access.
 #[derive(Debug, PartialEq)]
-pub struct Path {
-    /// The expression to access an attribute of
-    pub obj: Box<Expr>,
+pub enum Path {
+    /// A static path (a::b::c::d)
+    /// 
+    /// This includes the expression being accessed, 
+    /// and a vector holding the chain of attributes (and the type of the access)
+    Static(Box<Expr>, Vec<(String, Type)>),
+    
+    /// A chain of struct accesses (a.0.1.2.3.4)
+    /// 
+    /// This includes the expression being accessed, 
+    /// and a vector holding the chain of attributes accessed (and the type of the access)
+    Struct(Box<Expr>, Vec<(usize, Type)>),
 
-    /// The chain of attributes, 
-    /// whether the specific accesses were static, 
-    /// and the value type of the access.
-    pub attrs: Vec<(String, bool, Type)>
+    /// An method access (a.b where b is a method on type A)
+    /// 
+    /// This includes the expression being accessed and the method on that expression.
+    Method(Box<Expr>, String)
 }
-
 /// Value indexing.
 /// 
 /// This struct corresponds to [`ast::Index`].
