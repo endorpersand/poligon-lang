@@ -579,7 +579,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     plir::AsgUnit::Index(_) => todo!(),
                 }
             },
-            plir::ExprType::Path(_) => todo!(),
+            plir::ExprType::Path(p) => p.write_ir(compiler),
             plir::ExprType::UnaryOps { ops, expr } => {
                 match ops.split_last() {
                     Some((&(tail_op, _), head)) => {
@@ -737,7 +737,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 };
 
                 let fun_ret = match &funct.ty {
-                    plir::Type::Fun(_, ret) => &**ret,
+                    plir::Type::Fun(plir::FunType(_, ret)) => &**ret,
                     _ => unreachable!()
                 };
                 
@@ -781,6 +781,26 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
         };
 
         Ok(value)
+    }
+}
+
+impl<'ctx> TraverseIR<'ctx> for plir::Path {
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        match self {
+            plir::Path::Static(_, _) => todo!(),
+            plir::Path::Struct(e, attrs) => {
+                let mut value = e.write_ir(compiler)?.basic_value(compiler).into_struct_value();
+                for &(attr, _) in attrs {
+                    value = compiler.builder.build_extract_value(value, attr as u32, "")
+                        .unwrap_or_else(|| unreachable!("struct access OOB {attr}"))
+                        .into_struct_value();
+                }
+                Ok(GonValue::reconstruct(todo!(), value.into()))
+            },
+            plir::Path::Method(_, _, _) => todo!(),
+        }
     }
 }
 

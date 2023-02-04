@@ -145,12 +145,17 @@ impl Display for Type {
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
-            Type::Fun(params, ret) => {
-                write!(f, "(")?;
-                fmt_list(f, params)?;
-                write!(f, ") -> {ret}")
-            },
+            Type::Fun(ft) => write!(f, "{ft}"),
         }
+    }
+}
+
+impl Display for FunType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let FunType(params, ret) = self;
+        write!(f, "(")?;
+        fmt_list(f, params)?;
+        write!(f, ") -> {ret}")
     }
 }
 

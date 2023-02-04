@@ -15,8 +15,12 @@ pub enum Type {
     /// A tuple of types (e.g. `[int, int, int]`).
     Tuple(Vec<Type>),
     /// A function (e.g. `() -> int`, `str -> int`).
-    Fun(Vec<Type>, Box<Type>)
+    Fun(FunType)
 }
+
+/// A function type expression.
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct FunType(pub Vec<Type>, pub Box<Type>);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum TypeRef<'a> {
@@ -32,7 +36,7 @@ impl TypeRef<'_> {
             TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
             TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
             TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys)),
-            TypeRef::Fun(params, ret) => Type::Fun(Vec::from(params), Box::new(ret.clone())),
+            TypeRef::Fun(params, ret) => Type::fun_type(Vec::from(params), ret.clone()),
         }
     }
 }
@@ -60,8 +64,12 @@ impl Type {
             Type::Prim(ident) => TypeRef::Prim(ident),
             Type::Generic(ident, params) => TypeRef::Generic(ident, params),
             Type::Tuple(params) => TypeRef::Tuple(params),
-            Type::Fun(params, ret) => TypeRef::Fun(params, ret),
+            Type::Fun(ft) => ft.as_ref()
         }
+    }
+
+    pub(crate) fn fun_type(params: Vec<Type>, ret: Type) -> Self {
+        Type::Fun(FunType(params, Box::new(ret)))
     }
 
     /// Test if this type is `never`.
@@ -145,14 +153,8 @@ impl Type {
 }
 
 impl<'a> PartialEq<TypeRef<'a>> for Type {
-    fn eq(&self, other: &TypeRef) -> bool {
-        match (self, other) {
-            (Self::Prim(t1),        TypeRef::Prim(t2))        => t1 == t2,
-            (Self::Generic(t1, p1), TypeRef::Generic(t2, p2)) => t1 == t2 && p1 == p2,
-            (Self::Tuple(t1),       TypeRef::Tuple(t2))       => t1 == t2,
-            (Self::Fun(p1, r1),     TypeRef::Fun(p2, r2))     => p1 == p2 && **r1 == **r2,
-            _ => false,
-        }
+    fn eq(&self, &other: &TypeRef) -> bool {
+        self.as_ref() == other
     }
 }
 impl<'a> PartialEq<Type> for TypeRef<'a> {
@@ -163,6 +165,16 @@ impl<'a> PartialEq<TypeRef<'a>> for &'a Type {
 }
 impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
     fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
+}
+
+impl FunType {
+    pub(crate) fn as_ref(&self) -> TypeRef {
+        TypeRef::Fun(&self.0, &self.1)
+    }
+
+    pub fn pop_front(&mut self) {
+        self.0.remove(0);
+    }
 }
 
 /// Utility macro to make PLIR type expressions easier to read.

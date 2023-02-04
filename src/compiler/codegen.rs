@@ -351,7 +351,7 @@ impl<'k> SigKey<'k> {
 #[derive(Debug)]
 pub struct Class {
     ty: TypeData,
-    methods: HashMap<SigKey<'static>, (String, plir::Type)>
+    methods: HashMap<SigKey<'static>, (String, plir::FunType)>
 }
 
 impl Class {
@@ -374,7 +374,7 @@ impl Class {
         }
     }
 
-    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a (String, plir::Type)> {
+    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a (String, plir::FunType)> {
         let k = SigKey::new(ident, vec![]);
         
         self.methods.get(&k)
@@ -771,7 +771,7 @@ impl CodeGenerator {
 
         // declare function before parsing block
         self.declare(&ident, 
-            plir::Type::Fun(param_tys, Box::new(ret.clone()))
+            plir::Type::fun_type(param_tys, ret.clone())
         );
 
         Ok(plir::FunSignature { ident, params, ret })
@@ -1002,7 +1002,7 @@ impl CodeGenerator {
             ast::Expr::Call { funct, params } => {
                 let funct = self.consume_expr_and_box(*funct)?;
                 match &funct.ty {
-                    plir::Type::Fun(ptys, ret) => {
+                    plir::Type::Fun(plir::FunType(ptys, ret)) => {
                         let params = std::iter::zip(ptys.iter(), params)
                             .map(|(pty, expr)| {
                                 let param = self.consume_expr(expr)?;
@@ -1051,7 +1051,14 @@ impl CodeGenerator {
                         if matches!(path, plir::Path::Method(..)) {
                             Err(PLIRErr::CannotAccessOnMethod)?;
                         } else {
-                            path = plir::Path::Method(Box::new(path.into()), fname.clone(), ft.clone());
+                            let mut ft = ft.clone();
+                            ft.pop_front();
+                            
+                            path = plir::Path::Method(
+                                Box::new(path.into()), 
+                                fname.clone(), 
+                                plir::Type::Fun(ft.clone())
+                            );
                         }
                     },
                     None => {
