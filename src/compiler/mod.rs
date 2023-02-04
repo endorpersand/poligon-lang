@@ -791,13 +791,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
         match self {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
-                let mut value = e.write_ir(compiler)?.basic_value(compiler).into_struct_value();
+                let mut value = e.write_ir(compiler)?.basic_value(compiler);
                 for &(attr, _) in attrs {
-                    value = compiler.builder.build_extract_value(value, attr as u32, "")
-                        .unwrap_or_else(|| unreachable!("struct access OOB {attr}"))
-                        .into_struct_value();
+                    value = compiler.builder.build_extract_value(value.into_struct_value(), attr as u32, "")
+                        .unwrap_or_else(|| unreachable!("struct access OOB {attr}"));
                 }
-                Ok(GonValue::reconstruct(todo!(), value.into()))
+                Ok(GonValue::reconstruct(todo!(), value))
             },
             plir::Path::Method(_, _, _) => todo!(),
         }
