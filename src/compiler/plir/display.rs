@@ -322,7 +322,7 @@ impl Display for Path {
                 },
                 None => write!(f, "{o}"),
             },
-            Path::Method(o, method) => write!(f, "{o}.{method}"),
+            Path::Method(o, method, _) => write!(f, "{o}.{method}"),
         }
     }
 }

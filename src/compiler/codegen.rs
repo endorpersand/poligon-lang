@@ -61,6 +61,10 @@ pub enum PLIRErr {
     UndefinedType(String),
     /// Attribute doesn't exist on type
     UndefinedAttr(plir::Type, String),
+    /// Tried to use . access on a method
+    CannotAccessOnMethod,
+    /// Tried to assign to a method
+    CannotAssignToMethod,
     /// Cannot call given type
     CannotCall(plir::Type),
     /// Cannot spread here.
@@ -89,6 +93,8 @@ impl GonErr for PLIRErr {
             | PLIRErr::ExpectedType(_, _)
             | PLIRErr::CannotResolveType
             | PLIRErr::UndefinedType(_)
+            | PLIRErr::CannotAccessOnMethod
+            | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
             => "type error",
             
@@ -96,7 +102,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::UndefinedAttr(_, _)
             => "name error",
             
-            |PLIRErr::OpErr(e)
+            | PLIRErr::OpErr(e)
             => e.err_name(),
         }
     }
@@ -111,6 +117,8 @@ impl GonErr for PLIRErr {
             PLIRErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
             PLIRErr::UndefinedType(name) => format!("could not find type '{name}'"),
             PLIRErr::UndefinedAttr(t, name) => format!("could not find attribute '{name}' on '{t}'"),
+            PLIRErr::CannotAccessOnMethod => String::from("cannot access on method"),
+            PLIRErr::CannotAssignToMethod => String::from("cannot assign to method"),
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
             PLIRErr::OpErr(e) => e.message(),
@@ -875,8 +883,12 @@ impl CodeGenerator {
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
                             ast::AsgUnit::Path(p) => {
-                                let (_, p) = this.consume_path(p)?;
-                                plir::AsgUnit::Path(p)
+                                let p = this.consume_path(p)?;
+                                if matches!(p, plir::Path::Method(..)) {
+                                    plir::AsgUnit::Path(p)
+                                } else {
+                                    Err(PLIRErr::CannotAssignToMethod)?
+                                }
                             },
                             ast::AsgUnit::Index(idx) => {
                                 let (_, idx) = this.consume_index(idx)?;
@@ -900,8 +912,7 @@ impl CodeGenerator {
                     .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
             },
             ast::Expr::Path(p) => {
-                self.consume_path(p)
-                    .map(|(ty, path)| plir::Expr::new(ty, plir::ExprType::Path(path)))
+                self.consume_path(p).map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
                 let e = self.consume_expr(*expr)?;
@@ -1019,13 +1030,16 @@ impl CodeGenerator {
         self.consume_expr(expr).map(Box::new)
     }
 
-    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<(plir::Type, plir::Path)> {
+    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
         let ast::Path { obj, attrs } = p;
         let obj = self.consume_expr_and_box(*obj)?;
-        let mut new_attrs = vec![];
+        let mut path = match attrs.first().unwrap().1 {
+            true  => plir::Path::Static(obj, vec![]),
+            false => plir::Path::Struct(obj, vec![]),
+        };
 
         for (ident, st) in attrs {
-            let top_ty = new_attrs.last().map(|(_, t)| t).unwrap_or(&obj.ty);
+            let top_ty = path.ty();
             let cls = self.get_class(top_ty)?;
 
             if st {
@@ -1033,28 +1047,26 @@ impl CodeGenerator {
                 todo!()
             } else {
                 match cls.get_method(&ident) {
-                    Some((_, ft)) => {
-                        let p = Box::new(
-                            plir::Expr::new(
-                                top_ty.clone(), 
-                                plir::ExprType::Path(plir::Path::Struct(obj, new_attrs))
-                            )
-                        );
-                        return Ok((ft.clone(), plir::Path::Method(p, ident)));
+                    Some((fname, ft)) => {
+                        if matches!(path, plir::Path::Method(..)) {
+                            Err(PLIRErr::CannotAccessOnMethod)?;
+                        } else {
+                            path = plir::Path::Method(Box::new(path.into()), fname.clone(), ft.clone());
+                        }
                     },
                     None => {
                         let field = cls.get_field(&ident)
                             .cloned()
                             .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.clone(), ident.clone()))?;
                         
-                        new_attrs.push(field);
+                        path.add_struct_seg(field)
+                            .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
                     },
                 }
             };
         }
 
-        let last_ty = new_attrs.last().map(|(_, ty)| ty).cloned().unwrap();
-        Ok((last_ty, plir::Path::Struct(obj, new_attrs)))
+        Ok(path)
     }
     fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.

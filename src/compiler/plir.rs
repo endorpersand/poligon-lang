@@ -233,6 +233,15 @@ impl Expr {
     pub fn new(ty: Type, expr: ExprType) -> Self {
         Expr { ty, expr }
     }
+
+    /// Create a new boxed expression.
+    pub fn boxed(ty: Type, expr: ExprType) -> Box<Self> {
+        Box::new(Self::new(ty, expr))
+    }
+
+    fn invalid() -> Self {
+        Self::new(ty!("never"), ExprType::Spread(None))
+    }
 }
 
 /// An expression.
@@ -391,9 +400,49 @@ pub enum Path {
 
     /// An method access (a.b where b is a method on type A)
     /// 
-    /// This includes the expression being accessed and the method on that expression.
-    Method(Box<Expr>, String)
+    /// This includes the expression being accessed and the method on that expression,
+    /// and the type of the method
+    Method(Box<Expr>, String, Type)
 }
+impl Path {
+    pub(crate) fn ty(&self) -> &Type {
+        match self {
+            Path::Static(e, attrs) => attrs.last().map(|(_, t)| t).unwrap_or(&e.ty),
+            Path::Struct(e, attrs) => attrs.last().map(|(_, t)| t).unwrap_or(&e.ty),
+            Path::Method(_, _, ty) => ty,
+        }
+    }
+
+    pub(crate) fn add_struct_seg(&mut self, seg: (usize, Type)) -> Result<(), ()> {
+        match self {
+            Path::Static(_, _) => {
+                let placeholder = Path::Struct(Box::new(Expr::invalid()), vec![seg]);
+                
+                let old_path = std::mem::replace(self, placeholder);
+                let new_obj = Box::new(old_path.into());
+
+                let obj_ref = match self {
+                    Path::Static(o, _) => o,
+                    Path::Struct(o, _) => o,
+                    Path::Method(o, _, _) => o,
+                };
+                *obj_ref = new_obj;
+                Ok(())
+            },
+            Path::Struct(_, segs) => {
+                segs.push(seg);
+                Ok(())
+            },
+            Path::Method(_, _, _) => Err(()),
+        }
+    }
+}
+impl From<Path> for Expr {
+    fn from(value: Path) -> Self {
+        Expr::new(value.ty().clone(), ExprType::Path(value))
+    }
+}
+
 /// Value indexing.
 /// 
 /// This struct corresponds to [`ast::Index`].
