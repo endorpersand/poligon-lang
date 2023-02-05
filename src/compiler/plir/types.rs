@@ -219,9 +219,7 @@ pub struct Class {
     /// Name of the struct
     pub ident: String,
     /// Struct's fields
-    pub fields: HashMap<String, (usize, FieldDecl)>,
-    /// Struct's methods
-    pub methods: HashMap<String, MethodDecl>
+    pub fields: HashMap<String, (usize, FieldDecl)>
 }
 
 #[derive(Debug, PartialEq)]
@@ -234,12 +232,4 @@ pub struct FieldDecl {
 
     /// The type of the declaration (inferred if not present)
     pub ty: Type
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MethodDecl {
-    /// Whether this method is static
-    pub is_static: bool,
-    /// The actual function
-    pub decl: FunDecl
 }

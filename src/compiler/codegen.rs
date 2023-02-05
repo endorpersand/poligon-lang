@@ -9,7 +9,8 @@
 mod op_impl;
 
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
@@ -208,7 +209,16 @@ fn primitives(prims: &[&str]) -> HashMap<String, Class> {
 }
 
 #[derive(Debug)]
+enum Unresolved {
+    Class(ast::Class),
+    ExternFun(ast::FunSignature),
+    Fun(ast::FunDecl),
+    FunBlock(plir::FunSignature, ast::Block)
+}
+
+#[derive(Debug)]
 struct InsertBlock {
+    init_block: Vec<plir::Stmt>,
     block: Vec<plir::Stmt>,
 
     /// All conditional exits.
@@ -220,23 +230,25 @@ struct InsertBlock {
 
     vars: HashMap<String, plir::Type>,
     classes: HashMap<String, Class>,
-    semifuns: VecDeque<plir::FunSignature>,
+    unresolved: HashMap<String, Unresolved>,
 }
 
 impl InsertBlock {
     fn new() -> Self {
         Self {
+            init_block: vec![],
             block: vec![],
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
             classes: HashMap::new(),
-            semifuns: VecDeque::new()
+            unresolved: HashMap::new()
         }
     }
 
     fn top() -> Self {
         Self {
+            init_block: vec![],
             block: vec![],
             exits: vec![],
             final_exit: None,
@@ -248,7 +260,7 @@ impl InsertBlock {
                 plir::Type::S_CHAR,
                 plir::Type::S_STR,
             ]),
-            semifuns: VecDeque::new()
+            unresolved: HashMap::new()
         }
     }
     /// Determine whether another statement can be pushed into the insert block.
@@ -316,6 +328,13 @@ impl InsertBlock {
         }
 
         false
+    }
+
+    /// Push a singular statement into this insert block, at the front.
+    /// 
+    /// This should only be used for statements computed lazily (fun decl, classes, etc.)
+    fn push_lazy_stmt(&mut self, stmt: plir::Stmt) {
+        self.init_block.push(stmt)
     }
 }
 
@@ -443,8 +462,55 @@ impl CodeGenerator {
         self.blocks.last_mut().unwrap_or(&mut self.program)
     }
 
+    /// Declares a variable with a given type.
     fn declare(&mut self, ident: &str, ty: plir::Type) {
         self.peek_block().vars.insert(String::from(ident), ty);
+    }
+
+    fn resolve_ident(&mut self, ident: &str) -> PLIRResult<()> {
+        fn get_ib(this: &mut CodeGenerator, i: usize) -> &mut InsertBlock {
+            this.blocks.len().checked_sub(i + 1).map_or(
+                &mut this.program,
+                |i| &mut this.blocks[i]
+            )
+        }
+
+        use std::collections::hash_map::Entry;
+
+        let mi = self.blocks.iter().rev()
+            .chain(std::iter::once(&self.program))
+            .enumerate()
+            .find_map(|(i, ib)| ib.unresolved.contains_key(ident).then_some(i));
+        if let Some(i) = mi {
+            let Entry::Occupied(entry) = get_ib(self, i).unresolved.entry(ident.to_string()) else {
+                unreachable!()
+            };
+
+            match entry.get() {
+                Unresolved::Class(_) => {
+                    let Unresolved::Class(cls) = entry.remove() else { unreachable!() };
+                    self.consume_cls(cls)?;
+                },
+                Unresolved::ExternFun(_) => {
+                    let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
+                    
+                    let fs = self.consume_fun_sig(fs)?;
+                    get_ib(self, i).push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
+                },
+                Unresolved::Fun(_) => {
+                    let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
+                    let ast::FunDecl { sig, block } = fd;
+
+                    let sig = self.consume_fun_sig(sig)?;
+                    let block = Rc::try_unwrap(block).unwrap();
+
+                    get_ib(self, i).unresolved.insert(k, Unresolved::FunBlock(sig, block));
+                },
+                Unresolved::FunBlock(_, _) => {},
+            }
+        }
+
+        Ok(())
     }
 
     fn resolve<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
@@ -452,6 +518,12 @@ impl CodeGenerator {
             .chain(std::iter::once(&self.program))
             .find_map(f)
     }
+    fn resolve_mut<'a, T>(&'a mut self, f: impl FnMut(&'a mut InsertBlock) -> Option<T>) -> Option<T> {
+        self.blocks.iter_mut().rev()
+            .chain(std::iter::once(&mut self.program))
+            .find_map(f)
+    }
+
     fn get_var_type(&self, ident: &str) -> PLIRResult<&plir::Type> {
         self.resolve(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
@@ -499,22 +571,28 @@ impl CodeGenerator {
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, mut stmts: Vec<ast::Stmt>) -> PLIRResult<()> {
-        for stmt in stmts.iter_mut() {
-            if let ast::Stmt::FunDecl(fd) = stmt {
-                let sig = std::mem::replace(&mut fd.sig, ast::FunSignature {
-                    ident: String::new(),
-                    params: vec![],
-                    ret: None,
-                });
-                
-                let sig = self.consume_fun_sig(sig)?;
-                self.peek_block().semifuns.push_back(sig);
+    fn consume_stmts(&mut self, stmts: Vec<ast::Stmt>) -> PLIRResult<()> {
+        let mut eager_stmts = vec![];
+        for stmt in stmts {
+            match stmt {
+                ast::Stmt::FunDecl(fd) => {
+                    self.peek_block().unresolved
+                        .insert(fd.sig.ident.clone(), Unresolved::Fun(fd));
+                },
+                ast::Stmt::ExternFunDecl(fs) => {
+                    self.peek_block().unresolved
+                        .insert(fs.ident.clone(), Unresolved::ExternFun(fs));
+                    }
+                ast::Stmt::ClassDecl(cls) => {
+                    self.peek_block().unresolved
+                        .insert(cls.ident.clone(), Unresolved::Class(cls));
+                }
+                s => eager_stmts.push(s),
             }
         }
 
-        for stmt in stmts {
-            if !self.consume_stmt(stmt)? {
+        for stmt in eager_stmts {
+            if !self.consume_eager_stmt(stmt)? {
                 break;
             }
         }
@@ -525,7 +603,7 @@ impl CodeGenerator {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_stmt(&mut self, stmt: ast::Stmt) -> PLIRResult<bool> {
+    fn consume_eager_stmt(&mut self, stmt: ast::Stmt) -> PLIRResult<bool> {
         match stmt {
             ast::Stmt::Decl(d) => self.consume_decl(d),
             ast::Stmt::Return(me) => {
@@ -541,16 +619,13 @@ impl CodeGenerator {
             ast::Stmt::Continue => {
                 Ok(self.peek_block().push_cont())
             },
-            ast::Stmt::FunDecl(f) => self.consume_fun_decl(f),
-            ast::Stmt::ExternFunDecl(fs) => {
-                let fs = self.consume_fun_sig(fs)?;
-                Ok(self.peek_block().push_stmt(plir::Stmt::ExternFunDecl(fs)))
-            },
             ast::Stmt::Expr(e) => {
                 let e = self.consume_expr(e)?;
                 Ok(self.peek_block().push_stmt(plir::Stmt::Expr(e)))
             },
-            ast::Stmt::ClassDecl(cls) => self.consume_cls(cls),
+            ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
+            ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
+            ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
         }
     }
 
@@ -561,10 +636,13 @@ impl CodeGenerator {
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
-            mut block, exits, final_exit, 
-            vars: _, classes: _, semifuns: _ 
+            mut init_block, mut block, exits, final_exit, 
+            vars: _, classes: _, unresolved: _ 
         } = block;
         
+        init_block.append(&mut block);
+        block = init_block;
+
         // fill the unconditional exit if necessary:
         let mut final_exit = final_exit.unwrap_or_else(|| {
             // we need to add an explicit exit statement.
@@ -781,28 +859,29 @@ impl CodeGenerator {
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
     fn consume_fun_decl(&mut self, decl: ast::FunDecl) -> PLIRResult<bool> {
-        let ast::FunDecl { sig: _, block } = decl;
-        let sig = self.peek_block().semifuns.pop_front().unwrap();
+        // let ast::FunDecl { sig: _, block } = decl;
+        // let sig = self.peek_block().semifuns.pop_front().unwrap();
 
-        let old_block = std::rc::Rc::try_unwrap(block)
-            .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
+        // let old_block = std::rc::Rc::try_unwrap(block)
+        //     .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
 
-        let block = {
-            self.push_block();
+        // let block = {
+        //     self.push_block();
     
-            for plir::Param { ident, ty, .. } in sig.params.iter() {
-                self.declare(ident, ty.clone());
-            }
+        //     for plir::Param { ident, ty, .. } in sig.params.iter() {
+        //         self.declare(ident, ty.clone());
+        //     }
     
-            // collect all the statements from this block
-            self.consume_stmts(old_block.0)?;
+        //     // collect all the statements from this block
+        //     self.consume_stmts(old_block.0)?;
     
-            let insert_block = self.pop_block().unwrap();
-            self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
-        };
+        //     let insert_block = self.pop_block().unwrap();
+        //     self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
+        // };
 
-        let fun_decl = plir::FunDecl { sig, block };
-        Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
+        // let fun_decl = plir::FunDecl { sig, block };
+        // Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
+        todo!()
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
@@ -815,19 +894,21 @@ impl CodeGenerator {
             })
             .collect();
         
-        let methods = methods.into_iter()
-            .map(|ast::types::MethodDecl { is_static, decl }| {
-                todo!()
-            })
-            .collect();
-        let cls = plir::Class { ident, fields, methods };
-
-        todo!()
+        let ib = self.peek_block();
+        for ast::types::MethodDecl { is_static, decl } in methods {
+            ib.unresolved.insert(format!("{ident}::{}", &decl.sig.ident), Unresolved::Fun(decl));
+        }
+        let cls = plir::Class { ident, fields };
+        
+        ib.push_lazy_stmt(todo!());
+        
+        Ok(ib.is_open())
     }
 
     fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
         match expr {
             ast::Expr::Ident(ident) => {
+                self.resolve_ident(&ident)?;
                 Ok(plir::Expr::new(
                     self.get_var_type(&ident)?.clone(),
                     plir::ExprType::Ident(ident)
