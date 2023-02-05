@@ -290,6 +290,7 @@ impl TraverseResolve for ast::Stmt {
             ast::Stmt::FunDecl(f) => f.traverse_rs(map),
             ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
             ast::Stmt::Expr(e)   => e.traverse_rs(map),
+            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes")),
         }
     }
 }

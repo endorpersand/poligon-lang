@@ -882,6 +882,7 @@ impl TraverseRt for ast::Stmt {
             ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
             ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations"))?,
             ast::Stmt::Expr(e) => e.traverse_rt(ctx),
+            ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes"))?,
         }
     }
 }

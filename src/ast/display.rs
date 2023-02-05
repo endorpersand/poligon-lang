@@ -41,13 +41,29 @@ fn fmt_mapped_list<T, D: Display, F>(f: &mut std::fmt::Formatter<'_>, elems: &[T
     }
 }
 
-struct BlockDisplay<'b>(&'b [Stmt]);
-impl Display for BlockDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, self.0)
+struct TabDisplay<D>(D);
+impl TabDisplay<String> {
+    fn from_stmts(s: &[Stmt]) -> Self {
+        struct BlockDisplay<'b>(&'b [Stmt]);
+        impl Display for BlockDisplay<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                fmt_stmt_list(f, self.0)
+            }
+        }
+
+        TabDisplay(BlockDisplay(s).to_string())
     }
 }
-
+impl<D: Display> Display for TabDisplay<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = self.0.to_string();
+        for l in s.lines() {
+            writeln!(f, "{:4}{l}", "")?;
+        }
+        
+        Ok(())
+    }
+}
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt_stmt_list(f, &self.0)
@@ -67,6 +83,7 @@ impl Display for Stmt {
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
             Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
+            Stmt::ClassDecl(s) => write!(f, "{s}"),
         }
     }
 }
@@ -182,6 +199,59 @@ impl Display for Type {
     }
 }
 
+impl Display for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Class { ident, fields, methods } = self;
+        write!(f, "class {ident} {{")?;
+        for field in fields {
+            writeln!(f,"{field}")?;
+        }
+        writeln!(f)?;
+        for method in methods {
+            writeln!(f,"{method}")?;
+        }
+        write!(f, "}}")
+    }
+}
+impl Display for types::FieldDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let types::FieldDecl { rt, mt, ident, ty } = self;
+        
+        match rt {
+            ReasgType::Let => write!(f, "let "),
+            ReasgType::Const => write!(f, "const "),
+        }?;
+        match mt {
+            MutType::Mut => write!(f, "mut ")?,
+            MutType::Immut => {},
+        }
+        write!(f, "{ident}: {ty}")
+    }
+}
+impl Display for types::MethodDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let types::MethodDecl { is_static, decl } = self;
+
+        if *is_static {
+            write!(f, "{decl}")
+        } else {
+            let FunDecl { sig: FunSignature { ident, params, ret }, block } = decl;
+
+            write!(f, "fun {ident}(self")?;
+            if !params.is_empty() {
+                write!(f, ", ")?;
+                fmt_list(f, params)?;
+            }
+            write!(f, ") ")?;
+
+            if let Some(retty) = ret {
+                write!(f, "-> {retty}")?;
+            };
+
+            write!(f, " {block}")
+        }
+    }
+}
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -275,12 +345,7 @@ impl Display for Block {
             write!(f, "{{}}")
         } else {
             writeln!(f, "{{")?;
-
-            let buf = BlockDisplay(&self.0).to_string();
-            for line in buf.lines() {
-                writeln!(f, "{:4}{line}", "")?;
-            }
-
+            write!(f, "{}", TabDisplay::from_stmts(&self.0))?;
             write!(f, "}}")
         }
     }

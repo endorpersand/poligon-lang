@@ -550,6 +550,7 @@ impl CodeGenerator {
                 let e = self.consume_expr(e)?;
                 Ok(self.peek_block().push_stmt(plir::Stmt::Expr(e)))
             },
+            ast::Stmt::ClassDecl(cls) => self.consume_cls(cls),
         }
     }
 
@@ -804,6 +805,26 @@ impl CodeGenerator {
         Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
     }
 
+    fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
+        let ast::Class { ident, fields, methods } = cls;
+
+        let fields = fields.into_iter()
+            .enumerate()
+            .map(|(i, ast::types::FieldDecl { rt, mt, ident, ty })| {
+                (ident, (i, plir::FieldDecl { rt, mt, ty: plir::Type::from(ty) }))
+            })
+            .collect();
+        
+        let methods = methods.into_iter()
+            .map(|ast::types::MethodDecl { is_static, decl }| {
+                todo!()
+            })
+            .collect();
+        let cls = plir::Class { ident, fields, methods };
+
+        todo!()
+    }
+
     fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
         match expr {
             ast::Expr::Ident(ident) => {
@@ -1053,7 +1074,7 @@ impl CodeGenerator {
                         } else {
                             let mut ft = ft.clone();
                             ft.pop_front();
-                            
+
                             path = plir::Path::Method(
                                 Box::new(path.into()), 
                                 fname.clone(), 

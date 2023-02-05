@@ -13,8 +13,11 @@
 
 use std::rc::Rc;
 
+pub use self::types::{Type, Class};
+
 pub mod op;
 mod display;
+pub mod types;
 
 /// A complete program.
 /// 
@@ -95,7 +98,10 @@ pub enum Stmt {
     ExternFunDecl(FunSignature),
 
     /// An expression.
-    Expr(Expr)
+    Expr(Expr),
+
+    /// A struct declaration.
+    ClassDecl(Class)
 }
 
 impl Stmt {
@@ -198,17 +204,6 @@ pub enum MutType {
     /// Ø. This variable cannot be mutated and changed.
     Immut
 }
-
-/// A type expression.
-/// 
-/// # Examples
-/// ```text
-/// string
-/// list<string>
-/// map<string, list<int>>
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type(pub String, pub Vec<Type>);
 
 /// A function header / signature.
 /// 

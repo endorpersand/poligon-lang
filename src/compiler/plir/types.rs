@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::ast;
 use crate::compiler::codegen::OpErr;
 
-use super::Split;
+use super::{Split, FunDecl};
 
 /// A type expression.
 /// 
@@ -210,4 +212,34 @@ impl From<ast::Type> for Type {
             Type::Generic(ident, p)
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Class {
+    /// Name of the struct
+    pub ident: String,
+    /// Struct's fields
+    pub fields: HashMap<String, (usize, FieldDecl)>,
+    /// Struct's methods
+    pub methods: HashMap<String, MethodDecl>
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FieldDecl {
+    /// Whether the field can be reassigned later
+    pub rt: ast::ReasgType,
+    
+    /// Whether the field can be mutated
+    pub mt: ast::MutType,
+
+    /// The type of the declaration (inferred if not present)
+    pub ty: Type
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MethodDecl {
+    /// Whether this method is static
+    pub is_static: bool,
+    /// The actual function
+    pub decl: FunDecl
 }
