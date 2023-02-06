@@ -72,7 +72,34 @@ impl Display for Stmt {
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
             Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
+            Stmt::ClassDecl(c) => write!(f, "{c}"),
         }
+    }
+}
+
+impl Display for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Class { ident, fields: field_map } = self;
+        write!(f, "class {ident} {{ ")?;
+
+        let fields: Vec<_> = field_map.iter().map(|(_, (_, field))| field).collect();
+        fmt_list(f, &fields)?;
+        writeln!(f, " }}")
+    }
+}
+impl Display for types::FieldDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let types::FieldDecl { rt, mt, ty } = self;
+        
+        match rt {
+            ReasgType::Let => write!(f, "let "),
+            ReasgType::Const => write!(f, "const "),
+        }?;
+        match mt {
+            MutType::Mut => write!(f, "mut ")?,
+            MutType::Immut => {},
+        }
+        write!(f, "{ty}")
     }
 }
 

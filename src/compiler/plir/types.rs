@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::compiler::codegen::OpErr;
 
-use super::{Split, FunDecl};
+use super::Split;
 
 /// A type expression.
 /// 

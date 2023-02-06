@@ -441,10 +441,11 @@ impl CodeGenerator {
         if !self.blocks.is_empty() {
             panic!("Could not create program. Insert block was opened but not properly closed.");
         }
-        let InsertBlock { block, exits, .. } = self.program;
+        let InsertBlock {block, exits, mut init_block, .. } = self.program;
 
+        init_block.extend(block);
         match exits.last() {
-            None => Ok(plir::Program(block)),
+            None => Ok(plir::Program(init_block)),
             Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
             Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
             Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
@@ -597,6 +598,15 @@ impl CodeGenerator {
             }
         }
 
+        for (ident, unresolved) in self.peek_block().unresolved.drain() {
+            match unresolved {
+                Unresolved::Class(_) => todo!(),
+                Unresolved::ExternFun(_) => todo!(),
+                Unresolved::Fun(_) => todo!(),
+                Unresolved::FunBlock(_, _) => todo!(),
+            }
+        }
+
         Ok(())
     }
 
@@ -640,7 +650,7 @@ impl CodeGenerator {
             vars: _, classes: _, unresolved: _ 
         } = block;
         
-        init_block.append(&mut block);
+        init_block.extend(block);
         block = init_block;
 
         // fill the unconditional exit if necessary:
@@ -900,8 +910,7 @@ impl CodeGenerator {
         }
         let cls = plir::Class { ident, fields };
         
-        ib.push_lazy_stmt(todo!());
-        
+        ib.push_lazy_stmt(plir::Stmt::ClassDecl(cls));
         Ok(ib.is_open())
     }
 

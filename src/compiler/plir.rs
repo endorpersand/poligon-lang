@@ -94,7 +94,10 @@ pub enum Stmt {
     ExternFunDecl(FunSignature),
 
     /// An expression.
-    Expr(Expr)
+    Expr(Expr),
+
+    /// A struct declaration.
+    ClassDecl(Class)
 }
 
 impl Stmt {
