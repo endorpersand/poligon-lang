@@ -213,7 +213,7 @@ enum Unresolved {
     Class(ast::Class),
     ExternFun(ast::FunSignature),
     Fun(ast::FunDecl),
-    FunBlock(plir::FunSignature, ast::Block)
+    FunBlock(plir::FunSignature, Rc<ast::Block>)
 }
 
 #[derive(Debug)]
@@ -469,21 +469,18 @@ impl CodeGenerator {
     }
 
     fn resolve_ident(&mut self, ident: &str) -> PLIRResult<()> {
-        fn get_ib(this: &mut CodeGenerator, i: usize) -> &mut InsertBlock {
-            this.blocks.len().checked_sub(i + 1).map_or(
-                &mut this.program,
-                |i| &mut this.blocks[i]
-            )
-        }
-
         use std::collections::hash_map::Entry;
 
+        // mi is 0 to len
         let mi = self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
             .enumerate()
             .find_map(|(i, ib)| ib.unresolved.contains_key(ident).then_some(i));
         if let Some(i) = mi {
-            let Entry::Occupied(entry) = get_ib(self, i).unresolved.entry(ident.to_string()) else {
+            // repivot peek block to point to the unresolved item
+            let storage = self.blocks.split_off(self.blocks.len() - i);
+
+            let Entry::Occupied(entry) = self.peek_block().unresolved.entry(ident.to_string()) else {
                 unreachable!()
             };
 
@@ -496,19 +493,20 @@ impl CodeGenerator {
                     let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
                     
                     let fs = self.consume_fun_sig(fs)?;
-                    get_ib(self, i).push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
+                    self.peek_block().push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
                 },
                 Unresolved::Fun(_) => {
                     let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
                     let ast::FunDecl { sig, block } = fd;
 
                     let sig = self.consume_fun_sig(sig)?;
-                    let block = Rc::try_unwrap(block).unwrap();
-
-                    get_ib(self, i).unresolved.insert(k, Unresolved::FunBlock(sig, block));
+                    self.peek_block().unresolved.insert(k, Unresolved::FunBlock(sig, block));
                 },
                 Unresolved::FunBlock(_, _) => {},
             }
+
+            // revert peek block after
+            self.blocks.extend(storage);
         }
 
         Ok(())
@@ -598,13 +596,25 @@ impl CodeGenerator {
             }
         }
 
-        for (ident, unresolved) in self.peek_block().unresolved.drain() {
-            match unresolved {
-                Unresolved::Class(_) => todo!(),
-                Unresolved::ExternFun(_) => todo!(),
-                Unresolved::Fun(_) => todo!(),
-                Unresolved::FunBlock(_, _) => todo!(),
+        let mut unresolved = &mut self.peek_block().unresolved;
+        while let Some(ident) = unresolved.keys().next() {
+            match unresolved.remove(&ident.clone()).unwrap() {
+                Unresolved::Class(c) => { self.consume_cls(c)?; },
+                Unresolved::ExternFun(fs) => {
+                    let fs = self.consume_fun_sig(fs)?;
+                    self.peek_block().push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
+                },
+                Unresolved::Fun(fd) => {
+                    let ast::FunDecl { sig, block } = fd;
+
+                    let sig = self.consume_fun_sig(sig)?;
+                    self.consume_fun_block(sig, block)?;
+                },
+                Unresolved::FunBlock(sig, block) => {
+                    self.consume_fun_block(sig, block)?;
+                },
             }
+            unresolved = &mut self.peek_block().unresolved;
         }
 
         Ok(())
@@ -868,30 +878,28 @@ impl CodeGenerator {
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_decl(&mut self, decl: ast::FunDecl) -> PLIRResult<bool> {
-        // let ast::FunDecl { sig: _, block } = decl;
-        // let sig = self.peek_block().semifuns.pop_front().unwrap();
-
-        // let old_block = std::rc::Rc::try_unwrap(block)
-        //     .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
-
-        // let block = {
-        //     self.push_block();
+    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Rc<ast::Block>) -> PLIRResult<bool> {
+        let old_block = std::rc::Rc::try_unwrap(block)
+            .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
     
-        //     for plir::Param { ident, ty, .. } in sig.params.iter() {
-        //         self.declare(ident, ty.clone());
-        //     }
-    
-        //     // collect all the statements from this block
-        //     self.consume_stmts(old_block.0)?;
-    
-        //     let insert_block = self.pop_block().unwrap();
-        //     self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
-        // };
+        let block = {
+            self.push_block();
 
-        // let fun_decl = plir::FunDecl { sig, block };
-        // Ok(self.peek_block().push_stmt(plir::Stmt::FunDecl(fun_decl)))
-        todo!()
+            for plir::Param { ident, ty, .. } in sig.params.iter() {
+                self.declare(ident, ty.clone());
+            }
+    
+            // collect all the statements from this block
+            self.consume_stmts(old_block.0)?;
+    
+            let insert_block = self.pop_block().unwrap();
+            self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
+        };
+
+        let fun_decl = plir::FunDecl { sig, block };
+        
+        self.peek_block().push_lazy_stmt(plir::Stmt::FunDecl(fun_decl));
+        Ok(self.peek_block().is_open())
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
