@@ -109,6 +109,7 @@ impl Stmt {
     pub fn ends_with_block(&self) -> bool {
         matches!(self, 
             | Stmt::FunDecl(_)
+            | Stmt::ClassDecl(_)
             | Stmt::Expr(Expr::Block(_))
             | Stmt::Expr(Expr::If { .. })
             | Stmt::Expr(Expr::While { .. })
@@ -188,9 +189,10 @@ pub struct Param {
 }
 
 /// Reassignment types for variables, parameters, etc.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum ReasgType {
     /// `let`. This variable can be reassigned later.
+    #[default]
     Let, 
     /// `const`. This variable cannot be reassigned later. It is always the same value it was originally assigned.
     Const 

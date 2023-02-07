@@ -107,6 +107,7 @@ impl Stmt {
     pub fn ends_with_block(&self) -> bool {
         matches!(self, 
             | Stmt::FunDecl(_)
+            | Stmt::ClassDecl(_)
             | Stmt::Expr(Expr { expr: ExprType::Block(_), .. })
             | Stmt::Expr(Expr { expr: ExprType::If { .. }, .. })
             | Stmt::Expr(Expr { expr: ExprType::While { .. }, .. })

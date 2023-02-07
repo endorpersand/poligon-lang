@@ -559,7 +559,7 @@ impl Parser {
     /// Expect that the next tokens in the input represent a statement.
     pub fn match_stmt(&mut self) -> ParseResult<Option<ast::Stmt>> {
         let st = match self.peek_token() {
-            Some(token![let]) | Some(token![const]) => Some(self.expect_decl()?).map(ast::Stmt::Decl),
+            Some(token![let] | token![const]) => Some(self.expect_decl()?).map(ast::Stmt::Decl),
             Some(token![return])   => Some(self.expect_return()?),
             Some(token![break])    => Some(self.expect_break()?),
             Some(token![continue]) => Some(self.expect_cont()?),
@@ -568,6 +568,7 @@ impl Parser {
                 self.expect1(token![extern])?;
                 Some(self.expect_fun_sig()?).map(ast::Stmt::ExternFunDecl)
             },
+            Some(token![class])    => Some(self.expect_class_decl()?).map(ast::Stmt::ClassDecl),
             Some(_)                => self.match_expr()?.map(ast::Stmt::Expr),
             None                   => None
         };
@@ -577,11 +578,7 @@ impl Parser {
 
     /// Expect that the next tokens in the input represent a variable declaration.
     pub fn expect_decl(&mut self) -> ParseResult<ast::Decl> {
-        let rt = match self.next_token() {
-            Some(token![let])   => ast::ReasgType::Let,
-            Some(token![const]) => ast::ReasgType::Const,
-            _ => unreachable!()
-        };
+        let Some(rt) = self.match_reasg_type() else { unreachable!() };
         
         let pat = self.match_decl_pat()?
             .ok_or_else(|| ParseErr::ExpectedPattern.at_range(self.peek_loc()))?;
@@ -644,16 +641,22 @@ impl Parser {
         }
     }
 
+    /// Match the next token to a reassignment type if it represents one.
+    pub fn match_reasg_type(&mut self) -> Option<ast::ReasgType> {
+        if self.match1(token![let]) {
+            Some(ast::ReasgType::Let)
+        } else if self.match1(token![const]) {
+            Some(ast::ReasgType::Const)
+        } else {
+            None
+        }
+    }
     /// Match the next tokens in the input if they represent a function parameter.
     pub fn match_param(&mut self) -> ParseResult<Option<ast::Param>> {
-        let mrt_token = self.match_n(&[token![let], token![const]])
-            .map(|t| t.tt);
-        
-        let mut empty = mrt_token.is_none(); // if mrt is not empty, ensure empty is false
-        let rt = match mrt_token {
-            Some(token![let]) | None => ast::ReasgType::Let,
-            Some(token![const]) => ast::ReasgType::Const,
-            _ => unreachable!()
+        let mrt = self.match_reasg_type();
+        let (mut empty, rt) = match mrt {
+            Some(t) => (false, t),
+            None => (true, Default::default()),
         };
         
         let mt = if self.match1(token![mut]) {
@@ -735,6 +738,53 @@ impl Parser {
             sig,
             block: Rc::new(block)
         })
+    }
+
+    /// Expect that the next tokens in the input represent a class declaration.
+    pub fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
+        self.expect1(token![class])?;
+        let ident = self.expect_ident()?;
+
+        self.expect1(token!["{"])?;
+        let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
+        
+        let mut methods = vec![];
+        while let Some(m) = self.match_method_decl()? {
+            methods.push(m);
+        }
+        self.expect1(token!["}"])?;
+
+        Ok(ast::Class { ident, fields, methods })
+    }
+
+    /// Match the next tokens if they represent a field declaration.
+    pub fn match_field_decl(&mut self) -> ParseResult<Option<ast::types::FieldDecl>> {
+        let (mut empty, rt) = match self.match_reasg_type() {
+            Some(t) => (false, t),
+            None => (true, Default::default()),
+        };
+
+        let mt = if self.match1(token![mut]) {
+            empty = false;
+            ast::MutType::Mut
+        } else {
+            ast::MutType::Immut
+        };
+
+        if empty && !matches!(self.peek_token(), Some(Token::Ident(_))) {
+            return Ok(None);
+        }
+
+        let ident = self.expect_ident()?;
+        self.expect1(token![:])?;
+        let ty = self.expect_type()?;
+
+        Ok(Some(ast::types::FieldDecl { rt, mt, ident, ty }))
+    }
+
+    /// Match the next tokens if they represent a method declaration.
+    pub fn match_method_decl(&mut self) -> ParseResult<Option<ast::types::MethodDecl>> {
+        Ok(None)
     }
 
     /// Expect that the next token in the input is an identifier token,
