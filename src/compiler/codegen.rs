@@ -488,6 +488,8 @@ impl CodeGenerator {
     }
 
     fn resolve_ident(&mut self, ident: &str) -> PLIRResult<()> {
+        use std::collections::hash_map::Entry;
+
         // mi is 0 to len
         let mi = self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
@@ -497,16 +499,23 @@ impl CodeGenerator {
             // repivot peek block to point to the unresolved item
             let storage = self.blocks.split_off(self.blocks.len() - i);
 
-            let (k, unresolved) = self.peek_block().unresolved.remove_entry(ident).unwrap();
-            match unresolved {
-                Unresolved::Class(cls) => {
+            let Entry::Occupied(entry) = self.peek_block().unresolved.entry(ident.to_string()) else {
+                unreachable!()
+            };
+
+            match entry.get() {
+                Unresolved::Class(_) => {
+                    let Unresolved::Class(cls) = entry.remove() else { unreachable!() };
                     self.consume_cls(cls)?;
                 },
-                Unresolved::ExternFun(fs) => {
+                Unresolved::ExternFun(_) => {
+                    let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
+                    
                     let fs = self.consume_fun_sig(fs)?;
                     self.peek_block().push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
                 },
-                Unresolved::Fun(fd) => {
+                Unresolved::Fun(_) => {
+                    let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
                     let ast::FunDecl { sig, block } = fd;
 
                     let sig = self.consume_fun_sig(sig)?;
