@@ -586,16 +586,13 @@ impl CodeGenerator {
         for stmt in stmts {
             match stmt {
                 ast::Stmt::FunDecl(fd) => {
-                    self.peek_block().unresolved
-                        .insert(fd.sig.ident.clone(), Unresolved::Fun(fd));
+                    self.peek_block().insert_unresolved(Unresolved::Fun(fd));
                 },
                 ast::Stmt::ExternFunDecl(fs) => {
-                    self.peek_block().unresolved
-                        .insert(fs.ident.clone(), Unresolved::ExternFun(fs));
+                    self.peek_block().insert_unresolved(Unresolved::ExternFun(fs));
                     }
                 ast::Stmt::ClassDecl(cls) => {
-                    self.peek_block().unresolved
-                        .insert(cls.ident.clone(), Unresolved::Class(cls));
+                    self.peek_block().insert_unresolved(Unresolved::Class(cls));
                 }
                 s => eager_stmts.push(s),
             }
