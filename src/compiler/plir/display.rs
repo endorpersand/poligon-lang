@@ -92,9 +92,9 @@ impl Display for types::FieldDecl {
         let types::FieldDecl { rt, mt, ty } = self;
         
         match rt {
-            ReasgType::Let => write!(f, "let "),
-            ReasgType::Const => write!(f, "const "),
-        }?;
+            ReasgType::Let => {},
+            ReasgType::Const => write!(f, "const ")?,
+        };
         match mt {
             MutType::Mut => write!(f, "mut ")?,
             MutType::Immut => {},

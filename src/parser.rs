@@ -782,9 +782,63 @@ impl Parser {
         Ok(Some(ast::types::FieldDecl { rt, mt, ident, ty }))
     }
 
+    /// Expect that the next tokens represent a method identifier 
+    /// (self.ident, Self::ident, .ident, ::ident)
+    /// 
+    /// The return of this function holds the self parameter, the identifier, 
+    /// and whether or not the method is static.
+    pub fn expect_method_ident(&mut self) -> ParseResult<(Option<String>, String, bool)> {
+        let this = matches!(self.peek_token(), Some(Token::Ident(_))).then(|| {
+            let Some(Token::Ident(s)) = self.next_token() else {
+                unreachable!()
+            };
+            s
+        });
+
+        let is_static = match self.expect_n(&[token![.], token![::]])?.tt {
+            token![.] => false,
+            token![::] => true,
+            _ => unreachable!()
+        };
+        let method = self.expect_ident()?;
+
+        Ok((this, method, is_static))
+    }
+
+    /// Expect that the next tokens represent a method signature.
+    pub fn expect_method_sig(&mut self) -> ParseResult<ast::types::MethodSignature> {
+        let (this, method, is_static) = self.expect_method_ident()?;
+
+        self.expect1(token!["("])?;
+        let params = self.expect_closing_tuple_of(
+            Parser::match_param,
+            token![")"], 
+            ParseErr::ExpectedParam
+        )?;
+
+        let ret = if self.match1(token![->]) {
+            Some(self.expect_type()?)
+        } else {
+            None
+        };
+
+        Ok(ast::types::MethodSignature {
+            this,
+            is_static,
+            ident: method,
+            params,
+            ret,
+        })
+    }
+
     /// Match the next tokens if they represent a method declaration.
     pub fn match_method_decl(&mut self) -> ParseResult<Option<ast::types::MethodDecl>> {
-        Ok(None)
+        self.match1(token![fun]).then(|| {
+            let sig = self.expect_method_sig()?;
+            let block = self.expect_block()?;
+
+            Ok(ast::types::MethodDecl { sig, block: Rc::new(block) })
+        }).transpose()
     }
 
     /// Expect that the next token in the input is an identifier token,

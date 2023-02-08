@@ -1,7 +1,9 @@
 //! These components are the components of the AST involved with types 
 //! (type expressions, classes, shapes).
 
-use super::{MutType, ReasgType, FunDecl};
+use std::rc::Rc;
+
+use super::{MutType, ReasgType, Block, Param};
 
 /// A type expression.
 /// 
@@ -40,9 +42,23 @@ pub struct FieldDecl {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct MethodDecl {
+pub struct MethodSignature {
+    /// This method's self, Self
+    pub this: Option<String>,
     /// Whether this method is static
     pub is_static: bool,
-    /// The actual function
-    pub decl: FunDecl
+    /// The function's identifier
+    pub ident: String,
+    /// The function's parameters
+    pub params: Vec<Param>,
+    /// The function's return type (or `void` if unspecified)
+    pub ret: Option<Type>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MethodDecl {
+    /// The function's signature
+    pub sig: MethodSignature,
+    /// The function's body
+    pub block: Rc<Block>
 }

@@ -336,6 +336,17 @@ impl InsertBlock {
     fn push_lazy_stmt(&mut self, stmt: plir::Stmt) {
         self.init_block.push(stmt)
     }
+
+    fn insert_unresolved(&mut self, unresolved: Unresolved) {
+        let k = match &unresolved {
+            Unresolved::Class(c)        => &c.ident,
+            Unresolved::ExternFun(fs)   => &fs.ident,
+            Unresolved::Fun(fd)         => &fd.sig.ident,
+            Unresolved::FunBlock(fs, _) => &fs.ident,
+        };
+
+        self.unresolved.insert(k.clone(), unresolved);
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -913,8 +924,28 @@ impl CodeGenerator {
             .collect();
         
         let ib = self.peek_block();
-        for ast::types::MethodDecl { is_static, decl } in methods {
-            ib.unresolved.insert(format!("{ident}::{}", &decl.sig.ident), Unresolved::Fun(decl));
+        for method in methods {
+            let ast::types::MethodDecl {
+                sig: ast::types::MethodSignature { this, is_static, ident: method, mut params, ret }, 
+                block 
+            } = method;
+
+            if !is_static {
+                let this = this.unwrap_or_else(|| String::from("#unused"));
+                params.insert(0, ast::Param { 
+                    rt: Default::default(), 
+                    mt: Default::default(), 
+                    ident: this, 
+                    ty: Some(ast::Type(ident.clone(), vec![]))
+                });
+            } else {
+                // TODO, use this ident
+            };
+            let method = format!("{ident}::{method}");
+            let sig = ast::FunSignature { ident: method.clone(), params, ret };
+            let decl = ast::FunDecl { sig, block };
+
+            ib.insert_unresolved(Unresolved::Fun(decl));
         }
         let cls = plir::Class { ident, fields };
         

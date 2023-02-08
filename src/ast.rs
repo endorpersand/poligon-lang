@@ -199,11 +199,12 @@ pub enum ReasgType {
 }
 
 /// Mutability types for variables, parameters, etc.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum MutType {
     /// `mut`. This variable can be mutated and changed (e.g. list mutation).
     Mut,
     /// Ø. This variable cannot be mutated and changed.
+    #[default]
     Immut
 }
 

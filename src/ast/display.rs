@@ -154,6 +154,30 @@ impl Display for FunSignature {
         Ok(())
     }
 }
+impl Display for types::MethodSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let types::MethodSignature { this, is_static, ident, params, ret } = self;
+
+        write!(f, "fun ")?;
+        if let Some(this_ident) = this {
+            write!(f, "{this_ident}")?;
+        }
+        match is_static {
+            true  => write!(f, "::"),
+            false => write!(f, "."),
+        }?;
+        
+        write!(f, "{ident}(")?;
+        fmt_list(f, params)?;
+        write!(f, ") ")?;
+
+        if let Some(retty) = ret {
+            write!(f, "-> {retty}")?;
+        };
+
+        Ok(())
+    }
+}
 impl Display for FunDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let FunDecl { sig, block } = self;
@@ -230,26 +254,8 @@ impl Display for types::FieldDecl {
 }
 impl Display for types::MethodDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let types::MethodDecl { is_static, decl } = self;
-
-        if *is_static {
-            write!(f, "{decl}")
-        } else {
-            let FunDecl { sig: FunSignature { ident, params, ret }, block } = decl;
-
-            write!(f, "fun {ident}(self")?;
-            if !params.is_empty() {
-                write!(f, ", ")?;
-                fmt_list(f, params)?;
-            }
-            write!(f, ") ")?;
-
-            if let Some(retty) = ret {
-                write!(f, "-> {retty}")?;
-            };
-
-            write!(f, " {block}")
-        }
+        let types::MethodDecl { sig, block } = self;
+        write!(f, "{sig} {block}")
     }
 }
 impl Display for Expr {
