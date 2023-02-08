@@ -443,9 +443,31 @@ impl Path {
         }
     }
 }
+
 impl From<Path> for Expr {
     fn from(value: Path) -> Self {
-        Expr::new(value.ty().into_owned(), ExprType::Path(value))
+        fn can_flatten(this: &Path) -> bool {
+            match this {
+                Path::Static(_, attrs) => attrs.is_empty(),
+                Path::Struct(_, attrs) => attrs.is_empty(),
+                Path::Method(_, _, _) => false
+            }
+        }
+
+        let mut e = Expr::new(value.ty().into_owned(), ExprType::Path(value));
+        
+        loop {
+            match e {
+                Expr { expr: ExprType::Path(p), ..} if can_flatten(&p) => {
+                    e = match p {
+                        Path::Static(e, _) => *e,
+                        Path::Struct(e, _) => *e,
+                        Path::Method(_, _, _) => unreachable!(),
+                    }
+                },
+                e => break e
+            }
+        }
     }
 }
 
