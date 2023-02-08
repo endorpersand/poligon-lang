@@ -12,6 +12,8 @@
 mod display;
 mod types;
 
+use std::borrow::Cow;
+
 use crate::ast::{op, self};
 pub use types::*;
 pub(crate) use types::ty;
@@ -406,14 +408,14 @@ pub enum Path {
     /// 
     /// This includes the expression being accessed and the method on that expression,
     /// and the type of the method
-    Method(Box<Expr>, String, Type)
+    Method(Box<Expr>, String, FunType)
 }
 impl Path {
-    pub(crate) fn ty(&self) -> &Type {
+    pub(crate) fn ty(&self) -> Cow<Type> {
         match self {
-            Path::Static(e, attrs) => attrs.last().map(|(_, t)| t).unwrap_or(&e.ty),
-            Path::Struct(e, attrs) => attrs.last().map(|(_, t)| t).unwrap_or(&e.ty),
-            Path::Method(_, _, ty) => ty,
+            Path::Static(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
+            Path::Struct(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
+            Path::Method(_, _, ty) => Cow::Owned(Type::Fun(ty.clone())),
         }
     }
 
@@ -443,7 +445,7 @@ impl Path {
 }
 impl From<Path> for Expr {
     fn from(value: Path) -> Self {
-        Expr::new(value.ty().clone(), ExprType::Path(value))
+        Expr::new(value.ty().into_owned(), ExprType::Path(value))
     }
 }
 

@@ -24,6 +24,19 @@ pub enum Type {
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct FunType(pub Vec<Type>, pub Box<Type>);
 
+impl TryFrom<Type> for FunType {
+    type Error = crate::compiler::codegen::PLIRErr;
+
+    fn try_from(value: Type) -> Result<Self, Self::Error> {
+        use crate::compiler::codegen::PLIRErr;
+
+        match value {
+            Type::Fun(f) => Ok(f),
+            t => Err(PLIRErr::CannotCall(t))
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum TypeRef<'a> {
     Prim(&'a str),
@@ -152,6 +165,15 @@ impl Type {
             _ => Err(OpErr::CannotIndex(self.clone()))
         }
     }
+
+    pub fn ident(&self) -> Option<&str> {
+        match self.as_ref() {
+            TypeRef::Prim(ident)       => Some(ident),
+            TypeRef::Generic(ident, _) => Some(ident),
+            TypeRef::Tuple(_)          => None,
+            TypeRef::Fun(_, _)         => None,
+        }
+    }
 }
 
 impl<'a> PartialEq<TypeRef<'a>> for Type {
@@ -214,7 +236,7 @@ impl From<ast::Type> for Type {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Class {
     /// Name of the struct
     pub ident: String,
@@ -222,7 +244,7 @@ pub struct Class {
     pub fields: IndexMap<String, FieldDecl>
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FieldDecl {
     /// Whether the field can be reassigned later
     pub rt: ast::ReasgType,

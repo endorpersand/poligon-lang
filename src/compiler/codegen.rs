@@ -12,8 +12,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use indexmap::IndexMap;
-
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
 
@@ -70,6 +68,8 @@ pub enum PLIRErr {
     CannotAssignToMethod,
     /// Cannot call given type
     CannotCall(plir::Type),
+    /// Wrong number of parameters
+    WrongArity(usize /* expected */, usize /* got */),
     /// Cannot spread here.
     CannotSpread,
     /// Operation between two types cannot be computed.
@@ -99,6 +99,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotAccessOnMethod
             | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
+            | PLIRErr::WrongArity(_, _)
             => "type error",
             
             | PLIRErr::UndefinedVar(_)
@@ -123,6 +124,7 @@ impl GonErr for PLIRErr {
             PLIRErr::CannotAccessOnMethod => String::from("cannot access on method"),
             PLIRErr::CannotAssignToMethod => String::from("cannot assign to method"),
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
+            PLIRErr::WrongArity(e, g) => format!("wrong number of parameters - expected {e}, got {g}"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
             PLIRErr::OpErr(e) => e.message(),
         }
@@ -204,9 +206,9 @@ impl BlockBehavior {
     }
 }
 
-fn primitives(prims: &[&str]) -> HashMap<String, Class> {
+fn primitives(prims: &[&str]) -> HashMap<String, TypeHolder> {
     prims.iter()
-        .map(|&s| (String::from(s), Class::primitive()))
+        .map(|&s| (String::from(s), TypeHolder::primitive()))
         .collect()
 }
 
@@ -231,7 +233,7 @@ struct InsertBlock {
     final_exit: Option<BlockExit>,
 
     vars: HashMap<String, plir::Type>,
-    classes: HashMap<String, Class>,
+    types: HashMap<String, TypeHolder>,
     unresolved: HashMap<String, Unresolved>,
 }
 
@@ -243,7 +245,7 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
-            classes: HashMap::new(),
+            types: HashMap::new(),
             unresolved: HashMap::new()
         }
     }
@@ -255,7 +257,7 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
-            classes: primitives(&[
+            types: primitives(&[
                 plir::Type::S_INT,
                 plir::Type::S_FLOAT,
                 plir::Type::S_BOOL,
@@ -339,6 +341,7 @@ impl InsertBlock {
         self.init_block.push(stmt)
     }
 
+    /// Insert an unresolved class/function into the insert block.
     fn insert_unresolved(&mut self, unresolved: Unresolved) {
         let k = match &unresolved {
             Unresolved::Class(c)        => &c.ident,
@@ -348,6 +351,11 @@ impl InsertBlock {
         };
 
         self.unresolved.insert(k.clone(), unresolved);
+    }
+
+    /// Insert a class into the insert block's type register.
+    fn insert_class(&mut self, cls: &plir::Class) {
+        self.types.insert(cls.ident.clone(), TypeHolder::structural(cls.clone()));
     }
 }
 
@@ -381,12 +389,12 @@ impl<'k> SigKey<'k> {
 }
 
 #[derive(Debug)]
-pub struct Class {
+pub struct TypeHolder {
     ty: TypeData,
-    methods: HashMap<SigKey<'static>, (String, plir::FunType)>
+    methods: HashMap<SigKey<'static>, String>
 }
 
-impl Class {
+impl TypeHolder {
     pub fn primitive() -> Self {
         Self {
             ty: TypeData::Primitive,
@@ -394,35 +402,37 @@ impl Class {
         }
     }
 
-    pub fn structural(fields: impl IntoIterator<Item=(String, plir::Type)>) -> Self {
-        let fields = fields.into_iter().collect();
-
+    pub fn structural(cls: plir::Class) -> Self {
         Self {
-            ty: TypeData::Struct { fields },
+            ty: TypeData::Class(cls),
             methods: Default::default()
         }
     }
 
-    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a (String, plir::FunType)> {
+    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a str> {
         let k = SigKey::new(ident, vec![]);
         
-        self.methods.get(&k)
+        self.methods.get(&k).map(String::as_str)
+    }
+
+    pub fn insert_method(&mut self, ident: String, metref: String) {
+        let k = SigKey::new(ident, vec![]);
+
+        self.methods.insert(k, metref);
     }
 
     pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
         match &self.ty {
             TypeData::Primitive => None,
-            TypeData::Struct { fields } => fields.get_full(ident).map(|(i, _, v)| (i, v)),
+            TypeData::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum TypeData {
     Primitive,
-    Struct {
-        fields: IndexMap<String, plir::Type>
-    }
+    Class(plir::Class)
 }
 
 /// This struct does the actual conversion from AST to PLIR.
@@ -511,6 +521,13 @@ impl CodeGenerator {
 
         Ok(())
     }
+    fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
+        if let Some(ident) = ty.ident() {
+            self.resolve_ident(ident)
+        } else {
+            Ok(())
+        }
+    }
 
     fn resolve<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
         self.blocks.iter().rev()
@@ -523,13 +540,16 @@ impl CodeGenerator {
             .find_map(f)
     }
 
-    fn get_var_type(&self, ident: &str) -> PLIRResult<&plir::Type> {
+    fn get_var_type(&mut self, ident: &str) -> PLIRResult<&plir::Type> {
+        self.resolve_ident(ident)?;
+
         self.resolve(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
     }
-    fn get_class(&self, ty: &plir::Type) -> PLIRResult<&Class> {
+    fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeHolder> {
+        self.resolve_ty(ty)?;
         match ty {
-            plir::Type::Prim(ident) => self.resolve(|ib| ib.classes.get(ident))
+            plir::Type::Prim(ident) => self.resolve(|ib| ib.types.get(ident))
                 .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident))),
             _ => todo!()
         }
@@ -654,7 +674,7 @@ impl CodeGenerator {
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
             mut init_block, mut block, exits, final_exit, 
-            vars: _, classes: _, unresolved: _ 
+            vars: _, types: _, unresolved: _ 
         } = block;
         
         init_block.extend(block);
@@ -908,10 +928,14 @@ impl CodeGenerator {
             })
             .collect();
         
-        let ib = self.peek_block();
+        let cls = plir::Class { ident, fields };
+        
+        let mut ib = self.peek_block();
+        ib.insert_class(&cls);
+
         for method in methods {
             let ast::types::MethodDecl {
-                sig: ast::types::MethodSignature { this, is_static, ident: method, mut params, ret }, 
+                sig: ast::types::MethodSignature { this, is_static, ident: method_ident, mut params, ret }, 
                 block 
             } = method;
 
@@ -921,19 +945,24 @@ impl CodeGenerator {
                     rt: Default::default(), 
                     mt: Default::default(), 
                     ident: this, 
-                    ty: Some(ast::Type(ident.clone(), vec![]))
+                    ty: Some(ast::Type(cls.ident.clone(), vec![]))
                 });
             } else {
                 // TODO, use this ident
             };
-            let method = format!("{ident}::{method}");
-            let sig = ast::FunSignature { ident: method.clone(), params, ret };
+            let metref = format!("{}::{method_ident}", &cls.ident);
+
+            let sig = ast::FunSignature { ident: metref.clone(), params, ret };
             let decl = ast::FunDecl { sig, block };
 
             ib.insert_unresolved(Unresolved::Fun(decl));
+
+            if let Some(c) = ib.types.get_mut(&cls.ident) {
+                c.insert_method(method_ident, metref);
+            }
+            ib = self.peek_block();
         }
-        let cls = plir::Class { ident, fields };
-        
+
         ib.push_lazy_stmt(plir::Stmt::ClassDecl(cls));
         Ok(ib.is_open())
     }
@@ -941,7 +970,6 @@ impl CodeGenerator {
     fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
         match expr {
             ast::Expr::Ident(ident) => {
-                self.resolve_ident(&ident)?;
                 Ok(plir::Expr::new(
                     self.get_var_type(&ident)?.clone(),
                     plir::ExprType::Ident(ident)
@@ -1138,6 +1166,10 @@ impl CodeGenerator {
                 let funct = self.consume_expr_and_box(*funct)?;
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType(ptys, ret)) => {
+                        if ptys.len() != params.len() {
+                            Err(PLIRErr::WrongArity(ptys.len(), params.len()))?;
+                        }
+
                         let params = std::iter::zip(ptys.iter(), params)
                             .map(|(pty, expr)| {
                                 let param = self.consume_expr(expr)?;
@@ -1175,31 +1207,34 @@ impl CodeGenerator {
 
         for (ident, st) in attrs {
             let top_ty = path.ty();
-            let cls = self.get_class(top_ty)?;
+            let cls = self.get_class(&top_ty)?;
 
             if st {
                 // Only static access is thru types
                 todo!()
             } else {
                 match cls.get_method(&ident) {
-                    Some((fname, ft)) => {
+                    Some(metref) => {
                         if matches!(path, plir::Path::Method(..)) {
                             Err(PLIRErr::CannotAccessOnMethod)?;
                         } else {
-                            let mut ft = ft.clone();
-                            ft.pop_front();
+                            let metref = metref.to_string();
+                            let mut fun_ty: plir::FunType = self.get_var_type(&metref)?
+                                .clone()
+                                .try_into()?;
+                            fun_ty.pop_front();
 
                             path = plir::Path::Method(
                                 Box::new(path.into()), 
-                                fname.clone(), 
-                                plir::Type::Fun(ft.clone())
+                                ident.clone(), 
+                                fun_ty
                             );
                         }
                     },
                     None => {
                         let field = cls.get_field(&ident)
                             .map(|(i, t)| (i, t.clone()))
-                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.clone(), ident.clone()))?;
+                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), ident.clone()))?;
                         
                         path.add_struct_seg(field)
                             .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
