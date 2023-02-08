@@ -82,7 +82,7 @@ impl Display for Class {
         let Class { ident, fields: field_map } = self;
         write!(f, "class {ident} {{ ")?;
 
-        let fields: Vec<_> = field_map.iter().map(|(_, (_, field))| field).collect();
+        let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;
         writeln!(f, " }}")
     }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use crate::ast;
 use crate::compiler::codegen::OpErr;
@@ -219,7 +219,7 @@ pub struct Class {
     /// Name of the struct
     pub ident: String,
     /// Struct's fields
-    pub fields: HashMap<String, (usize, FieldDecl)>
+    pub fields: IndexMap<String, FieldDecl>
 }
 
 #[derive(Debug, PartialEq)]

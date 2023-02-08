@@ -11,3 +11,4 @@ regex = "1.6.0"
 
 # 83dd54b was the latest commit on master on January 21, 2023
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "15cbacf", features = ["llvm15-0"] }
+indexmap = "1.9.2"

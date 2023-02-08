@@ -12,6 +12,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use indexmap::IndexMap;
+
 use crate::ast::{self, ReasgType, MutType};
 use crate::err::GonErr;
 
@@ -393,10 +395,7 @@ impl Class {
     }
 
     pub fn structural(fields: impl IntoIterator<Item=(String, plir::Type)>) -> Self {
-        let fields = fields.into_iter()
-            .enumerate()
-            .map(|(i, (ident, ty))| (ident, (i, ty)))
-            .collect();
+        let fields = fields.into_iter().collect();
 
         Self {
             ty: TypeData::Struct { fields },
@@ -410,20 +409,19 @@ impl Class {
         self.methods.get(&k)
     }
 
-    pub fn get_field(&self, ident: &str) -> Option<&TypeWithIndex> {
+    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
         match &self.ty {
             TypeData::Primitive => None,
-            TypeData::Struct { fields } => fields.get(ident),
+            TypeData::Struct { fields } => fields.get_full(ident).map(|(i, _, v)| (i, v)),
         }
     }
 }
 
-type TypeWithIndex = (usize, plir::Type);
 #[derive(Clone, Debug)]
 enum TypeData {
     Primitive,
     Struct {
-        fields: HashMap<String, TypeWithIndex>
+        fields: IndexMap<String, plir::Type>
     }
 }
 
@@ -905,9 +903,8 @@ impl CodeGenerator {
         let ast::Class { ident, fields, methods } = cls;
 
         let fields = fields.into_iter()
-            .enumerate()
-            .map(|(i, ast::types::FieldDecl { rt, mt, ident, ty })| {
-                (ident, (i, plir::FieldDecl { rt, mt, ty: plir::Type::from(ty) }))
+            .map(|ast::types::FieldDecl { rt, mt, ident, ty }| {
+                (ident, plir::FieldDecl { rt, mt, ty: plir::Type::from(ty) })
             })
             .collect();
         
@@ -1201,7 +1198,7 @@ impl CodeGenerator {
                     },
                     None => {
                         let field = cls.get_field(&ident)
-                            .cloned()
+                            .map(|(i, t)| (i, t.clone()))
                             .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.clone(), ident.clone()))?;
                         
                         path.add_struct_seg(field)
