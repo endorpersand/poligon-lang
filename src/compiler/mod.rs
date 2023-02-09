@@ -189,7 +189,7 @@ impl<'ctx> Compiler<'ctx> {
         match self.vars.get(ident) {
             Some(&ptr) => {
                 let val = self.builder.build_load(self.get_layout(ty)?, ptr, "load");
-                Ok(GonValue::reconstruct(ty, val))
+                self.reconstruct(ty, val)
             },
             None => Err(CompileErr::UndefinedVar(String::from(ident))),
         }
@@ -289,21 +289,27 @@ impl<'ctx> Compiler<'ctx> {
         self.import_fun(ident, fun_ty)
     }
 
-    // TODO: clean up all of these functions:
-    fn add_class(&mut self, ty: &str, layout: impl BasicType<'ctx>) {
+    /// Define a type for the compiler to track.
+    fn define_type(&mut self, ty: &str, layout: impl BasicType<'ctx>) {
         self.layouts.insert(ty.to_string(), layout.as_basic_type_enum());
     }
 
+    /// Get the LLVM layout of a given PLIR type if the compiler knows about it.
     fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
         ty.ident()
             .and_then(|ident| self.get_layout_by_name(ident))
             .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
     }
+    /// Get the LLVM layout using the layout's identifier.
     fn get_layout_by_name(&self, ident: &str) -> Option<BasicTypeEnum<'ctx>> {
         self.layouts.get(ident).copied()
     }
+    /// Get the BasicTypeEnum for this PLIR type (or void if is void).
+    /// 
+    /// This is useful for function types returning.
     fn get_layout_or_void(&self, ty: &plir::Type) -> CompileResult<'ctx, ReturnableType<'ctx>> {
         use plir::{TypeRef, Type};
+
         if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
             Ok(self.ctx.void_type()).map(Into::into)
         } else {
@@ -632,13 +638,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         let first = compiler.apply_unary(&**expr, tail_op)?;
                         head.iter()
                             .try_rfold(first, |e, &(op, _)| compiler.raw_unary(e, op))
-                            .map(|bv| GonValue::reconstruct(expr_ty, bv))
+                            .and_then(|bv| compiler.reconstruct(expr_ty, bv))
                     },
                     None => expr.write_ir(compiler),
                 }
             },
             plir::ExprType::BinaryOp { op, left, right } => {
-                compiler.apply_binary(&**left, *op, &**right).map(|bv| GonValue::reconstruct(expr_ty, bv))
+                compiler.apply_binary(&**left, *op, &**right)
+                    .and_then(|bv| compiler.reconstruct(expr_ty, bv))
             },
             plir::ExprType::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
@@ -744,7 +751,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let phi = compiler.builder.build_phi(expr_layout, "if_result");
                 compiler.add_incoming_gv(phi, &incoming);
                 
-                Ok(GonValue::reconstruct(expr_ty, phi.as_basic_value()))
+                compiler.reconstruct(expr_ty, phi.as_basic_value())
             },
             plir::ExprType::While { condition, block } => {
                 let bb = compiler.get_insert_block();
@@ -796,7 +803,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
                     match call.try_as_basic_value().left() {
-                        Some(basic) => Ok(GonValue::reconstruct(fun_ret, basic)),
+                        Some(basic) => compiler.reconstruct(fun_ret, basic),
                         None => Ok(GonValue::Unit),
                     }
                 } else {
@@ -844,7 +851,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
                         value = compiler.builder.build_extract_value(value.into_struct_value(), attr as u32, "")
                             .unwrap_or_else(|| unreachable!("struct access OOB {attr}"));
                     }
-                    Ok(GonValue::reconstruct(ty, value))
+                    compiler.reconstruct(ty, value)
                 } else {
                     e.write_ir(compiler)
                 }
@@ -958,7 +965,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
         // store params
         for (param, val) in iter::zip(&sig.params, fun.get_param_iter()) {
-            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(&param.ty, val))?;
+            let gv = compiler.reconstruct(&param.ty, val)?;
+            compiler.alloca_and_store(&param.ident, gv)?;
         }
 
         // return nothing if the return value is Unit
@@ -991,7 +999,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
         
         let struct_ty = compiler.ctx.opaque_struct_type(ident);
         struct_ty.set_body(&fields, false);
-        compiler.add_class(ident, struct_ty);
+        compiler.define_type(ident, struct_ty);
 
         Ok(())
     }

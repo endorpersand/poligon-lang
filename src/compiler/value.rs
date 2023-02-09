@@ -1,7 +1,9 @@
 mod op_impl;
 mod internals;
 
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue};
+use std::borrow::Cow;
+
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, BasicValue};
 
 use super::{Compiler, CompileResult, CompileErr, layout};
 use super::plir;
@@ -109,7 +111,22 @@ impl<'ctx> Compiler<'ctx> {
             // TODO: impl char -> str
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
-            _ => Err(CompileErr::CannotCast(v.plir_type(), ty.clone()))
+            _ => Err(CompileErr::CannotCast(v.plir_type().into_owned(), ty.clone()))
+        }
+    }
+
+    /// Create a [`GonValue`] from a given LLVM value.
+    pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> CompileResult<'ctx, GonValue<'ctx>> {
+        use plir::{TypeRef, Type};
+        
+        let v = v.as_basic_value_enum();
+        match t.as_ref() {
+            TypeRef::Prim(Type::S_FLOAT) => Ok(GonValue::Float(v.into_float_value())),
+            TypeRef::Prim(Type::S_INT)   => Ok(GonValue::Int(v.into_int_value())),
+            TypeRef::Prim(Type::S_BOOL)  => Ok(GonValue::Bool(v.into_int_value())),
+            TypeRef::Prim(Type::S_VOID)  => Ok(GonValue::Unit),
+            TypeRef::Prim(Type::S_STR)   => Ok(GonValue::Str(v.into_struct_value())),
+            _ => Err(CompileErr::UnresolvedType(t.clone()))
         }
     }
 }
@@ -119,13 +136,13 @@ impl<'ctx> GonValue<'ctx> {
     /// 
     /// This can be used to reconstruct a GonValue from a LLVM representation. 
     /// See [`GonValue::reconstruct`].
-    pub fn plir_type(&self) -> plir::Type {
+    pub fn plir_type(self) -> Cow<'ctx, plir::Type> {
         match self {
-            GonValue::Float(_) => plir::ty!(plir::Type::S_FLOAT),
-            GonValue::Int(_)   => plir::ty!(plir::Type::S_INT),
-            GonValue::Bool(_)  => plir::ty!(plir::Type::S_BOOL),
-            GonValue::Str(_)   => plir::ty!(plir::Type::S_STR),
-            GonValue::Unit     => plir::ty!(plir::Type::S_VOID),
+            GonValue::Float(_) => Cow::Owned(plir::ty!(plir::Type::S_FLOAT)),
+            GonValue::Int(_)   => Cow::Owned(plir::ty!(plir::Type::S_INT)),
+            GonValue::Bool(_)  => Cow::Owned(plir::ty!(plir::Type::S_BOOL)),
+            GonValue::Str(_)   => Cow::Owned(plir::ty!(plir::Type::S_STR)),
+            GonValue::Unit     => Cow::Owned(plir::ty!(plir::Type::S_VOID)),
         }
     }
 
@@ -151,21 +168,6 @@ impl<'ctx> GonValue<'ctx> {
         match self {
             GonValue::Unit => None,
             val => Some(val.basic_value(c))
-        }
-    }
-
-    /// Create a [`GonValue`] from a given LLVM value.
-    pub fn reconstruct(t: &plir::Type, v: BasicValueEnum<'ctx>) -> Self {
-        use plir::{TypeRef, Type};
-        
-        match t.as_ref() {
-            TypeRef::Prim(Type::S_FLOAT) => Self::Float(v.into_float_value()),
-            TypeRef::Prim(Type::S_INT)   => Self::Int(v.into_int_value()),
-            TypeRef::Prim(Type::S_BOOL)  => Self::Bool(v.into_int_value()),
-            TypeRef::Prim(Type::S_VOID)  => Self::Unit,
-            TypeRef::Prim(Type::S_STR)   => Self::Str(v.into_struct_value()),
-            // TODO: not panic
-            _ => panic!("Cannot reconstruct value from type {t}")
         }
     }
 }
