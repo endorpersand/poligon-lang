@@ -13,11 +13,11 @@
 
 use std::rc::Rc;
 
-pub use self::types::{Type, Class};
+pub use self::types::*;
 
 pub mod op;
 mod display;
-pub mod types;
+mod types;
 
 /// A complete program.
 /// 

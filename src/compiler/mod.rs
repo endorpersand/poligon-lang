@@ -64,8 +64,11 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
         Type::S_VOID  => ctx.struct_type(&[], false)
     }
 }
+
 /// Computes a const layout.
-/// The layouts are defined in Compiler::from_ctx.
+/// The layouts are defined in [`default_layouts`].
+/// 
+/// If an unimplemented layout is accessed, this panics.
 macro_rules! layout {
     ($compiler:expr, $i:ident) => {
         $compiler.get_layout_by_name($crate::compiler::plir::Type::$i).unwrap()

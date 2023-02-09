@@ -156,18 +156,18 @@ impl Display for FunSignature {
 }
 impl Display for types::MethodSignature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let types::MethodSignature { this, is_static, ident, params, ret } = self;
+        let types::MethodSignature { referent, is_static, name, params, ret } = self;
 
         write!(f, "fun ")?;
-        if let Some(this_ident) = this {
-            write!(f, "{this_ident}")?;
+        if let Some(ref_ident) = referent {
+            write!(f, "{ref_ident}")?;
         }
         match is_static {
             true  => write!(f, "::"),
             false => write!(f, "."),
         }?;
         
-        write!(f, "{ident}(")?;
+        write!(f, "{name}(")?;
         fmt_list(f, params)?;
         write!(f, ") ")?;
 

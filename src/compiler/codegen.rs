@@ -206,9 +206,9 @@ impl BlockBehavior {
     }
 }
 
-fn primitives(prims: &[&str]) -> HashMap<String, TypeHolder> {
+fn primitives(prims: &[&str]) -> HashMap<String, TypeData> {
     prims.iter()
-        .map(|&s| (String::from(s), TypeHolder::primitive()))
+        .map(|&s| (String::from(s), TypeData::primitive()))
         .collect()
 }
 
@@ -233,7 +233,7 @@ struct InsertBlock {
     final_exit: Option<BlockExit>,
 
     vars: HashMap<String, plir::Type>,
-    types: HashMap<String, TypeHolder>,
+    types: HashMap<String, TypeData>,
     unresolved: HashMap<String, Unresolved>,
 }
 
@@ -355,7 +355,7 @@ impl InsertBlock {
 
     /// Insert a class into the insert block's type register.
     fn insert_class(&mut self, cls: &plir::Class) {
-        self.types.insert(cls.ident.clone(), TypeHolder::structural(cls.clone()));
+        self.types.insert(cls.ident.clone(), TypeData::structural(cls.clone()));
     }
 }
 
@@ -388,49 +388,58 @@ impl<'k> SigKey<'k> {
     }
 }
 
+/// Value type that holds the data of a type.
+/// 
+/// This allows the PLIR codegen to replace methods with functions
+/// and access type fields.
 #[derive(Debug)]
-pub struct TypeHolder {
-    ty: TypeData,
+struct TypeData {
+    ty: TypeStructure,
     methods: HashMap<SigKey<'static>, String>
 }
 
-impl TypeHolder {
+impl TypeData {
+    /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
     pub fn primitive() -> Self {
         Self {
-            ty: TypeData::Primitive,
+            ty: TypeStructure::Primitive,
             methods: Default::default()
         }
     }
 
+    /// Create a structural type (a type whose fields are defined in Poligon)
     pub fn structural(cls: plir::Class) -> Self {
         Self {
-            ty: TypeData::Class(cls),
+            ty: TypeStructure::Class(cls),
             methods: Default::default()
         }
     }
 
+    /// Get a method defined in the type.
     pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a str> {
         let k = SigKey::new(ident, vec![]);
         
         self.methods.get(&k).map(String::as_str)
     }
 
+    /// Add a method to the type.
     pub fn insert_method(&mut self, ident: String, metref: String) {
         let k = SigKey::new(ident, vec![]);
 
         self.methods.insert(k, metref);
     }
 
+    /// Get a field on the type (if present).
     pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
         match &self.ty {
-            TypeData::Primitive => None,
-            TypeData::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
+            TypeStructure::Primitive => None,
+            TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
         }
     }
 }
 
 #[derive(Debug)]
-enum TypeData {
+enum TypeStructure {
     Primitive,
     Class(plir::Class)
 }
@@ -558,7 +567,7 @@ impl CodeGenerator {
         self.resolve(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
     }
-    fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeHolder> {
+    fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
         match ty {
             plir::Type::Prim(ident) => self.resolve(|ib| ib.types.get(ident))
@@ -945,7 +954,7 @@ impl CodeGenerator {
         let ast::Class { ident, fields, methods } = cls;
 
         let fields = fields.into_iter()
-            .map(|ast::types::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
+            .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
                 self.consume_type(ty).map(|ty| {
                     (ident, plir::FieldDecl { rt, mt, ty })
                 })
@@ -958,13 +967,13 @@ impl CodeGenerator {
         ib.insert_class(&cls);
 
         for method in methods {
-            let ast::types::MethodDecl {
-                sig: ast::types::MethodSignature { this, is_static, ident: method_ident, mut params, ret }, 
+            let ast::MethodDecl {
+                sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
                 block 
             } = method;
 
             if !is_static {
-                let this = this.unwrap_or_else(|| String::from("#unused"));
+                let this = referent.unwrap_or_else(|| String::from("#unused"));
                 params.insert(0, ast::Param { 
                     rt: Default::default(), 
                     mt: Default::default(), 
@@ -974,7 +983,7 @@ impl CodeGenerator {
             } else {
                 // TODO, use this ident
             };
-            let metref = format!("{}::{method_ident}", &cls.ident);
+            let metref = format!("{}::{method_name}", &cls.ident);
 
             let sig = ast::FunSignature { ident: metref.clone(), params, ret };
             let decl = ast::FunDecl { sig, block };
@@ -982,7 +991,7 @@ impl CodeGenerator {
             ib.insert_unresolved(Unresolved::Fun(decl));
 
             if let Some(c) = ib.types.get_mut(&cls.ident) {
-                c.insert_method(method_ident, metref);
+                c.insert_method(method_name, metref);
             }
             ib = self.peek_block();
         }

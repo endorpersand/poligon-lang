@@ -166,6 +166,7 @@ impl Type {
         }
     }
 
+    /// If this type has an identifier, return it.
     pub fn ident(&self) -> Option<&str> {
         match self.as_ref() {
             TypeRef::Prim(ident)       => Some(ident),
@@ -196,6 +197,9 @@ impl FunType {
         TypeRef::Fun(&self.0, &self.1)
     }
 
+    /// Removes the first parameter of the function.
+    /// 
+    /// This is useful for removing the referent in method types.
     pub fn pop_front(&mut self) {
         self.0.remove(0);
     }
@@ -236,14 +240,25 @@ impl From<ast::Type> for Type {
     }
 }
 
+/// A class declaration.
+/// 
+/// This corresponds to [`ast::Class`].
+/// However, unlike `ast::Class`, 
+/// this struct does not contain the class's methods.
+/// 
+/// Those methods are redefined as functions in PLIR codegen.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Class {
-    /// Name of the struct
+    /// Name of the class
     pub ident: String,
-    /// Struct's fields
+    /// A mapping of identifiers to fields in the class
     pub fields: IndexMap<String, FieldDecl>
 }
 
+/// A field declaration.
+///
+/// This corresponds to [`ast::FieldDecl`].
+/// Unlike `ast::FieldDecl`, the field's name is omitted (and has been moved to [`Class`]).
 #[derive(Debug, PartialEq, Clone)]
 pub struct FieldDecl {
     /// Whether the field can be reassigned later

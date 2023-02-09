@@ -758,7 +758,7 @@ impl Parser {
     }
 
     /// Match the next tokens if they represent a field declaration.
-    pub fn match_field_decl(&mut self) -> ParseResult<Option<ast::types::FieldDecl>> {
+    pub fn match_field_decl(&mut self) -> ParseResult<Option<ast::FieldDecl>> {
         let (mut empty, rt) = match self.match_reasg_type() {
             Some(t) => (false, t),
             None => (true, Default::default()),
@@ -779,7 +779,7 @@ impl Parser {
         self.expect1(token![:])?;
         let ty = self.expect_type()?;
 
-        Ok(Some(ast::types::FieldDecl { rt, mt, ident, ty }))
+        Ok(Some(ast::FieldDecl { rt, mt, ident, ty }))
     }
 
     /// Expect that the next tokens represent a method identifier 
@@ -806,8 +806,8 @@ impl Parser {
     }
 
     /// Expect that the next tokens represent a method signature.
-    pub fn expect_method_sig(&mut self) -> ParseResult<ast::types::MethodSignature> {
-        let (this, method, is_static) = self.expect_method_ident()?;
+    pub fn expect_method_sig(&mut self) -> ParseResult<ast::MethodSignature> {
+        let (referent, method_name, is_static) = self.expect_method_ident()?;
 
         self.expect1(token!["("])?;
         let params = self.expect_closing_tuple_of(
@@ -822,22 +822,22 @@ impl Parser {
             None
         };
 
-        Ok(ast::types::MethodSignature {
-            this,
+        Ok(ast::MethodSignature {
+            referent,
             is_static,
-            ident: method,
+            name: method_name,
             params,
             ret,
         })
     }
 
     /// Match the next tokens if they represent a method declaration.
-    pub fn match_method_decl(&mut self) -> ParseResult<Option<ast::types::MethodDecl>> {
+    pub fn match_method_decl(&mut self) -> ParseResult<Option<ast::MethodDecl>> {
         self.match1(token![fun]).then(|| {
             let sig = self.expect_method_sig()?;
             let block = self.expect_block()?;
 
-            Ok(ast::types::MethodDecl { sig, block: Rc::new(block) })
+            Ok(ast::MethodDecl { sig, block: Rc::new(block) })
         }).transpose()
     }
 
