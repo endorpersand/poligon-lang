@@ -545,6 +545,7 @@ impl CodeGenerator {
             .chain(std::iter::once(&self.program))
             .find_map(f)
     }
+    #[allow(unused)]
     fn resolve_mut<'a, T>(&'a mut self, f: impl FnMut(&'a mut InsertBlock) -> Option<T>) -> Option<T> {
         self.blocks.iter_mut().rev()
             .chain(std::iter::once(&mut self.program))

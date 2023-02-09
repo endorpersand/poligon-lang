@@ -27,7 +27,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
-use inkwell::types::{StructType, BasicTypeEnum, PointerType};
+use inkwell::types::{StructType, BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue};
 
 use crate::ast::{op, Literal};
@@ -36,12 +36,72 @@ use crate::err::GonErr;
 pub use self::value::*;
 use self::value::apply_bv;
 
+fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
+    macro_rules! map {
+        ($($k:expr => $v:expr),*$(,)?) => {{
+            let mut m = HashMap::new();
+            $(
+                m.insert(String::from($k), $v.into());
+            )*
+            m
+        }}
+    }
+
+    use plir::Type;
+
+    map! {
+        Type::S_INT   => ctx.i64_type(),
+        Type::S_FLOAT => ctx.f64_type(),
+        Type::S_BOOL  => ctx.bool_type(),
+        Type::S_STR   => {
+            let st = ctx.opaque_struct_type(Type::S_STR);
+            st.set_body(&[
+                ctx.i8_type().ptr_type(Default::default()).into(),
+                ctx.i64_type().into()
+            ], false);
+            st
+        },
+        Type::S_VOID  => ctx.struct_type(&[], false)
+    }
+}
+/// Computes a const layout.
+/// The layouts are defined in Compiler::from_ctx.
+macro_rules! layout {
+    ($compiler:expr, $i:ident) => {
+        $compiler.get_layout_by_name($crate::compiler::plir::Type::$i).unwrap()
+    }
+}
+pub(crate) use layout;
+
+enum ReturnableType<'ctx> {
+    Basic(BasicTypeEnum<'ctx>),
+    Void(VoidType<'ctx>)
+}
+impl<'ctx> ReturnableType<'ctx> {
+    fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+        match self {
+            ReturnableType::Basic(t) => t.fn_type(param_types, is_var_args),
+            ReturnableType::Void(t) => t.fn_type(param_types, is_var_args),
+        }
+    }
+}
+impl<'ctx> From<BasicTypeEnum<'ctx>> for ReturnableType<'ctx> {
+    fn from(value: BasicTypeEnum<'ctx>) -> Self {
+        ReturnableType::Basic(value)
+    }
+}
+impl<'ctx> From<VoidType<'ctx>> for ReturnableType<'ctx> {
+    fn from(value: VoidType<'ctx>) -> Self {
+        ReturnableType::Void(value)
+    }
+}
+
 /// This struct converts from PLIR to LLVM.
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
-    structs: HashMap<String, GonStruct<'ctx>>,
+    layouts: HashMap<String, BasicTypeEnum<'ctx>>,
 
     vars: HashMap<String, PointerValue<'ctx>>
 }
@@ -53,7 +113,7 @@ impl<'ctx> Compiler<'ctx> {
             ctx,
             builder: ctx.create_builder(),
             module: ctx.create_module("eval"),
-            structs: HashMap::new(),
+            layouts: default_layouts(ctx),
             vars: HashMap::new()
         }
     }
@@ -104,12 +164,12 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Create an alloca instruction and also store the value in the allocated pointer
-    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> PointerValue<'ctx>
+    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>>
     {
-        let alloca = self.builder.build_alloca(val.type_layout().basic_type(self), ident);
+        let alloca = self.builder.build_alloca(self.get_layout(&val.plir_type())?, ident);
         self.vars.insert(String::from(ident), alloca);
         self.builder.build_store(alloca, val.basic_value(self));
-        alloca
+        Ok(alloca)
     }
 
     /// Store the value in the allocated position or return None if there is no allocated position
@@ -125,8 +185,7 @@ impl<'ctx> Compiler<'ctx> {
     fn get_val(&mut self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
         match self.vars.get(ident) {
             Some(&ptr) => {
-                let layout = self.load_layout(ty)?;
-                let val = self.builder.build_load(layout.basic_type(self), ptr, "load");
+                let val = self.builder.build_load(self.get_layout(ty)?, ptr, "load");
                 Ok(GonValue::reconstruct(ty, val))
             },
             None => Err(CompileErr::UndefinedVar(String::from(ident))),
@@ -218,53 +277,35 @@ impl<'ctx> Compiler<'ctx> {
         let plir::FunSignature { ident, params, ret } = sig;
 
         let arg_tys: Vec<_> = params.iter()
-            .map(|p| {
-                let layout = self.load_layout(&p.ty)?;
-                Ok(layout.basic_type(self).into())
-            })
+            .map(|p| self.get_layout(&p.ty).map(Into::into))
             .collect::<Result<_, _>>()?;
-
-        let ret_ty = self.load_layout(ret)?;
-
-        let fun_ty = ret_ty.fn_type(self, &arg_tys, false);
+        
+        let fun_ty = self.get_layout_or_void(ret)?
+            .fn_type(&arg_tys, false);
 
         self.import_fun(ident, fun_ty)
     }
 
     // TODO: clean up all of these functions:
-    fn register_struct(&mut self, gs: GonStruct<'ctx>) {
-        self.structs.insert(gs.name.to_string(), gs);
+    fn add_class(&mut self, ty: &str, layout: impl BasicType<'ctx>) {
+        self.layouts.insert(ty.to_string(), layout.as_basic_type_enum());
     }
 
-    fn load_layout(&mut self, ty: &plir::Type) -> CompileResult<'ctx, TypeLayout> {
-        use plir::{Type, TypeRef};
-        
-        // TODO: be less hacky
-        if let TypeRef::Prim(Type::S_STR) = ty.as_ref() {
-            self.string_type();
-        }
-
-        TypeLayout::of(ty)
+    fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
+        ty.ident()
+            .and_then(|ident| self.get_layout_by_name(ident))
             .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
     }
-
-    fn get_struct(&self, ident: &str) -> &GonStruct<'ctx> {
-        self.structs.get(ident)
-            .unwrap_or_else(|| panic!("Struct {ident} not present"))
+    fn get_layout_by_name(&self, ident: &str) -> Option<BasicTypeEnum<'ctx>> {
+        self.layouts.get(ident).copied()
     }
-
-    fn get_struct_or_init<const N: usize>(
-            &mut self, 
-            ident: &str, 
-            f: impl FnOnce(&mut Self) -> [BasicTypeEnum<'ctx>; N]
-        ) -> &mut GonStruct<'ctx> {
-        if !self.structs.contains_key(ident) {
-            let fields = &f(self)[..];
-            let gs = GonStruct::new(self, ident, fields);
-            self.register_struct(gs);
+    fn get_layout_or_void(&self, ty: &plir::Type) -> CompileResult<'ctx, ReturnableType<'ctx>> {
+        use plir::{TypeRef, Type};
+        if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
+            Ok(self.ctx.void_type()).map(Into::into)
+        } else {
+            self.get_layout(ty).map(Into::into)
         }
-
-        self.structs.get_mut(ident).unwrap()
     }
 }
 
@@ -352,7 +393,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             CompileErr::UndefinedFun(name) => format!("could not find function '{name}'"),
             CompileErr::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
             CompileErr::InvalidFun => String::from("could not create function"),
-            CompileErr::UnresolvedType(t) => format!("'{t}' is missing an LLVM representation"),
+            CompileErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
             CompileErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
             CompileErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
             CompileErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
@@ -407,28 +448,29 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// 3. If there are any functions named main, then that function is the program.
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         fn is_main(cs: &CStr) -> bool {
-            match cs.to_str() {
-                Ok(s) => s == "main",
-                Err(_) => false,
-            }
+            matches!(cs.to_str(), Ok("main"))
         }
 
         // split the functions from everything else:
         let mut funs = vec![];
         let mut fun_bodies = vec![];
-        let mut rest = vec![];
         
-        for stmt in &self.0 {
+        let hoist_pt = self.0.partition_point(plir::Stmt::hoisted);
+        let (hoisted, rest) = self.0.split_at(hoist_pt);
+
+        for stmt in hoisted {
             match stmt {
                 plir::Stmt::FunDecl(dcl) => {
                     funs.push(dcl.sig.write_ir(compiler)?);
                     fun_bodies.push(dcl);
                 },
                 plir::Stmt::ExternFunDecl(dcl) => funs.push(compiler.import(dcl)?),
-                stmt => rest.push(stmt)
+                plir::Stmt::ClassDecl(cls) => cls.write_ir(compiler)?,
+                _ => unreachable!()
             }
         }
         
+        // delay function resolution until everything hoisted has been evaluated
         for bodies in fun_bodies {
             bodies.write_ir(compiler)?;
         }
@@ -503,7 +545,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 // TODO: support rt, mt, ty
 
                 let val = val.write_ir(compiler)?;
-                compiler.alloca_and_store(ident, val);
+                compiler.alloca_and_store(ident, val)?;
                 Ok(GonValue::Unit)
             },
             plir::Stmt::Return(me) => {
@@ -544,7 +586,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
-        let expr_layout = compiler.load_layout(expr_ty)?;
+        let expr_layout = compiler.get_layout(expr_ty)?;
 
         match expr {
             plir::ExprType::Ident(ident) => compiler.get_val(ident, expr_ty),
@@ -696,7 +738,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 compiler.builder.position_at_end(merge_bb);
 
-                let phi = compiler.builder.build_phi(expr_layout.basic_type(compiler), "if_result");
+                let phi = compiler.builder.build_phi(expr_layout, "if_result");
                 compiler.add_incoming_gv(phi, &incoming);
                 
                 Ok(GonValue::reconstruct(expr_ty, phi.as_basic_value()))
@@ -883,14 +925,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
         let plir::FunSignature { ident, params, ret } = self;
 
         let arg_tys: Vec<_> = params.iter()
-            .map(|p| {
-                let layout = compiler.load_layout(&p.ty)?;
-                Ok(layout.basic_type(compiler).into())
-            })
+            .map(|p| compiler.get_layout(&p.ty).map(Into::into))
             .collect::<Result<_, _>>()?;
 
-        let ret_ty = compiler.load_layout(ret)?;
-        let fun_ty = ret_ty.fn_type(compiler, &arg_tys, false);
+        let fun_ty = compiler.get_layout_or_void(ret)?
+            .fn_type(&arg_tys, false);
         let fun = compiler.module.add_function(ident, fun_ty, None);
 
         // set arguments names
@@ -916,7 +955,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
         // store params
         for (param, val) in iter::zip(&sig.params, fun.get_param_iter()) {
-            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(&param.ty, val));
+            compiler.alloca_and_store(&param.ident, GonValue::reconstruct(&param.ty, val))?;
         }
 
         // return nothing if the return value is Unit
@@ -934,6 +973,24 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
             unsafe { fun.delete() }
             Err(CompileErr::InvalidFun)
         }
+    }
+}
+
+impl<'ctx> TraverseIR<'ctx> for plir::Class {
+    type Return = CompileResult<'ctx, ()>;
+
+    fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        let plir::Class { ident, fields } = self;
+
+        let fields: Vec<_> = fields.values()
+            .map(|fd| compiler.get_layout(&fd.ty))
+            .collect::<Result<_, _>>()?;
+        
+        let struct_ty = compiler.ctx.opaque_struct_type(ident);
+        struct_ty.set_body(&fields, false);
+        compiler.add_class(ident, struct_ty);
+
+        Ok(())
     }
 }
 

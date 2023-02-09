@@ -116,6 +116,16 @@ impl Stmt {
             | Stmt::Expr(Expr { expr: ExprType::For { .. }, .. })
         )
     }
+
+    /// Test if this statement is hoisted (above non-hoisted) statements
+    /// during PLIR code generation.
+    pub fn hoisted(&self) -> bool {
+        matches!(self,
+            | Stmt::FunDecl(_)
+            | Stmt::ExternFunDecl(_)
+            | Stmt::ClassDecl(_)
+        )
+    }
 }
 
 /// A variable declaration.

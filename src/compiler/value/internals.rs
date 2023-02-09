@@ -1,12 +1,10 @@
 //! Internally defined structs for LLVM representation
 
 use inkwell::builder::Builder;
-use inkwell::types::{FunctionType, StructType};
+use inkwell::types::{FunctionType, BasicType};
 use inkwell::values::FunctionValue;
 
-use crate::compiler::{Compiler, CompileResult};
-
-use super::{TypeLayout, GonStruct};
+use crate::compiler::{Compiler, CompileResult, layout};
 
 macro_rules! std_map {
     ($($l:literal: $i:ident),+) => {
@@ -24,23 +22,15 @@ macro_rules! std_map {
 }
 
 impl<'ctx> Compiler<'ctx> {
-    pub (in crate::compiler) fn void_value_type(&self) -> StructType<'ctx> {
-        self.ctx.struct_type(&[], false)
-    }
-
-    pub(in crate::compiler) fn string_type(&mut self) -> &mut GonStruct<'ctx> {
-        self.get_struct_or_init("String", |c| [
-            c.ctx.i8_type().ptr_type(Default::default()).into(),
-            c.ctx.i64_type().into()
-        ])
-    }
-
     fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let p0 = fun.get_first_param().unwrap().into_struct_value();
         let buf = builder.build_extract_value(p0, 0, "buf").unwrap();
     
         let puts = self.import_fun("puts",
-            TypeLayout::Int.fn_type(self, &[self.ctx.i8_type().ptr_type(Default::default()).into()], false),
+            layout!(self, S_INT).fn_type(
+                &[self.ptr_type(Default::default()).into()], 
+                false
+            ),
         )?;
     
         builder.build_call(puts, &[buf.into()], "");
@@ -53,9 +43,10 @@ impl<'ctx> Compiler<'ctx> {
         let p0 = fun.get_first_param().unwrap();
     
         let printf = self.import_fun("printf",
-            TypeLayout::Int.fn_type(self, &[
-                self.ctx.i8_type().ptr_type(Default::default()).into()
-            ], true),
+            layout!(self, S_INT).fn_type(
+                &[self.ptr_type(Default::default()).into()], 
+                true
+            ),
         )?;
     
         let template = unsafe { builder.build_global_string("%c\0", "printc") };
@@ -69,9 +60,10 @@ impl<'ctx> Compiler<'ctx> {
         let p0 = fun.get_first_param().unwrap();
     
         let printf = self.import_fun("printf",
-            TypeLayout::Int.fn_type(self, &[
-                self.ctx.i8_type().ptr_type(Default::default()).into()
-            ], true),
+            layout!(self, S_INT).fn_type(
+                &[self.ptr_type(Default::default()).into()], 
+                true
+            ),
         )?;
     
         let template = unsafe { builder.build_global_string("%d\0", "printd") };

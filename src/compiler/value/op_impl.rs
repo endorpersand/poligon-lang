@@ -2,7 +2,7 @@ use inkwell::types::BasicType;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
-use crate::compiler::plir;
+use crate::compiler::{plir, layout};
 use crate::compiler::{Compiler, CompileResult, CompileErr};
 use crate::ast::op;
 
@@ -293,7 +293,7 @@ impl<'ctx> Unary<'ctx> for StructValue<'ctx> {
         let call = c.builder.build_call(f, &[self.into()], op_name);
         Ok(match call.try_as_basic_value().left() {
             Some(t) => t,
-            None => c.void_value_type().const_zero().into(),
+            None => layout!(c, S_VOID).const_zero(),
         })
     }
 }
@@ -437,7 +437,7 @@ impl<'ctx> Binary<'ctx> for StructValue<'ctx> {
         let call = c.builder.build_call(f, &[self.into(), right.into()], op_name);
         Ok(match call.try_as_basic_value().left() {
             Some(t) => t,
-            None => c.void_value_type().const_zero().into(),
+            None => layout!(c, S_VOID).const_zero(),
         })
     }
     
