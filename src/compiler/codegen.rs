@@ -840,7 +840,10 @@ impl CodeGenerator {
         let ast::Decl { rt, pat, ty, val } = decl;
 
         let e = self.consume_expr(val)?;
-        let ty = ty.map(plir::Type::from);
+        let ty = match ty {
+            Some(t) => Some(self.consume_type(t)?),
+            None => None,
+        };
 
         self.unpack_pat(pat, e, (rt, ty), 
             |(rt, mty), idx| {
@@ -876,26 +879,27 @@ impl CodeGenerator {
     fn consume_fun_sig(&mut self, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
         let ast::FunSignature { ident, params, ret } = sig;
         
-        let (params, param_tys): (Vec<_>, Vec<_>) = params.into_iter()
-        .map(|p| {
-            let ast::Param { rt, mt, ident, ty } = p;
-            let ty = ty.map_or(
-                plir::ty!(plir::Type::S_UNK),
-                plir::Type::from
-            );
+        let params: Vec<_> = params.into_iter()
+            .map(|p| -> PLIRResult<_> {
+                let ast::Param { rt, mt, ident, ty } = p;
+                let ty = match ty {
+                    Some(t) => self.consume_type(t)?,
+                    None => plir::ty!(plir::Type::S_UNK),
+                };
 
-            plir::Param { rt, mt, ident, ty }
-        })
-        .map(|p| {
-            let ty = p.ty.clone();
-            (p, ty)
-        })
-        .unzip();
+                Ok(plir::Param { rt, mt, ident, ty })
+            })
+            .collect::<Result<_, _>>()?;
+        
+        let param_tys = params.iter()
+            .map(|p| &p.ty)
+            .cloned()
+            .collect();
     
-        let ret = ret.map_or(
-            plir::ty!(plir::Type::S_VOID),
-            plir::Type::from
-        );
+        let ret = match ret {
+            Some(t) => self.consume_type(t)?,
+            None => plir::ty!(plir::Type::S_VOID),
+        };
 
         // declare function before parsing block
         self.declare(&ident, 
@@ -931,14 +935,21 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
+    fn consume_type(&mut self, ty: ast::Type) -> PLIRResult<plir::Type> {
+        let ty = plir::Type::from(ty);
+        self.resolve_ty(&ty).map(|_| ty)
+    }
+
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
         let ast::Class { ident, fields, methods } = cls;
 
         let fields = fields.into_iter()
-            .map(|ast::types::FieldDecl { rt, mt, ident, ty }| {
-                (ident, plir::FieldDecl { rt, mt, ty: plir::Type::from(ty) })
+            .map(|ast::types::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
+                self.consume_type(ty).map(|ty| {
+                    (ident, plir::FieldDecl { rt, mt, ty })
+                })
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         
         let cls = plir::Class { ident, fields };
         
