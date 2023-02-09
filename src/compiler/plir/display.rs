@@ -1,10 +1,10 @@
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 
 use crate::ast::{ReasgType, MutType};
 
 use super::*;
 
-fn fmt_stmt_list(f: &mut std::fmt::Formatter<'_>, stmts: &[Stmt]) -> std::fmt::Result {
+fn fmt_stmt_list(f: &mut Formatter<'_>, stmts: &[Stmt]) -> std::fmt::Result {
     for stmt in stmts {
         write!(f, "{stmt}")?;
 
@@ -17,7 +17,7 @@ fn fmt_stmt_list(f: &mut std::fmt::Formatter<'_>, stmts: &[Stmt]) -> std::fmt::R
     Ok(())
 }
 
-fn fmt_list<D: Display>(f: &mut std::fmt::Formatter<'_>, elems: &[D]) -> std::fmt::Result {
+fn fmt_list<D: Display>(f: &mut Formatter<'_>, elems: &[D]) -> std::fmt::Result {
     if let Some((tail, head)) = elems.split_last() {
         for el in head {
             write!(f, "{el}, ")?;
@@ -28,7 +28,7 @@ fn fmt_list<D: Display>(f: &mut std::fmt::Formatter<'_>, elems: &[D]) -> std::fm
         Ok(())
     }
 }
-fn fmt_mapped_list<T, D: Display, F>(f: &mut std::fmt::Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
+fn fmt_mapped_list<T, D: Display, F>(f: &mut Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
     where F: Fn(&T) -> D
 {
     if let Some((tail, head)) = elems.split_last() {
@@ -42,21 +42,45 @@ fn fmt_mapped_list<T, D: Display, F>(f: &mut std::fmt::Formatter<'_>, elems: &[T
     }
 }
 
+struct StmtsDisplay<'b>(&'b [Stmt]);
+impl Display for StmtsDisplay<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt_stmt_list(f, self.0)
+    }
+}
 struct BlockDisplay<'b>(&'b [Stmt]);
 impl Display for BlockDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, self.0)
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            write!(f, "{{}}")
+        } else {
+            writeln!(f, "{{")?;
+
+            let buf = StmtsDisplay(self.0).to_string();
+            for line in buf.lines() {
+                writeln!(f, "{:4}{line}", "")?;
+            }
+
+            write!(f, "}}")
+        }
+    }
+}
+fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt::Result {
+    if omit_ty {
+        write!(f, "{}", BlockDisplay(&b.1))
+    } else {
+        write!(f, "{b}")
     }
 }
 
 impl Display for Program {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         fmt_stmt_list(f, &self.0)
     }
 }
 
 impl Display for Stmt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Stmt::Decl(d) => write!(f, "{d}"),
             Stmt::Return(me) => match me {
@@ -78,7 +102,7 @@ impl Display for Stmt {
 }
 
 impl Display for Class {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ident, fields: field_map } = self;
         write!(f, "class {ident} {{ ")?;
 
@@ -88,7 +112,7 @@ impl Display for Class {
     }
 }
 impl Display for types::FieldDecl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let types::FieldDecl { rt, mt, ty } = self;
         
         match rt {
@@ -104,7 +128,7 @@ impl Display for types::FieldDecl {
 }
 
 impl Display for Decl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Decl { rt, mt, ident, ty, val } = self;
         
         match rt {
@@ -116,12 +140,16 @@ impl Display for Decl {
             MutType::Immut => {},
         };
 
-        write!(f, "{ident}: {ty} = {val}")
+        write!(f, "{ident}: {ty} = ")?;
+        match val {
+            Expr { expr: ExprType::Block(b), .. } => fmt_typed_block(f, b, ty == &b.0),
+            e => write!(f, "{e}"),
+        }
     }
 }
 
 impl Display for FunSignature {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FunSignature { ident, params, ret } = self;
         write!(f, "fun {ident}(")?;
         fmt_list(f, params)?;
@@ -130,14 +158,16 @@ impl Display for FunSignature {
 }
 
 impl Display for FunDecl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FunDecl { sig, block } = self;
-        write!(f, "{sig} {block}")
+
+        write!(f, "{sig} ")?;
+        fmt_typed_block(f, block, sig.ret == block.0)
     }
 }
 
 impl Display for Param {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Param { rt, mt, ident, ty } = self;
 
         match rt {
@@ -155,7 +185,7 @@ impl Display for Param {
 }
 
 impl Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Prim(ident) => write!(f, "{ident}"),
             Type::Generic(ident, params) => {
@@ -178,7 +208,7 @@ impl Display for Type {
 }
 
 impl Display for FunType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FunType(params, ret) = self;
         write!(f, "(")?;
         fmt_list(f, params)?;
@@ -187,7 +217,7 @@ impl Display for FunType {
 }
 
 impl Display for Expr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Expr { ty, expr } = self;
         match expr {
             ExprType::Block(_) => write!(f, "{expr}"), // it is already included in Block
@@ -196,7 +226,7 @@ impl Display for Expr {
     }
 }
 impl Display for ExprType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ExprType::Ident(id) => write!(f, "{id}"),
             ExprType::Block(b) => write!(f, "{b}"),
@@ -296,27 +326,16 @@ impl Display for ExprType {
 }
 
 impl Display for Block {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Block(ty, stmts) = self;
 
         write!(f, "<{ty}>")?;
-        if stmts.is_empty() {
-            write!(f, "{{}}")
-        } else {
-            writeln!(f, "{{")?;
-
-            let buf = BlockDisplay(stmts).to_string();
-            for line in buf.lines() {
-                writeln!(f, "{:4}{line}", "")?;
-            }
-
-            write!(f, "}}")
-        }
+        write!(f, "{}", BlockDisplay(stmts))
     }
 }
 
 impl Display for AsgUnit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             AsgUnit::Ident(ident) => write!(f, "{ident}"),
             AsgUnit::Path(p) => write!(f, "{p}"),
@@ -326,7 +345,7 @@ impl Display for AsgUnit {
 }
 
 impl Display for Path {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Path::Static(o, attrs) => match attrs.split_last() {
                 Some(((last, _), rest)) => {
@@ -360,7 +379,7 @@ impl Display for Path {
 }
 
 impl Display for Index {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Index { expr, index } = self;
 
         write!(f, "{expr}[{index}]")
