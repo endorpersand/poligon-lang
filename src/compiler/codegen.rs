@@ -457,10 +457,12 @@ impl CodeGenerator {
 
     /// Takes out the generated [`plir::Program`] from this struct.
     pub fn unwrap(self) -> PLIRResult<plir::Program> {
-        if !self.blocks.is_empty() {
-            panic!("Could not create program. Insert block was opened but not properly closed.");
-        }
-        let InsertBlock {block, exits, mut init_block, .. } = self.program;
+        assert!(self.blocks.is_empty(),
+            "insert block was opened but not properly closed"
+        );
+
+        let InsertBlock {block, exits, mut init_block, unresolved, .. } = self.program;
+        debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
         init_block.extend(block);
         match exits.last() {
@@ -683,9 +685,10 @@ impl CodeGenerator {
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
             mut init_block, mut block, exits, final_exit, 
-            vars: _, types: _, unresolved: _ 
+            vars: _, types: _, unresolved 
         } = block;
-        
+        debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
+
         init_block.extend(block);
         block = init_block;
 
@@ -1214,7 +1217,7 @@ impl CodeGenerator {
             false => plir::Path::Struct(obj, vec![]),
         };
 
-        for (ident, st) in attrs {
+        for (attr, st) in attrs {
             let top_ty = path.ty();
             let cls = self.get_class(&top_ty)?;
 
@@ -1222,7 +1225,7 @@ impl CodeGenerator {
                 // Only static access is thru types
                 todo!()
             } else {
-                match cls.get_method(&ident) {
+                match cls.get_method(&attr) {
                     Some(metref) => {
                         if matches!(path, plir::Path::Method(..)) {
                             Err(PLIRErr::CannotAccessOnMethod)?;
@@ -1235,15 +1238,15 @@ impl CodeGenerator {
 
                             path = plir::Path::Method(
                                 Box::new(path.into()), 
-                                ident.clone(), 
+                                attr.clone(), 
                                 fun_ty
                             );
                         }
                     },
                     None => {
-                        let field = cls.get_field(&ident)
+                        let field = cls.get_field(&attr)
                             .map(|(i, t)| (i, t.clone()))
-                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), ident.clone()))?;
+                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone()))?;
                         
                         path.add_struct_seg(field)
                             .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
