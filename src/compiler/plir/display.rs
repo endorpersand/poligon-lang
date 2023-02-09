@@ -330,7 +330,7 @@ impl Display for Path {
         match self {
             Path::Static(o, attrs) => match attrs.split_last() {
                 Some(((last, _), rest)) => {
-                    for (_, ty) in rest {
+                    for (_, ty) in rest.iter().rev() {
                         write!(f, "<{ty}>(")?;
                     }
                     write!(f, "{o}")?;
@@ -343,7 +343,7 @@ impl Display for Path {
             },
             Path::Struct(o, attrs) => match attrs.split_last() {
                 Some(((last, _), rest)) => {
-                    for (_, ty) in rest {
+                    for (_, ty) in rest.iter().rev() {
                         write!(f, "<{ty}>(")?;
                     }
                     write!(f, "{o}")?;
