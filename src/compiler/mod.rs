@@ -169,7 +169,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Create an alloca instruction and also store the value in the allocated pointer
     fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>>
     {
-        let alloca = self.builder.build_alloca(self.get_layout(&val.plir_type())?, ident);
+        let alloca = self.builder.build_alloca(self.get_layout(&self.plir_type_of(val))?, ident);
         self.vars.insert(String::from(ident), alloca);
         self.builder.build_store(alloca, self.basic_value_of(val));
         Ok(alloca)
@@ -869,61 +869,62 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
         let Self { expr, index } = self;
 
         let expr = expr.write_ir(compiler)?;
-        let index = index.write_ir(compiler)?;
+        let _index = index.write_ir(compiler)?;
 
         // This should be type checked in PLIR:
         match expr {
-            GonValue::Float(_) => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Int(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Bool(_)  => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Unit     => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Str(s)   => {
-                // TODO: support unicode
-                let buf = compiler.builder.build_extract_value(s, 0, "buf").unwrap().into_pointer_value();
-                let len = compiler.builder.build_extract_value(s, 1, "len").unwrap().into_int_value();
+            GonValue::Float(_)  => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Int(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Bool(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Unit      => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Struct(_) => {
+                todo!()
+                // // TODO: support unicode
+                // let buf = compiler.builder.build_extract_value(s, 0, "buf").unwrap().into_pointer_value();
+                // let len = compiler.builder.build_extract_value(s, 1, "len").unwrap().into_int_value();
 
-                let i8_type = compiler.ctx.i8_type();
-                let i64_type = compiler.ctx.i64_type();
+                // let i8_type = compiler.ctx.i8_type();
+                // let i64_type = compiler.ctx.i64_type();
                 
-                // this should also be type checked in PLIR:
-                let idx = compiler.basic_value_of(index).into_int_value();
+                // // this should also be type checked in PLIR:
+                // let idx = compiler.basic_value_of(index).into_int_value();
 
-                // bounds check
-                let lower = compiler.raw_cmp(len.get_type().const_zero(), op::Cmp::Le, idx);
-                let upper = compiler.raw_cmp(idx, op::Cmp::Lt, len);
+                // // bounds check
+                // let lower = compiler.raw_cmp(len.get_type().const_zero(), op::Cmp::Le, idx);
+                // let upper = compiler.raw_cmp(idx, op::Cmp::Lt, len);
                 
-                let bounds = compiler.builder.build_and(lower, upper, "bounds_check");
+                // let bounds = compiler.builder.build_and(lower, upper, "bounds_check");
                 
-                let bb = compiler.get_insert_block();
-                let safe = compiler.ctx.insert_basic_block_after(bb, "safe_idx");
-                let oob = compiler.ctx.insert_basic_block_after(safe, "oob_idx");
-                let exit = compiler.ctx.insert_basic_block_after(oob, "exit_idx");
+                // let bb = compiler.get_insert_block();
+                // let safe = compiler.ctx.insert_basic_block_after(bb, "safe_idx");
+                // let oob = compiler.ctx.insert_basic_block_after(safe, "oob_idx");
+                // let exit = compiler.ctx.insert_basic_block_after(oob, "exit_idx");
 
-                compiler.builder.build_conditional_branch(bounds, safe, oob);
+                // compiler.builder.build_conditional_branch(bounds, safe, oob);
                 
-                compiler.builder.position_at_end(safe);
-                let pos = unsafe {compiler.builder.build_gep(
-                    i8_type.array_type(0), 
-                    buf, 
-                    &[i64_type.const_zero(), idx],
-                    ""
-                ) };
+                // compiler.builder.position_at_end(safe);
+                // let pos = unsafe {compiler.builder.build_gep(
+                //     i8_type.array_type(0), 
+                //     buf, 
+                //     &[i64_type.const_zero(), idx],
+                //     ""
+                // ) };
 
-                let val = compiler.builder.build_load(i8_type, pos, "").into_int_value();
-                let val = compiler.builder.build_int_cast(val, i64_type, "");
-                compiler.builder.build_unconditional_branch(exit);
+                // let val = compiler.builder.build_load(i8_type, pos, "").into_int_value();
+                // let val = compiler.builder.build_int_cast(val, i64_type, "");
+                // compiler.builder.build_unconditional_branch(exit);
                 
-                compiler.builder.position_at_end(oob);
-                compiler.branch_and_goto(exit);
+                // compiler.builder.position_at_end(oob);
+                // compiler.branch_and_goto(exit);
                 
-                let phi = compiler.builder.build_phi(i64_type, "");
-                phi.add_incoming(&[
-                    (&val, safe),
-                    (&i64_type.const_zero(), oob)
-                ]);
+                // let phi = compiler.builder.build_phi(i64_type, "");
+                // phi.add_incoming(&[
+                //     (&val, safe),
+                //     (&i64_type.const_zero(), oob)
+                // ]);
 
-                // TODO: make char
-                Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
+                // // TODO: make char
+                // Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
             },
         }
     }

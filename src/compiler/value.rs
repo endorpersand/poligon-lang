@@ -1,8 +1,6 @@
 mod op_impl;
 mod internals;
 
-use std::borrow::Cow;
-
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, BasicValue};
 
 use super::{Compiler, CompileResult, CompileErr, layout};
@@ -52,8 +50,10 @@ pub enum GonValue<'ctx> {
     Int(IntValue<'ctx> /* iX */),
     /// A `bool`.
     Bool(IntValue<'ctx> /* i1 */),
-    /// A `string`.
-    Str(StructValue<'ctx>),
+    /// Any value represented by a struct in LLVM.
+    /// 
+    /// For example, `String`.
+    Struct(StructValue<'ctx>),
     /// `void`. 
     /// 
     /// This can either be represented 
@@ -85,7 +85,7 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_store(array_ptr, array);
         
         let str_type = layout!(self, S_STR).into_struct_type();
-        GonValue::Str(self.create_struct_value(str_type, &[
+        GonValue::Struct(self.create_struct_value(str_type, &[
             array_ptr.into(),
             self.ctx.i64_type().const_int(s.len() as u64 + 1, true).into()
         ]).unwrap())
@@ -111,13 +111,14 @@ impl<'ctx> Compiler<'ctx> {
             // TODO: impl char -> str
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
-            _ => Err(CompileErr::CannotCast(v.plir_type().into_owned(), ty.clone()))
+            _ => Err(CompileErr::CannotCast(self.plir_type_of(v), ty.clone()))
         }
     }
 
     /// Create a [`GonValue`] from a given LLVM value.
     pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> CompileResult<'ctx, GonValue<'ctx>> {
         use plir::{TypeRef, Type};
+        use inkwell::types::BasicTypeEnum;
         
         let v = v.as_basic_value_enum();
         match t.as_ref() {
@@ -125,8 +126,13 @@ impl<'ctx> Compiler<'ctx> {
             TypeRef::Prim(Type::S_INT)   => Ok(GonValue::Int(v.into_int_value())),
             TypeRef::Prim(Type::S_BOOL)  => Ok(GonValue::Bool(v.into_int_value())),
             TypeRef::Prim(Type::S_VOID)  => Ok(GonValue::Unit),
-            TypeRef::Prim(Type::S_STR)   => Ok(GonValue::Str(v.into_struct_value())),
-            _ => Err(CompileErr::UnresolvedType(t.clone()))
+            _ => {
+                if let BasicTypeEnum::StructType(_) = self.get_layout(t)? {
+                    Ok(GonValue::Struct(v.into_struct_value()))
+                } else {
+                    Err(CompileErr::UnresolvedType(t.clone()))
+                }
+            }
         }
     }
 
@@ -135,11 +141,11 @@ impl<'ctx> Compiler<'ctx> {
     /// Depending on context, [`Compiler::returnable_value_of`] may be more suitable.
     pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
         match value {
-            GonValue::Float(f) => f.into(),
-            GonValue::Int(i)   => i.into(),
-            GonValue::Bool(b)  => b.into(),
-            GonValue::Str(s)   => s.into(),
-            GonValue::Unit     => layout!(self, S_VOID).const_zero(),
+            GonValue::Float(f)  => f.into(),
+            GonValue::Int(i)    => i.into(),
+            GonValue::Bool(b)   => b.into(),
+            GonValue::Struct(s) => s.into(),
+            GonValue::Unit      => layout!(self, S_VOID).const_zero(),
         }
     }
 
@@ -154,20 +160,26 @@ impl<'ctx> Compiler<'ctx> {
             val => Some(self.basic_value_of(val))
         }
     }
-}
 
-impl<'ctx> GonValue<'ctx> {
     /// The PLIR type for this value.
     /// 
     /// This can be used to reconstruct a GonValue from a LLVM representation. 
     /// See [`Compiler::reconstruct`].
-    pub fn plir_type(self) -> Cow<'ctx, plir::Type> {
-        match self {
-            GonValue::Float(_) => Cow::Owned(plir::ty!(plir::Type::S_FLOAT)),
-            GonValue::Int(_)   => Cow::Owned(plir::ty!(plir::Type::S_INT)),
-            GonValue::Bool(_)  => Cow::Owned(plir::ty!(plir::Type::S_BOOL)),
-            GonValue::Str(_)   => Cow::Owned(plir::ty!(plir::Type::S_STR)),
-            GonValue::Unit     => Cow::Owned(plir::ty!(plir::Type::S_VOID)),
+    pub fn plir_type_of(&self, value: GonValue<'ctx>) -> plir::Type {
+        match value {
+            GonValue::Float(_)  => plir::ty!(plir::Type::S_FLOAT),
+            GonValue::Int(_)    => plir::ty!(plir::Type::S_INT),
+            GonValue::Bool(_)   => plir::ty!(plir::Type::S_BOOL),
+            GonValue::Struct(s) => {
+                let st = s.get_type();
+                let name = st.get_name()
+                    .expect("Expected struct to have name")
+                    .to_str()
+                    .expect("Expected struct name to be Rust-compatible");
+                
+                plir::ty!(name)
+            },
+            GonValue::Unit      => plir::ty!(plir::Type::S_VOID),
         }
     }
 }
