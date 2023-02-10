@@ -17,6 +17,7 @@ mod value;
 pub mod codegen;
 pub mod plir;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::iter;
@@ -324,8 +325,6 @@ pub enum CompileErr<'ctx> {
     UndefinedVar(String),
     /// Function was not declared.
     UndefinedFun(String),
-    /// Wrong number of parameters were put into this function.
-    WrongArity(usize /* expected */, usize /* got */),
     /// The function created was invalid.
     InvalidFun,
     /// The given PLIR type could not be resolved into a type in LLVM.
@@ -357,9 +356,6 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
             | CompileErr::UndefinedFun(_)
             => "name error",
 
-            | CompileErr::WrongArity(_, _)
-            => "value error",
-
             | CompileErr::InvalidFun
             | CompileErr::CannotDetermineMain
             => "syntax error",
@@ -384,7 +380,6 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
         match self {
             CompileErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
             CompileErr::UndefinedFun(name) => format!("could not find function '{name}'"),
-            CompileErr::WrongArity(e, f) => format!("expected {e} parameters in function call, got {f}"),
             CompileErr::InvalidFun => String::from("could not create function"),
             CompileErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
             CompileErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
@@ -777,32 +772,39 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             },
             plir::ExprType::For { .. } => todo!(),
             plir::ExprType::Call { funct, params } => {
-                let fun = if let plir::ExprType::Ident(ident) = &funct.expr {
-                    compiler.module.get_function(ident)
-                        .ok_or_else(|| CompileErr::UndefinedFun(ident.clone()))?
-                } else {
-                    todo!()
+                let mut pvals = vec![];
+
+                let fun_ident = match &funct.expr {
+                    plir::ExprType::Ident(ident) => Cow::from(ident),
+                    plir::ExprType::Path(plir::Path::Method(referent, met, _)) => {
+                        let ty = referent.ty.ident().expect("expected referent type to have identifier");
+                        
+                        pvals.push(referent.write_ir(compiler)?);
+                        Cow::from(format!("{ty}::{met}"))
+                    },
+                    _ => todo!("arbitrary expr calls")
                 };
+
+                let fun = compiler.module.get_function(&fun_ident)
+                    .ok_or_else(|| CompileErr::UndefinedFun(fun_ident.into_owned()))?;
 
                 let fun_ret = match &funct.ty {
                     plir::Type::Fun(plir::FunType(_, ret)) => &**ret,
                     _ => unreachable!()
                 };
                 
-                let fun_params = fun.count_params() as usize;
-                let expr_params = params.len();
-                if fun_params == expr_params {
-                    let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| compiler.basic_value_of(gv).into()))
-                        .collect::<Result<_, _>>()?;
+                for p in params {
+                    pvals.push(p.write_ir(compiler)?);
+                }
+                let pvals: Vec<_> = pvals.into_iter()
+                    .map(|p| compiler.basic_value_of(p))
+                    .map(Into::into)
+                    .collect();
 
-                    let call = compiler.builder.build_call(fun, &resolved_params, "call");
-                    match call.try_as_basic_value().left() {
-                        Some(basic) => compiler.reconstruct(fun_ret, basic),
-                        None => Ok(GonValue::Unit),
-                    }
-                } else {
-                    Err(CompileErr::WrongArity(fun_params, expr_params))
+                let call = compiler.builder.build_call(fun, &pvals, "call");
+                match call.try_as_basic_value().left() {
+                    Some(basic) => compiler.reconstruct(fun_ret, basic),
+                    None => Ok(GonValue::Unit),
                 }
             },
             plir::ExprType::Index(idx) => idx.write_ir(compiler),
@@ -871,7 +873,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
                     e.write_ir(compiler)
                 }
             },
-            plir::Path::Method(_, _, _) => todo!(),
+            plir::Path::Method(_, _, _) => panic!("Expected method to be resolved in call"),
         }
     }
 }
