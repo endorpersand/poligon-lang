@@ -844,15 +844,25 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
         match self {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
-                if let Some((_, ty)) = attrs.last() {
+                if let Some((_, last_ty)) = attrs.last() {
                     let gv = e.write_ir(compiler)?;
-                    let mut value = compiler.basic_value_of(gv);
+                    let ty = compiler.basic_value_of(gv).get_type();
 
-                    for &(attr, _) in attrs {
-                        value = compiler.builder.build_extract_value(value.into_struct_value(), attr as u32, "")
-                            .unwrap_or_else(|| unreachable!("struct access OOB {attr}"));
-                    }
-                    compiler.reconstruct(ty, value)
+                    let ptr = compiler.alloca_and_store("path", gv)?;
+
+                    let i32_ty = compiler.ctx.i32_type();
+                    let mut indexes = vec![i32_ty.const_zero()];
+                    let attr_idx = attrs.iter()
+                        .map(|&(i, _)| i)
+                        .map(|i| i32_ty.const_int(i as u64, false));
+                    indexes.extend(attr_idx);
+
+                    // SAFETY: After PLIR pass, this should be valid.
+                    let el_ptr = unsafe {
+                        compiler.builder.build_in_bounds_gep(ty, ptr, &indexes, "path_access")
+                    };
+                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
+                    compiler.reconstruct(last_ty, el)
                 } else {
                     e.write_ir(compiler)
                 }
