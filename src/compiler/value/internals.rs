@@ -23,8 +23,8 @@ macro_rules! std_map {
 
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        let p0 = fun.get_first_param().unwrap().into_struct_value();
-        let buf = builder.build_extract_value(p0, 0, "buf").unwrap();
+        let ptr = fun.get_first_param().unwrap().into_pointer_value();
+        let buf_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
     
         let puts = self.import_fun("puts",
             layout!(self, S_INT).fn_type(
@@ -33,6 +33,7 @@ impl<'ctx> Compiler<'ctx> {
             ),
         )?;
     
+        let buf = builder.build_load(self.ptr_type(Default::default()), buf_ptr, "buf");
         builder.build_call(puts, &[buf.into()], "");
         builder.build_return(None);
     

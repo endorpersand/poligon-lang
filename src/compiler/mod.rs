@@ -260,18 +260,30 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_return(self.returnable_value_of(gv).as_ref().map(|bv| bv as _))
     }
 
-    /// Import a function using the provided PLIR function signature.
-    fn import(&mut self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+    /// Create a function value from the function's PLIR signature.
+    fn define_fun(&self, sig: &plir::FunSignature) -> CompileResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { ident, params, ret } = sig;
 
         let arg_tys: Vec<_> = params.iter()
-            .map(|p| self.get_layout(&p.ty).map(Into::into))
+            .map(|p| self.get_ref_layout(&p.ty).map(Into::into))
             .collect::<Result<_, _>>()?;
-        
+
         let fun_ty = self.get_layout_or_void(ret)?
             .fn_type(&arg_tys, false);
+        let fun = self.module.add_function(ident, fun_ty, None);
 
-        self.import_fun(ident, fun_ty)
+        // set arguments names
+        for (param, arg) in iter::zip(params, fun.get_param_iter()) {
+            apply_bv!(let v = arg => v.set_name(&param.ident));
+        }
+
+        Ok((fun, fun_ty))
+    }
+
+    /// Import a function using the provided PLIR function signature.
+    fn import(&mut self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+        let (_, fun_ty) = self.define_fun(sig)?;
+        self.import_fun(&sig.ident, fun_ty)
     }
 
     /// Define a type for the compiler to track.
@@ -279,7 +291,7 @@ impl<'ctx> Compiler<'ctx> {
         self.layouts.insert(ty.to_string(), layout.as_basic_type_enum());
     }
 
-    /// Get the LLVM layout of a given PLIR type if the compiler knows about it.
+    /// Get the LLVM layout of a given PLIR type.
     fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
         ty.ident()
             .and_then(|ident| self.get_layout_by_name(ident))
@@ -299,6 +311,38 @@ impl<'ctx> Compiler<'ctx> {
             Ok(self.ctx.void_type()).map(Into::into)
         } else {
             self.get_layout(ty).map(Into::into)
+        }
+    }
+
+    /// If this PLIR type is a copy-by-reference type, return `Ok(PointerType)` 
+    /// to indicate this is holding a pointer.
+    /// Otherwise, return `Err(BasicTypeEnum)` to say the conversion to pointer failed.
+    /// 
+    /// This should not be used, instead use [`Compiler::get_ref_layout`].
+    fn try_get_ref_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, Result<PointerType<'ctx>, BasicTypeEnum<'ctx>>> {
+        use plir::{TypeRef, Type};
+        
+        self.get_layout(ty).map(|layout| {
+            match (ty.as_ref(), layout) {
+                (TypeRef::Prim(Type::S_VOID), _) => Err(layout),
+                (_, BasicTypeEnum::StructType(_)) => Ok(self.ptr_type(Default::default())),
+                _ => Err(layout)
+            }
+        })
+    }
+
+    /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
+    /// If a type is copy-by-reference, this type is LLVM `ptr`, otherwise it is its normal value.
+    fn get_ref_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
+        self.try_get_ref_layout(ty)
+            .map(|l| l.map_or_else(std::convert::identity, Into::into))
+    }
+    /// Similar to [`Expr::write_ir`], except writing in a pointer if this value is copy-by-reference.
+    fn write_ref_value(&mut self, e: &plir::Expr) -> CompileResult<'ctx, BasicValueEnum<'ctx>> {
+        if self.try_get_ref_layout(&e.ty)?.is_ok() {
+            e.write_ptr(self).map(Into::into)
+        } else {
+            e.write_ir(self).map(|gv| self.basic_value_of(gv))
         }
     }
 }
@@ -775,7 +819,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     plir::ExprType::Path(plir::Path::Method(referent, met, _)) => {
                         let ty = referent.ty.ident().expect("expected referent type to have identifier");
                         
-                        pvals.push(referent.write_ir(compiler)?);
+                        pvals.push(compiler.write_ref_value(referent)?);
                         Cow::from(format!("{ty}::{met}"))
                     },
                     _ => todo!("arbitrary expr calls")
@@ -790,10 +834,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 };
                 
                 for p in params {
-                    pvals.push(p.write_ir(compiler)?);
+                    pvals.push(compiler.write_ref_value(p)?);
                 }
                 let pvals: Vec<_> = pvals.into_iter()
-                    .map(|p| compiler.basic_value_of(p))
                     .map(Into::into)
                     .collect();
 
@@ -963,22 +1006,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
 
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let plir::FunSignature { ident, params, ret } = self;
-
-        let arg_tys: Vec<_> = params.iter()
-            .map(|p| compiler.get_layout(&p.ty).map(Into::into))
-            .collect::<Result<_, _>>()?;
-
-        let fun_ty = compiler.get_layout_or_void(ret)?
-            .fn_type(&arg_tys, false);
-        let fun = compiler.module.add_function(ident, fun_ty, None);
-
-        // set arguments names
-        for (param, arg) in iter::zip(params, fun.get_param_iter()) {
-            apply_bv!(let v = arg => v.set_name(&param.ident));
-        }
-
-        Ok(fun)
+        compiler.define_fun(self).map(|(fv, _)| fv)
     }
 }
 
@@ -996,8 +1024,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
         // store params
         for (param, val) in iter::zip(&sig.params, fun.get_param_iter()) {
-            let gv = compiler.reconstruct(&param.ty, val)?;
-            compiler.alloca_and_store(&param.ident, gv)?;
+            if let BasicValueEnum::PointerValue(ptr) = val {
+                compiler.vars.insert(param.ident.clone(), ptr);
+            } else {
+                let gv = compiler.reconstruct(&param.ty, val)?;
+                compiler.alloca_and_store(&param.ident, gv)?;
+            }
         }
 
         // return nothing if the return value is Unit
