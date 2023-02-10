@@ -27,7 +27,7 @@ impl<'ctx> AsBV<'ctx> for &plir::Expr {
 }
 impl<'ctx> AsBVInfallible<'ctx> for GonValue<'ctx> {
     fn into_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx> {
-        self.basic_value(c)
+        c.basic_value_of(self)
     }
 }
 impl<'ctx> AsBVInfallible<'ctx> for BV<'ctx> {

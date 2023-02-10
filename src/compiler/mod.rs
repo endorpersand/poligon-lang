@@ -171,7 +171,7 @@ impl<'ctx> Compiler<'ctx> {
     {
         let alloca = self.builder.build_alloca(self.get_layout(&val.plir_type())?, ident);
         self.vars.insert(String::from(ident), alloca);
-        self.builder.build_store(alloca, val.basic_value(self));
+        self.builder.build_store(alloca, self.basic_value_of(val));
         Ok(alloca)
     }
 
@@ -180,7 +180,7 @@ impl<'ctx> Compiler<'ctx> {
     {
         self.vars.get(ident)
             .map(|&alloca| {
-                self.builder.build_store(alloca, val.basic_value(self));
+                self.builder.build_store(alloca, self.basic_value_of(val));
                 alloca
             })
     }
@@ -197,7 +197,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn add_incoming_gv<'a>(&self, phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
         let (incoming_results, incoming_blocks): (Vec<BasicValueEnum<'ctx>>, Vec<_>) = incoming.iter()
-            .map(|&(a, b)| (a.basic_value(self), b))
+            .map(|&(a, b)| (self.basic_value_of(a), b))
             .unzip();
     
         let vec: Vec<_> = iter::zip(incoming_results.iter(), incoming_blocks)
@@ -272,7 +272,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Build a function return instruction using a GonValue.
     pub fn build_return(&self, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
-        self.builder.build_return(gv.basic_value_or_void(self).as_ref().map(|t| t as _))
+        self.builder.build_return(self.returnable_value_of(gv).as_ref().map(|bv| bv as _))
     }
 
     /// Import a function using the provided PLIR function signature.
@@ -798,7 +798,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let expr_params = params.len();
                 if fun_params == expr_params {
                     let resolved_params: Vec<_> = params.iter()
-                        .map(|p| p.write_ir(compiler).map(|gv| gv.basic_value(compiler).into()))
+                        .map(|p| p.write_ir(compiler).map(|gv| compiler.basic_value_of(gv).into()))
                         .collect::<Result<_, _>>()?;
 
                     let call = compiler.builder.build_call(fun, &resolved_params, "call");
@@ -845,7 +845,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, ty)) = attrs.last() {
-                    let mut value = e.write_ir(compiler)?.basic_value(compiler);
+                    let gv = e.write_ir(compiler)?;
+                    let mut value = compiler.basic_value_of(gv);
 
                     for &(attr, _) in attrs {
                         value = compiler.builder.build_extract_value(value.into_struct_value(), attr as u32, "")
@@ -885,7 +886,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
                 let i64_type = compiler.ctx.i64_type();
                 
                 // this should also be type checked in PLIR:
-                let idx = index.basic_value(compiler).into_int_value();
+                let idx = compiler.basic_value_of(index).into_int_value();
 
                 // bounds check
                 let lower = compiler.raw_cmp(len.get_type().const_zero(), op::Cmp::Le, idx);

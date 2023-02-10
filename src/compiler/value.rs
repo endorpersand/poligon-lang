@@ -129,13 +129,38 @@ impl<'ctx> Compiler<'ctx> {
             _ => Err(CompileErr::UnresolvedType(t.clone()))
         }
     }
+
+    /// Obtain the basic LLVM value represented by this [`GonValue`].
+    /// 
+    /// Depending on context, [`Compiler::returnable_value_of`] may be more suitable.
+    pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
+        match value {
+            GonValue::Float(f) => f.into(),
+            GonValue::Int(i)   => i.into(),
+            GonValue::Bool(b)  => b.into(),
+            GonValue::Str(s)   => s.into(),
+            GonValue::Unit     => layout!(self, S_VOID).const_zero(),
+        }
+    }
+
+    /// Obtain the LLVM value used for return statements for this [`GonValue`].
+    /// 
+    /// This should be used instead of [`Compiler::basic_value_of`]
+    /// when being inserted into a `return` statement or 
+    /// other similar statements where an `Option\<&dyn BasicValue\>` is accepted.
+    pub fn returnable_value_of(&self, value: GonValue<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+        match value {
+            GonValue::Unit => None,
+            val => Some(self.basic_value_of(val))
+        }
+    }
 }
 
 impl<'ctx> GonValue<'ctx> {
     /// The PLIR type for this value.
     /// 
     /// This can be used to reconstruct a GonValue from a LLVM representation. 
-    /// See [`GonValue::reconstruct`].
+    /// See [`Compiler::reconstruct`].
     pub fn plir_type(self) -> Cow<'ctx, plir::Type> {
         match self {
             GonValue::Float(_) => Cow::Owned(plir::ty!(plir::Type::S_FLOAT)),
@@ -143,31 +168,6 @@ impl<'ctx> GonValue<'ctx> {
             GonValue::Bool(_)  => Cow::Owned(plir::ty!(plir::Type::S_BOOL)),
             GonValue::Str(_)   => Cow::Owned(plir::ty!(plir::Type::S_STR)),
             GonValue::Unit     => Cow::Owned(plir::ty!(plir::Type::S_VOID)),
-        }
-    }
-
-    /// Produce a basic LLVM value for this `GonValue`.
-    /// 
-    /// Depending on context, [`GonValue::basic_value_or_void`] may be more suitable.
-    pub fn basic_value(self, c: &Compiler<'ctx>) -> BasicValueEnum<'ctx> {
-        match self {
-            GonValue::Float(f) => f.into(),
-            GonValue::Int(i)   => i.into(),
-            GonValue::Bool(b)  => b.into(),
-            GonValue::Str(s)   => s.into(),
-            GonValue::Unit     => layout!(c, S_VOID).const_zero(),
-        }
-    }
-
-    /// Produce a basic LLVM value (or void) for this `GonValue`.
-    /// 
-    /// This should be used instead of [`GonValue::basic_value`]
-    /// when being inserted into a `return` statement or 
-    /// other similar statements where an Option\<BasicValue\> is accepted.
-    pub fn basic_value_or_void(self, c: &Compiler<'ctx>) -> Option<BasicValueEnum<'ctx>> {
-        match self {
-            GonValue::Unit => None,
-            val => Some(val.basic_value(c))
         }
     }
 }
