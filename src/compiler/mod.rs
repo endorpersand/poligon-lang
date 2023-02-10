@@ -175,22 +175,9 @@ impl<'ctx> Compiler<'ctx> {
         Ok(alloca)
     }
 
-    /// Store the value in the allocated position or return None if there is no allocated position
-    fn store_val(&self, ident: &str, val: GonValue<'ctx>) -> Option<PointerValue<'ctx>>
-    {
-        self.vars.get(ident)
-            .map(|&alloca| {
-                self.builder.build_store(alloca, self.basic_value_of(val));
-                alloca
-            })
-    }
-
-    fn get_val(&mut self, ident: &str, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
+    fn get_ptr(&mut self, ident: &str) -> CompileResult<'ctx, PointerValue<'ctx>> {
         match self.vars.get(ident) {
-            Some(&ptr) => {
-                let val = self.builder.build_load(self.get_layout(ty)?, ptr, "load");
-                self.reconstruct(ty, val)
-            },
+            Some(&ptr) => Ok(ptr),
             None => Err(CompileErr::UndefinedVar(String::from(ident))),
         }
     }
@@ -257,17 +244,14 @@ impl<'ctx> Compiler<'ctx> {
         ty: StructType<'ctx>,
         values: &[BasicValueEnum<'ctx>]
     ) -> CompileResult<'ctx, StructValue<'ctx>> {
-        let ptr = self.builder.build_alloca(ty, "struct");
-        let result = ty.const_zero();
-        self.builder.build_store(ptr, result);
-
+        let mut result = ty.const_zero();
         for (i, &fval) in values.iter().enumerate() {
-            let field_ptr = self.builder.build_struct_gep(ty, ptr, i as u32, "field")
-                .map_err(|_| CompileErr::StructIndexOOB(i))?;
-            self.builder.build_store(field_ptr, fval);
+            result = self.builder.build_insert_value(result, fval, i as u32, "")
+                .ok_or_else(|| CompileErr::StructIndexOOB(i))?
+                .try_into()
+                .unwrap();
         }
-        
-        Ok(self.builder.build_load(ty, ptr, "struct_load").into_struct_value())
+        Ok(result)
     }
 
     /// Build a function return instruction using a GonValue.
@@ -423,6 +407,10 @@ pub trait TraverseIR<'ctx> {
 
     /// This function describes how the value is written into LLVM.
     fn write_ir(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
+}
+// TODO: pub
+trait TraverseIRPtr<'ctx> {
+    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>>;
 }
 
 // impl<'ctx> TraverseIR<'ctx> for plir::Block {
@@ -598,7 +586,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
         let expr_layout = compiler.get_layout(expr_ty)?;
 
         match expr {
-            plir::ExprType::Ident(ident) => compiler.get_val(ident, expr_ty),
+            plir::ExprType::Ident(_) => self.write_ptr(compiler).and_then(|ptr| {
+                let bv = compiler.builder.build_load(expr_layout, ptr, "");
+                compiler.reconstruct(expr_ty, bv)
+            }),
             plir::ExprType::Block(block) => {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
@@ -623,8 +614,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 match target {
                     plir::AsgUnit::Ident(ident) => {
                         let val = expr.write_ir(compiler)?;
-                        compiler.store_val(ident, val)
+
+                        let ptr = compiler.vars.get(ident)
+                            .copied()
                             .ok_or_else(|| CompileErr::UndefinedVar(ident.clone()))?;
+                        compiler.builder.build_store(ptr, compiler.basic_value_of(val));
+
                         Ok(val)
                     },
                     plir::AsgUnit::Path(_)  => todo!(),
@@ -820,6 +815,17 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
         }
     }
 }
+impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
+    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+        match &self.expr {
+            plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
+            _ => {
+                self.write_ir(compiler)
+                    .and_then(|value| compiler.alloca_and_store("", value))
+            }
+        }
+    }
+}
 
 impl<'ctx> TraverseIR<'ctx> for Literal {
     type Return = CompileResult<'ctx, GonValue<'ctx>>;
@@ -845,12 +851,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, last_ty)) = attrs.last() {
-                    let gv = e.write_ir(compiler)?;
-                    let ty = compiler.basic_value_of(gv).get_type();
-
-                    let ptr = compiler.alloca_and_store("path", gv)?;
-
+                    let ptr = e.write_ptr(compiler)?;
+                    let ty = compiler.get_layout(&e.ty)?;
                     let i32_ty = compiler.ctx.i32_type();
+
                     let mut indexes = vec![i32_ty.const_zero()];
                     let attr_idx = attrs.iter()
                         .map(|&(i, _)| i)
