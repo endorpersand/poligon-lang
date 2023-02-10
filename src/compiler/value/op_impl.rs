@@ -286,7 +286,7 @@ impl<'ctx> Unary<'ctx> for StructValue<'ctx> {
             op::Unary::BitNot => "ubitnot",
         };
 
-        let Some(f) = c.module.get_function(&format!("__{st_name}_{op_name}")) else {
+        let Some(f) = c.module.get_function(&format!("{st_name}::{op_name}")) else {
             return cannot_unary(op, self)
         };
 
@@ -430,7 +430,7 @@ impl<'ctx> Binary<'ctx> for StructValue<'ctx> {
             op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
         };
 
-        let Some(f) = c.module.get_function(&format!("__{lname}_{op_name}_{rname}")) else {
+        let Some(f) = c.module.get_function(&format!("{lname}::{op_name}_{rname}")) else {
             return cannot_binary(op, self, right)
         };
 

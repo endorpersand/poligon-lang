@@ -1081,9 +1081,9 @@ impl CodeGenerator {
                             ast::AsgUnit::Path(p) => {
                                 let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
-                                    plir::AsgUnit::Path(p)
-                                } else {
                                     Err(PLIRErr::CannotAssignToMethod)?
+                                } else {
+                                    plir::AsgUnit::Path(p)
                                 }
                             },
                             ast::AsgUnit::Index(idx) => {

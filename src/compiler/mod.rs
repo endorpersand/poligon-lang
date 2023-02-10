@@ -606,20 +606,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::SetLiteral(_) => todo!(),
             plir::ExprType::DictLiteral(_) => todo!(),
             plir::ExprType::Assign(target, expr) => {
-                match target {
-                    plir::AsgUnit::Ident(ident) => {
-                        let val = expr.write_ir(compiler)?;
+                let val = expr.write_ir(compiler)?;
 
-                        let ptr = compiler.vars.get(ident)
-                            .copied()
-                            .ok_or_else(|| CompileErr::UndefinedVar(ident.clone()))?;
-                        compiler.builder.build_store(ptr, compiler.basic_value_of(val));
+                let ptr = match target {
+                    plir::AsgUnit::Ident(ident) => compiler.get_ptr(ident)?,
+                    plir::AsgUnit::Path(p)      => p.write_ptr(compiler)?,
+                    plir::AsgUnit::Index(_)     => todo!(),
+                };
 
-                        Ok(val)
-                    },
-                    plir::AsgUnit::Path(_)  => todo!(),
-                    plir::AsgUnit::Index(_) => todo!(),
-                }
+                compiler.builder.build_store(ptr, compiler.basic_value_of(val));
+                Ok(val)
             },
             plir::ExprType::Path(p) => p.write_ir(compiler),
             plir::ExprType::UnaryOps { ops, expr } => {
@@ -853,6 +849,23 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, last_ty)) = attrs.last() {
+                    let el_ptr = self.write_ptr(compiler)?;
+                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
+                    compiler.reconstruct(last_ty, el)
+                } else {
+                    e.write_ir(compiler)
+                }
+            },
+            plir::Path::Method(_, _, _) => panic!("Expected method to be resolved in call"),
+        }
+    }
+}
+impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
+    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+        match self {
+            plir::Path::Static(_, _) => todo!(),
+            plir::Path::Struct(e, attrs) => {
+                if !attrs.is_empty() {
                     let ptr = e.write_ptr(compiler)?;
                     let ty = compiler.get_layout(&e.ty)?;
                     let i32_ty = compiler.ctx.i32_type();
@@ -867,13 +880,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
                     let el_ptr = unsafe {
                         compiler.builder.build_in_bounds_gep(ty, ptr, &indexes, "path_access")
                     };
-                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
-                    compiler.reconstruct(last_ty, el)
+
+                    Ok(el_ptr)
                 } else {
-                    e.write_ir(compiler)
+                    e.write_ptr(compiler)
                 }
             },
-            plir::Path::Method(_, _, _) => panic!("Expected method to be resolved in call"),
+            plir::Path::Method(_, _, _) => panic!("Method does not have a pointer"),
         }
     }
 }
