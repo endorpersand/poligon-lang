@@ -872,6 +872,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
     fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
         match &self.expr {
             plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
+            plir::ExprType::Path(p) => p.write_ptr(compiler),
             _ => {
                 self.write_ir(compiler)
                     .and_then(|value| compiler.alloca_and_store("", value))
