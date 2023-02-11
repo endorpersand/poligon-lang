@@ -570,6 +570,7 @@ impl TraverseRt for ast::Expr {
             },
             ast::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets"))?,
             ast::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts"))?,
+            ast::Expr::ClassLiteral(_, _) => Err(FeatureErr::CompilerOnly("classes"))?,
             ast::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 

@@ -788,12 +788,7 @@ impl Parser {
     /// The return of this function holds the self parameter, the identifier, 
     /// and whether or not the method is static.
     pub fn expect_method_ident(&mut self) -> ParseResult<(Option<String>, String, bool)> {
-        let this = matches!(self.peek_token(), Some(Token::Ident(_))).then(|| {
-            let Some(Token::Ident(s)) = self.next_token() else {
-                unreachable!()
-            };
-            s
-        });
+        let referent = self.match_ident();
 
         let is_static = match self.expect_n(&[token![.], token![::]])?.tt {
             token![.] => false,
@@ -802,7 +797,7 @@ impl Parser {
         };
         let method = self.expect_ident()?;
 
-        Ok((this, method, is_static))
+        Ok((referent, method, is_static))
     }
 
     /// Expect that the next tokens represent a method signature.
@@ -839,6 +834,17 @@ impl Parser {
 
             Ok(ast::MethodDecl { sig, block: Rc::new(block) })
         }).transpose()
+    }
+
+    /// Match the next token in input if it is an identifier token,
+    /// returning the identifier's string if successfully matched.
+    pub fn match_ident(&mut self) -> Option<String> {
+        matches!(self.peek_token(), Some(Token::Ident(_))).then(|| {
+            let Some(FullToken { tt: Token::Ident(s), .. }) = self.tokens.pop_front() else {
+                unreachable!()
+            };
+            s
+        })
     }
 
     /// Expect that the next token in the input is an identifier token,
@@ -1207,9 +1213,7 @@ impl Parser {
     pub fn match_unit(&mut self) -> ParseResult<Option<ast::Expr>> {
         if let Some(t) = self.peek_token() {
             let unit = match t {
-                Token::Ident(id) if id == "set" => self.expect_set()?,
-                Token::Ident(id) if id == "dict" => self.expect_dict()?,
-                Token::Ident(_)   => self.expect_ident().map(ast::Expr::Ident)?,
+                Token::Ident(_) => self.expect_ii()?,
                 Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
                 token!["["]       => self.expect_list()?,
                 token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
@@ -1257,51 +1261,61 @@ impl Parser {
         Ok(ast::Expr::ListLiteral(exprs))
     }
 
-    /// Expect that the next tokens in input represent a set literal (`set {1, 2, 3}`).
-    pub fn expect_set(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(Token::Ident("set".to_string()))?;
-
-        let e = if self.match1(token!["{"]) {
-            let exprs = self.expect_closing_tuple(token!["}"])?;
-            
-            ast::Expr::SetLiteral(exprs)
-        } else {
-            ast::Expr::Ident("set".to_string())
-        };
-
-        Ok(e)
-    }
-
-    /// Expect that the next tokens in input represent a dict literal (`dict {"a": 1, "b": 2}`).
-    pub fn expect_dict(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(Token::Ident("dict".to_string()))?;
-
-        let e = if self.match1(token!["{"]) {
-            let entries = self.expect_closing_tuple_of(
-                Parser::match_entry,
-                token!["}"], 
-                ParseErr::ExpectedEntry
-            )?;
-            
-            ast::Expr::DictLiteral(entries)
-        } else {
-            ast::Expr::Ident("dict".to_string())
-        };
-
-        Ok(e)
-    }
-
-    /// Expect that the next tokens in input represent a dict entry (`"a": 2`).
-    /// 
-    /// This is used by [`Parser::expect_dict`].
-    pub fn match_entry(&mut self) -> ParseResult<Option<(ast::Expr, ast::Expr)>> {
-        if let Some(k) = self.match_expr()? {
-            self.expect1(token![:])?;
-            let v = self.expect_expr()?;
-            Ok(Some((k, v)))
-        } else {
-            Ok(None)
+    /// Expect that the next tokens are an identifier, 
+    /// a set literal (`set {1, 2, 3}`), 
+    /// a dict literal (`dict {"a": 1, "b": 2, "c": 3}`),
+    /// or a class initializer (`Class {a: 2, b: 3, c: 4}`).
+    fn expect_ii(&mut self) -> ParseResult<ast::Expr> {
+        /// Entry for dict literals
+        fn match_entry(this: &mut Parser) -> ParseResult<Option<(ast::Expr, ast::Expr)>> {
+            if let Some(k) = this.match_expr()? {
+                this.expect1(token![:])?;
+                let v = this.expect_expr()?;
+                Ok(Some((k, v)))
+            } else {
+                Ok(None)
+            }
         }
+        /// Entry for class initializers
+        fn match_init_entry(this: &mut Parser) -> ParseResult<Option<(String, ast::Expr)>> {
+            if let Some(k) = this.match_ident() {
+                this.expect1(token![:])?;
+                let v = this.expect_expr()?;
+                Ok(Some((k, v)))
+            } else {
+                Ok(None)
+            }
+        }
+
+        let id = self.expect_ident()?;
+        let e = if self.match1(token!["{"]) {
+            match id.as_str() {
+                "set" => {
+                    let exprs = self.expect_closing_tuple(token!["}"])?;
+                    ast::Expr::SetLiteral(exprs)
+                },
+                "dict" => {
+                    let entries = self.expect_closing_tuple_of(
+                        match_entry,
+                        token!["}"], 
+                        ParseErr::ExpectedEntry
+                    )?;
+                    ast::Expr::DictLiteral(entries)
+                },
+                _ => {
+                    let entries = self.expect_closing_tuple_of(
+                        match_init_entry, 
+                        token!["}"], 
+                        ParseErr::ExpectedIdent
+                    )?;
+                    ast::Expr::ClassLiteral(ast::Type(id, vec![]), entries)
+                }
+            }
+        } else {
+            ast::Expr::Ident(id)
+        };
+
+        Ok(e)
     }
 
     /// Expect that the next tokens in input represent an if-else expression 

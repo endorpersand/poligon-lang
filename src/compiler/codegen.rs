@@ -72,6 +72,12 @@ pub enum PLIRErr {
     WrongArity(usize /* expected */, usize /* got */),
     /// Cannot spread here.
     CannotSpread,
+    /// Cannot use class initializer syntax on this type.
+    CannotInitialize(plir::Type),
+    /// The field was not initialized on the type.
+    UninitializedField(plir::Type, String),
+    /// The field was unexpectedly initialized on the type.
+    UnexpectedField(plir::Type, String),
     /// Operation between two types cannot be computed.
     OpErr(OpErr)
 }
@@ -100,12 +106,17 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
             | PLIRErr::WrongArity(_, _)
+            | PLIRErr::CannotInitialize(_)
             => "type error",
             
             | PLIRErr::UndefinedVar(_)
             | PLIRErr::UndefinedAttr(_, _)
             => "name error",
             
+            | PLIRErr::UninitializedField(_, _)
+            | PLIRErr::UnexpectedField(_, _)
+            => "value error",
+
             | PLIRErr::OpErr(e)
             => e.err_name(),
         }
@@ -126,6 +137,9 @@ impl GonErr for PLIRErr {
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
             PLIRErr::WrongArity(e, g) => format!("wrong number of parameters - expected {e}, got {g}"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
+            PLIRErr::CannotInitialize(t) => format!("cannot use initializer syntax on type '{t}'"),
+            PLIRErr::UninitializedField(t, f) => format!("uninitialized field '{f}' on type '{t}'"),
+            PLIRErr::UnexpectedField(t, f) => format!("field '{f}' is not present on type '{t}'"),
             PLIRErr::OpErr(e) => e.message(),
         }
     }
@@ -434,6 +448,13 @@ impl TypeData {
         match &self.ty {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
+        }
+    }
+
+    fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::FieldDecl>> {
+        match &self.ty {
+            TypeStructure::Primitive => None,
+            TypeStructure::Class(cls) => Some(&cls.fields)
         }
     }
 }
@@ -1069,6 +1090,37 @@ impl CodeGenerator {
                     plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]),
                     plir::ExprType::DictLiteral(new_inner)
                 ))
+            },
+            ast::Expr::ClassLiteral(ty, entries) => {
+                let ty = self.consume_type(ty)?;
+                let mut entries: HashMap<_, _> = entries.into_iter()
+                    .map(|(k, v)| Ok((k, self.consume_expr(v)?)))
+                    .collect::<PLIRResult<_>>()?;
+                
+                let cls = self.get_class(&ty)?;
+                let fields = cls.fields()
+                    .ok_or_else(|| PLIRErr::CannotInitialize(ty.clone()))?;
+                
+                let new_entries = fields.iter()
+                    .map(|(k, fd)| {
+                        let fexpr = entries.remove(k)
+                            .ok_or_else(|| PLIRErr::UninitializedField(ty.clone(), k.clone()))?;
+                        
+                        let fexpr = op_impl::apply_special_cast(fexpr, &fd.ty, CastType::Decl)
+                            .map_err(|e| PLIRErr::ExpectedType(fd.ty.clone(), e.ty))?;
+
+                        Ok(fexpr)
+                    })
+                    .collect::<PLIRResult<_>>()?;
+                
+                if let Some((f, _)) = entries.into_iter().next() {
+                    Err(PLIRErr::UnexpectedField(ty, f))
+                } else {
+                    Ok(plir::Expr::new(
+                        ty.clone(), 
+                        plir::ExprType::ClassLiteral(ty, new_entries)
+                    ))
+                }
             },
             ast::Expr::Assign(pat, expr) => {
                 let expr = self.consume_expr(*expr)?;

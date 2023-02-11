@@ -246,6 +246,11 @@ impl Display for ExprType {
                 fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
                 write!(f, "}}")
             },
+            ExprType::ClassLiteral(ident, lt) => {
+                write!(f, "{ident} {{")?;
+                fmt_list(f, lt)?;
+                write!(f, "}}")
+            },
             ExprType::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             ExprType::Path(p) => write!(f, "{p}"),
             ExprType::UnaryOps { ops, expr } => {

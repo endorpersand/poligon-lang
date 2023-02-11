@@ -649,6 +649,18 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::ListLiteral(_) => todo!(),
             plir::ExprType::SetLiteral(_) => todo!(),
             plir::ExprType::DictLiteral(_) => todo!(),
+            plir::ExprType::ClassLiteral(t, entries) => {
+                let layout = compiler.get_layout(t)?.into_struct_type();
+                let entries: Vec<_> = entries.iter()
+                    .map(|e| {
+                        e.write_ir(compiler)
+                            .map(|gv| compiler.basic_value_of(gv))
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                compiler.create_struct_value(layout, &entries)
+                    .and_then(|bv| compiler.reconstruct(expr_ty, bv))
+            },
             plir::ExprType::Assign(target, expr) => {
                 let val = expr.write_ir(compiler)?;
 

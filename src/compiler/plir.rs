@@ -289,6 +289,9 @@ pub enum ExprType {
     /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
     DictLiteral(Vec<(Expr, Expr)>),
 
+    /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
+    ClassLiteral(Type, Vec<Expr>),
+
     /// An assignment operation.
     /// 
     /// Unlike [`ast::Expr::Assign`], this cannot be a pattern.

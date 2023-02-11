@@ -279,6 +279,11 @@ impl Display for Expr {
                 fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
                 write!(f, "}}")
             },
+            Expr::ClassLiteral(name, lt) => {
+                write!(f, "{name} {{")?;
+                fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
+                write!(f, "}}")
+            },
             Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             Expr::Path(p) => write!(f, "{p}"),
             Expr::UnaryOps { ops, expr } => {

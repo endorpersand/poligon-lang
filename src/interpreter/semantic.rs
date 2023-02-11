@@ -316,6 +316,7 @@ impl TraverseResolve for ast::Expr {
 
                 Ok(())
             },
+            ast::Expr::ClassLiteral(_, _) => Err(ResolveErr::CompilerOnly("classes")),
             ast::Expr::Assign(lhs, rhs) => {
                 rhs.traverse_rs(map)?;
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
