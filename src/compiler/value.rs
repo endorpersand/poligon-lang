@@ -41,7 +41,7 @@ pub(crate) use apply_bt;
 /// An LLVM representation of the a possible value in Poligon.
 /// 
 /// This enum holds all the information to keep track of a type in Poligon,
-/// and can be converted to an LLVM value via [`GonValue::basic_value`].
+/// and can be converted to an LLVM value via [`Compiler::basic_value_of`].
 #[derive(Clone, Copy, Debug)]
 pub enum GonValue<'ctx> {
     /// A `float`.
