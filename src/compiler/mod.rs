@@ -19,7 +19,6 @@ pub mod plir;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::ffi::CStr;
 use std::iter;
 
 use inkwell::{OptimizationLevel, AddressSpace};
@@ -461,18 +460,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// First, evaluate all of the function declarations.
     /// 
     /// We can then determine the program entry point:
-    /// 1. If there are any statements outside of function declarations, 
-    /// then those statements are treated as a single program.
-    ///     - In this case, there cannot be a function named `main`.
-    /// 2. If there is only one function, then that function is the program.
-    /// 3. If there are any functions named main, then that function is the program.
+    /// -  If there are any functions named main, that function is the program.
+    /// -  Otherwise, all unhoisted statements are collected into a function (main).
+    /// - If there is both a function named main and unhoisted statements present, this will error.
     fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        fn is_main(cs: &CStr) -> bool {
-            matches!(cs.to_str(), Ok("main"))
-        }
-
         // split the functions from everything else:
-        let mut funs = vec![];
+        let mut main_fun = None;
         let mut fun_bodies = vec![];
         
         let hoist_pt = self.0.partition_point(plir::Stmt::hoisted);
@@ -481,10 +474,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         for stmt in hoisted {
             match stmt {
                 plir::Stmt::FunDecl(dcl) => {
-                    funs.push(dcl.sig.write_value(compiler)?);
+                    let fv = dcl.sig.write_value(compiler)?;
+                    if dcl.sig.ident == "main" {
+                        main_fun.replace(fv);
+                    }
                     fun_bodies.push(dcl);
                 },
-                plir::Stmt::ExternFunDecl(dcl) => funs.push(compiler.import(dcl)?),
+                plir::Stmt::ExternFunDecl(dcl) => { compiler.import(dcl)?; },
                 plir::Stmt::ClassDecl(cls) => cls.write_value(compiler)?,
                 _ => unreachable!()
             }
@@ -495,52 +491,19 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             bodies.write_value(compiler)?;
         }
 
-        // evaluate type of program
-        if rest.is_empty() {
-            match *funs.as_slice() {
-                // the program is an empty function
-                [] => {
-                    let main = compiler.module.add_function(
-                        "main", 
-                        compiler.ctx.void_type().fn_type(&[], false), 
-                        None
-                    );
-
-                    let bb = compiler.ctx.append_basic_block(main, "body");
-                    compiler.builder.position_at_end(bb);
-                    compiler.builder.build_return(None);
-
-                    if main.verify(false) {
-                        Ok(main)
-                    } else {
-                        unreachable!("Creation of blank main function errored?");
-                    }
-                }
-
-                // the program is the only function in fun_decls
-                [fun] => Ok(fun),
-                
-                // the program is the "main" function in fun_decls
-                _ => {
-                    funs.into_iter().find(|f| is_main(f.get_name()))
-                        .ok_or(CompileErr::CannotDetermineMain)
-                }
-            }
-        } else {
-            // the program is the anonymous statements
-            if funs.iter().any(|f| is_main(f.get_name())) {
-                Err(CompileErr::CannotDetermineMain)
-            } else {
+        match (main_fun, rest) {
+            (Some(f), []) => Ok(f),
+            (Some(_), _)  => Err(CompileErr::CannotDetermineMain),
+            (None, stmts) => {
                 let main = compiler.module.add_function(
                     "main", 
                     compiler.ctx.void_type().fn_type(&[], false), 
                     None
                 );
-
-                let bb = compiler.ctx.append_basic_block(main, "main_body");
                 
+                let bb = compiler.ctx.append_basic_block(main, "main_body");
                 compiler.builder.position_at_end(bb);
-                for stmt in rest {
+                for stmt in stmts {
                     stmt.write_value(compiler)?;
                 }
                 compiler.builder.build_return(None);
