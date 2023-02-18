@@ -1288,7 +1288,8 @@ impl Parser {
         }
 
         let id = self.expect_ident()?;
-        let e = if self.match1(token!["{"]) {
+        let e = if self.match1(token![#]) {
+            self.expect1(token!["{"])?;
             match id.as_str() {
                 "set" => {
                     let exprs = self.expect_closing_tuple(token!["}"])?;
