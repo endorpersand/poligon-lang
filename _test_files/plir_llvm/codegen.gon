@@ -40,7 +40,7 @@ fun b2() { b1(); }
 //! TEST recursive_fib
 extern fun printd(s: int);
 
-fun fib(n: int) {
+fun fib(n: int) -> int {
     if n < 2 { return n; }
     return fib(n - 1) + fib(n - 2); 
 }
