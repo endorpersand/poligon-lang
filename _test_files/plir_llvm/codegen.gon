@@ -1,0 +1,33 @@
+//! TEST basic_if
+if true {
+    2;
+} else {
+    3;
+}
+
+//! TEST basic_pattern
+let [a, .., b] = [1, 2, 3, 4];
+let [a, ..b, c] = [1, 2, 3, 4];
+
+a = 4;
+[a, b, c, .., d, e, f] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+//! TEST basic_arith_chain
+((1 + (2 + 3) * 4) - 5) * 7 / 7;
+
+//! TEST basic_block
+let a = {
+    let b = {
+        let c = {
+            5;
+        };
+
+        c;
+    };
+
+    b;
+};
+
+//! TEST basic_extern
+extern fun print(s: string);
+print("hello!");

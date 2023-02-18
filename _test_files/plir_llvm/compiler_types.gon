@@ -1,0 +1,153 @@
+//! TEST class_chain
+extern fun print(s: string);
+extern fun printd(d: int);
+
+class A {
+    age: int
+}
+class B {
+    a: A
+}
+class C {
+    a: A,
+    b: B
+}
+class D {
+    a: A,
+    b: B,
+    c: C
+}
+class E {
+    a: A,
+    b: B,
+    c: C,
+    d: D,
+    dell: D
+
+    fun self.get_size() -> int {
+        self.d.c.b.a.age;
+    }
+}
+
+fun get_size(e: E) -> int {
+    e.d.c.b.a.age;
+}
+
+//! TEST initializer
+extern fun printd(s: int);
+
+class A {
+    age: int,
+    size: int
+}
+
+fun main() {
+    let a = A #{ age: 14, size: 14 };
+    printd(a.age);
+    printd(a.size);
+}
+
+//! TEST method_access
+extern fun printd(s: int);
+
+class A {
+    age: int,
+
+    fun self.get_age() -> int {
+        self.age;
+    }
+    fun self.set_age(a: int) -> int {
+        self.age = a;
+    }
+}
+
+fun main() {
+    let a = A #{ age: 14 };
+    a.set_age(15);
+    printd(a.age);
+}
+
+//! TEST decl_cast_check
+
+let chr2str:   string = 'h';
+let str2str:   string = "hello";
+
+let int2float: float = 2;
+let int2int:   int   = 3;
+
+//! TEST decl_cast_check_fail_1
+let str2void: void = "hello";
+//! TEST decl_cast_check_fail_2
+let int2void: void = 14;
+//! TEST decl_cast_check_fail_3
+let str2bool: bool = "hello";
+//! TEST decl_cast_check_fail_4
+let float2int: int = 0.7;
+//! TEST decl_cast_check_fail_5
+let str2chr: char = "hello";
+
+//! TEST fun_cast_check
+fun chr2str(c: char) -> string { c; }
+fun str2str(s: string) -> string { s; }
+
+fun int2float(i: int) -> float { i; }
+fun int2int(i: int) -> int { i; }
+
+fun str2void(s: string) { s; }
+fun int2void(i: int) { i; }
+
+//! TEST fun_cast_check_fail_1
+fun str2bool(s: string) -> bool { s; }
+//! TEST fun_cast_check_fail_2
+fun float2int(f: float) -> int { f; }
+//! TEST fun_cast_check_fail_3
+fun str2chr(s: string) -> char { s; }
+
+//! TEST type_res
+extern fun printd(s: int);
+
+class A {}
+
+fun consume_a(a: A) {}
+fun produce_a() -> A {
+    A #{};
+}
+
+class B {
+    age: int
+
+    fun self.sq_age() -> int {
+        self.age * self.age;
+    }
+}
+
+fun main() {
+    let a: A = A #{};
+    let b: B = B #{
+        age: 10
+    };
+
+    printd(b.age);
+    printd(b.sq_age());
+}
+
+//! TEST type_res_fail_1
+// A is not defined
+fun consume_a(a: A) {}
+
+//! TEST type_res_fail_2
+// A is not defined
+fun produce_a() -> A {}
+
+//! TEST type_res_fail_3
+// A is not defined
+fun main() {
+    let a: A = A #{};
+}
+
+//! TEST type_res_fail_4
+// A is not defined
+extern fun printd(s: int);
+fun consume_a(a: A) {
+    printd(a.age);
+}

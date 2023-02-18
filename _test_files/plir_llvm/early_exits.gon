@@ -1,0 +1,60 @@
+//! TEST early_return
+extern fun print(s: string);
+
+fun main() {
+    let a = 1;
+    return;
+
+    let b = 2;
+    print(b);
+}
+
+//! TEST return_void
+extern fun print(s: string);
+fun main() {
+    return print("this should be valid!");
+}
+
+//! TEST never_decl
+fun test() -> bool {
+    let d = { return false; };
+    true;
+}
+
+//! TEST never_block
+fun test() -> bool {
+    let bl = {
+        return false;
+    };
+    true;
+}
+
+//! TEST never_if
+fun test(a: bool) -> bool {
+    let bl = if a {
+        return true;
+    } else {
+        3;
+    };
+    false;
+}
+
+//! TEST never_while
+fun test_rt(a: bool) -> bool {
+    while true {
+        return false;
+    }
+    return a;
+}
+fun test_br(a: bool) -> bool {
+    while true {
+        break;
+    }
+    return a;
+}
+fun test_ct(a: bool) -> bool {
+    while true {
+        continue;
+    }
+    return a;
+}

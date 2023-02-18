@@ -758,7 +758,7 @@ impl CodeGenerator {
                     };
 
                     match me.take() {
-                        Some(e) => match op_impl::apply_special_cast(e, &exp_ty, CastType::Decl) {
+                        Some(e) => match op_impl::apply_special_cast(e, &exp_ty, CastType::FunDecl) {
                             Ok(e) => {
                                 // cast was successful so apply it
                                 me.replace(e);
@@ -1350,57 +1350,71 @@ impl Default for CodeGenerator {
 
 #[cfg(test)]
 mod tests {
-    use crate::{lexer, parser};
+    use crate::test_utils::prelude::*;
 
-    use super::*;
+    load_tests!("_test_files/plir_llvm/codegen.gon");
+    load_tests!(early_exit_tests, "_test_files/plir_llvm/early_exits.gon");
+    load_tests!(type_tests, "_test_files/plir_llvm/compiler_types.gon");
 
-    fn assert_plir_pass(input: &str) {
-        let lexed = lexer::tokenize(input).unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        println!("{}", codegen(parsed).unwrap())
+    fn cg_test(test: Test) -> TestResult<()> {
+        let cg = test.codegen();
+        println!("=== {} {} ===",  test.name, if cg.is_ok() { "PASS" } else { "FAIL" });
+
+        match &cg {
+            Ok(t)  => println!("{t}"),
+            Err(e) => println!("{e:?}\n"),
+        }
+        
+        cg.map(|_| ())
     }
 
     #[test]
-    fn get_display() {
-        assert_plir_pass("if true {
-            2;
-        } else {
-            3;
-        }");
+    fn basic_plir_pass() -> TestResult<()> {
+        tests().pass_all(cg_test, &[
+            "basic_if", 
+            "basic_arith_chain", 
+            "basic_pattern", 
+            "basic_block", 
+            "basic_extern"
+        ])
+    }
 
-        assert_plir_pass("fun a(b: int, c: string) {
-            let d = if 0 {
-                return 1;
-            } else {
-                3;
-            };
+    #[test]
+    fn early_exit() -> TestResult<()> {
+        early_exit_tests().pass_all(cg_test, &[
+            "early_return",
+            "return_void",
+            "never_decl",
+            "never_block",
+            "never_if",
+            "never_while"
+        ])
+    }
 
-            4;
-        }");
+    #[test]
+    fn type_test() -> TestResult<()> {
+        type_tests().pass_all(cg_test, &[
+            "class_chain",
+            "initializer",
+            "method_access",
+            "decl_cast_check",
+            "fun_cast_check",
+            "type_res"
+        ])?;
 
-        assert_plir_pass("
-            let [a, .., b] = [1, 2, 3, 4];
-            let [a, ..b, c] = [1, 2, 3, 4];
-
-            a = 4;
-            [a, b, c, .., d, e, f] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-        ");
-
-        assert_plir_pass("
-            fun print(a: int) {
-                // :?
-            }
-
-            let vd = {
-                let a = 1;
-                {
-                    print(a);
-                }
-
-                fun print(a: float) {
-                    a * 2;
-                }
-            };
-        ");
+        type_tests().fail_all(cg_test, &[
+            "decl_cast_check_fail_1",
+            "decl_cast_check_fail_2",
+            "decl_cast_check_fail_3",
+            "decl_cast_check_fail_4",
+            "decl_cast_check_fail_5",
+            "fun_cast_check_fail_1",
+            "fun_cast_check_fail_2",
+            "fun_cast_check_fail_3",
+            "type_res_fail_1",
+            "type_res_fail_2",
+            "type_res_fail_3",
+            "type_res_fail_4",
+        ])
     }
 }

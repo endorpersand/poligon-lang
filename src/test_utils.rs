@@ -13,9 +13,7 @@ use crate::lexer::token::{FullToken, Token};
 use inkwell::context::Context;
 
 pub mod prelude {
-    pub use super::TestLoader;
-    pub use super::TestResult;
-    pub use super::IoExtract;
+    pub use super::{TestLoader, Test, TestResult, IoExtract};
 
     macro_rules! load_tests {
         ($f:literal) => {
@@ -42,6 +40,7 @@ pub enum TestErr {
     IoErr(std::io::Error),
     LexFailed(String),
     TestFailed(String /* name of test */, String /* the error */),
+    TestPassed(String /* name of test */),
     UnknownTest(String)
 }
 impl From<std::io::Error> for TestErr {
@@ -57,6 +56,7 @@ impl Debug for TestErr {
             Self::DuplicateTest(name) => write!(f, "duplicate test {name}"),
             Self::IoErr(err) => write!(f, "{err:?}"),
             Self::LexFailed(err) => write!(f, "lexing of test file failed:\n{err}"),
+            Self::TestPassed(test) => write!(f, "{test} passed"),
             Self::TestFailed(test, err) => write!(f, "{test} panicked:\n{err}"),
             Self::UnknownTest(name) => write!(f, "unknown test {name}"),
         }
@@ -68,7 +68,7 @@ type Tokens = Vec<FullToken>;
 
 #[derive(Clone)]
 pub struct Test<'t> {
-    name: &'t str,
+    pub name: &'t str,
     code: &'t str,
     tokens: Vec<FullToken>
 }
@@ -158,6 +158,26 @@ impl TestLoader {
             }),
             None => Err(TestErr::UnknownTest(id.to_string())),
         }
+    }
+
+    pub fn pass_all<T, I: FromIterator<T>>(&self, mut f: impl FnMut(Test) -> TestResult<T>, tests: &[&str]) -> TestResult<I> {
+        tests.iter()
+            .copied()
+            .map(|t| self.get(t))
+            .map(|rt| rt.and_then(&mut f))
+            .collect()
+    }
+
+    pub fn fail_all<T>(&self, mut f: impl FnMut(Test) -> TestResult<T>, tests: &[&str]) -> TestResult<()> {
+        tests.iter()
+            .copied()
+            .try_for_each(|t| {
+                let test = self.get(t)?;
+                match f(test) {
+                    Ok(_) => Err(TestErr::TestPassed(String::from(t))),
+                    Err(_) => Ok(()),
+                }
+            })
     }
 }
 
