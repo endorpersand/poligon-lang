@@ -1,2 +1,2 @@
-//! TEST error
-2 + @
+//! TEST add
+2 + 2

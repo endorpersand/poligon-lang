@@ -15,6 +15,7 @@ use inkwell::context::Context;
 pub mod prelude {
     pub use super::TestLoader;
     pub use super::TestResult;
+    pub use super::IoExtract;
 
     macro_rules! load_tests {
         ($f:literal) => {
@@ -202,12 +203,58 @@ fn split_tests(t: impl IntoIterator<Item=FullToken>) -> TestResult<Vec<(String, 
     Ok(tests)
 }
 
+mod exio {
+    use std::collections::VecDeque;
+    use std::io::{BufReader, prelude::*};
+
+    use crate::interpreter::runtime::IoHook;
+
+    pub struct IoExtract {
+        inner: BufReader<VecDeque<u8>>
+    }
+
+    impl IoExtract {
+        pub fn new() -> Self {
+            Self {
+                inner: BufReader::new(Default::default())
+            }
+        }
+
+        pub fn write_hook(&mut self) -> IoHook {
+            IoHook::new_w(self.inner.get_mut())
+        }
+    }
+
+    impl Read for IoExtract {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+    impl BufRead for IoExtract {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            self.inner.fill_buf()
+        }
+
+        fn consume(&mut self, amt: usize) {
+            self.inner.consume(amt)
+        }
+    }
+    impl Write for IoExtract {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.inner.get_mut().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.get_mut().flush()
+        }
+    }
+}
+pub use exio::IoExtract;
+
+
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::io::{BufRead, BufReader};
-    
-    use crate::interpreter::runtime::IoHook;
+    use std::io::BufRead;
 
     use super::prelude::*;
 
@@ -217,16 +264,14 @@ mod tests {
     fn hello() -> TestResult<()> {
         let t = tests().get("add")?;
 
-        let mut dq = VecDeque::new();
-        let hook = IoHook::new_w(&mut dq);
-        
-        t.interpret_with_io(hook)?;
-        
-        let reader = BufReader::new(dq);
-        let mut lines = reader.lines();
+        let mut io = IoExtract::new();
 
-        assert_eq!(lines.next().unwrap().unwrap(), "4");
+        t.interpret_with_io(io.write_hook())?;
+        
+        let mut lines = io.lines().map(Result::unwrap);
+        assert_eq!(lines.next().unwrap(), "4");
         assert!(lines.next().is_none());
+        
         Ok(())
     }
 }
