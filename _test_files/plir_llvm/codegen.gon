@@ -48,3 +48,10 @@ fun fib(n: int) -> int {
 fun main() {
     printd(fib(20));
 }
+
+//! TEST hoist_block
+fun a() {
+    return b();
+    
+    fun b() {}
+}

@@ -1440,7 +1440,8 @@ mod tests {
     fn recursive_funs() -> TestResult<()> {
         tests().pass_all(cg_test, &[
             "fun_recursion_inf",
-            "recursive_fib"
+            "recursive_fib",
+            "hoist_block"
         ])
     }
 
