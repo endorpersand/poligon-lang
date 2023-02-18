@@ -560,6 +560,7 @@ impl CodeGenerator {
         self.peek_block().vars.insert(String::from(ident), ty);
     }
 
+    /// If there is an unresolved structure present at the identifier, try to resolve it.
     fn resolve_ident(&mut self, ident: &str) -> PLIRResult<()> {
         use std::collections::hash_map::Entry;
 
@@ -568,6 +569,7 @@ impl CodeGenerator {
             .chain(std::iter::once(&self.program))
             .enumerate()
             .find_map(|(i, ib)| ib.unresolved.contains_key(ident).then_some(i));
+
         if let Some(i) = mi {
             // repivot peek block to point to the unresolved item
             let storage = self.blocks.split_off(self.blocks.len() - i);
@@ -603,6 +605,8 @@ impl CodeGenerator {
 
         Ok(())
     }
+
+    /// [`CodeGenerator::resolve_ident`], but using a type parameter
     fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
         if let Some(ident) = ty.ident() {
             self.resolve_ident(ident)
@@ -611,28 +615,25 @@ impl CodeGenerator {
         }
     }
 
-    fn resolve<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
+    /// Find a specific item, starting from the deepest scope and scaling out.
+    fn find_scoped<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
         self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
-            .find_map(f)
-    }
-    #[allow(unused)]
-    fn resolve_mut<'a, T>(&'a mut self, f: impl FnMut(&'a mut InsertBlock) -> Option<T>) -> Option<T> {
-        self.blocks.iter_mut().rev()
-            .chain(std::iter::once(&mut self.program))
             .find_map(f)
     }
 
     fn get_var_type(&mut self, ident: &str) -> PLIRResult<&plir::Type> {
         self.resolve_ident(ident)?;
 
-        self.resolve(|ib| ib.vars.get(ident))
+        self.find_scoped(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
     }
+
     fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
+
         match ty {
-            plir::Type::Prim(ident) => self.resolve(|ib| ib.types.get(ident))
+            plir::Type::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
                 .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident))),
             _ => todo!()
         }
@@ -1009,7 +1010,9 @@ impl CodeGenerator {
 
     fn consume_type(&mut self, ty: ast::Type) -> PLIRResult<plir::Type> {
         let ty = plir::Type::from(ty);
-        self.resolve_ty(&ty).map(|_| ty)
+
+        // See if class is initialized, and if so, return the plir Type
+        self.get_class(&ty).map(|_| ty)
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
