@@ -13,19 +13,15 @@ use crate::lexer::token::{FullToken, Token};
 use inkwell::context::Context;
 
 pub mod prelude {
-    pub use super::{TestLoader, Test, TestResult, IoExtract};
+    pub use super::{TestLoader, Test, TestResult, IoExtract, with_compiler};
 
     macro_rules! load_tests {
         ($f:literal) => {
-            load_tests!(tests, $f);
+            load_tests!(TESTS, $f);
         };
         ($name:ident, $f:literal) => {
-            fn $name() -> &'static $crate::test_utils::TestLoader {
-                lazy_static::lazy_static! {
-                    static ref TEST: $crate::test_utils::TestLoader = $crate::test_utils::TestLoader::new($f).unwrap();
-                }
-        
-                &TEST
+            lazy_static::lazy_static! {
+                static ref $name: $crate::test_utils::TestLoader = $crate::test_utils::TestLoader::new($f).unwrap();
             }
         };
     }
@@ -74,35 +70,35 @@ pub struct Test<'t> {
 }
 
 impl Test<'_> {
-    fn transform_result<T, E: GonErr>(&self, r: Result<T, impl Into<FullGonErr<E>>>) -> TestResult<T> {
+    pub fn wrap_test_result<T, E: GonErr>(&self, r: Result<T, impl Into<FullGonErr<E>>>) -> TestResult<T> {
         r.map_err(|e| e.into().full_msg(self.code))
          .map_err(|e| TestErr::TestFailed(self.name.to_string(), e))
     }
 
     pub fn parse(&self) -> TestResult<ast::Program> {
         let r = parser::parse(self.tokens.clone());
-        self.transform_result(r)
+        self.wrap_test_result(r)
     }
 
     pub fn interpret(&self) -> TestResult<Value> {
         let mut ctx = RtContext::new();
 
         let r = self.parse()?.run_with_ctx(&mut ctx);
-        self.transform_result(r)
+        self.wrap_test_result(r)
     }
 
     pub fn interpret_with_io(&self, hook: runtime::IoHook) -> TestResult<Value> {
         let mut ctx = RtContext::new_with_io(hook);
 
         let r = self.parse()?.run_with_ctx(&mut ctx);
-        self.transform_result(r)
+        self.wrap_test_result(r)
     }
 
     pub fn codegen(&self) -> TestResult<plir::Program> {
         let ast = self.parse()?;
 
         let r = codegen::codegen(ast);
-        self.transform_result(r)
+        self.wrap_test_result(r)
     }
 
     fn compile_w_ctx<'ctx>(&self, ctx: &'ctx Context) -> TestResult<(Compiler<'ctx>, FunctionValue<'ctx>)> {
@@ -112,7 +108,7 @@ impl Test<'_> {
     
         match compiler.compile(&plir) {
             Ok(f) => Ok((compiler, f)),
-            Err(e) => self.transform_result(Err(e)),
+            Err(e) => self.wrap_test_result(Err(e)),
         }
     }
 
@@ -125,8 +121,14 @@ impl Test<'_> {
         let (mut compiler, f) = self.compile_w_ctx(&ctx)?;
         
         let r = compiler.jit_run(f);
-        self.transform_result(r)
+        self.wrap_test_result(r)
     }
+}
+
+pub fn with_compiler<T>(mut f: impl FnMut(&mut Compiler) -> T) -> T {
+    let ctx = Context::create();
+    let mut compiler = Compiler::from_ctx(&ctx);
+    f(&mut compiler)
 }
 
 pub struct TestLoader(String, HashMap<String, Tokens>);
@@ -282,7 +284,7 @@ mod tests {
 
     #[test]
     fn hello() -> TestResult<()> {
-        let t = tests().get("add")?;
+        let t = TESTS.get("add")?;
 
         let mut io = IoExtract::new();
 

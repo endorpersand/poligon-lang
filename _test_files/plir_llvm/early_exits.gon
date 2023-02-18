@@ -11,25 +11,47 @@ fun main() {
 
 //! TEST return_void
 extern fun print(s: string);
+
 fun main() {
     return print("this should be valid!");
 }
 
 //! TEST never_decl
+extern fun print(s: string);
+
 fun test() -> bool {
     let d = { return false; };
     true;
 }
 
+fun main() {
+    if test() {
+        print("true");
+    } else {
+        print("false");
+    }
+}
+
 //! TEST never_block
+extern fun print(s: string);
+
 fun test() -> bool {
     {
         return false;
     };
     true;
 }
+fun main() {
+    if test() {
+        print("true");
+    } else {
+        print("false");
+    }
+}
 
 //! TEST never_if
+extern fun print(s: string);
+
 fun test(a: bool) -> bool {
     let bl = if a {
         return true;
@@ -39,8 +61,17 @@ fun test(a: bool) -> bool {
     
     bl == 2;
 }
+fun main() {
+    if test(false) {
+        print("true");
+    } else {
+        print("false");
+    }
+}
 
 //! TEST never_while
+extern fun print(s: string);
+
 fun test_rt(a: bool) -> bool {
     while true {
         return false;
@@ -60,7 +91,22 @@ fun test_ct(a: bool) -> bool {
     return a;
 }
 
+fun main() {
+    if test_br(false) {
+        print("true");
+    } else {
+        print("false");
+    }
+    if test_rt(true) {
+        print("true");
+    } else {
+        print("false");
+    }
+}
+
 //! TEST while_ret_break
+extern fun print(s: string);
+
 fun test(a: bool) -> bool {
     while true {
         if a {
@@ -71,4 +117,11 @@ fun test(a: bool) -> bool {
     }
 
     false;
+}
+fun main() {
+    if test(false) {
+        print("true");
+    } else {
+        print("false");
+    }
 }

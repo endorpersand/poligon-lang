@@ -1,9 +1,95 @@
 //! TEST basic_if
-if true {
-    2;
-} else {
-    3;
+extern fun printd(s: int);
+fun test1v(a: bool) {
+    if a {
+        printd(2);
+    }
 }
+
+fun test2v(a: bool) {
+    if a {
+        printd(2);
+    } else {
+        printd(3);
+    }
+}
+fun test2(a: bool) -> int {
+    if a {
+        2;
+    } else {
+        3;
+    }
+}
+fun test3(a: bool, b: bool) -> int {
+    if a {
+        2;
+    } else if b {
+        3;
+    } else {
+        4;
+    }
+}
+fun test13(a: bool) -> int {
+    if a {
+        2; 
+    } else if a {
+        3;
+    } else if a {
+        4;
+    } else if a {
+        5;
+    } else if a {
+        6;
+    } else if a {
+        7;
+    } else if a {
+        8;
+    } else if a {
+        9;
+    } else if a {
+        10;
+    } else if a {
+        11;
+    } else if a {
+        12;
+    } else if a {
+        13;
+    } else {
+        14;
+    }
+}
+fun main() {
+    test1v(true);
+    test2v(false);
+    printd(test2(false));
+    printd(test3(true, true));
+    printd(test13(false));
+}
+
+//! TEST basic_while
+extern fun printd(s: int);
+extern fun print(s: string);
+let i = 0;
+while i < 10 {
+    printd(i);
+    print("\n");
+    i = i + 1;
+}
+
+//! TEST basic_access
+extern fun printd(s: int);
+let a = 14;
+
+printd(a);
+{
+    printd(a);
+    {
+        let a = 15;
+        printd(a);
+    }
+    printd(a);
+}
+
 
 //! TEST basic_pattern
 let [a, .., b] = [1, 2, 3, 4];
@@ -14,6 +100,38 @@ a = 4;
 
 //! TEST basic_arith_chain
 ((1 + (2 + 3) * 4) - 5) * 7 / 7;
+
+//! TEST basic_logic_cmp
+extern fun print(s: string);
+fun print_bool(b: bool) {
+    print(if b { "true"; } else { "false"; });
+}
+
+fun bool2a(a: bool, b: bool) -> bool {
+    a && b;
+}
+fun bool2o(a: bool, b: bool) -> bool {
+    a || b;
+}
+
+fun cmp2(a: int, b: int) -> bool {
+    a < b;
+}
+
+fun cmp3(a: int, b: int, c: int) -> bool {
+    a < b < c;
+}
+fun cmp7(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> bool {
+    a < b < c < d == e < f > g;
+}
+
+fun main() {
+    print_bool(bool2a(true, false));
+    print_bool(bool2o(true, false));
+    print_bool(cmp2(1, 2));
+    print_bool(cmp3(1, 2, 3));
+    print_bool(cmp7(1, 2, 3, 4, 4, 5, 4));
+}
 
 //! TEST basic_block
 let a = {

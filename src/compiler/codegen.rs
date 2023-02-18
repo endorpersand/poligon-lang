@@ -1397,8 +1397,8 @@ mod tests {
     use crate::test_utils::prelude::*;
 
     load_tests!("_test_files/plir_llvm/codegen.gon");
-    load_tests!(early_exit_tests, "_test_files/plir_llvm/early_exits.gon");
-    load_tests!(type_tests, "_test_files/plir_llvm/compiler_types.gon");
+    load_tests!(EARLY_EXIT_TESTS, "_test_files/plir_llvm/early_exits.gon");
+    load_tests!(TYPE_TESTS, "_test_files/plir_llvm/compiler_types.gon");
 
     fn cg_test(test: Test) -> TestResult<()> {
         let cg = test.codegen();
@@ -1413,19 +1413,22 @@ mod tests {
     }
 
     #[test]
-    fn basic_plir_pass() -> TestResult<()> {
-        tests().pass_all(cg_test, &[
+    fn basic_pass() -> TestResult<()> {
+        TESTS.pass_all(cg_test, &[
             "basic_if", 
+            "basic_while", 
+            "basic_access", 
             "basic_arith_chain", 
             "basic_pattern", 
             "basic_block", 
-            "basic_extern"
+            "basic_extern",
+            "basic_logic_cmp",
         ])
     }
 
     #[test]
     fn early_exit() -> TestResult<()> {
-        early_exit_tests().pass_all(cg_test, &[
+        EARLY_EXIT_TESTS.pass_all(cg_test, &[
             "early_return",
             "return_void",
             "never_decl",
@@ -1438,7 +1441,7 @@ mod tests {
 
     #[test]
     fn recursive_funs() -> TestResult<()> {
-        tests().pass_all(cg_test, &[
+        TESTS.pass_all(cg_test, &[
             "fun_recursion_inf",
             "recursive_fib",
             "hoist_block"
@@ -1447,16 +1450,17 @@ mod tests {
 
     #[test]
     fn type_test() -> TestResult<()> {
-        type_tests().pass_all(cg_test, &[
+        TYPE_TESTS.pass_all(cg_test, &[
             "class_chain",
             "initializer",
             "method_access",
             "decl_cast_check",
             "fun_cast_check",
-            "type_res"
+            "type_res",
+            "fun_call"
         ])?;
 
-        type_tests().fail_all(cg_test, &[
+        TYPE_TESTS.fail_all(cg_test, &[
             "decl_cast_check_fail_1",
             "decl_cast_check_fail_2",
             "decl_cast_check_fail_3",
@@ -1469,6 +1473,9 @@ mod tests {
             "type_res_fail_2",
             "type_res_fail_3",
             "type_res_fail_4",
+            "fun_call_fail_1",
+            "fun_call_fail_2",
+            "fun_call_fail_3"
         ])
     }
 }

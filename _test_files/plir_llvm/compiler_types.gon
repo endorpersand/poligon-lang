@@ -151,3 +151,44 @@ extern fun printd(s: int);
 fun consume_a(a: A) {
     printd(a.age);
 }
+
+//! TEST fun_call
+extern fun print(s: string);
+
+fun main() {
+    print_concat3("Hello", ", ", "World!");
+    sum3(0, 1, 2);
+}
+fun print_concat3(a: string, b: string, c: string) {
+    print(a);
+}
+fun sum3(a: float, b: float, c: float) -> float {
+    a + b + c;
+}
+//! TEST fun_call_fail_1
+extern fun print(s: string);
+
+fun main() {
+    print_concat3("Hello");
+}
+fun print_concat3(a: string, b: string, c: string) {
+    print(a);
+}
+//! TEST fun_call_fail_2
+extern fun print(s: string);
+
+fun main() {
+    print_concat3("Hello, ", "World!", "How", "are", "you?");
+}
+fun print_concat3(a: string, b: string, c: string) {
+    print(a);
+}
+//! TEST fun_call_fail_3
+extern fun print(s: string);
+
+fun main() {
+    print_concat3(0, 1, 2);
+}
+fun print_concat3(a: string, b: string, c: string) {
+    print(a);
+}

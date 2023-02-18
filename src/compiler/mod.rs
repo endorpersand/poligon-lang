@@ -1067,300 +1067,89 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::Path;
+    use crate::test_utils::prelude::*;
 
-    use inkwell::context::Context;
+    fn test_compile(t: Test) -> TestResult<()> {
+        println!("=== compile {} ===", t.name);
+        let plir = t.codegen()?;
 
-    use crate::lexer;
-    use crate::parser;
-
-    use super::Compiler;
-    use super::codegen;
-    use super::plir;
-
-    fn file(input: impl AsRef<Path>) -> String {
-        fs::read_to_string(input.as_ref()).unwrap()
-    }
-    /// Assert that a function declaration with an expression in it passes.
-    /// Also prints the function to STDERR.
-    fn assert_fun_pass(input: &str) {
-        assert_fun_pass_vb(input, false)
-    }
-
-    fn assert_fun_pass_vb(input: &str, verbose: bool) {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed  = lexer::tokenize(input).unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        let plired = codegen::codegen(parsed).unwrap();
-
-        if verbose {
-            println!("{plired}");
-        }
-
-        match &plired.0[..] {
-            [plir::Stmt::FunDecl(fdcl)] => {
-                let fun = compiler.compile(fdcl).unwrap();
-                fun.print_to_stderr();
+        println!("{plir}");
+        with_compiler(|c| {
+            match c.compile(&plir) {
+                Ok(_) => {
+                    c.module.print_to_stderr();
+                    Ok(())
+                },
+                Err(e) => t.wrap_test_result(Err(e)),
             }
-            _ => {
-                panic!("Program is not a singular function declaration");
-            }
-        }
+        })
     }
 
-    fn assert_main_pass_vb(input: &str, verbose: bool) {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
+    fn test_run(t: Test) -> TestResult<()> {
+        println!("=== run {} ===", t.name);
+        let plir = t.codegen()?;
 
-        let lexed  = lexer::tokenize(input).unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        let plired = codegen::codegen(parsed).unwrap();
-
-        if verbose {
-            println!("{plired}");
-        }
-
-        compiler.compile(&plired).unwrap();
-        for fun in compiler.module.get_functions() {
-            fun.print_to_stderr();
-        }
-    }
-
-    fn exec<T>(input: &str) -> T {
-        let ctx = Context::create();
-        let mut compiler = Compiler::from_ctx(&ctx);
-
-        let lexed  = lexer::tokenize(input).unwrap();
-        let parsed = parser::parse(lexed).unwrap();
-        let plired = codegen::codegen(parsed).unwrap();
-        let fun = compiler.compile(&plired).unwrap();
-
-        unsafe { compiler.jit_run::<T>(fun).unwrap() }
-    }
-
-    #[test]
-    fn mid_return() {
-        assert_fun_pass_vb("fun main() -> float {
-            return 2.0;
-            main();
-        }", true)
-    }
-    #[test]
-    fn what_am_i_doing_2() {
-        assert_fun_pass("fun hello() -> float {
-            2. + 3.;
-        }");
-
-        assert_fun_pass("fun double(a: float) -> float {
-            a * 2;
-        }");
-    }
-
-    #[test]
-    fn if_else_void_test() {
-        assert_fun_pass("fun main(a: int) {
-            if a {
-                main(a);
-            };
-        }");
-    
-        assert_fun_pass("fun main(a: int) {
-            if a {
-                main(a);
-            } else {
-                main(a);
-            };
-        }");
-    }
-
-    #[test]
-    fn if_with_fast_return() {
-        // fast return
-        assert_fun_pass("fun main(a: int) -> float {
-            let b = if a {
-                return 2.;
-            } else {
-                2. + 15.;
-            };
-
-            b;
-        }");
-    }
-
-    #[test]
-    fn if_else_chain_test() {
-        assert_fun_pass("fun main(a: float) -> float {
-            if a {
-                main(0.); 
-            } else {
-                main(0.) + 1.;
-            }
-        }");
-
-        assert_fun_pass("fun main(a: float) -> float {
-            if a {
-                main(0.); 
-            } else if a {
-                main(0.) + 1.;
-            } else {
-                main(0.) + 2.;
-            }
-        }");
-        
-        assert_fun_pass("fun main(a: float) -> float {
-            if a {
-                main(0.); 
-            } else if a {
-                main(0.) + 1.;
-            } else if a {
-                main(0.) + 2.;
-            } else if a {
-                main(0.) + 3.;
-            } else if a {
-                main(0.) + 4.;
-            } else if a {
-                main(0.) + 5.;
-            } else if a {
-                main(0.) + 6.;
-            } else if a {
-                main(0.) + 7.;
-            } else if a {
-                main(0.) + 8.;
-            } else if a {
-                main(0.) + 9.;
-            } else if a {
-                main(0.) + 10.;
-            } else if a {
-                main(0.) + 11.;
-            } else {
-                main(0.) + 12.;
-            }
-        }");
-    }
-
-    #[test]
-    fn while_ir() {
-        assert_fun_pass("fun main(a: float) -> float {
-            while a {
-                main(a);
-            };
-
-            2.0;
-        }");
-    }
-
-    #[test]
-    fn var_test() {
-        assert_fun_pass("fun main(a: float) -> float {
-            a = 2.;
-        }");
-
-        assert_fun_pass("fun main() {
-            let b = 2.;
-        }");
-    }
-
-    #[test]
-    fn log_and_log_or_test() {
-        assert_fun_pass("fun main(a: bool, b: bool) -> bool {
-            a && b;
-        }");
-        
-        assert_fun_pass("fun main(a: bool, b: bool) -> bool {
-            a || b;
-        }");
-    }
-
-    #[test]
-    fn cmp_test() {
-        assert_fun_pass("fun main(a: int, b: int) -> bool {
-            a < b;
-        }");
-        
-        assert_fun_pass("fun main(a: int, b: int, c: int) -> bool {
-            a < b < c;
-        }");
-
-        assert_fun_pass("fun main(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> bool {
-            a < b < c < d == e < f > g;
-        }");
-    }
-
-    #[test]
-    fn multi_stmt_test() {
-        // test multiple declarations
-        assert_fun_pass("fun main() -> int {
-            let a = 1;
-            let b = 2;
-            let c = 3;
-            a + b + c;
-        }");
-
-        // block test
-        assert_fun_pass("fun main() -> int {
-            let b = {
-                let a = 1;
-                a + 2;
-            };
-
-            b;
-        }");
-
-        // multi expression
-        assert_fun_pass("fun main() -> float {
-            1. + 2. + 3.;
-            4. + 5. + 6.;
-            7. + 8. + 9.;
-        }");
-    }
-
-    // #[test]
-    // fn void_add() {
-    //     assert_fun_pass("fun main() {
-    //         main() + 1;
-    //     }")
-    // }
-    #[test]
-    fn jit_compile_test() {
-        let value = exec::<f64>("
-            fun double(a: float) -> float {
-                a * 2;
-            }
+        println!("{plir}");
+        with_compiler(|c| {
+            let result = c.compile(&plir)
+                .and_then(|f| unsafe { c.jit_run::<()>(f) });
             
-            fun main() -> float {
-                double(15.);
-            }
-        ");
-        println!("{}", value);
+            t.wrap_test_result(result)
+        })
+    }
 
-        let value = exec::<bool>("
-            fun main() -> bool {
-                true;
-            }
-        ");
-        println!("{}", value);
+    load_tests!(CG_TESTS, "_test_files/plir_llvm/codegen.gon");
+    load_tests!(EARLY_EXIT_TESTS, "_test_files/plir_llvm/early_exits.gon");
+    load_tests!(TYPE_TESTS, "_test_files/plir_llvm/compiler_types.gon");
+
+    #[test]
+    fn basic_pass() -> TestResult<()> {
+        CG_TESTS.pass_all(test_run, &[
+            "basic_if", 
+            "basic_while", 
+            "basic_access", 
+            "basic_arith_chain", 
+            // "basic_pattern", TODO!: complete
+            "basic_block", 
+            "basic_extern",
+            "basic_logic_cmp",
+        ])
     }
 
     #[test]
-    fn plir_llvm_creation() {
-        assert_main_pass_vb(&file("_test_files/plir_llvm_creation.gon"), true)
+    fn recursive_funs() -> TestResult<()> {
+        CG_TESTS.pass_all(test_compile, &["fun_recursion_inf"])?;
+        CG_TESTS.pass_all(test_run, &[
+            "recursive_fib",
+            "hoist_block"
+        ])
     }
 
     #[test]
-    fn printing() {
-        let code = "
-        extern fun puts(s: string) -> int;
+    #[ignore] // TODO: complete
+    fn early_exit() -> TestResult<()> {
+        EARLY_EXIT_TESTS.pass_all(test_run, &[
+            "early_return",
+            "return_void",
+            "never_decl",
+            "never_block",
+            "never_if",
+            "never_while",
+            "while_ret_break"
+        ])
+    }
 
-        fun main() {
-            puts(\"Hello World!\");
-            return;
-        }
-        ";
 
-        assert_main_pass_vb(code, true);
-        exec::<()>(code);
+    #[test]
+    fn type_test() -> TestResult<()> {
+        TYPE_TESTS.pass_all(test_run, &[
+            "class_chain",
+            "initializer",
+            "method_access",
+            "decl_cast_check",
+            "fun_cast_check",
+            "type_res",
+            "fun_call"
+        ])
     }
 }
