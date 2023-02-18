@@ -52,3 +52,6 @@ pub mod ast;
 pub mod interpreter;
 pub mod compiler;
 pub mod err;
+
+#[cfg(test)]
+mod test_utils;
