@@ -89,7 +89,7 @@ impl Type {
 
     /// Test if this type is `never`.
     #[inline]
-    fn is_never(&self) -> bool {
+    pub fn is_never(&self) -> bool {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_NEVER))
     }
     

@@ -281,9 +281,50 @@ impl InsertBlock {
             unresolved: HashMap::new()
         }
     }
+
+    fn last_stmt(&self) -> Option<&plir::Stmt> {
+        self.block.last()
+            .or_else(|| self.init_block.last())
+    }
+
+    fn last_stmt_type(&self) -> Cow<plir::Type> {
+        use plir::{Stmt, Type, ty};
+
+        #[inline]
+        fn void_ty<'t>() -> Cow<'t, Type> {
+            Cow::Owned(ty!(Type::S_VOID))
+        }
+
+        #[inline]
+        fn never_ty<'t>() -> Cow<'t, Type> {
+            Cow::Owned(ty!(Type::S_NEVER))
+        }
+
+        match self.last_stmt() {
+            Some(Stmt::Decl(d)) => {
+                let ty = &d.val.ty;
+
+                if ty.is_never() {
+                     Cow::Borrowed(ty)
+                } else {
+                    void_ty()
+                }
+            },
+            Some(Stmt::Return(_))        => never_ty(),
+            Some(Stmt::Break)            => never_ty(),
+            Some(Stmt::Continue)         => never_ty(),
+            Some(Stmt::Exit(_))          => never_ty(),
+            Some(Stmt::FunDecl(_))       => void_ty(),
+            Some(Stmt::ExternFunDecl(_)) => void_ty(),
+            Some(Stmt::Expr(e))          => Cow::Borrowed(&e.ty),
+            Some(Stmt::ClassDecl(_))     => void_ty(),
+            None => void_ty(),
+        }
+    }
+
     /// Determine whether another statement can be pushed into the insert block.
     fn is_open(&self) -> bool {
-        self.final_exit.is_none()
+        !self.last_stmt_type().is_never()
     }
 
     /// Push a singular statement into this insert block.
@@ -1234,7 +1275,7 @@ impl CodeGenerator {
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
+                    plir::ty!(plir::Type::S_VOID), // TODO: plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
@@ -1243,7 +1284,7 @@ impl CodeGenerator {
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
+                    plir::ty!(plir::Type::S_VOID), // TODO: plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
                     plir::ExprType::For { ident, iterator, block }
                 ))
             },
@@ -1387,7 +1428,8 @@ mod tests {
             "never_decl",
             "never_block",
             "never_if",
-            "never_while"
+            "never_while",
+            "while_ret_break"
         ])
     }
 
@@ -1398,7 +1440,7 @@ mod tests {
             "recursive_fib"
         ])
     }
-    
+
     #[test]
     fn type_test() -> TestResult<()> {
         type_tests().pass_all(cg_test, &[

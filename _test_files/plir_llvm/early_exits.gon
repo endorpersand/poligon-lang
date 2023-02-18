@@ -23,7 +23,7 @@ fun test() -> bool {
 
 //! TEST never_block
 fun test() -> bool {
-    let bl = {
+    {
         return false;
     };
     true;
@@ -36,7 +36,8 @@ fun test(a: bool) -> bool {
     } else {
         3;
     };
-    false;
+    
+    bl == 2;
 }
 
 //! TEST never_while
@@ -57,4 +58,17 @@ fun test_ct(a: bool) -> bool {
         continue;
     }
     return a;
+}
+
+//! TEST while_ret_break
+fun test(a: bool) -> bool {
+    while true {
+        if a {
+            return true;
+        } else {
+            break;
+        }
+    }
+
+    false;
 }
