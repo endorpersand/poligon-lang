@@ -1392,6 +1392,14 @@ mod tests {
     }
 
     #[test]
+    fn recursive_funs() -> TestResult<()> {
+        tests().pass_all(cg_test, &[
+            "fun_recursion_inf",
+            "recursive_fib"
+        ])
+    }
+    
+    #[test]
     fn type_test() -> TestResult<()> {
         type_tests().pass_all(cg_test, &[
             "class_chain",

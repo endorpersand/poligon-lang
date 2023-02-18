@@ -31,3 +31,20 @@ let a = {
 //! TEST basic_extern
 extern fun print(s: string);
 print("hello!");
+
+//! TEST fun_recursion_inf
+fun a() { a(); }
+fun b1() { b2(); }
+fun b2() { b1(); }
+
+//! TEST recursive_fib
+extern fun printd(s: int);
+
+fun fib(n: int) {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2); 
+}
+
+fun main() {
+    printd(fib(20));
+}
