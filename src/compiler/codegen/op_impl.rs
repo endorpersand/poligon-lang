@@ -115,15 +115,15 @@ fn apply_cast2((left, right): (Expr, Expr), t: &Type) -> Result<(Expr, Expr), (E
     }
 }
 
-trait ResultFlatten {
+trait ResultIntoInner {
     type Inner;
-    fn flatten(self) -> Self::Inner;
+    fn into_inner(self) -> Self::Inner;
 }
 
-impl<T> ResultFlatten for Result<T, T> {
+impl<T> ResultIntoInner for Result<T, T> {
     type Inner = T;
 
-    fn flatten(self) -> Self::Inner {
+    fn into_inner(self) -> Self::Inner {
         match self {
             Ok(t) => t,
             Err(t) => t,
@@ -135,13 +135,13 @@ pub fn apply_unary(e: Expr, op: op::Unary) -> PLIRResult<Expr> {
     // Check for any valid casts that can be applied here:
     let cast = match op {
         op::Unary::Plus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).flatten()
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
         },
         op::Unary::Minus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).flatten()
+            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
         },
         op::Unary::LogNot => {
-            apply_cast(e, &ty!(Type::S_BOOL)).flatten()
+            apply_cast(e, &ty!(Type::S_BOOL)).into_inner()
         },
         op::Unary::BitNot => e,
     };
@@ -151,8 +151,8 @@ pub fn apply_unary(e: Expr, op: op::Unary) -> PLIRResult<Expr> {
         let ty = cast.ty.clone();
 
         match (op, ty.as_ref()) {
-            (op::Unary::Plus, TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT)) => ty,
-            (op::Unary::Minus, TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT)) => ty,
+            (op::Unary::Plus,   TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
+            (op::Unary::Minus,  TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
             (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
             (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
             _ => Err(OpErr::CannotUnary(op, ty))?
@@ -182,20 +182,20 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
                 // list cast ?
                 ty!(Type::S_INT),
                 ty!(Type::S_FLOAT)
-            ][..];
-            chain((left, right), types, apply_cast2).flatten()
+            ];
+            chain((left, right), types, apply_cast2).into_inner()
         },
         op::Binary::Sub => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
         },
         op::Binary::Mul => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
         },
         op::Binary::Div => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
         },
         op::Binary::Mod => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)][..], apply_cast2).flatten()
+            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
         },
         op::Binary::Shl    => (left, right),
         op::Binary::Shr    => (left, right),
@@ -215,7 +215,7 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
             (op::Binary::Add, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             (op::Binary::Sub, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+            (op::Binary::Div, TypeRef::Prim(Type::S_INT | Type::S_FLOAT), TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty!(Type::S_FLOAT),
             (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             // collections:
             (op::Binary::Add, l @ (TypeRef::Prim(Type::S_STR) | TypeRef::Generic(Type::S_LIST, _)), r) if l == r => left,
@@ -238,15 +238,15 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
 
 pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
     // Check for any valid casts that can be applied here:
-    let lcast = apply_cast(left, &ty!(Type::S_STR)).flatten();
+    let lcast = apply_cast(left, &ty!(Type::S_STR)).into_inner();
 
     let icast = match lcast.ty.as_ref() {
         | TypeRef::Prim(Type::S_STR)
         | TypeRef::Generic(Type::S_LIST, _)
         | TypeRef::Tuple(_)
-        => apply_cast(index, &ty!(Type::S_INT)).flatten(),
+        => apply_cast(index, &ty!(Type::S_INT)).into_inner(),
         
-        TypeRef::Generic(Type::S_DICT, [k, _]) => apply_cast(index, k).flatten(),
+        TypeRef::Generic(Type::S_DICT, [k, _]) => apply_cast(index, k).into_inner(),
         
         _ => return Err(OpErr::CannotIndex(lcast.ty).into())
     };
