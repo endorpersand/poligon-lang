@@ -72,7 +72,7 @@ extern fun print(s: string);
 let i = 0;
 while i < 10 {
     printd(i);
-    print("\n");
+    print("");
     i = i + 1;
 }
 
