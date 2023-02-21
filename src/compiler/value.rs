@@ -50,6 +50,10 @@ pub enum GonValue<'ctx> {
     Int(IntValue<'ctx> /* iX */),
     /// A `bool`.
     Bool(IntValue<'ctx> /* i1 */),
+    /// A `char`.
+    /// 
+    /// Following Rust's rules, `char` is stored as a u32.
+    Char(IntValue<'ctx> /* i32 */),
     /// Any value represented by a struct in LLVM.
     /// 
     /// For example, `String`.
@@ -74,6 +78,10 @@ impl<'ctx> Compiler<'ctx> {
     /// Create a new float value using a float from Rust.
     pub fn new_float(&self, f: f64) -> GonValue<'ctx> {
         GonValue::Float(self.ctx.f64_type().const_float(f))
+    }
+    /// Create a new char value using a char from Rust.
+    pub fn new_char(&self, c: char) -> GonValue<'ctx> {
+        GonValue::Int(self.ctx.i32_type().const_int(c as u32 as u64, true))
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&mut self, s: &str) -> GonValue<'ctx> {
@@ -125,6 +133,7 @@ impl<'ctx> Compiler<'ctx> {
             TypeRef::Prim(Type::S_FLOAT) => Ok(GonValue::Float(v.into_float_value())),
             TypeRef::Prim(Type::S_INT)   => Ok(GonValue::Int(v.into_int_value())),
             TypeRef::Prim(Type::S_BOOL)  => Ok(GonValue::Bool(v.into_int_value())),
+            TypeRef::Prim(Type::S_CHAR)  => Ok(GonValue::Char(v.into_int_value())),
             TypeRef::Prim(Type::S_VOID)  => Ok(GonValue::Unit),
             _ => {
                 if let BasicTypeEnum::StructType(_) = self.get_layout(t)? {
@@ -144,6 +153,7 @@ impl<'ctx> Compiler<'ctx> {
             GonValue::Float(f)  => f.into(),
             GonValue::Int(i)    => i.into(),
             GonValue::Bool(b)   => b.into(),
+            GonValue::Char(c)   => c.into(),
             GonValue::Struct(s) => s.into(),
             GonValue::Unit      => layout!(self, S_VOID).const_zero(),
         }
@@ -170,6 +180,7 @@ impl<'ctx> Compiler<'ctx> {
             GonValue::Float(_)  => plir::ty!(plir::Type::S_FLOAT),
             GonValue::Int(_)    => plir::ty!(plir::Type::S_INT),
             GonValue::Bool(_)   => plir::ty!(plir::Type::S_BOOL),
+            GonValue::Char(_)   => plir::ty!(plir::Type::S_CHAR),
             GonValue::Struct(s) => {
                 let st = s.get_type();
                 let name = st.get_name()

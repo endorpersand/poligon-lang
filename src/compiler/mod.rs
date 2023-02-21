@@ -889,12 +889,12 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
     type Return = CompileResult<'ctx, GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
-        let value = match self {
-            Literal::Int(i)   => compiler.new_int(*i),
-            Literal::Float(f) => compiler.new_float(*f),
-            Literal::Char(_)  => todo!("char literal"),
-            Literal::Str(s)   => compiler.new_str(s),
-            Literal::Bool(b)  => compiler.new_bool(*b),
+        let value = match *self {
+            Literal::Int(i)     => compiler.new_int(i),
+            Literal::Float(f)   => compiler.new_float(f),
+            Literal::Char(c)    => compiler.new_char(c),
+            Literal::Str(ref s) => compiler.new_str(s),
+            Literal::Bool(b)    => compiler.new_bool(b),
         };
 
         Ok(value)
@@ -966,6 +966,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
             GonValue::Int(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
             GonValue::Bool(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
             GonValue::Unit      => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Char(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
             GonValue::Struct(_) => {
                 todo!()
                 // // TODO: support unicode
@@ -1014,7 +1015,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
 
                 // // TODO: make char
                 // Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
-            },
+            }
         }
     }
 }
