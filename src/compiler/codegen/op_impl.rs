@@ -192,7 +192,7 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
             chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
         },
         op::Binary::Div => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+            apply_cast2((left, right), &ty!(Type::S_FLOAT)).into_inner()
         },
         op::Binary::Mod => {
             chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
@@ -215,7 +215,7 @@ pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr>
             (op::Binary::Add, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             (op::Binary::Sub, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            (op::Binary::Div, TypeRef::Prim(Type::S_INT | Type::S_FLOAT), TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty!(Type::S_FLOAT),
+            (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => ty!(Type::S_FLOAT),
             (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
             // collections:
             (op::Binary::Add, l @ (TypeRef::Prim(Type::S_STR) | TypeRef::Generic(Type::S_LIST, _)), r) if l == r => left,

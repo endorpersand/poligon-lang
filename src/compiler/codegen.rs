@@ -159,6 +159,8 @@ enum BlockExit {
     /// This block exited normally.
     Exit(plir::Type)
 }
+
+#[derive(PartialEq, Eq)]
 enum BlockBehavior {
     /// This block is a function body.
     Function,
@@ -172,6 +174,7 @@ enum BlockBehavior {
     /// This block is the body of an `if` statement.
     Conditional
 }
+
 enum BlockExitHandle {
     /// Continue running in the upper loop.
     /// 
@@ -771,22 +774,27 @@ impl CodeGenerator {
 
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
             // otherwise just append an `exit` stmt.
-            let exit_expr = if let Some(plir::Stmt::Expr(_)) = block.last() {
-                if let plir::Stmt::Expr(e) = block.pop().unwrap() {
-                    Some(e)
-                } else {
-                    unreachable!()
-                }
-            } else {
-                None
+            let exit_expr = match block.pop() {
+                Some(plir::Stmt::Expr(e)) => Some(e),
+                Some(stmt) => {
+                    block.push(stmt);
+                    None
+                },
+                None => None
             };
 
             let exit_ty = match &exit_expr {
                 Some(e) => e.ty.clone(),
                 None => plir::ty!(plir::Type::S_VOID),
             };
-            block.push(plir::Stmt::Exit(exit_expr));
-            BlockExit::Exit(exit_ty)
+
+            if btype == BlockBehavior::Function {
+                block.push(plir::Stmt::Return(exit_expr));
+                BlockExit::Return(exit_ty)
+            } else {
+                block.push(plir::Stmt::Exit(exit_expr));
+                BlockExit::Exit(exit_ty)
+            }
         });
 
         // Type check block:
