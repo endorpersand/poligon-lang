@@ -243,7 +243,7 @@ impl<'ctx> Compiler<'ctx> {
         where F: FnOnce(&mut Self, GonValue<'ctx>)
     {
         self.exit_pointers.push(exits);
-        let (value, mjump) = match block.1.split_last() {
+        let (mcvalue, mjump) = match block.1.split_last() {
             Some((tail, head)) => {
                 for stmt in head {
                     stmt.write_value(self)?;
@@ -252,28 +252,30 @@ impl<'ctx> Compiler<'ctx> {
                 match tail {
                     plir::Stmt::Exit(me) => {
                         let value = me.write_value(self)?;
-                        (value, self.get_exit_pointer(|ep| ep.exit))
+                        (Some(value), self.get_exit_pointer(|ep| ep.exit))
                     },
-                    plir::Stmt::Break => (GonValue::Unit, self.get_exit_pointer(|ep| ep.brk)),
-                    plir::Stmt::Continue => (GonValue::Unit, self.get_exit_pointer(|ep| ep.cont)),
+                    plir::Stmt::Break => (None, self.get_exit_pointer(|ep| ep.brk)),
+                    plir::Stmt::Continue => (None, self.get_exit_pointer(|ep| ep.cont)),
                     plir::Stmt::Return(me) => {
                         let value = me.write_value(self)?;
                         self.build_return(value);
-                        // no point calling closer here, b/c we've exited the function
-                        return Ok(GonValue::Unit);
+                        (None, None)
                     }
-                    _ => (GonValue::Unit, None)
+                    _ => (Some(GonValue::Unit), None) // unreachable?
                 }
             },
-            None => (GonValue::Unit, None), // {}
+            None => (Some(GonValue::Unit), None), // {}
         };
         self.exit_pointers.pop();
 
         if let Some(jump) = mjump {
             self.builder.build_unconditional_branch(jump);
         }
-        close(self, value);
-        Ok(value)
+        if let Some(close_value) = mcvalue {
+            close(self, close_value);
+        }
+
+        Ok(mcvalue.unwrap_or(GonValue::Unit))
     }
 
     fn branch_and_goto(&self, bb: BasicBlock<'ctx>) {
