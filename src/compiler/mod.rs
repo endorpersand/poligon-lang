@@ -343,8 +343,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type.
     fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
-        ty.ident()
-            .and_then(|ident| self.get_layout_by_name(ident))
+        self.get_layout_by_name(&ty.ident())
             .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
     }
     /// Get the LLVM layout using the layout's identifier.
@@ -823,8 +822,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let fun_ident = match &funct.expr {
                     plir::ExprType::Ident(ident) => Cow::from(ident),
                     plir::ExprType::Path(plir::Path::Method(referent, met, _)) => {
-                        let ty = referent.ty.ident().expect("expected referent type to have identifier");
-                        
+                        let ty = referent.ty.ident();
                         pvals.push(compiler.write_ref_value(referent)?);
                         Cow::from(format!("{ty}::{met}"))
                     },

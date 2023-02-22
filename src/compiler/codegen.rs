@@ -611,11 +611,7 @@ impl CodeGenerator {
 
     /// [`CodeGenerator::resolve_ident`], but using a type parameter
     fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
-        if let Some(ident) = ty.ident() {
-            self.resolve_ident(ident)
-        } else {
-            Ok(())
-        }
+        self.resolve_ident(&ty.ident())
     }
 
     /// Find a specific item, starting from the deepest scope and scaling out.

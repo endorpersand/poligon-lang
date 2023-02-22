@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use indexmap::IndexMap;
 
 use crate::ast;
@@ -167,12 +169,26 @@ impl Type {
     }
 
     /// If this type has an identifier, return it.
-    pub fn ident(&self) -> Option<&str> {
+    pub fn ident(&self) -> Cow<str> {
+        #[inline]
+        fn param_tuple(params: &[Type]) -> String {
+            params.iter()
+                .map(Type::ident)
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
         match self.as_ref() {
-            TypeRef::Prim(ident)       => Some(ident),
-            TypeRef::Generic(ident, _) => Some(ident),
-            TypeRef::Tuple(_)          => None,
-            TypeRef::Fun(_, _)         => None,
+            TypeRef::Prim(ident) => Cow::from(ident),
+            TypeRef::Generic(ident, params) => {
+                Cow::from(format!("{ident}::({})", param_tuple(params)))
+            },
+            TypeRef::Tuple(params) => {
+                Cow::from(format!("#tuple::({})", param_tuple(params)))
+            },
+            TypeRef::Fun(params, ret) => {
+                Cow::from(format!("#fun::({}; {})", param_tuple(params), ret.ident()))
+            },
         }
     }
 }
