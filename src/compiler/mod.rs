@@ -28,7 +28,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
 use inkwell::types::{StructType, BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue, ArrayValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
@@ -53,11 +53,20 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
         Type::S_INT   => ctx.i64_type(),
         Type::S_FLOAT => ctx.f64_type(),
         Type::S_BOOL  => ctx.bool_type(),
-        Type::S_STR   => {
+        Type::S_CHAR  => ctx.i8_type(),
+        "#dynarray" => {
+            let st = ctx.opaque_struct_type("#dynarray");
+            st.set_body(&[
+                ctx.i8_type().ptr_type(Default::default()).into(), // buffer
+                ctx.i32_type().into(), // length
+                ctx.i32_type().into() // capacity
+            ], false);
+            st
+        },
+        Type::S_STR => {
             let st = ctx.opaque_struct_type(Type::S_STR);
             st.set_body(&[
-                ctx.i8_type().ptr_type(Default::default()).into(),
-                ctx.i64_type().into()
+                ctx.get_struct_type("#dynarray").unwrap().into()
             ], false);
             st
         },
@@ -72,7 +81,10 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
 macro_rules! layout {
     ($compiler:expr, $i:ident) => {
         $compiler.get_layout_by_name($crate::compiler::plir::Type::$i).unwrap()
-    }
+    };
+    ($compiler:expr, $i:literal) => {
+        $compiler.get_layout_by_name($i).unwrap()
+    };
 }
 pub(crate) use layout;
 
@@ -393,6 +405,44 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             e.write_value(self).map(|gv| self.basic_value_of(gv))
         }
+    }
+
+    fn dynarray_new(&mut self, array: ArrayValue<'ctx>) -> CompileResult<'ctx, StructValue<'ctx>> {
+        use std::cmp::Ordering;
+
+        let ty = self.ctx.get_struct_type("#dynarray").expect("#dynarray type not defined in LLVM");
+        let arr_ty = array.get_type();
+        let len = arr_ty.len();
+        let cap = if len == 0 {
+            0
+        } else {
+            len.next_power_of_two()
+        };
+        let i32_ty = self.ctx.i32_type();
+
+        let buf = match len.cmp(&cap) {
+            Ordering::Less => {
+                let newarr_ty = arr_ty.get_element_type().array_type(cap);
+                let buf = self.builder.build_alloca(newarr_ty, "dynarray_buf");
+                self.builder.build_store(buf, newarr_ty.const_zero());
+                self.builder.build_store(buf, array);
+
+                buf
+            },
+            Ordering::Equal => {
+                let buf = self.builder.build_alloca(arr_ty, "dynarray_buf");
+                self.builder.build_store(buf, array);
+
+                buf
+            },
+            Ordering::Greater => panic!("cap < len in dynarray new: {cap} < {len}"),
+        };
+
+        self.create_struct_value(ty, &[
+            buf.into(),
+            i32_ty.const_int(len as u64, true).into(),
+            i32_ty.const_int(cap as u64, true).into(),
+        ])
     }
 }
 

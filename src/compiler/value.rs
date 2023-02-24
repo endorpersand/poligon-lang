@@ -88,15 +88,10 @@ impl<'ctx> Compiler<'ctx> {
         // todo: null-terminated fix
         // i love c
         let array = self.ctx.const_string(s.as_bytes(), true);
+        let dynarray = self.dynarray_new(array).expect("error occurred in dynarray alloc");
 
-        let array_ptr = self.builder.build_alloca(array.get_type(), "strstore");
-        self.builder.build_store(array_ptr, array);
-        
         let str_type = layout!(self, S_STR).into_struct_type();
-        GonValue::Struct(self.create_struct_value(str_type, &[
-            array_ptr.into(),
-            self.ctx.i64_type().const_int(s.len() as u64 + 1, true).into()
-        ]).unwrap())
+        GonValue::Struct(self.create_struct_value(str_type, &[dynarray.into()]).unwrap())
     }
 
     /// Cast a GonValue to another type.

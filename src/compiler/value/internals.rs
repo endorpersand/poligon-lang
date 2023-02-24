@@ -24,8 +24,9 @@ macro_rules! std_map {
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let ptr = fun.get_first_param().unwrap().into_pointer_value();
-        let buf_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
-    
+        let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
+        let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
+
         let puts = self.import_fun("puts",
             layout!(self, S_INT).fn_type(
                 &[self.ptr_type(Default::default()).into()], 
