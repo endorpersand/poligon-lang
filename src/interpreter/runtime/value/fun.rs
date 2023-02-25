@@ -124,4 +124,4 @@ macro_rules! fun_type {
         FunType::new(FunParamType::PosSpread(vec![$($($e),+)?], $f), $r)
     };
 }
-pub(crate) use fun_type;
+pub(in crate::interpreter) use fun_type;

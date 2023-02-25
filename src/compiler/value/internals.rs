@@ -21,6 +21,20 @@ macro_rules! std_map {
     }
 }
 
+/// A macro that makes the syntax for creating [`FunctionType`]s simpler.
+macro_rules! fn_type {
+    (($($e:expr),*) -> $r:expr) => {
+        $r.fn_type(params![$($e),*], false)
+    };
+    ((~) -> $r:expr) => {
+        $r.fn_type(params![], true)
+    };
+    (($($e:expr),+,~) -> $r:expr) => {
+        $r.fn_type(params![$($e),+], true)
+    };
+}
+pub(in crate::compiler) use fn_type;
+
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let _ptr = self.ptr_type(Default::default());
@@ -29,12 +43,7 @@ impl<'ctx> Compiler<'ctx> {
         let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
         let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
 
-        let puts = self.import_fun("puts",
-            layout!(self, S_INT).fn_type(
-                &[_ptr.into()], 
-                false
-            ),
-        )?;
+        let puts = self.import_fun("puts", fn_type![(_ptr) -> layout!(self, S_INT)])?;
     
         let buf = builder.build_load(_ptr, buf_ptr, "buf");
         builder.build_call(puts, &[buf.into()], "");
@@ -48,7 +57,7 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT);
 
         let p0 = fun.get_first_param().unwrap();
-        let printf = self.import_fun("printf", _int.fn_type(params![_ptr], true))?;
+        let printf = self.import_fun("printf", fn_type!((_ptr, ~) -> _int))?;
     
         let template = unsafe { builder.build_global_string("%c\0", "printc") };
         builder.build_call(printf, params![template.as_pointer_value(), p0], "");
@@ -62,7 +71,7 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT);
 
         let p0 = fun.get_first_param().unwrap();
-        let printf = self.import_fun("printf", _int.fn_type(params![_ptr], true))?;
+        let printf = self.import_fun("printf", fn_type!((_ptr, ~) -> _int))?;
     
         let template = unsafe { builder.build_global_string("%d\0", "printd") };
         builder.build_call(printf, params![template.as_pointer_value(), p0], "");
@@ -132,7 +141,7 @@ impl<'ctx> Compiler<'ctx> {
         
         builder.position_at_end(realloc_bb);
 
-        let dn = self.import_fun("#dynarray::new", _dynarray.fn_type(params![_int], false))?;
+        let dn = self.import_fun("#dynarray::new", fn_type![(_int) -> _dynarray])?;
         let alloc = builder.build_call(dn, params![new_cap], "alloc")
             .try_as_basic_value()
             .unwrap_left()
@@ -163,6 +172,7 @@ impl<'ctx> Compiler<'ctx> {
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _int = layout!(self, S_INT).into_int_type();
         let _ptr = self.ptr_type(Default::default());
+        let _void = self.ctx.void_type();
 
         let [dynarray_ptr, bytes, add_len]: [_; 3] = *Box::try_from(fun.get_params()).unwrap();
         let dynarray_ptr = dynarray_ptr.into_pointer_value();
@@ -174,9 +184,7 @@ impl<'ctx> Compiler<'ctx> {
         let old_len = builder.build_load(_int, old_len_ptr, "").into_int_value();
         let new_len = builder.build_int_add(old_len, add_len, "len");
 
-        let dynarray_resize = self.import_fun("#dynarray::resize", self.ctx.void_type().fn_type(
-            params![_ptr, _int], false
-        ))?;
+        let dynarray_resize = self.import_fun("#dynarray::resize", fn_type![(_ptr, _int) -> _void])?;
         builder.build_call(dynarray_resize, params![dynarray_ptr, new_len], "");
 
         self.import_heap();
@@ -231,17 +239,18 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn import_heap(&self) {
         let _int = self.ptr_type(Default::default());
         let _i64 = layout!(self, S_INT);
+        let _void = self.ctx.void_type();
 
         if self.module.get_function("malloc").is_none() {
-            let malloc = _int.fn_type(params![_i64], false);
+            let malloc = fn_type![(_i64) -> _int];
             self.module.add_function("malloc", malloc, None);
         }
         if self.module.get_function("free").is_none() {
-            let free = self.ctx.void_type().fn_type(params![_int], false);
+            let free = fn_type![(_int) -> _void];
             self.module.add_function("free", free, None);
         }
         if self.module.get_function("memcpy").is_none() {
-            let memcpy = _int.fn_type(params![_int, _int, _i64], false);
+            let memcpy = fn_type![(_int, _int, _i64) -> _int];
             self.module.add_function("memcpy", memcpy, None);
         }
     }
