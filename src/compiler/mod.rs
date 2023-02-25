@@ -16,6 +16,7 @@
 mod value;
 pub mod codegen;
 pub mod plir;
+mod llvm;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -23,16 +24,16 @@ use std::iter;
 
 use inkwell::{OptimizationLevel, AddressSpace};
 use inkwell::basic_block::BasicBlock;
-use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
 use inkwell::types::{StructType, BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue, ArrayValue};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
 
+use self::llvm::Builder2;
 pub use self::value::*;
 use self::value::apply_bv;
 
@@ -58,8 +59,8 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
             let st = ctx.opaque_struct_type("#dynarray");
             st.set_body(&[
                 ctx.i8_type().ptr_type(Default::default()).into(), // buffer
-                ctx.i32_type().into(), // length
-                ctx.i32_type().into() // capacity
+                ctx.i32_type().into(), // length (in bytes)
+                ctx.i32_type().into() // capacity (in bytes)
             ], false);
             st
         },
@@ -144,7 +145,7 @@ impl<'ctx> ExitPointers<'ctx> {
 /// This struct converts from PLIR to LLVM.
 pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
-    builder: Builder<'ctx>,
+    builder: Builder2<'ctx>,
     module: Module<'ctx>,
     layouts: HashMap<String, BasicTypeEnum<'ctx>>,
     exit_pointers: Vec<ExitPointers<'ctx>>,
@@ -157,7 +158,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn from_ctx(ctx: &'ctx Context) -> Self {
         Self {
             ctx,
-            builder: ctx.create_builder(),
+            builder: Builder2::new(ctx.create_builder()),
             module: ctx.create_module("eval"),
             layouts: default_layouts(ctx),
             exit_pointers: vec![],
@@ -405,44 +406,6 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             e.write_value(self).map(|gv| self.basic_value_of(gv))
         }
-    }
-
-    fn dynarray_new(&mut self, array: ArrayValue<'ctx>) -> CompileResult<'ctx, StructValue<'ctx>> {
-        use std::cmp::Ordering;
-
-        let ty = self.ctx.get_struct_type("#dynarray").expect("#dynarray type not defined in LLVM");
-        let arr_ty = array.get_type();
-        let len = arr_ty.len();
-        let cap = if len == 0 {
-            0
-        } else {
-            len.next_power_of_two()
-        };
-        let i32_ty = self.ctx.i32_type();
-
-        let buf = match len.cmp(&cap) {
-            Ordering::Less => {
-                let newarr_ty = arr_ty.get_element_type().array_type(cap);
-                let buf = self.builder.build_alloca(newarr_ty, "dynarray_buf");
-                self.builder.build_store(buf, newarr_ty.const_zero());
-                self.builder.build_store(buf, array);
-
-                buf
-            },
-            Ordering::Equal => {
-                let buf = self.builder.build_alloca(arr_ty, "dynarray_buf");
-                self.builder.build_store(buf, array);
-
-                buf
-            },
-            Ordering::Greater => panic!("cap < len in dynarray new: {cap} < {len}"),
-        };
-
-        self.create_struct_value(ty, &[
-            buf.into(),
-            i32_ty.const_int(len as u64, true).into(),
-            i32_ty.const_int(cap as u64, true).into(),
-        ])
     }
 }
 

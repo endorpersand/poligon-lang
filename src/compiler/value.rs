@@ -84,14 +84,37 @@ impl<'ctx> Compiler<'ctx> {
         GonValue::Int(self.ctx.i32_type().const_int(c as u32 as u64, true))
     }
     /// Create a new string value using a string slice from Rust.
-    pub fn new_str(&mut self, s: &str) -> GonValue<'ctx> {
-        // todo: null-terminated fix
-        // i love c
-        let array = self.ctx.const_string(s.as_bytes(), true);
-        let dynarray = self.dynarray_new(array).expect("error occurred in dynarray alloc");
+    pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
+        // todo: support \0
+        let _ptr = self.ptr_type(Default::default());
+        let _int = layout!(self, S_INT).into_int_type();
+        let _dynarray = layout!(self, "#dynarray").into_struct_type();
+        let _str = layout!(self, S_STR).into_struct_type();
 
-        let str_type = layout!(self, S_STR).into_struct_type();
-        GonValue::Struct(self.create_struct_value(str_type, &[dynarray.into()]).unwrap())
+        let string = self.ctx.const_string(s.as_bytes(), true);
+        let len = _int.const_int(string.get_type().len() as _, false);
+
+        let arr_new = self.import_fun("#dynarray::new", 
+            _dynarray.fn_type(&[_int.into()], false)
+        ).unwrap();
+        let arr_ext = self.import_fun("#dynarray::extend",
+            self.ctx.void_type().fn_type(&[_ptr.into(), _ptr.into(), _int.into()], false)
+        ).unwrap();
+
+        let dynarray = self.builder.build_call(arr_new, &[len.into()], "dynarray_new")
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_struct_value();
+        let dynarray_ptr = self.builder.build_alloca(_dynarray, "");
+        let string_ptr = self.builder.build_alloca(string.get_type(), "");
+
+        self.builder.build_store(dynarray_ptr, dynarray);
+        self.builder.build_store(string_ptr, string);
+
+        self.builder.build_call(arr_ext, &[dynarray_ptr.into(), string_ptr.into(), len.into()], "");
+
+        let dynarray = self.builder.build_load(_dynarray, dynarray_ptr, "");
+        GonValue::Struct(self.create_struct_value(_str, &[dynarray]).unwrap())
     }
 
     /// Cast a GonValue to another type.

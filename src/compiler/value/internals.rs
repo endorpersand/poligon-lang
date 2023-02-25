@@ -1,9 +1,9 @@
 //! Internally defined structs for LLVM representation
 
-use inkwell::builder::Builder;
 use inkwell::types::{FunctionType, BasicType};
 use inkwell::values::FunctionValue;
 
+use crate::compiler::llvm::Builder2;
 use crate::compiler::{Compiler, CompileResult, layout};
 
 macro_rules! std_map {
@@ -12,7 +12,7 @@ macro_rules! std_map {
             matches!(name, $($l)|+)
         }
 
-        fn register(&self, name: &str, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        fn register(&self, name: &str, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
             match name {
                 $($l => self.$i(builder, fun)),+,
                 _ => unimplemented!()
@@ -22,7 +22,7 @@ macro_rules! std_map {
 }
 
 impl<'ctx> Compiler<'ctx> {
-    fn std_print(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let ptr = fun.get_first_param().unwrap().into_pointer_value();
         let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
         let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
@@ -41,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn std_printc(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn std_printc(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let p0 = fun.get_first_param().unwrap();
     
         let printf = self.import_fun("printf",
@@ -58,7 +58,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
     
-    fn std_printd(&self, builder: Builder<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn std_printd(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let p0 = fun.get_first_param().unwrap();
     
         let printf = self.import_fun("printf",
@@ -75,11 +75,135 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
+    fn dynarray_new(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _i64 = self.ctx.i64_type();
+        let _dynarray = layout!(self, "#dynarray")
+            .into_struct_type();
+        
+        let cap = fun.get_first_param().unwrap().into_int_value();
+
+        self.import_heap();
+        let malloc = self.module.get_function("malloc").unwrap();
+
+        let buf = builder.build_call(malloc, &[cap.into()], "dynarray_buf")
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_pointer_value();
+
+        let val = builder.create_struct_value(_dynarray, &[
+            buf.into(), 
+            _i64.const_zero().into(), 
+            cap.into()
+        ])?;
+
+        builder.build_return(Some(&val));
+
+        Ok(())
+    }
+
+    fn dynarray_resize(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        use inkwell::IntPredicate::UGT;
+
+        let _dynarray = layout!(self, "#dynarray");
+        let _int = layout!(self, S_INT);
+
+        self.import_heap();
+        let memcpy = self.module.get_function("memcpy").unwrap();
+        let free = self.module.get_function("free").unwrap();
+        
+        let [dynarray_ptr, new_cap]: [_; 2] = *Box::try_from(fun.get_params()).unwrap();
+        let dynarray_ptr = dynarray_ptr.into_pointer_value();
+        let new_cap = new_cap.into_int_value();
+
+        let dynarray = builder.build_load(_dynarray, dynarray_ptr, "")
+            .into_struct_value();
+        
+        let old_buf = builder.build_extract_value(dynarray, 0, "old_buf")
+            .expect("#dynarray buf")
+            .into_pointer_value();
+        let len = builder.build_extract_value(dynarray, 1, "len")
+            .expect("#dynarray len")
+            .into_int_value();
+        let old_cap = builder.build_extract_value(dynarray, 2, "old_cap")
+            .expect("#dynarray cap")
+            .into_int_value();
+    
+        let needs_realloc = builder.build_int_compare(UGT, new_cap, old_cap, "");
+        let realloc_bb = self.ctx.append_basic_block(fun, "realloc");
+        let merge_bb = self.ctx.append_basic_block(fun, "merge");
+
+        builder.build_conditional_branch(needs_realloc, realloc_bb, merge_bb);
+        
+        builder.position_at_end(realloc_bb);
+
+        let dn = self.import_fun("#dynarray::new", _dynarray.fn_type(&[_int.into()], false))?;
+        let alloc = builder.build_call(dn, &[new_cap.into()], "alloc")
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_struct_value();
+
+        let new_buf = builder.build_extract_value(alloc, 0, "new_buf")
+            .expect("#dynarray buf")
+            .into_pointer_value();
+
+        builder.build_call(memcpy, &[new_buf.into(), old_buf.into(), len.into()], "copy_buf");
+        builder.build_insert_value(alloc, len, 1, "alloc");
+        
+        builder.build_store(dynarray_ptr, alloc);
+        builder.build_call(free, &[old_buf.into()], "free_old_buf");
+
+        builder.build_unconditional_branch(merge_bb);
+        
+        builder.position_at_end(merge_bb);
+        builder.build_return(None);
+        Ok(())
+    }
+
+    fn dynarray_append(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        todo!()
+    }
+
+    fn dynarray_extend(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _dynarray = layout!(self, "#dynarray").into_struct_type();
+        let _int = layout!(self, S_INT).into_int_type();
+        let _ptr = self.ptr_type(Default::default());
+
+        let [dynarray_ptr, bytes, add_len]: [_; 3] = *Box::try_from(fun.get_params()).unwrap();
+        let dynarray_ptr = dynarray_ptr.into_pointer_value();
+
+        let bytes = bytes.into_pointer_value();
+        let add_len = add_len.into_int_value();
+
+        let old_len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
+        let old_len = builder.build_load(_int, old_len_ptr, "").into_int_value();
+        let new_len = builder.build_int_add(old_len, add_len, "len");
+
+        let dynarray_resize = self.import_fun("#dynarray::resize", self.ctx.void_type().fn_type(&[
+            _ptr.into(),
+            _int.into()
+        ], false))?;
+        builder.build_call(dynarray_resize, &[dynarray_ptr.into(), new_len.into()], "");
+
+        self.import_heap();
+        let memcpy = self.module.get_function("memcpy").unwrap();
+        let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
+        let buf = builder.build_load(_ptr, buf_ptr, "buf").into_pointer_value();
+        let shift_buf = unsafe {
+            builder.build_gep(self.ctx.i8_type().array_type(0), buf, &[_int.const_zero(), old_len], "") 
+        };
+        builder.build_call(memcpy, &[shift_buf.into(), bytes.into(), add_len.into()], "");
+        Ok(())
+    }
+
     // HACK
     std_map! {
         "print": std_print,
         "printc": std_printc,
-        "printd": std_printd
+        "printd": std_printd,
+        "#dynarray::new": dynarray_new,
+        "#dynarray::resize": dynarray_resize,
+        "#dynarray::append": dynarray_append,
+        "#dynarray::extend": dynarray_extend
     }
 
     /// Import a defined internal function or a libc function.
@@ -91,7 +215,7 @@ impl<'ctx> Compiler<'ctx> {
         let fun = self.module.get_function(s).unwrap_or_else(|| self.module.add_function(s, ty, None));
 
         if self.lookup(s) && fun.count_basic_blocks() < 1 {
-            let builder = self.ctx.create_builder();
+            let builder = Builder2::new(self.ctx.create_builder());
             let bb = self.ctx.append_basic_block(fun, "body");
             builder.position_at_end(bb);
 
@@ -105,5 +229,23 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         Ok(fun)
+    }
+
+    /// Imports malloc, free, memcpy from libc
+    pub(crate) fn import_heap(&self) {
+        let ptr_ty = self.ptr_type(Default::default());
+
+        if self.module.get_function("malloc").is_none() {
+            let malloc = ptr_ty.fn_type(&[self.ctx.i64_type().into()], false);
+            self.module.add_function("malloc", malloc, None);
+        }
+        if self.module.get_function("free").is_none() {
+            let free = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+            self.module.add_function("free", free, None);
+        }
+        if self.module.get_function("memcpy").is_none() {
+            let memcpy = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), self.ctx.i64_type().into()], false);
+            self.module.add_function("memcpy", memcpy, None);
+        }
     }
 }
