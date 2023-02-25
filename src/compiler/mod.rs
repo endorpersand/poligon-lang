@@ -89,6 +89,11 @@ macro_rules! layout {
 }
 pub(crate) use layout;
 
+macro_rules! params {
+    ($($e:expr),*) => { &[$($e.into()),*] }
+}
+pub(self) use params;
+
 enum ReturnableType<'ctx> {
     Basic(BasicTypeEnum<'ctx>),
     Void(VoidType<'ctx>)
@@ -915,14 +920,15 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
             plir::Path::Static(_, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if !attrs.is_empty() {
+                    let _i32 = compiler.ctx.i32_type();
+                    
                     let ptr = e.write_ptr(compiler)?;
                     let ty = compiler.get_layout(&e.ty)?;
-                    let i32_ty = compiler.ctx.i32_type();
 
-                    let mut indexes = vec![i32_ty.const_zero()];
+                    let mut indexes = vec![_i32.const_zero()];
                     let attr_idx = attrs.iter()
                         .map(|&(i, _)| i)
-                        .map(|i| i32_ty.const_int(i as u64, false));
+                        .map(|i| _i32.const_int(i as u64, false));
                     indexes.extend(attr_idx);
 
                     // SAFETY: After PLIR pass, this should be valid.

@@ -4,7 +4,7 @@ use inkwell::types::{FunctionType, BasicType};
 use inkwell::values::FunctionValue;
 
 use crate::compiler::llvm::Builder2;
-use crate::compiler::{Compiler, CompileResult, layout};
+use crate::compiler::{Compiler, CompileResult, layout, params};
 
 macro_rules! std_map {
     ($($l:literal: $i:ident),+) => {
@@ -44,34 +44,28 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn std_printc(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _ptr = self.ptr_type(Default::default());
+        let _int = layout!(self, S_INT);
+
         let p0 = fun.get_first_param().unwrap();
-    
-        let printf = self.import_fun("printf",
-            layout!(self, S_INT).fn_type(
-                &[self.ptr_type(Default::default()).into()], 
-                true
-            ),
-        )?;
+        let printf = self.import_fun("printf", _int.fn_type(params![_ptr], true))?;
     
         let template = unsafe { builder.build_global_string("%c\0", "printc") };
-        builder.build_call(printf, &[template.as_pointer_value().into(), p0.into()], "");
+        builder.build_call(printf, params![template.as_pointer_value(), p0], "");
         builder.build_return(None);
     
         Ok(())
     }
     
     fn std_printd(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _ptr = self.ptr_type(Default::default());
+        let _int = layout!(self, S_INT);
+
         let p0 = fun.get_first_param().unwrap();
-    
-        let printf = self.import_fun("printf",
-            layout!(self, S_INT).fn_type(
-                &[self.ptr_type(Default::default()).into()], 
-                true
-            ),
-        )?;
+        let printf = self.import_fun("printf", _int.fn_type(params![_ptr], true))?;
     
         let template = unsafe { builder.build_global_string("%d\0", "printd") };
-        builder.build_call(printf, &[template.as_pointer_value().into(), p0.into()], "");
+        builder.build_call(printf, params![template.as_pointer_value(), p0], "");
         builder.build_return(None);
     
         Ok(())
@@ -138,8 +132,8 @@ impl<'ctx> Compiler<'ctx> {
         
         builder.position_at_end(realloc_bb);
 
-        let dn = self.import_fun("#dynarray::new", _dynarray.fn_type(&[_int.into()], false))?;
-        let alloc = builder.build_call(dn, &[new_cap.into()], "alloc")
+        let dn = self.import_fun("#dynarray::new", _dynarray.fn_type(params![_int], false))?;
+        let alloc = builder.build_call(dn, params![new_cap], "alloc")
             .try_as_basic_value()
             .unwrap_left()
             .into_struct_value();
@@ -148,11 +142,11 @@ impl<'ctx> Compiler<'ctx> {
             .expect("#dynarray buf")
             .into_pointer_value();
 
-        builder.build_call(memcpy, &[new_buf.into(), old_buf.into(), len.into()], "copy_buf");
+        builder.build_call(memcpy, params![new_buf, old_buf, len], "copy_buf");
         builder.build_insert_value(alloc, len, 1, "alloc");
         
         builder.build_store(dynarray_ptr, alloc);
-        builder.build_call(free, &[old_buf.into()], "free_old_buf");
+        builder.build_call(free, params![old_buf], "free_old_buf");
 
         builder.build_unconditional_branch(merge_bb);
         
@@ -180,11 +174,10 @@ impl<'ctx> Compiler<'ctx> {
         let old_len = builder.build_load(_int, old_len_ptr, "").into_int_value();
         let new_len = builder.build_int_add(old_len, add_len, "len");
 
-        let dynarray_resize = self.import_fun("#dynarray::resize", self.ctx.void_type().fn_type(&[
-            _ptr.into(),
-            _int.into()
-        ], false))?;
-        builder.build_call(dynarray_resize, &[dynarray_ptr.into(), new_len.into()], "");
+        let dynarray_resize = self.import_fun("#dynarray::resize", self.ctx.void_type().fn_type(
+            params![_ptr, _int], false
+        ))?;
+        builder.build_call(dynarray_resize, params![dynarray_ptr, new_len], "");
 
         self.import_heap();
         let memcpy = self.module.get_function("memcpy").unwrap();
@@ -193,7 +186,7 @@ impl<'ctx> Compiler<'ctx> {
         let shift_buf = unsafe {
             builder.build_gep(self.ctx.i8_type().array_type(0), buf, &[_int.const_zero(), old_len], "") 
         };
-        builder.build_call(memcpy, &[shift_buf.into(), bytes.into(), add_len.into()], "");
+        builder.build_call(memcpy, params![shift_buf, bytes, add_len], "");
         builder.build_return(None);
         Ok(())
     }
@@ -236,18 +229,19 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Imports malloc, free, memcpy from libc
     pub(crate) fn import_heap(&self) {
-        let ptr_ty = self.ptr_type(Default::default());
+        let _int = self.ptr_type(Default::default());
+        let _i64 = layout!(self, S_INT);
 
         if self.module.get_function("malloc").is_none() {
-            let malloc = ptr_ty.fn_type(&[self.ctx.i64_type().into()], false);
+            let malloc = _int.fn_type(params![_i64], false);
             self.module.add_function("malloc", malloc, None);
         }
         if self.module.get_function("free").is_none() {
-            let free = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+            let free = self.ctx.void_type().fn_type(params![_int], false);
             self.module.add_function("free", free, None);
         }
         if self.module.get_function("memcpy").is_none() {
-            let memcpy = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), self.ctx.i64_type().into()], false);
+            let memcpy = _int.fn_type(params![_int, _int, _i64], false);
             self.module.add_function("memcpy", memcpy, None);
         }
     }

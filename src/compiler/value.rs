@@ -3,7 +3,7 @@ mod internals;
 
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, BasicValue};
 
-use super::{Compiler, CompileResult, CompileErr, layout};
+use super::{Compiler, CompileResult, CompileErr, layout, params};
 use super::plir;
 
 /// Apply a function to a basic value enum 
@@ -95,13 +95,13 @@ impl<'ctx> Compiler<'ctx> {
         let len = _int.const_int(string.get_type().len() as _, false);
 
         let arr_new = self.import_fun("#dynarray::new", 
-            _dynarray.fn_type(&[_int.into()], false)
+            _dynarray.fn_type(params![_int], false)
         ).unwrap();
         let arr_ext = self.import_fun("#dynarray::extend",
-            self.ctx.void_type().fn_type(&[_ptr.into(), _ptr.into(), _int.into()], false)
+            self.ctx.void_type().fn_type(params![_ptr, _ptr, _int], false)
         ).unwrap();
 
-        let dynarray = self.builder.build_call(arr_new, &[len.into()], "dynarray_new")
+        let dynarray = self.builder.build_call(arr_new, params![len], "dynarray_new")
             .try_as_basic_value()
             .unwrap_left()
             .into_struct_value();
@@ -111,7 +111,7 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_store(dynarray_ptr, dynarray);
         self.builder.build_store(string_ptr, string);
 
-        self.builder.build_call(arr_ext, &[dynarray_ptr.into(), string_ptr.into(), len.into()], "");
+        self.builder.build_call(arr_ext, params![dynarray_ptr, string_ptr, len], "");
 
         let dynarray = self.builder.build_load(_dynarray, dynarray_ptr, "");
         GonValue::Struct(self.builder.create_struct_value(_str, &[dynarray]).unwrap())
