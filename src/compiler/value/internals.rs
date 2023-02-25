@@ -23,18 +23,20 @@ macro_rules! std_map {
 
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _ptr = self.ptr_type(Default::default());
+        
         let ptr = fun.get_first_param().unwrap().into_pointer_value();
         let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
         let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
 
         let puts = self.import_fun("puts",
             layout!(self, S_INT).fn_type(
-                &[self.ptr_type(Default::default()).into()], 
+                &[_ptr.into()], 
                 false
             ),
         )?;
     
-        let buf = builder.build_load(self.ptr_type(Default::default()), buf_ptr, "buf");
+        let buf = builder.build_load(_ptr, buf_ptr, "buf");
         builder.build_call(puts, &[buf.into()], "");
         builder.build_return(None);
     
@@ -192,6 +194,7 @@ impl<'ctx> Compiler<'ctx> {
             builder.build_gep(self.ctx.i8_type().array_type(0), buf, &[_int.const_zero(), old_len], "") 
         };
         builder.build_call(memcpy, &[shift_buf.into(), bytes.into(), add_len.into()], "");
+        builder.build_return(None);
         Ok(())
     }
 

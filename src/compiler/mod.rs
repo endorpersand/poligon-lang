@@ -59,8 +59,8 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
             let st = ctx.opaque_struct_type("#dynarray");
             st.set_body(&[
                 ctx.i8_type().ptr_type(Default::default()).into(), // buffer
-                ctx.i32_type().into(), // length (in bytes)
-                ctx.i32_type().into() // capacity (in bytes)
+                ctx.i64_type().into(), // length (in bytes)
+                ctx.i64_type().into() // capacity (in bytes)
             ], false);
             st
         },
