@@ -37,6 +37,7 @@ macro_rules! apply_bt {
 
 pub(crate) use apply_bv;
 pub(crate) use apply_bt;
+pub(in crate::compiler) use internals::fn_type;
 
 /// An LLVM representation of the a possible value in Poligon.
 /// 
@@ -91,15 +92,11 @@ impl<'ctx> Compiler<'ctx> {
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _str = layout!(self, S_STR).into_struct_type();
 
+        let arr_new = self.std_import("#dynarray::new").unwrap();
+        let arr_ext = self.std_import("#dynarray::extend").unwrap();
+
         let string = self.ctx.const_string(s.as_bytes(), true);
         let len = _int.const_int(string.get_type().len() as _, false);
-
-        let arr_new = self.import_fun("#dynarray::new", 
-            _dynarray.fn_type(params![_int], false)
-        ).unwrap();
-        let arr_ext = self.import_fun("#dynarray::extend",
-            self.ctx.void_type().fn_type(params![_ptr, _ptr, _int], false)
-        ).unwrap();
 
         let dynarray = self.builder.build_call(arr_new, params![len], "dynarray_new")
             .try_as_basic_value()

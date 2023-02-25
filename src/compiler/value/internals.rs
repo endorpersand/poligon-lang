@@ -4,18 +4,25 @@ use inkwell::types::{FunctionType, BasicType};
 use inkwell::values::FunctionValue;
 
 use crate::compiler::llvm::Builder2;
-use crate::compiler::{Compiler, CompileResult, layout, params};
+use crate::compiler::{Compiler, CompileResult, layout, params, CompileErr};
 
 macro_rules! std_map {
-    ($($l:literal: $i:ident),+) => {
-        fn lookup(&self, name: &str) -> bool {
-            matches!(name, $($l)|+)
+    (use $compiler:ident; $($(let $t:ident = $u:expr;)+)? $($l:literal: $i:ident, $closure:expr),+) => {
+        fn lookup(&self, name: &str) -> Option<FunctionType<'ctx>> {
+            let $compiler = self;
+            $(
+                $(let $t = $u;)+
+            )?
+            match name {
+                $($l => Some($closure)),+,
+                _ => None
+            }
         }
 
-        fn register(&self, name: &str, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        fn init_body(&self, name: &str, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
             match name {
                 $($l => self.$i(builder, fun)),+,
-                _ => unimplemented!()
+                s => panic!("non-intrinsic {s} was imported, but does not have a defined body")
             }
         }
     }
@@ -33,6 +40,7 @@ macro_rules! fn_type {
         $r.fn_type(params![$($e),+], true)
     };
 }
+
 pub(in crate::compiler) use fn_type;
 
 impl<'ctx> Compiler<'ctx> {
@@ -43,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
         let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
         let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
 
-        let puts = self.import_fun("puts", fn_type![(_ptr) -> layout!(self, S_INT)])?;
+        let puts = self.std_import("puts")?;
     
         let buf = builder.build_load(_ptr, buf_ptr, "buf");
         builder.build_call(puts, &[buf.into()], "");
@@ -57,7 +65,7 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT);
 
         let p0 = fun.get_first_param().unwrap();
-        let printf = self.import_fun("printf", fn_type!((_ptr, ~) -> _int))?;
+        let printf = self.std_import("printf")?;
     
         let template = unsafe { builder.build_global_string("%c\0", "printc") };
         builder.build_call(printf, params![template.as_pointer_value(), p0], "");
@@ -71,7 +79,7 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT);
 
         let p0 = fun.get_first_param().unwrap();
-        let printf = self.import_fun("printf", fn_type!((_ptr, ~) -> _int))?;
+        let printf = self.std_import("printf")?;
     
         let template = unsafe { builder.build_global_string("%d\0", "printd") };
         builder.build_call(printf, params![template.as_pointer_value(), p0], "");
@@ -85,11 +93,10 @@ impl<'ctx> Compiler<'ctx> {
         let _dynarray = layout!(self, "#dynarray")
             .into_struct_type();
         
+        let malloc = self.std_import("malloc")?;
+
         let cap = fun.get_first_param().unwrap().into_int_value();
-
-        self.import_heap();
-        let malloc = self.module.get_function("malloc").unwrap();
-
+        
         let buf = builder.build_call(malloc, &[cap.into()], "dynarray_buf")
             .try_as_basic_value()
             .unwrap_left()
@@ -112,9 +119,8 @@ impl<'ctx> Compiler<'ctx> {
         let _dynarray = layout!(self, "#dynarray");
         let _int = layout!(self, S_INT);
 
-        self.import_heap();
-        let memcpy = self.module.get_function("memcpy").unwrap();
-        let free = self.module.get_function("free").unwrap();
+        let memcpy = self.std_import("memcpy")?;
+        let free = self.std_import("free")?;
         
         let [dynarray_ptr, new_cap]: [_; 2] = *Box::try_from(fun.get_params()).unwrap();
         let dynarray_ptr = dynarray_ptr.into_pointer_value();
@@ -141,7 +147,7 @@ impl<'ctx> Compiler<'ctx> {
         
         builder.position_at_end(realloc_bb);
 
-        let dn = self.import_fun("#dynarray::new", fn_type![(_int) -> _dynarray])?;
+        let dn = self.std_import("#dynarray::new")?;
         let alloc = builder.build_call(dn, params![new_cap], "alloc")
             .try_as_basic_value()
             .unwrap_left()
@@ -174,6 +180,9 @@ impl<'ctx> Compiler<'ctx> {
         let _ptr = self.ptr_type(Default::default());
         let _void = self.ctx.void_type();
 
+        let dynarray_resize = self.std_import("#dynarray::resize")?;
+        let memcpy = self.std_import("memcpy")?;
+
         let [dynarray_ptr, bytes, add_len]: [_; 3] = *Box::try_from(fun.get_params()).unwrap();
         let dynarray_ptr = dynarray_ptr.into_pointer_value();
 
@@ -184,11 +193,8 @@ impl<'ctx> Compiler<'ctx> {
         let old_len = builder.build_load(_int, old_len_ptr, "").into_int_value();
         let new_len = builder.build_int_add(old_len, add_len, "len");
 
-        let dynarray_resize = self.import_fun("#dynarray::resize", fn_type![(_ptr, _int) -> _void])?;
         builder.build_call(dynarray_resize, params![dynarray_ptr, new_len], "");
 
-        self.import_heap();
-        let memcpy = self.module.get_function("memcpy").unwrap();
         let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
         let buf = builder.build_load(_ptr, buf_ptr, "buf").into_pointer_value();
         let shift_buf = unsafe {
@@ -201,29 +207,62 @@ impl<'ctx> Compiler<'ctx> {
 
     // HACK
     std_map! {
-        "print": std_print,
-        "printc": std_printc,
-        "printd": std_printd,
-        "#dynarray::new": dynarray_new,
-        "#dynarray::resize": dynarray_resize,
-        "#dynarray::append": dynarray_append,
-        "#dynarray::extend": dynarray_extend
+        use c;
+        let _str  = layout!(c, S_STR);
+        let _char = layout!(c, S_CHAR);
+        let _int  = layout!(c, S_INT);
+        let _i8   = c.ctx.i8_type();
+        let _void = c.ctx.void_type();
+        let _dynarray = layout!(c, "#dynarray");
+        let _ptr = c.ptr_type(Default::default());
+
+        "print": std_print,   fn_type![(_str)  -> _void],
+        "printc": std_printc, fn_type![(_char) -> _void],
+        "printd": std_printd, fn_type![(_int)  -> _void],
+        "#dynarray::new": dynarray_new, fn_type![(_int) -> _dynarray],
+        "#dynarray::resize": dynarray_resize, fn_type![(_ptr /* "#dynarray"* */, _int) -> _void],
+        "#dynarray::append": dynarray_append, fn_type![(_ptr /* "#dynarray"* */, _i8)  -> _void],
+        "#dynarray::extend": dynarray_extend, fn_type![(_ptr /* "#dynarray"* */, _ptr /* i8* */, _int) -> _void]
     }
 
+    fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
+        let _ptr  = self.ptr_type(Default::default());
+        let _int  = layout!(self, S_INT);
+        let _void = self.ctx.void_type();
+
+        match name {
+            "puts"   => Some(fn_type![(_ptr /* i8* */) -> _int]),
+            "printf" => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
+            "malloc" => Some(fn_type![(_int) -> _ptr]),
+            "free"   => Some(fn_type![(_ptr) -> _void]),
+            "memcpy" => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
+            _ => None
+        }
+    }
     /// Import a defined internal function or a libc function.
     /// 
     /// Internal functions are currently defined in [`compiler::value::internals`].
     /// The type signature and identifier need to match exactly, or else defined internals may fail 
     /// or a segmentation fault may occur.
-    pub(crate) fn import_fun(&self, s: &str, ty: FunctionType<'ctx>) -> CompileResult<'ctx, FunctionValue<'ctx>> {
-        let fun = self.module.get_function(s).unwrap_or_else(|| self.module.add_function(s, ty, None));
+    pub(crate) fn std_import(&self, s: &str) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+        let intrinsic = self.intrinsic(s);
+        let fun = match self.module.get_function(s) {
+            Some(fun) => fun,
+            None => {
+                let ty = intrinsic
+                    .or_else(|| self.lookup(s))
+                    .ok_or_else(|| CompileErr::CannotImport(String::from(s)))?;
 
-        if self.lookup(s) && fun.count_basic_blocks() < 1 {
+                self.module.add_function(s, ty, None)
+            }
+        };
+
+        if intrinsic.is_none() && fun.count_basic_blocks() < 1 {
             let builder = Builder2::new(self.ctx.create_builder());
             let bb = self.ctx.append_basic_block(fun, "body");
             builder.position_at_end(bb);
 
-            self.register(s, builder, fun)?;
+            self.init_body(s, builder, fun)?;
 
             if !fun.verify(true) {
                 // SAFETY: Not used after.
@@ -233,25 +272,5 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         Ok(fun)
-    }
-
-    /// Imports malloc, free, memcpy from libc
-    pub(crate) fn import_heap(&self) {
-        let _int = self.ptr_type(Default::default());
-        let _i64 = layout!(self, S_INT);
-        let _void = self.ctx.void_type();
-
-        if self.module.get_function("malloc").is_none() {
-            let malloc = fn_type![(_i64) -> _int];
-            self.module.add_function("malloc", malloc, None);
-        }
-        if self.module.get_function("free").is_none() {
-            let free = fn_type![(_int) -> _void];
-            self.module.add_function("free", free, None);
-        }
-        if self.module.get_function("memcpy").is_none() {
-            let memcpy = fn_type![(_int, _int, _i64) -> _int];
-            self.module.add_function("memcpy", memcpy, None);
-        }
     }
 }

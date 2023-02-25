@@ -328,8 +328,9 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Import a function using the provided PLIR function signature.
     fn import(&mut self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
-        let (_, fun_ty) = self.define_fun(sig)?;
-        self.import_fun(&sig.ident, fun_ty)
+        // TODO: type check?
+        let (_, _fun_ty) = self.define_fun(sig)?;
+        self.std_import(&sig.ident)
     }
 
     /// Define a type for the compiler to track.
@@ -414,6 +415,8 @@ pub enum CompileErr<'ctx> {
     UndefinedVar(String),
     /// Function was not declared.
     UndefinedFun(String),
+    /// Imported object does not exist.
+    CannotImport(String),
     /// The function created was invalid.
     InvalidFun,
     /// The given PLIR type could not be resolved into a type in LLVM.
@@ -443,6 +446,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
         match self {
             | CompileErr::UndefinedVar(_)
             | CompileErr::UndefinedFun(_)
+            | CompileErr::CannotImport(_)
             => "name error",
 
             | CompileErr::InvalidFun
@@ -469,6 +473,7 @@ impl<'ctx> GonErr for CompileErr<'ctx> {
         match self {
             CompileErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
             CompileErr::UndefinedFun(name) => format!("could not find function '{name}'"),
+            CompileErr::CannotImport(name) => format!("cannot import '{name}'"),
             CompileErr::InvalidFun => String::from("could not create function"),
             CompileErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
             CompileErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
@@ -543,7 +548,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             (None, stmts) => {
                 let main = compiler.module.add_function(
                     "main", 
-                    compiler.ctx.void_type().fn_type(&[], false), 
+                    fn_type![() -> compiler.ctx.void_type()],
                     None
                 );
                 
