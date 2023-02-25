@@ -170,8 +170,64 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_append(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        todo!()
+    fn dynarray_push(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        let _dynarray = layout!(self, "#dynarray");
+        let _int = layout!(self, S_INT).into_int_type();
+        let _i8 = self.ctx.i8_type();
+        let _bytearr = _i8.array_type(0);
+        
+        let [dynarray_ptr, new_byte]: [_; 2] = *Box::try_from(fun.get_params()).unwrap();
+        let dynarray_ptr = dynarray_ptr.into_pointer_value();
+        let new_byte = new_byte.into_int_value();
+
+        let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
+        let len = builder.build_load(_int, len_ptr, "len").into_int_value();
+        let len_p1 = builder.build_int_add(len, _int.const_int(1, false), "");
+        
+        let dynarray_resize = self.std_import("#dynarray::resize")?;
+        builder.build_call(dynarray_resize, &[len_p1.into()], "");
+
+        let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
+        let push_ptr = unsafe { 
+            builder.build_gep(_bytearr, buf_ptr, &[
+                _int.const_int(0, false),
+                len
+            ], "")
+        };
+        builder.build_store(push_ptr, new_byte);
+        builder.build_return(None);
+        Ok(())
+    }
+
+    fn dynarray_pop(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        use inkwell::IntPredicate::EQ;
+        
+        let _dynarray = layout!(self, "#dynarray").into_struct_type();
+        let _int = layout!(self, S_INT).into_int_type();
+        let _i8 = self.ctx.i8_type();
+        let _bytearr = _i8.array_type(0);
+
+        let dynarray_ptr = fun.get_first_param().unwrap().into_pointer_value();
+        
+        let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
+        let len = builder.build_load(_int, len_ptr, "len").into_int_value();
+        let len_m1 = builder.build_int_sub(len, _int.const_int(1, false), "");
+        
+        let len_iz = builder.build_int_compare(EQ, len, _int.const_zero(), "");
+        let new_len = builder.build_select(len_iz, len, len_m1, "").into_int_value();
+        
+        let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
+        let popped_ptr = unsafe { 
+            builder.build_gep(_bytearr, buf_ptr, &[
+                _int.const_int(0, false),
+                new_len
+            ], "")
+        };
+        let nz_popped = builder.build_load(_i8, popped_ptr, "nz_pop").into_int_value();
+        let popped = builder.build_select(len_iz, _int.const_zero(), nz_popped, ""); // TODO: null
+        
+        builder.build_return(Some(&popped));
+        Ok(())
     }
 
     fn dynarray_extend(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
@@ -179,6 +235,7 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT).into_int_type();
         let _ptr = self.ptr_type(Default::default());
         let _void = self.ctx.void_type();
+        let _bytearr = self.ctx.i8_type().array_type(0);
 
         let dynarray_resize = self.std_import("#dynarray::resize")?;
         let memcpy = self.std_import("memcpy")?;
@@ -198,7 +255,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
         let buf = builder.build_load(_ptr, buf_ptr, "buf").into_pointer_value();
         let shift_buf = unsafe {
-            builder.build_gep(self.ctx.i8_type().array_type(0), buf, &[_int.const_zero(), old_len], "") 
+            builder.build_gep(_bytearr, buf, &[_int.const_zero(), old_len], "") 
         };
         builder.build_call(memcpy, params![shift_buf, bytes, add_len], "");
         builder.build_return(None);
@@ -221,8 +278,9 @@ impl<'ctx> Compiler<'ctx> {
         "printd": std_printd, fn_type![(_int)  -> _void],
         "#dynarray::new": dynarray_new, fn_type![(_int) -> _dynarray],
         "#dynarray::resize": dynarray_resize, fn_type![(_ptr /* "#dynarray"* */, _int) -> _void],
-        "#dynarray::append": dynarray_append, fn_type![(_ptr /* "#dynarray"* */, _i8)  -> _void],
-        "#dynarray::extend": dynarray_extend, fn_type![(_ptr /* "#dynarray"* */, _ptr /* i8* */, _int) -> _void]
+        "#dynarray::push": dynarray_push, fn_type![(_ptr /* "#dynarray"* */, _i8)  -> _void],
+        "#dynarray::extend": dynarray_extend, fn_type![(_ptr /* "#dynarray"* */, _ptr /* i8* */, _int) -> _void],
+        "#dynarray::pop": dynarray_pop, fn_type![(_ptr /* "#dynarray"* */) -> _i8]
     }
 
     fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
