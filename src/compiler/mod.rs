@@ -27,8 +27,8 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
-use inkwell::types::{StructType, BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, StructValue, InstructionValue};
+use inkwell::types::{BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
@@ -291,31 +291,9 @@ impl<'ctx> Compiler<'ctx> {
         Ok(mcvalue.unwrap_or(GonValue::Unit))
     }
 
-    fn branch_and_goto(&self, bb: BasicBlock<'ctx>) {
-        self.builder.build_unconditional_branch(bb);
-        self.builder.position_at_end(bb);
-    }
-
     /// Creates an opaque pointer type.
     pub fn ptr_type(&self, addr: AddressSpace) -> PointerType<'ctx> {
         self.ctx.i64_type().ptr_type(addr)
-    }
-
-    /// Initializes a new struct value 
-    /// and assigns all the fields of that struct.
-    pub fn create_struct_value(
-        &self, 
-        ty: StructType<'ctx>,
-        values: &[BasicValueEnum<'ctx>]
-    ) -> CompileResult<'ctx, StructValue<'ctx>> {
-        let mut result = ty.const_zero();
-        for (i, &fval) in values.iter().enumerate() {
-            result = self.builder.build_insert_value(result, fval, i as u32, "")
-                .ok_or_else(|| CompileErr::StructIndexOOB(i))?
-                .try_into()
-                .unwrap();
-        }
-        Ok(result)
     }
 
     /// Build a function return instruction using a GonValue.
@@ -649,7 +627,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let exit_bb = compiler.ctx.append_basic_block(fun, "post_block");
 
                 compiler.builder.position_at_end(orig_bb);
-                compiler.branch_and_goto(expr_bb);
+                compiler.builder.branch_and_goto(expr_bb);
                 let bval = compiler.write_block(block, ExitPointers::bare(exit_bb), |_, _| {})?;
 
                 compiler.builder.position_at_end(exit_bb);
@@ -668,7 +646,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     })
                     .collect::<Result<_, _>>()?;
 
-                compiler.create_struct_value(layout, &entries)
+                compiler.builder.create_struct_value(layout, &entries)
                     .and_then(|bv| compiler.reconstruct(expr_ty, bv))
             },
             plir::ExprType::Assign(target, expr) => {
@@ -732,7 +710,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         incoming.push((result, compiler.get_insert_block()));
 
                         // close block and go to post
-                        compiler.branch_and_goto(post_bb);
+                        compiler.builder.branch_and_goto(post_bb);
 
                         let phi = compiler.builder.build_phi(compiler.ctx.bool_type(), "cmp_result");
                         add_incoming(phi, &incoming);
@@ -814,7 +792,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 // end BB by going into loop
                 compiler.builder.position_at_end(bb);
-                compiler.branch_and_goto(cond_bb);
+                compiler.builder.branch_and_goto(cond_bb);
 
                 // if cond is true, go into the loop. otherwise, exit
                 let condval = condition.write_value(compiler)?;
@@ -1016,7 +994,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
                 // compiler.builder.build_unconditional_branch(exit);
                 
                 // compiler.builder.position_at_end(oob);
-                // compiler.branch_and_goto(exit);
+                // compiler.builder.branch_and_goto(exit);
                 
                 // let phi = compiler.builder.build_phi(i64_type, "");
                 // phi.add_incoming(&[

@@ -1,3 +1,4 @@
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::types::StructType;
 use inkwell::values::{BasicValueEnum, StructValue};
@@ -24,7 +25,7 @@ impl<'ctx> Builder2<'ctx> {
     pub fn new(b: Builder<'ctx>) -> Self {
         Self(b)
     }
-    
+
     /// Initializes a new struct value 
     /// and assigns all the fields of that struct.
     pub fn create_struct_value(
@@ -42,5 +43,10 @@ impl<'ctx> Builder2<'ctx> {
         }
 
         Ok(result)
+    }
+
+    pub(crate) fn branch_and_goto(&self, bb: BasicBlock<'ctx>) {
+        self.build_unconditional_branch(bb);
+        self.position_at_end(bb);
     }
 }

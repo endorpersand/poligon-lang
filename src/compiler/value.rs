@@ -114,7 +114,7 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_call(arr_ext, &[dynarray_ptr.into(), string_ptr.into(), len.into()], "");
 
         let dynarray = self.builder.build_load(_dynarray, dynarray_ptr, "");
-        GonValue::Struct(self.create_struct_value(_str, &[dynarray]).unwrap())
+        GonValue::Struct(self.builder.create_struct_value(_str, &[dynarray]).unwrap())
     }
 
     /// Cast a GonValue to another type.
