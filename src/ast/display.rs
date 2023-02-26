@@ -280,7 +280,7 @@ impl Display for Expr {
                 write!(f, "}}")
             },
             Expr::ClassLiteral(name, lt) => {
-                write!(f, "{name} {{")?;
+                write!(f, "{name} #{{")?;
                 fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
                 write!(f, "}}")
             },

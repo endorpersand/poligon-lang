@@ -236,9 +236,16 @@ impl Display for FunType {
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Expr { ty, expr } = self;
-        match expr {
-            ExprType::Block(_) => write!(f, "{expr}"), // it is already included in Block
-            _ => write!(f, "<{ty}>({expr})")
+
+        let indicated = matches!(expr,
+            | ExprType::Block(_)
+            | ExprType::ClassLiteral(_, _)
+        );
+
+        if indicated {
+            write!(f, "{expr}")
+        } else {
+            write!(f, "<{ty}>({expr})")
         }
     }
 }
@@ -264,7 +271,7 @@ impl Display for ExprType {
                 write!(f, "}}")
             },
             ExprType::ClassLiteral(ident, lt) => {
-                write!(f, "{ident} {{")?;
+                write!(f, "{ident} #{{")?;
                 fmt_list(f, lt)?;
                 write!(f, "}}")
             },
