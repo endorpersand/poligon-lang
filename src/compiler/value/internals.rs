@@ -116,8 +116,8 @@ impl<'ctx> Compiler<'ctx> {
     fn dynarray_resize(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         use inkwell::IntPredicate::UGT;
 
-        let _dynarray = layout!(self, "#dynarray");
-        let _int = layout!(self, S_INT);
+        let _dynarray = layout!(self, "#dynarray").into_struct_type();
+        let _int = layout!(self, S_INT).into_int_type();
 
         let memcpy = self.std_import("memcpy")?;
         let free = self.std_import("free")?;
@@ -126,8 +126,7 @@ impl<'ctx> Compiler<'ctx> {
         let dynarray_ptr = dynarray_ptr.into_pointer_value();
         let new_cap = new_cap.into_int_value();
 
-        let dynarray = builder.build_load(_dynarray, dynarray_ptr, "")
-            .into_struct_value();
+        let dynarray = builder.build_typed_load(_dynarray, dynarray_ptr, "");
         
         let old_buf = builder.build_extract_value(dynarray, 0, "old_buf")
             .expect("#dynarray buf")
@@ -175,13 +174,13 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT).into_int_type();
         let _i8 = self.ctx.i8_type();
         let _bytearr = _i8.array_type(0);
-        
+
         let [dynarray_ptr, new_byte]: [_; 2] = *Box::try_from(fun.get_params()).unwrap();
         let dynarray_ptr = dynarray_ptr.into_pointer_value();
         let new_byte = new_byte.into_int_value();
 
         let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
-        let len = builder.build_load(_int, len_ptr, "len").into_int_value();
+        let len = builder.build_typed_load(_int, len_ptr, "len");
         let len_p1 = builder.build_int_add(len, _int.const_int(1, false), "");
         
         let dynarray_resize = self.std_import("#dynarray::resize")?;
@@ -210,11 +209,11 @@ impl<'ctx> Compiler<'ctx> {
         let dynarray_ptr = fun.get_first_param().unwrap().into_pointer_value();
         
         let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
-        let len = builder.build_load(_int, len_ptr, "len").into_int_value();
+        let len = builder.build_typed_load(_int, len_ptr, "len");
         let len_m1 = builder.build_int_sub(len, _int.const_int(1, false), "");
         
         let len_iz = builder.build_int_compare(EQ, len, _int.const_zero(), "");
-        let new_len = builder.build_select(len_iz, len, len_m1, "").into_int_value();
+        let new_len = builder.build_typed_select1(len_iz, len, len_m1, "");
         
         let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
         let popped_ptr = unsafe { 
@@ -223,7 +222,7 @@ impl<'ctx> Compiler<'ctx> {
                 new_len
             ], "")
         };
-        let nz_popped = builder.build_load(_i8, popped_ptr, "nz_pop").into_int_value();
+        let nz_popped = builder.build_typed_load(_i8, popped_ptr, "nz_pop");
         let popped = builder.build_select(len_iz, _int.const_zero(), nz_popped, ""); // TODO: null
         
         builder.build_return(Some(&popped));
@@ -247,13 +246,13 @@ impl<'ctx> Compiler<'ctx> {
         let add_len = add_len.into_int_value();
 
         let old_len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
-        let old_len = builder.build_load(_int, old_len_ptr, "").into_int_value();
+        let old_len = builder.build_typed_load(_int, old_len_ptr, "");
         let new_len = builder.build_int_add(old_len, add_len, "len");
 
         builder.build_call(dynarray_resize, params![dynarray_ptr, new_len], "");
 
         let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
-        let buf = builder.build_load(_ptr, buf_ptr, "buf").into_pointer_value();
+        let buf = builder.build_typed_load(_ptr, buf_ptr, "buf");
         let shift_buf = unsafe {
             builder.build_gep(_bytearr, buf, &[_int.const_zero(), old_len], "") 
         };

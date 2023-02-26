@@ -382,7 +382,7 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
                     };
                     c.builder.build_store(insert_ptr, slice2);
 
-                    Ok(c.builder.build_load(tyr, result_ptr, "concat_load").into_array_value())
+                    Ok(c.builder.build_typed_load(tyr, result_ptr, "concat_load"))
                 } else {
                     cannot_binary(op, self, right)
                 }
