@@ -191,7 +191,7 @@ impl TestLoader {
         tests.iter()
             .filter_map(|name| {
                 match self.get(name) {
-                    Ok(test) => test.running(self.id).then_some(f(test)),
+                    Ok(test) => test.running(self.id).then(|| f(test)),
                     Err(err) => Some(Err(err)),
                 }
             })
