@@ -883,7 +883,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
 
     fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
         match self {
-            plir::Path::Static(_, _) => todo!(),
+            plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, last_ty)) = attrs.last() {
                     let el_ptr = self.write_ptr(compiler)?;
@@ -900,7 +900,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
     fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
         match self {
-            plir::Path::Static(_, _) => todo!(),
+            plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if !attrs.is_empty() {
                     let _i32 = compiler.ctx.i32_type();

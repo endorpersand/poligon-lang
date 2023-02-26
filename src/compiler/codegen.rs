@@ -1195,6 +1195,12 @@ impl CodeGenerator {
             ast::Expr::Path(p) => {
                 self.consume_path(p).map(Into::into)
             },
+            ast::Expr::StaticPath(ty, attr) => {
+                let ty = self.consume_type(ty)?;
+                let ident = format!("{ty}::{attr}");
+                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident)?.clone()))
+                    .map(Into::into)
+            },
             ast::Expr::UnaryOps { ops, expr } => {
                 let e = self.consume_expr(*expr)?;
                 
@@ -1318,47 +1324,36 @@ impl CodeGenerator {
     fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
         let ast::Path { obj, attrs } = p;
         let obj = self.consume_expr_and_box(*obj)?;
-        let mut path = match attrs.first().unwrap().1 {
-            true  => plir::Path::Static(obj, vec![]),
-            false => plir::Path::Struct(obj, vec![]),
-        };
+        let mut path = plir::Path::Struct(obj, vec![]);
 
-        for (attr, st) in attrs {
+        for attr in attrs {
             let top_ty = path.ty();
             let cls = self.get_class(&top_ty)?;
 
-            if st {
-                // Only static access is thru types
-                todo!()
-            } else {
-                match cls.get_method(&attr) {
-                    Some(metref) => {
-                        if matches!(path, plir::Path::Method(..)) {
-                            Err(PLIRErr::CannotAccessOnMethod)?;
-                        } else {
-                            let metref = metref.to_string();
-                            let mut fun_ty: plir::FunType = self.get_var_type(&metref)?
-                                .clone()
-                                .try_into()?;
-                            fun_ty.pop_front();
+            if let Some(metref) = cls.get_method(&attr) {
+                if matches!(path, plir::Path::Method(..)) {
+                    Err(PLIRErr::CannotAccessOnMethod)?;
+                } else {
+                    let metref = metref.to_string();
+                    let mut fun_ty: plir::FunType = self.get_var_type(&metref)?
+                        .clone()
+                        .try_into()?;
+                    fun_ty.pop_front();
 
-                            path = plir::Path::Method(
-                                Box::new(path.into()), 
-                                attr.clone(), 
-                                fun_ty
-                            );
-                        }
-                    },
-                    None => {
-                        let field = cls.get_field(&attr)
-                            .map(|(i, t)| (i, t.clone()))
-                            .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone()))?;
-                        
-                        path.add_struct_seg(field)
-                            .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
-                    },
+                    path = plir::Path::Method(
+                        Box::new(path.into()), 
+                        attr.clone(), 
+                        fun_ty
+                    );
                 }
-            };
+            } else {
+                let field = cls.get_field(&attr)
+                    .map(|(i, t)| (i, t.clone()))
+                    .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone()))?;
+    
+                path.add_struct_seg(field)
+                    .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
+            }
         }
 
         Ok(path)

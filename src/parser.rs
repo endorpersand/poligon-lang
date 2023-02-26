@@ -1177,22 +1177,30 @@ impl Parser {
         }
     }
 
-    /// Match the next tokens in input if they represent a path expression (`a.b.c::d::e::f.g.h.i`)
+    /// Match the next tokens in input if they represent a path expression (`Type::expr`, or `a.b.c.d.e`)
     /// or any expression with higher precedence.
     /// 
     /// The next expression above in precedence is [`Parser::match_unit`].
     pub fn match_path(&mut self) -> ParseResult<Option<ast::Expr>> {
+        macro_rules! pat_arr {
+            ($($p:pat),*) => {[$(
+                FullToken { tt: $p, .. }
+            ),*]}
+        }
+
+        if let Some(pat_arr![Token::Ident(_), token![::]]) = self.tokens.make_contiguous().get(0..2) {
+            // TODO: support generics?
+            let ty = self.expect_type()?;
+            self.expect1(token![::])?;
+            let attr = self.expect_ident()?;
+
+            return Ok(Some(ast::Expr::StaticPath(ty, attr)));
+        } 
+        
         if let Some(mut e) = self.match_unit()? {
             let mut attrs = vec![];
-
-            while let Some(t) = self.match_n(&[token![.], token![::]]) {
-                let static_attr = match t.tt {
-                    token![.]  => false,
-                    token![::] => true,
-                    _ => unreachable!()
-                };
-
-                attrs.push((self.expect_ident()?, static_attr));
+            while self.match1(token![.]) {
+                attrs.push(self.expect_ident()?);
             }
 
             if !attrs.is_empty() {

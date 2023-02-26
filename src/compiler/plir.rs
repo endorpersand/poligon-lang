@@ -466,13 +466,14 @@ pub enum ExprType {
 /// indicate the type of the access.
 #[derive(Debug, PartialEq)]
 pub enum Path {
-    /// A static path (a::b::c::d)
+    /// A static path (Type::attr)
     /// 
-    /// This includes the expression being accessed, 
-    /// and a vector holding the chain of attributes (and the type of the access)
-    Static(Box<Expr>, Vec<(String, Type)>),
+    /// This includes the type expression being accessed, 
+    /// the attribute being accessed,
+    /// and the type of the access
+    Static(Type, String, Type),
     
-    /// A chain of struct accesses (a.0.1.2.3.4)
+    /// A chain of struct accesses (obj.0.1.2.3.4)
     /// 
     /// This includes the expression being accessed, 
     /// and a vector holding the chain of attributes accessed (and the type of the access)
@@ -480,14 +481,15 @@ pub enum Path {
 
     /// An method access (a.b where b is a method on type A)
     /// 
-    /// This includes the expression being accessed and the method on that expression,
+    /// This includes the expression being accessed,
+    /// the method on that expression,
     /// and the type of the method
     Method(Box<Expr>, String, FunType)
 }
 impl Path {
     pub(crate) fn ty(&self) -> Cow<Type> {
         match self {
-            Path::Static(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
+            Path::Static(_, _, ty) => Cow::Borrowed(ty),
             Path::Struct(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
             Path::Method(_, _, ty) => Cow::Owned(Type::Fun(ty.clone())),
         }
@@ -495,16 +497,14 @@ impl Path {
 
     pub(crate) fn add_struct_seg(&mut self, seg: (usize, Type)) -> Result<(), ()> {
         match self {
-            Path::Static(_, _) => {
+            Path::Static(_, _, _) => {
                 let placeholder = Path::Struct(Box::new(Expr::invalid()), vec![seg]);
                 
                 let old_path = std::mem::replace(self, placeholder);
                 let new_obj = Box::new(old_path.into());
 
-                let obj_ref = match self {
-                    Path::Static(o, _) => o,
-                    Path::Struct(o, _) => o,
-                    Path::Method(o, _, _) => o,
+                let Path::Struct(obj_ref, _) = self else {
+                    unreachable!("initialized placeholder is Path::struct")
                 };
                 *obj_ref = new_obj;
                 Ok(())
@@ -522,8 +522,8 @@ impl From<Path> for Expr {
     fn from(value: Path) -> Self {
         fn can_flatten(this: &Path) -> bool {
             match this {
-                Path::Static(_, attrs) => attrs.is_empty(),
                 Path::Struct(_, attrs) => attrs.is_empty(),
+                Path::Static(_, _, _) => false,
                 Path::Method(_, _, _) => false
             }
         }
@@ -534,8 +534,8 @@ impl From<Path> for Expr {
             match e {
                 Expr { expr: ExprType::Path(p), ..} if can_flatten(&p) => {
                     e = match p {
-                        Path::Static(e, _) => *e,
                         Path::Struct(e, _) => *e,
+                        Path::Static(_, _, _) => unreachable!(),
                         Path::Method(_, _, _) => unreachable!(),
                     }
                 },

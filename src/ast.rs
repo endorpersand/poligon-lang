@@ -296,6 +296,10 @@ pub enum Expr {
     /// See [`Path`] for examples.
     Path(Path),
 
+    /// A static path.
+    /// 
+    /// This does a static access on a type (e.g. `Type::attr`).
+    StaticPath(Type, String),
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 
@@ -410,28 +414,25 @@ impl Literal {
     }
 }
 
-/// A path.
+/// A path, which accesses attributes from an expression.
 /// 
 /// # Syntax
 /// ```text
-/// path = expr (("." | "::") ident)+;
+/// path = expr ("." ident)+;
 /// ```
 /// 
 /// # Examples
 /// ```text
 /// a.b
 /// a.b.c.d.e
-/// Struct::b.c.d
 /// ```
 #[derive(Debug, PartialEq)]
 pub struct Path {
     /// The expression to access an attribute of
     pub obj: Box<Expr>,
 
-    /// The chain of attributes 
-    /// and whether the specific accesses were static.
-    // a.b.c.d vs a::b::c::d
-    pub attrs: Vec<(String, bool)>
+    /// The chain of attributes
+    pub attrs: Vec<String>
 }
 
 /// Value indexing.

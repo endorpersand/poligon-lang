@@ -578,6 +578,7 @@ impl TraverseRt for ast::Expr {
                     .map_err(TermOp::Err)
             },
             ast::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
+            ast::Expr::StaticPath(_, _) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
             ast::Expr::UnaryOps { ops, expr } => {
                 let mut ops_iter = ops.iter().rev();
         
@@ -707,7 +708,7 @@ impl TraverseRt for ast::Expr {
                     e @ ast::Expr::Path(ast::Path { obj, attrs }) => {
                         if let this @ Value::List(_) = obj.traverse_rt(ctx)? {
                             if attrs.len() == 1 {
-                                let (property, _) = &attrs[0];
+                                let property = &attrs[0];
                                 let mut call_params = vec![this];
                                 call_params.extend(params.iter()
                                     .map(|e| e.traverse_rt(ctx))

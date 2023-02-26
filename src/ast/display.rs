@@ -286,6 +286,7 @@ impl Display for Expr {
             },
             Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             Expr::Path(p) => write!(f, "{p}"),
+            Expr::StaticPath(t, a) => write!(f, "{t}::{a}"),
             Expr::UnaryOps { ops, expr } => {
                 for op in ops {
                     write!(f, "{op}")?;
@@ -389,14 +390,8 @@ impl Display for Path {
         let Path { obj, attrs } = self;
         write!(f, "{obj}")?;
 
-        for (attr, st) in attrs {
-            if *st {
-                write!(f, "::")
-            } else {
-                write!(f, ".")
-            }?;
-
-            write!(f, "{attr}")?;
+        for attr in attrs {
+            write!(f, ".{attr}")?;
         }
 
         Ok(())

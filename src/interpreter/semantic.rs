@@ -322,6 +322,7 @@ impl TraverseResolve for ast::Expr {
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
             ast::Expr::Path(p) => p.obj.traverse_rs(map),
+            ast::Expr::StaticPath(_, _) => Ok(()),
             ast::Expr::UnaryOps { ops: _, expr } => expr.traverse_rs(map),
             ast::Expr::BinaryOp { op: _, left, right } => {
                 left.traverse_rs(map)?;
