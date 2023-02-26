@@ -4,7 +4,9 @@ use crate::ast::{ReasgType, MutType};
 
 use super::*;
 
-fn fmt_stmt_list(f: &mut Formatter<'_>, stmts: &[Stmt]) -> std::fmt::Result {
+/// Formats a list of statements.
+/// This accepts any display type, but should be used on Statement type structs.
+fn fmt_stmt_list(f: &mut Formatter<'_>, stmts: &[impl Display + EndsWithBlock]) -> std::fmt::Result {
     for stmt in stmts {
         write!(f, "{stmt}")?;
 
@@ -42,13 +44,13 @@ fn fmt_mapped_list<T, D: Display, F>(f: &mut Formatter<'_>, elems: &[T], map: F)
     }
 }
 
-struct StmtsDisplay<'b>(&'b [Stmt]);
-impl Display for StmtsDisplay<'_> {
+struct StmtsDisplay<'b, D>(&'b [D]);
+impl<D: Display + EndsWithBlock> Display for StmtsDisplay<'_, D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         fmt_stmt_list(f, self.0)
     }
 }
-struct BlockDisplay<'b>(&'b [Stmt]);
+struct BlockDisplay<'b>(&'b [ProcStmt]);
 impl Display for BlockDisplay<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.0.is_empty() {
@@ -75,32 +77,38 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, &self.0)
+        fmt_stmt_list(f, &self.0)?;
+        fmt_stmt_list(f, &self.1)
     }
 }
 
-impl Display for Stmt {
+impl Display for HoistedStmt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Decl(d) => write!(f, "{d}"),
-            Stmt::Return(me) => match me {
-                Some(e) => write!(f, "return {e}"),
-                None => write!(f, "return"),
-            },
-            Stmt::Break => write!(f, "break"),
-            Stmt::Continue => write!(f, "continue"),
-            Stmt::Exit(me) => match me {
-                Some(e) => write!(f, "exit {e}"),
-                None => write!(f, "exit"),
-            },
-            Stmt::FunDecl(fd) => write!(f, "{fd}"),
-            Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
-            Stmt::Expr(e) => write!(f, "{e}"),
-            Stmt::ClassDecl(c) => write!(f, "{c}"),
+            HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
+            HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
+            HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
         }
     }
 }
-
+impl Display for ProcStmt {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcStmt::Decl(d) => write!(f, "{d}"),
+            ProcStmt::Return(me) => match me {
+                Some(e) => write!(f, "return {e}"),
+                None => write!(f, "return"),
+            },
+            ProcStmt::Break => write!(f, "break"),
+            ProcStmt::Continue => write!(f, "continue"),
+            ProcStmt::Exit(me) => match me {
+                Some(e) => write!(f, "exit {e}"),
+                None => write!(f, "exit"),
+            },
+            ProcStmt::Expr(e) => write!(f, "{e}"),
+        }
+    }
+}
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ident, fields: field_map } = self;

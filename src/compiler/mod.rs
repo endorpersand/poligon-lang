@@ -260,6 +260,8 @@ impl<'ctx> Compiler<'ctx> {
     pub fn write_block<F>(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>, close: F) -> CompileResult<'ctx, GonValue<'ctx>>
         where F: FnOnce(&mut Self, GonValue<'ctx>)
     {
+        use plir::ProcStmt;
+
         self.exit_pointers.push(exits);
         let (mcvalue, mjump) = match block.1.split_last() {
             Some((tail, head)) => {
@@ -268,13 +270,13 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 match tail {
-                    plir::Stmt::Exit(me) => {
+                    ProcStmt::Exit(me) => {
                         let value = me.write_value(self)?;
                         (Some(value), self.get_exit_pointer(|ep| ep.exit))
                     },
-                    plir::Stmt::Break => (None, self.get_exit_pointer(|ep| ep.brk)),
-                    plir::Stmt::Continue => (None, self.get_exit_pointer(|ep| ep.cont)),
-                    plir::Stmt::Return(me) => {
+                    ProcStmt::Break => (None, self.get_exit_pointer(|ep| ep.brk)),
+                    ProcStmt::Continue => (None, self.get_exit_pointer(|ep| ep.cont)),
+                    ProcStmt::Return(me) => {
                         let value = me.write_value(self)?;
                         self.build_return(value);
                         (None, None)
@@ -515,25 +517,25 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// -  Otherwise, all unhoisted statements are collected into a function (main).
     /// - If there is both a function named main and unhoisted statements present, this will error.
     fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        use plir::HoistedStmt;
+
         // split the functions from everything else:
         let mut main_fun = None;
         let mut fun_bodies = vec![];
         
-        let hoist_pt = self.0.partition_point(plir::Stmt::hoisted);
-        let (hoisted, rest) = self.0.split_at(hoist_pt);
+        let plir::Program(hoisted, proc) = &self;
 
         for stmt in hoisted {
             match stmt {
-                plir::Stmt::FunDecl(dcl) => {
+                HoistedStmt::FunDecl(dcl) => {
                     let fv = dcl.sig.write_value(compiler)?;
                     if dcl.sig.ident == "main" {
                         main_fun.replace(fv);
                     }
                     fun_bodies.push(dcl);
                 },
-                plir::Stmt::ExternFunDecl(dcl) => { compiler.import(dcl)?; },
-                plir::Stmt::ClassDecl(cls) => cls.write_value(compiler)?,
-                _ => unreachable!()
+                HoistedStmt::ExternFunDecl(dcl) => { compiler.import(dcl)?; },
+                HoistedStmt::ClassDecl(cls) => cls.write_value(compiler)?,
             }
         }
         
@@ -542,7 +544,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             bodies.write_value(compiler)?;
         }
 
-        match (main_fun, rest) {
+        match (main_fun, proc.as_slice()) {
             (Some(f), []) => Ok(f),
             (Some(_), _)  => Err(CompileErr::CannotDetermineMain),
             (None, stmts) => {
@@ -569,12 +571,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
+impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
     type Return = CompileResult<'ctx, GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
+        use plir::ProcStmt;
+
         match self {
-            plir::Stmt::Decl(d) => {
+            ProcStmt::Decl(d) => {
                 let plir::Decl { ident, val, .. } = d;
                 // TODO: support rt, mt, ty
 
@@ -582,7 +586,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
                 compiler.alloca_and_store(ident, val)?;
                 Ok(GonValue::Unit)
             },
-            plir::Stmt::Return(me) => {
+            ProcStmt::Return(me) => {
                 match me {
                     Some(expr) => {
                         let e = expr.write_value(compiler)?;
@@ -593,26 +597,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Stmt {
 
                 Ok(GonValue::Unit)
             },
-            plir::Stmt::Exit(_) => {
+            ProcStmt::Exit(_) => {
                 // Exits are resolved at the block level
                 Ok(GonValue::Unit)
             },
-            plir::Stmt::Break => todo!(),
-            plir::Stmt::Continue => todo!(),
-            plir::Stmt::FunDecl(d) => {
-                d.sig.write_value(compiler)?;
-                d.write_value(compiler)?;
-                Ok(GonValue::Unit)
-            },
-            plir::Stmt::ExternFunDecl(fs) => {
-                compiler.import(fs)?;
-                Ok(GonValue::Unit)
-            },
-            plir::Stmt::Expr(e) => e.write_value(compiler),
-            plir::Stmt::ClassDecl(c) => {
-                c.write_value(compiler)?;
-                Ok(GonValue::Unit)
-            },
+            ProcStmt::Break => todo!(),
+            ProcStmt::Continue => todo!(),
+            ProcStmt::Expr(e) => e.write_value(compiler),
         }
     }
 }

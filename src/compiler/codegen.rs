@@ -239,7 +239,7 @@ enum Unresolved {
 
 #[derive(Debug)]
 struct InsertBlock {
-    block: Vec<plir::Stmt>,
+    block: Vec<plir::ProcStmt>,
 
     /// All conditional exits.
     exits: Vec<BlockExit>,
@@ -283,7 +283,7 @@ impl InsertBlock {
     }
 
     fn last_stmt_type(&self) -> Cow<plir::Type> {
-        use plir::{Stmt, Type, ty};
+        use plir::{ProcStmt, Type, ty};
 
         #[inline]
         fn void_ty<'t>() -> Cow<'t, Type> {
@@ -296,7 +296,7 @@ impl InsertBlock {
         }
 
         match self.block.last() {
-            Some(Stmt::Decl(d)) => {
+            Some(ProcStmt::Decl(d)) => {
                 let ty = &d.val.ty;
 
                 if ty.is_never() {
@@ -305,14 +305,11 @@ impl InsertBlock {
                     void_ty()
                 }
             },
-            Some(Stmt::Return(_))        => never_ty(),
-            Some(Stmt::Break)            => never_ty(),
-            Some(Stmt::Continue)         => never_ty(),
-            Some(Stmt::Exit(_))          => never_ty(),
-            Some(Stmt::FunDecl(_))       => void_ty(),
-            Some(Stmt::ExternFunDecl(_)) => void_ty(),
-            Some(Stmt::Expr(e))          => Cow::Borrowed(&e.ty),
-            Some(Stmt::ClassDecl(_))     => void_ty(),
+            Some(ProcStmt::Return(_))        => never_ty(),
+            Some(ProcStmt::Break)            => never_ty(),
+            Some(ProcStmt::Continue)         => never_ty(),
+            Some(ProcStmt::Exit(_))          => never_ty(),
+            Some(ProcStmt::Expr(e))          => Cow::Borrowed(&e.ty),
             None => void_ty(),
         }
     }
@@ -326,11 +323,12 @@ impl InsertBlock {
     /// 
     /// The return indicates whether or not another statement 
     /// can be pushed into the insert block (whether a final exit has been set).
-    fn push_stmt(&mut self, stmt: plir::Stmt) -> bool {
-        match stmt {
-            plir::Stmt::Return(e) => self.push_return(e),
-            plir::Stmt::Break => self.push_break(),
-            plir::Stmt::Continue => self.push_cont(),
+    fn push_stmt(&mut self, stmt: impl Into<plir::ProcStmt>) -> bool {
+        use plir::ProcStmt;
+        match stmt.into() {
+            ProcStmt::Return(e) => self.push_return(e),
+            ProcStmt::Break => self.push_break(),
+            ProcStmt::Continue => self.push_cont(),
             st => {
                 if self.is_open() {
                     self.block.push(st)
@@ -351,7 +349,7 @@ impl InsertBlock {
                 Some(ref e) => e.ty.clone(),
                 None => plir::ty!(plir::Type::S_VOID),
             };
-            self.block.push(plir::Stmt::Return(me));
+            self.block.push(plir::ProcStmt::Return(me));
             self.final_exit.replace(BlockExit::Return(ty));
         }
 
@@ -364,7 +362,7 @@ impl InsertBlock {
     /// be pushed into the insert block (as a final exit has been set).
     fn push_break(&mut self) -> bool {
         if self.is_open() {
-            self.block.push(plir::Stmt::Break);
+            self.block.push(plir::ProcStmt::Break);
             self.final_exit.replace(BlockExit::Break);
         }
 
@@ -377,7 +375,7 @@ impl InsertBlock {
     /// be pushed into the insert block (as a final exit has been set).
     fn push_cont(&mut self) -> bool {
         if self.is_open() {
-            self.block.push(plir::Stmt::Continue);
+            self.block.push(plir::ProcStmt::Continue);
             self.final_exit.replace(BlockExit::Continue);
         }
 
@@ -497,7 +495,7 @@ enum TypeStructure {
 /// This struct does the actual conversion from AST to PLIR.
 pub struct CodeGenerator {
     program: InsertBlock,
-    globals: Vec<plir::Stmt>,
+    globals: Vec<plir::HoistedStmt>,
     blocks: Vec<InsertBlock>,
     var_id: usize,
 
@@ -524,11 +522,8 @@ impl CodeGenerator {
         let InsertBlock {block, exits, unresolved, .. } = self.program;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
-        let mut stmts = self.globals;
-        stmts.extend(block);
-
         match exits.last() {
-            None => Ok(plir::Program(stmts)),
+            None => Ok(plir::Program(self.globals, block)),
             Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
             Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
             Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
@@ -578,7 +573,7 @@ impl CodeGenerator {
                     let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
                     
                     let fs = self.consume_fun_sig(fs)?;
-                    self.globals.push(plir::Stmt::ExternFunDecl(fs));
+                    self.push_global(fs);
                 },
                 Unresolved::Fun(_) => {
                     let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
@@ -644,12 +639,16 @@ impl CodeGenerator {
             val: e,
         };
 
-        self.peek_block().push_stmt(plir::Stmt::Decl(decl));
+        self.peek_block().push_stmt(decl);
 
         Var {
             ident,
             ty: ety
         }
+    }
+
+    fn push_global(&mut self, global: impl Into<plir::HoistedStmt>) {
+        self.globals.push(global.into())
     }
 
     /// Convert a program into PLIR, and attach it to the CodeGenerator.
@@ -690,7 +689,7 @@ impl CodeGenerator {
                 Unresolved::Class(c) => { self.consume_cls(c)?; },
                 Unresolved::ExternFun(fs) => {
                     let fs = self.consume_fun_sig(fs)?;
-                    self.globals.push(plir::Stmt::ExternFunDecl(fs));
+                    self.push_global(fs);
                 },
                 Unresolved::Fun(fd) => {
                     let ast::FunDecl { sig, block } = fd;
@@ -729,7 +728,7 @@ impl CodeGenerator {
             },
             ast::Stmt::Expr(e) => {
                 let e = self.consume_expr(e)?;
-                Ok(self.peek_block().push_stmt(plir::Stmt::Expr(e)))
+                Ok(self.peek_block().push_stmt(e))
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
             ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
@@ -749,6 +748,8 @@ impl CodeGenerator {
         } = block;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
+        use plir::{ProcStmt, ty};
+
         // fill the unconditional exit if necessary:
         let mut final_exit = final_exit.unwrap_or_else(|| {
             // we need to add an explicit exit statement.
@@ -756,7 +757,7 @@ impl CodeGenerator {
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
             // otherwise just append an `exit` stmt.
             let exit_expr = match block.pop() {
-                Some(plir::Stmt::Expr(e)) => Some(e),
+                Some(ProcStmt::Expr(e)) => Some(e),
                 Some(stmt) => {
                     block.push(stmt);
                     None
@@ -766,14 +767,14 @@ impl CodeGenerator {
 
             let exit_ty = match &exit_expr {
                 Some(e) => e.ty.clone(),
-                None => plir::ty!(plir::Type::S_VOID),
+                None => ty!(plir::Type::S_VOID),
             };
 
             if btype == BlockBehavior::Function {
-                block.push(plir::Stmt::Return(exit_expr));
+                block.push(ProcStmt::Return(exit_expr));
                 BlockExit::Return(exit_ty)
             } else {
-                block.push(plir::Stmt::Exit(exit_expr));
+                block.push(ProcStmt::Exit(exit_expr));
                 BlockExit::Exit(exit_ty)
             }
         });
@@ -784,7 +785,7 @@ impl CodeGenerator {
                 | BlockExit::Return(exit_ty) 
                 | BlockExit::Exit(exit_ty) 
                 => if exit_ty.as_ref() != exp_ty.as_ref() {
-                    let Some(plir::Stmt::Return(me) | plir::Stmt::Exit(me)) = block.last_mut() else {
+                    let Some(ProcStmt::Return(me) | ProcStmt::Exit(me)) = block.last_mut() else {
                         unreachable!();
                     };
 
@@ -888,7 +889,7 @@ impl CodeGenerator {
                 }
 
                 if consume_var {
-                    self.peek_block().push_stmt(plir::Stmt::Expr(var.into_expr()));
+                    self.peek_block().push_stmt(var.into_expr());
                 }
                 Ok(())
             },
@@ -927,7 +928,7 @@ impl CodeGenerator {
 
                 this.declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                this.peek_block().push_stmt(plir::Stmt::Decl(decl));
+                this.peek_block().push_stmt(decl);
 
                 Ok(())
             },
@@ -993,7 +994,7 @@ impl CodeGenerator {
 
         let fun_decl = plir::FunDecl { sig, block };
         
-        self.globals.push(plir::Stmt::FunDecl(fun_decl));
+        self.push_global(fun_decl);
         Ok(self.peek_block().is_open())
     }
 
@@ -1049,7 +1050,7 @@ impl CodeGenerator {
             }
         }
 
-        self.globals.push(plir::Stmt::ClassDecl(cls));
+        self.push_global(cls);
         Ok(self.peek_block().is_open())
     }
 
@@ -1181,7 +1182,7 @@ impl CodeGenerator {
                             plir::ExprType::Assign(unit, Box::new(e))
                         );
 
-                        this.peek_block().push_stmt(plir::Stmt::Expr(asg));
+                        this.peek_block().push_stmt(asg);
                         Ok(())
                     },
                     true

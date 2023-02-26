@@ -22,7 +22,7 @@ pub(crate) use types::ty;
 /// 
 /// This struct corresponds to [`ast::Program`].
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Vec<Stmt>);
+pub struct Program(pub Vec<HoistedStmt>, pub Vec<ProcStmt>);
 
 /// An enclosed scope with a list of statements.
 /// 
@@ -38,95 +38,156 @@ pub struct Program(pub Vec<Stmt>);
 /// }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Block(pub Type, pub Vec<Stmt>);
+pub struct Block(pub Type, pub Vec<ProcStmt>);
 
 impl Default for Block {
     fn default() -> Self {
-        Self(ty!(Type::S_VOID), vec![Stmt::Exit(None)])
+        Self(ty!(Type::S_VOID), vec![ProcStmt::Exit(None)])
     }
 }
 
-/// A statement.
-///
-/// This enum corresponds to [`ast::Stmt`].
-#[derive(Debug, PartialEq)]
-pub enum Stmt {
-    /// A variable declaration with a value initializer.
-    /// 
-    /// See [`Decl`] for examples.
-    Decl(Decl),
-    
-    /// A return statement that signals to exit the function body.
-    /// 
-    /// This return statement can return nothing (`void`), 
-    /// or return a value from a given expression.
-    /// 
-    /// # Examples
-    /// ```text
-    /// return; // no expr
-    /// return <int>2; // with expr
-    /// ```
-    Return(Option<Expr>),
+mod stmt {
+    use super::{FunDecl, FunSignature, Class, Decl, Expr, ExprType};
 
-    /// `break`
-    Break,
-
-    /// `continue`
-    Continue,
-
-    /// A statement that signals to exit the current block.
+    /// A statement that is always available (within PLIR).
     /// 
-    /// This statement can exit the block with nothing (`void`), 
-    /// or with a value from a given expression.
-    Exit(Option<Expr>),
-
-    /// A function declaration with a defined body.
+    /// This is one of the enums that corresponds to [`ast::Stmt`][`crate::ast::Stmt`]. 
+    /// See also [`ProcStmt`].
     /// 
-    /// See [`FunDecl`] for examples.
-    FunDecl(FunDecl),
+    /// Hoisted statements are special in that they can be partially resolved. 
+    /// For example, all function signatures are resolved before function bodies.
+    /// This quality of hoisted statements mean that a list of hoisted statements 
+    /// is not necessarily evaluated in order.
+    #[derive(Debug, PartialEq)]
+    pub enum HoistedStmt {
 
-    /// A function declaration without a specified body
-    /// 
-    /// In the compiler, this is used to call functions from libc.
-    /// 
-    /// # Example
-    /// ```text
-    /// extern fun puts(s: string) -> int;
-    /// ```
-    ExternFunDecl(FunSignature),
+        /// A function declaration with a defined body.
+        /// 
+        /// See [`FunDecl`] for examples.
+        FunDecl(FunDecl),
 
-    /// An expression.
-    Expr(Expr),
+        /// A function declaration without a specified body
+        /// 
+        /// In the compiler, this is used to call functions from libc.
+        /// 
+        /// # Example
+        /// ```text
+        /// extern fun puts(s: string) -> int;
+        /// ```
+        ExternFunDecl(FunSignature),
 
-    /// A struct declaration.
-    ClassDecl(Class)
-}
-
-impl Stmt {
-    /// Test if this statement ends with a block.
-    /// 
-    /// This function corresponds to [`ast::Stmt::ends_with_block`].
-    pub fn ends_with_block(&self) -> bool {
-        matches!(self, 
-            | Stmt::FunDecl(_)
-            | Stmt::ClassDecl(_)
-            | Stmt::Expr(Expr { expr: ExprType::Block(_), .. })
-            | Stmt::Expr(Expr { expr: ExprType::If { .. }, .. })
-            | Stmt::Expr(Expr { expr: ExprType::While { .. }, .. })
-            | Stmt::Expr(Expr { expr: ExprType::For { .. }, .. })
-        )
+        /// A struct declaration.
+        ClassDecl(Class)
     }
 
-    /// Test if this statement is hoisted (above non-hoisted) statements
-    /// during PLIR code generation.
-    pub fn hoisted(&self) -> bool {
-        matches!(self,
-            | Stmt::FunDecl(_)
-            | Stmt::ExternFunDecl(_)
-            | Stmt::ClassDecl(_)
-        )
+    /// A statement that happens as a part of a procedure (e.g. a block).
+    /// 
+    /// This is one of the enums that corresponds to [`ast::Stmt`][`crate::ast::Stmt`].
+    /// See also [`HoistedStmt`].
+    /// 
+    /// A list of procedural statements can simply be evaluated in order.
+    #[derive(Debug, PartialEq)]
+    pub enum ProcStmt {
+        /// A variable declaration with a value initializer.
+        /// 
+        /// See [`Decl`] for examples.
+        Decl(Decl),
+        
+        /// A return statement that signals to exit the function body.
+        /// 
+        /// This return statement can return nothing (`void`), 
+        /// or return a value from a given expression.
+        /// 
+        /// # Examples
+        /// ```text
+        /// return; // no expr
+        /// return <int>2; // with expr
+        /// ```
+        Return(Option<Expr>),
+
+        /// `break`
+        Break,
+
+        /// `continue`
+        Continue,
+
+        /// A statement that signals to exit the current block.
+        /// 
+        /// This statement can exit the block with nothing (`void`), 
+        /// or with a value from a given expression.
+        Exit(Option<Expr>),
+
+        /// An expression.
+        Expr(Expr)
+    }
+
+    impl HoistedStmt {
+        /// Test if this statement ends with a block.
+        /// 
+        /// This function corresponds to [`ast::Stmt::ends_with_block`].
+        pub fn ends_with_block(&self) -> bool {
+            use HoistedStmt::*;
+
+            matches!(self,
+                | FunDecl(_)
+                | ClassDecl(_)
+            )
+        }
+    }
+
+    impl ProcStmt {
+        /// Test if this statement ends with a block.
+        /// 
+        /// This function corresponds to [`ast::Stmt::ends_with_block`].
+        pub fn ends_with_block(&self) -> bool {
+            matches!(self,
+                | ProcStmt::Expr(Expr { expr: ExprType::Block(_), .. })
+                | ProcStmt::Expr(Expr { expr: ExprType::If { .. }, .. })
+                | ProcStmt::Expr(Expr { expr: ExprType::While { .. }, .. })
+                | ProcStmt::Expr(Expr { expr: ExprType::For { .. }, .. })
+            )
+        }
+    }
+
+    pub(super) trait EndsWithBlock {
+        fn ends_with_block(&self) -> bool;
+    }
+    impl EndsWithBlock for ProcStmt {
+        fn ends_with_block(&self) -> bool { self.ends_with_block() }
+    }
+    impl EndsWithBlock for HoistedStmt {
+        fn ends_with_block(&self) -> bool { self.ends_with_block() }
+    }
+
+    impl From<Decl> for ProcStmt {
+        fn from(value: Decl) -> Self {
+            ProcStmt::Decl(value)
+        }
+    }
+    impl From<Expr> for ProcStmt {
+        fn from(value: Expr) -> Self {
+            ProcStmt::Expr(value)
+        }
+    }
+    impl From<FunDecl> for HoistedStmt {
+        fn from(value: FunDecl) -> Self {
+            HoistedStmt::FunDecl(value)
+        }
+    }
+    impl From<FunSignature> for HoistedStmt {
+        fn from(value: FunSignature) -> Self {
+            HoistedStmt::ExternFunDecl(value)
+        }
+    }
+    impl From<Class> for HoistedStmt {
+        fn from(value: Class) -> Self {
+            HoistedStmt::ClassDecl(value)
+        }
     }
 }
+
+use stmt::EndsWithBlock;
+pub use stmt::*;
 
 /// A variable declaration.
 /// 
