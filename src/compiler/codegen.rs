@@ -611,6 +611,11 @@ impl CodeGenerator {
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
     }
 
+    /// Identifier needs to be resolved beforehand, via [`CodeGenerator::resolve_ident`].
+    fn get_var_type_opt(&mut self, ident: &str) -> Option<&plir::Type> {
+        self.find_scoped(|ib| ib.vars.get(ident))
+    }
+
     fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
 
@@ -1205,13 +1210,12 @@ impl CodeGenerator {
                 let e = self.consume_expr(*expr)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(e, op_impl::apply_unary)
+                    .try_fold(e, |expr, op| self.apply_unary(expr, op))
             },
             ast::Expr::BinaryOp { op, left, right } => {
-                op_impl::apply_binary(op,
-                    self.consume_expr(*left)?,
-                    self.consume_expr(*right)?,
-                )
+                let left = self.consume_expr(*left)?;
+                let right = self.consume_expr(*right)?;
+                self.apply_binary(op, left, right)
             },
             ast::Expr::Comparison { left, rights } => {
                 let left = self.consume_expr_and_box(*left)?;
@@ -1287,14 +1291,14 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let funct = self.consume_expr_and_box(*funct)?;
+                let funct = self.consume_expr(*funct)?;
                 match &funct.ty {
-                    plir::Type::Fun(plir::FunType(ptys, ret)) => {
-                        if ptys.len() != params.len() {
-                            Err(PLIRErr::WrongArity(ptys.len(), params.len()))?;
+                    plir::Type::Fun(plir::FunType(param_tys, _)) => {
+                        if param_tys.len() != params.len() {
+                            Err(PLIRErr::WrongArity(param_tys.len(), params.len()))?;
                         }
 
-                        let params = std::iter::zip(ptys.iter(), params)
+                        let params = std::iter::zip(param_tys.iter(), params)
                             .map(|(pty, expr)| {
                                 let param = self.consume_expr(expr)?;
                                 op_impl::apply_special_cast(param, pty, CastType::Call)
@@ -1302,9 +1306,7 @@ impl CodeGenerator {
                             })
                             .collect::<Result<_, _>>()?;
 
-                        Ok(plir::Expr::new(
-                            (**ret).clone(), plir::ExprType::Call { funct, params }
-                        ))
+                        plir::Expr::call(funct, params)
                     },
                     t => Err(PLIRErr::CannotCall(t.clone()))
                 }
@@ -1451,6 +1453,7 @@ mod tests {
         ])?;
 
         TYPE_TESTS.fail_all(cg_test, &[
+            "class_operator_overloading_fail",
             "decl_cast_check_fail_1",
             "decl_cast_check_fail_2",
             "decl_cast_check_fail_3",

@@ -194,9 +194,14 @@ impl Display for Param {
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+impl Display for TypeRef<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Prim(ident) => write!(f, "{ident}"),
-            Type::Generic(ident, params) => {
+            TypeRef::Prim(ident) => write!(f, "{ident}"),
+            TypeRef::Generic(ident, params) => {
                 write!(f, "{ident}")?;
                 if !params.is_empty() {
                     write!(f, "<")?;
@@ -205,12 +210,16 @@ impl Display for Type {
                 }
                 Ok(())
             },
-            Type::Tuple(types) => {
+            TypeRef::Tuple(types) => {
                 write!(f, "[")?;
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
-            Type::Fun(ft) => write!(f, "{ft}"),
+            TypeRef::Fun(params, ret) => {
+                write!(f, "(")?;
+                fmt_list(f, params)?;
+                write!(f, ") -> {ret}")
+            },
         }
     }
 }

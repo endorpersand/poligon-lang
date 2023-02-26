@@ -800,12 +800,18 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 let fun_ident = match &funct.expr {
                     plir::ExprType::Ident(ident) => Cow::from(ident),
-                    plir::ExprType::Path(plir::Path::Method(referent, met, _)) => {
-                        let ty = referent.ty.ident();
-                        pvals.push(compiler.write_ref_value(referent)?);
-                        Cow::from(format!("{ty}::{met}"))
+                    plir::ExprType::Path(p) => match p {
+                        plir::Path::Static(ty, met, _) => {
+                            Cow::from(format!("{ty}::{met}"))
+                        },
+                        plir::Path::Struct(_, _) => unreachable!("struct attr cannot be fun"),
+                        plir::Path::Method(referent, met, _) => {
+                            let ty = referent.ty.ident();
+                            pvals.push(compiler.write_ref_value(referent)?);
+                            Cow::from(format!("{ty}::{met}"))
+                        },
                     },
-                    _ => todo!("arbitrary expr calls")
+                    e => todo!("arbitrary expr calls: {e:?}")
                 };
 
                 let fun = compiler.module.get_function(&fun_ident)
@@ -1143,6 +1149,7 @@ mod tests {
         TYPE_TESTS.pass_all(test_run, &[
             "class_chain",
             "initializer",
+            "class_operator_overloading",
             "method_access",
             "decl_cast_check",
             "fun_cast_check",

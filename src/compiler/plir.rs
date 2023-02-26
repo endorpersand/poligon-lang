@@ -189,6 +189,8 @@ mod stmt {
 use stmt::EndsWithBlock;
 pub use stmt::*;
 
+use super::codegen::{PLIRErr, PLIRResult};
+
 /// A variable declaration.
 /// 
 /// This struct also requires a value initializer.
@@ -318,6 +320,16 @@ impl Expr {
 
     fn invalid() -> Self {
         Self::new(ty!("never"), ExprType::Spread(None))
+    }
+
+    /// Creates a call using call parameters.
+    pub fn call(fun: Expr, params: Vec<Expr>) -> PLIRResult<Self> {
+        let Type::Fun(ft) = &fun.ty else { return Err(PLIRErr::CannotCall(fun.ty)) };
+
+        Ok(Expr::new(
+            (*ft.1).clone(), 
+            ExprType::Call {funct: Box::new(fun), params }
+        ))
     }
 }
 

@@ -131,110 +131,169 @@ impl<T> ResultIntoInner for Result<T, T> {
     }
 }
 
-pub fn apply_unary(e: Expr, op: op::Unary) -> PLIRResult<Expr> {
-    // Check for any valid casts that can be applied here:
-    let cast = match op {
-        op::Unary::Plus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
-        },
-        op::Unary::Minus => {
-            chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
-        },
-        op::Unary::LogNot => {
-            apply_cast(e, &ty!(Type::S_BOOL)).into_inner()
-        },
-        op::Unary::BitNot => e,
-    };
+impl super::CodeGenerator {
+    /// Checks if this unary operator exists as a method.
+    fn find_unary(&mut self, op: op::Unary, left: TypeRef) -> PLIRResult<Option<Expr>> {
+        let method_name = match op {
+            op::Unary::Plus   => "plus",
+            op::Unary::Minus  => "minus",
+            op::Unary::LogNot => return Ok(None), // ! is implemented in terms of truth
+            op::Unary::BitNot => "bitnot",
+        };
 
-    // Type check and compute resulting expr type:
-    let ty = {
-        let ty = cast.ty.clone();
+        let ident = format!("{left}::{method_name}");
+        self.resolve_ident(&ident)?;
+        
+        let e = self.get_var_type_opt(&ident)
+            .cloned()
+            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+        
+        Ok(e)
+    }
+    
+    pub(super) fn apply_unary(&mut self, e: Expr, op: op::Unary) -> PLIRResult<Expr> {
+        // Check for any valid casts that can be applied here:
+        let cast = match op {
+            op::Unary::Plus => {
+                chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
+            },
+            op::Unary::Minus => {
+                chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
+            },
+            op::Unary::LogNot => {
+                apply_cast(e, &ty!(Type::S_BOOL)).into_inner()
+            },
+            op::Unary::BitNot => e,
+        };
+    
+        // Type check and compute resulting expr type:
+        let ty = {
+            let ty = cast.ty.clone();
+    
+            match (op, ty.as_ref()) {
+                (op::Unary::Plus,   TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
+                (op::Unary::Minus,  TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
+                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
+                (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
+                (op, tyref) => {
+                    let fun = self.find_unary(op, tyref)?
+                        .ok_or(OpErr::CannotUnary(op, ty))?;
+                    
+                    return Expr::call(fun, vec![cast]);
+                }
+            }
+        };
+    
+        // Construct expression:
+        let expr = match cast.expr {
+            ExprType::UnaryOps { mut ops, expr } => {
+                ops.insert(0, (op, cast.ty)); // This bothers me immensely.
+                ExprType::UnaryOps { ops, expr }
+            }
+            e => ExprType::UnaryOps { 
+                ops: vec![(op, ty.clone())], 
+                expr: Box::new(Expr { ty: cast.ty, expr: e }) 
+            }
+        };
+        Ok(Expr { ty, expr })
+    }
 
-        match (op, ty.as_ref()) {
-            (op::Unary::Plus,   TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
-            (op::Unary::Minus,  TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
-            (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
-            (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
-            _ => Err(OpErr::CannotUnary(op, ty))?
-        }
-    };
+    /// Checks if this unary operator exists as a method.
+    fn find_binary(&mut self, op: op::Binary, left: TypeRef, right: TypeRef) -> PLIRResult<Option<Expr>> {
+        let method_name = match op {
+            op::Binary::Add => "add",
+            op::Binary::Sub => "sub",
+            op::Binary::Mul => "mul",
+            op::Binary::Div => "div",
+            op::Binary::Mod => "mod",
+            op::Binary::Shl => "shl",
+            op::Binary::Shr => "shr",
+            op::Binary::BitOr => "bitor",
+            op::Binary::BitAnd => "bitand",
+            op::Binary::BitXor => "bitxor",
+            op::Binary::LogAnd => return Ok(None),
+            op::Binary::LogOr  => return Ok(None),
+        };
 
-    // Construct expression:
-    let expr = match cast.expr {
-        ExprType::UnaryOps { mut ops, expr } => {
-            ops.insert(0, (op, cast.ty)); // This bothers me immensely.
-            ExprType::UnaryOps { ops, expr }
-        }
-        e => ExprType::UnaryOps { 
-            ops: vec![(op, ty.clone())], 
-            expr: Box::new(Expr { ty: cast.ty, expr: e }) 
-        }
-    };
-    Ok(Expr { ty, expr })
+        let ident = format!("{left}::{method_name}_{right}");
+        self.resolve_ident(&ident)?;
+        
+        let e = self.get_var_type_opt(&ident)
+            .cloned()
+            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+        
+        Ok(e)
+    }
+
+    pub(super) fn apply_binary(&mut self, op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr> {
+        // Check for any valid casts that can be applied here:
+        let (lcast, rcast) = match op {
+            op::Binary::Add => {
+                let types = &[
+                    ty!(Type::S_STR),
+                    // list cast ?
+                    ty!(Type::S_INT),
+                    ty!(Type::S_FLOAT)
+                ];
+                chain((left, right), types, apply_cast2).into_inner()
+            },
+            op::Binary::Sub => {
+                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+            },
+            op::Binary::Mul => {
+                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+            },
+            op::Binary::Div => {
+                apply_cast2((left, right), &ty!(Type::S_FLOAT)).into_inner()
+            },
+            op::Binary::Mod => {
+                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+            },
+            op::Binary::Shl    => (left, right),
+            op::Binary::Shr    => (left, right),
+            op::Binary::BitOr  => (left, right),
+            op::Binary::BitAnd => (left, right),
+            op::Binary::BitXor => (left, right),
+            op::Binary::LogAnd => (left, right),
+            op::Binary::LogOr  => (left, right),
+        };
+    
+        // Type check and compute resulting expr type:
+        let ty = {
+            let left = lcast.ty.clone();
+            let right = &rcast.ty;
+            match (op, left.as_ref(), right.as_ref()) {
+                // numeric operators:
+                (op::Binary::Add, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+                (op::Binary::Sub, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+                (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+                (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => ty!(Type::S_FLOAT),
+                (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+                // collections:
+                (op::Binary::Add, l @ (TypeRef::Prim(Type::S_STR) | TypeRef::Generic(Type::S_LIST, _)), r) if l == r => left,
+                // bitwise operators:
+                (op::Binary::Shl, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
+                (op::Binary::Shr, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
+                (op::Binary::BitOr,  l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
+                (op::Binary::BitAnd, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
+                (op::Binary::BitXor, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
+                // logical operators:
+                (op::Binary::LogAnd, l, r) if l == r => left,
+                (op::Binary::LogOr, l, r) if l == r => left,
+                (op, leftref, rightref) => {
+                    let fun = self.find_binary(op, leftref, rightref)?
+                        .ok_or_else(|| OpErr::CannotBinary(op, left, right.clone()))?;
+
+                    return Expr::call(fun, vec![lcast, rcast]);
+                }
+            }
+        };
+    
+        // Construct expression:
+        Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast), right: Box::new(rcast) }})
+    }
 }
 
-pub fn apply_binary(op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr> {
-    // Check for any valid casts that can be applied here:
-    let (lcast, rcast) = match op {
-        op::Binary::Add => {
-            let types = &[
-                ty!(Type::S_STR),
-                // list cast ?
-                ty!(Type::S_INT),
-                ty!(Type::S_FLOAT)
-            ];
-            chain((left, right), types, apply_cast2).into_inner()
-        },
-        op::Binary::Sub => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
-        },
-        op::Binary::Mul => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
-        },
-        op::Binary::Div => {
-            apply_cast2((left, right), &ty!(Type::S_FLOAT)).into_inner()
-        },
-        op::Binary::Mod => {
-            chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
-        },
-        op::Binary::Shl    => (left, right),
-        op::Binary::Shr    => (left, right),
-        op::Binary::BitOr  => (left, right),
-        op::Binary::BitAnd => (left, right),
-        op::Binary::BitXor => (left, right),
-        op::Binary::LogAnd => (left, right),
-        op::Binary::LogOr  => (left, right),
-    };
-
-    // Type check and compute resulting expr type:
-    let ty = {
-        let left = lcast.ty.clone();
-        let right = &rcast.ty;
-        match (op, left.as_ref(), right.as_ref()) {
-            // numeric operators:
-            (op::Binary::Add, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            (op::Binary::Sub, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => ty!(Type::S_FLOAT),
-            (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-            // collections:
-            (op::Binary::Add, l @ (TypeRef::Prim(Type::S_STR) | TypeRef::Generic(Type::S_LIST, _)), r) if l == r => left,
-            // bitwise operators:
-            (op::Binary::Shl, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
-            (op::Binary::Shr, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
-            (op::Binary::BitOr,  l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
-            (op::Binary::BitAnd, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
-            (op::Binary::BitXor, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
-            // logical operators:
-            (op::Binary::LogAnd, l, r) if l == r => left,
-            (op::Binary::LogOr, l, r) if l == r => left,
-            _ => Err(OpErr::CannotBinary(op, left, right.clone()))?
-        }
-    };
-
-    // Construct expression:
-    Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast), right: Box::new(rcast) }})
-}
 
 pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
     // Check for any valid casts that can be applied here:
