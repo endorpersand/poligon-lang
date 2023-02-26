@@ -2,7 +2,7 @@ use inkwell::types::BasicType;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
-use crate::compiler::{plir, layout, params};
+use crate::compiler::plir;
 use crate::compiler::{Compiler, CompileResult, CompileErr};
 use crate::ast::op;
 
@@ -115,9 +115,6 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn raw_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
         left.apply_unary(op, self)
     }
-    pub(crate) fn raw_cmp<T: Cmp<'ctx, U>, U>(&mut self, left: T, op: op::Cmp, right: U) -> T::Output {
-        left.apply_cmp(op, right, self)
-    }
 }
 
 impl<'ctx> Unary<'ctx> for BV<'ctx> {
@@ -131,7 +128,7 @@ impl<'ctx> Unary<'ctx> for BV<'ctx> {
                 BV::FloatValue(v)   => v.apply_unary(op, c).map(Into::into),
                 BV::ArrayValue(_)   => cannot_unary(op, self),
                 BV::PointerValue(_) => cannot_unary(op, self),
-                BV::StructValue(v)  => v.apply_unary(op, c),
+                BV::StructValue(_)  => cannot_unary(op, self),
                 BV::VectorValue(_)  => cannot_unary(op, self),
             }
         }
@@ -207,7 +204,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
                     BV::IntValue(v)     => Ok(v.apply_binary(op, cast_rhs!(), c).into()),
                     BV::FloatValue(v)   => v.apply_binary(op, cast_rhs!(), c).map(Into::into),
                     BV::PointerValue(_) => cannot_binary(op, self, rhs),
-                    BV::StructValue(v)  => v.apply_binary(op, cast_rhs!(), c),
+                    BV::StructValue(_)  => cannot_binary(op, self, rhs),
                     BV::VectorValue(_)  => cannot_binary(op, self, rhs),
                 }
             }
@@ -268,33 +265,6 @@ impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
             op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
             op::Unary::BitNot => c.builder.build_not(self, "bit_not"),
         }
-    }
-}
-
-impl<'ctx> Unary<'ctx> for StructValue<'ctx> {
-    type Output = CompileResult<'ctx, BV<'ctx>>;
-    
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
-        let sty = self.get_type();
-        let Some(st_name) = sty.get_name() else { return cannot_unary(op, self) };
-        let Ok(st_name) = st_name.to_str() else { return cannot_unary(op, self) };
-        
-        let op_name = match op {
-            op::Unary::Plus   => "uplus",
-            op::Unary::Minus  => "uminus",
-            op::Unary::LogNot => unreachable!("logical not was directly computed on {}", self.get_type()),
-            op::Unary::BitNot => "ubitnot",
-        };
-
-        let Some(f) = c.module.get_function(&format!("{st_name}::{op_name}")) else {
-            return cannot_unary(op, self)
-        };
-
-        let call = c.builder.build_call(f, &[self.into()], op_name);
-        Ok(match call.try_as_basic_value().left() {
-            Some(t) => t,
-            None => layout!(c, S_VOID).const_zero(),
-        })
     }
 }
 
@@ -402,47 +372,6 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
     }
 }
 
-
-impl<'ctx> Binary<'ctx> for StructValue<'ctx> {
-    type Output = CompileResult<'ctx, BV<'ctx>>;
-
-    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
-        let lty = self.get_type();
-        let Some(lname) = lty.get_name() else { return cannot_binary(op, self, right) };
-        let Ok(lname) = lname.to_str() else { return cannot_binary(op, self, right) };
-        
-        let rty = self.get_type();
-        let Some(rname) = rty.get_name() else { return cannot_binary(op, self, right) };
-        let Ok(rname) = rname.to_str() else { return cannot_binary(op, self, right) };
-        
-        let op_name = match op {
-            op::Binary::Add    => "badd",
-            op::Binary::Sub    => "bsub",
-            op::Binary::Mul    => "bmul",
-            op::Binary::Div    => "bdiv",
-            op::Binary::Mod    => "bmod",
-            op::Binary::Shl    => "bshl",
-            op::Binary::Shr    => "bshr",
-            op::Binary::BitOr  => "bbitor",
-            op::Binary::BitAnd => "bbitand",
-            op::Binary::BitXor => "bbitxor",
-            op::Binary::LogAnd => unreachable!("logical and was directly computed on {}", self.get_type()),
-            op::Binary::LogOr  => unreachable!("logical or was directly computed on {}", self.get_type()),
-        };
-
-        let Some(f) = c.module.get_function(&format!("{lname}::{op_name}_{rname}")) else {
-            return cannot_binary(op, self, right)
-        };
-
-        let call = c.builder.build_call(f, params![self, right], op_name);
-        Ok(match call.try_as_basic_value().left() {
-            Some(t) => t,
-            None => layout!(c, S_VOID).const_zero(),
-        })
-    }
-    
-}
-
 impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
     type Output = IntValue<'ctx> /* bool */;
 
@@ -477,6 +406,7 @@ impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
         c.builder.build_int_compare(pred, self, right, name)
     }
 }
+
 impl<'ctx> Cmp<'ctx> for PointerValue<'ctx> {
     type Output = IntValue<'ctx>;
 
