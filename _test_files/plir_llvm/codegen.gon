@@ -169,8 +169,30 @@ fun main() {
 }
 
 //! TEST hoist_block
-fun a() {
-    return b();
+extern fun printd(s: int);
+
+fun compute(n: int) -> int {
+    return double(n) + 1;
     
-    fun b() {}
+    fun double(n: int) -> int { n * 2; }
+}
+
+fun main() {
+    let calc = compute(10);
+    printd(calc);
+}
+
+//! TEST hoist_block_fail
+extern fun printd(s: int);
+
+fun compute(n: int) -> int {
+    return double(n) + 1;
+    
+    fun double(n: int) -> int { n * 2; }
+}
+
+fun main() {
+    let dbl = double(10);
+    let calc = compute(dbl);
+    printd(calc);
 }

@@ -129,7 +129,7 @@ impl GonErr for PLIRErr {
             PLIRErr::CannotReturn => String::from("cannot 'return' here"),
             PLIRErr::ExpectedType(e, f) => format!("expected type '{e}', but got '{f}'"),
             PLIRErr::CannotResolveType => String::from("cannot determine type"),
-            PLIRErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            PLIRErr::UndefinedVar(name) => format!("could not find identifier '{name}'"),
             PLIRErr::UndefinedType(name) => format!("could not find type '{name}'"),
             PLIRErr::UndefinedAttr(t, name) => format!("could not find attribute '{name}' on '{t}'"),
             PLIRErr::CannotAccessOnMethod => String::from("cannot access on method"),
@@ -239,7 +239,6 @@ enum Unresolved {
 
 #[derive(Debug)]
 struct InsertBlock {
-    init_block: Vec<plir::Stmt>,
     block: Vec<plir::Stmt>,
 
     /// All conditional exits.
@@ -257,7 +256,6 @@ struct InsertBlock {
 impl InsertBlock {
     fn new() -> Self {
         Self {
-            init_block: vec![],
             block: vec![],
             exits: vec![],
             final_exit: None,
@@ -269,7 +267,6 @@ impl InsertBlock {
 
     fn top() -> Self {
         Self {
-            init_block: vec![],
             block: vec![],
             exits: vec![],
             final_exit: None,
@@ -285,11 +282,6 @@ impl InsertBlock {
         }
     }
 
-    fn last_stmt(&self) -> Option<&plir::Stmt> {
-        self.block.last()
-            .or_else(|| self.init_block.last())
-    }
-
     fn last_stmt_type(&self) -> Cow<plir::Type> {
         use plir::{Stmt, Type, ty};
 
@@ -303,7 +295,7 @@ impl InsertBlock {
             Cow::Owned(ty!(Type::S_NEVER))
         }
 
-        match self.last_stmt() {
+        match self.block.last() {
             Some(Stmt::Decl(d)) => {
                 let ty = &d.val.ty;
 
@@ -390,13 +382,6 @@ impl InsertBlock {
         }
 
         false
-    }
-
-    /// Push a singular statement into this insert block, at the front.
-    /// 
-    /// This should only be used for statements computed lazily (fun decl, classes, etc.)
-    fn push_lazy_stmt(&mut self, stmt: plir::Stmt) {
-        self.init_block.push(stmt)
     }
 
     /// Insert an unresolved class/function into the insert block.
@@ -512,6 +497,7 @@ enum TypeStructure {
 /// This struct does the actual conversion from AST to PLIR.
 pub struct CodeGenerator {
     program: InsertBlock,
+    globals: Vec<plir::Stmt>,
     blocks: Vec<InsertBlock>,
     var_id: usize,
 
@@ -523,9 +509,9 @@ impl CodeGenerator {
     pub fn new() -> Self {
         Self { 
             program: InsertBlock::top(), 
+            globals: vec![],
             blocks: vec![],
-            var_id: 0,
-            // steps: HashMap::new()
+            var_id: 0
         }
     }
 
@@ -535,12 +521,14 @@ impl CodeGenerator {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, exits, mut init_block, unresolved, .. } = self.program;
+        let InsertBlock {block, exits, unresolved, .. } = self.program;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
-        init_block.extend(block);
+        let mut stmts = self.globals;
+        stmts.extend(block);
+
         match exits.last() {
-            None => Ok(plir::Program(init_block)),
+            None => Ok(plir::Program(stmts)),
             Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
             Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
             Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
@@ -590,7 +578,7 @@ impl CodeGenerator {
                     let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
                     
                     let fs = self.consume_fun_sig(fs)?;
-                    self.peek_block().push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
+                    self.globals.push(plir::Stmt::ExternFunDecl(fs));
                 },
                 Unresolved::Fun(_) => {
                     let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
@@ -702,7 +690,7 @@ impl CodeGenerator {
                 Unresolved::Class(c) => { self.consume_cls(c)?; },
                 Unresolved::ExternFun(fs) => {
                     let fs = self.consume_fun_sig(fs)?;
-                    self.peek_block().push_lazy_stmt(plir::Stmt::ExternFunDecl(fs));
+                    self.globals.push(plir::Stmt::ExternFunDecl(fs));
                 },
                 Unresolved::Fun(fd) => {
                     let ast::FunDecl { sig, block } = fd;
@@ -756,13 +744,10 @@ impl CodeGenerator {
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
-            mut init_block, mut block, exits, final_exit, 
+            mut block, exits, final_exit, 
             vars: _, types: _, unresolved 
         } = block;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
-
-        init_block.extend(block);
-        block = init_block;
 
         // fill the unconditional exit if necessary:
         let mut final_exit = final_exit.unwrap_or_else(|| {
@@ -1008,7 +993,7 @@ impl CodeGenerator {
 
         let fun_decl = plir::FunDecl { sig, block };
         
-        self.peek_block().push_lazy_stmt(plir::Stmt::FunDecl(fun_decl));
+        self.globals.push(plir::Stmt::FunDecl(fun_decl));
         Ok(self.peek_block().is_open())
     }
 
@@ -1032,7 +1017,7 @@ impl CodeGenerator {
         
         let cls = plir::Class { ident, fields };
         
-        let mut ib = self.peek_block();
+        let ib = self.peek_block();
         ib.insert_class(&cls);
 
         for method in methods {
@@ -1062,11 +1047,10 @@ impl CodeGenerator {
             if let Some(c) = ib.types.get_mut(&cls.ident) {
                 c.insert_method(method_name, metref);
             }
-            ib = self.peek_block();
         }
 
-        ib.push_lazy_stmt(plir::Stmt::ClassDecl(cls));
-        Ok(ib.is_open())
+        self.globals.push(plir::Stmt::ClassDecl(cls));
+        Ok(self.peek_block().is_open())
     }
 
     fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
@@ -1451,6 +1435,9 @@ mod tests {
             "fun_recursion_inf",
             "recursive_fib",
             "hoist_block"
+        ])?;
+        TESTS.fail_all(cg_test, &[
+            "hoist_block_fail"
         ])
     }
 
