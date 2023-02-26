@@ -1089,7 +1089,7 @@ mod tests {
     use crate::test_utils::prelude::*;
 
     fn test_compile(t: Test) -> TestResult<()> {
-        println!("=== compile {} ===", t.name);
+        println!("=== compile {} ===", t.header.name);
         let plir = t.codegen()?;
 
         println!("{plir}");
@@ -1105,7 +1105,7 @@ mod tests {
     }
 
     fn test_run(t: Test) -> TestResult<()> {
-        println!("=== run {} ===", t.name);
+        println!("=== run {} ===", t.header.name);
         let plir = t.codegen()?;
 
         println!("{plir}");
@@ -1117,9 +1117,11 @@ mod tests {
         })
     }
 
-    load_tests!(CG_TESTS, "_test_files/plir_llvm/codegen.gon");
-    load_tests!(EARLY_EXIT_TESTS, "_test_files/plir_llvm/early_exits.gon");
-    load_tests!(TYPE_TESTS, "_test_files/plir_llvm/compiler_types.gon");
+    load_tests!("compiler",
+        CG_TESTS = "_test_files/plir_llvm/codegen.gon"
+        EARLY_EXIT_TESTS = "_test_files/plir_llvm/early_exits.gon"
+        TYPE_TESTS = "_test_files/plir_llvm/compiler_types.gon"
+    );
 
     #[test]
     fn basic_pass() -> TestResult<()> {
@@ -1128,7 +1130,7 @@ mod tests {
             "basic_while", 
             "basic_access", 
             "basic_arith_chain", 
-            // "basic_pattern", TODO!: complete
+            "basic_pattern", // TODO!: complete
             "basic_block", 
             "basic_extern",
             "basic_logic_cmp",
@@ -1145,7 +1147,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: complete
     fn early_exit() -> TestResult<()> {
         EARLY_EXIT_TESTS.pass_all(test_run, &[
             "early_return",

@@ -92,6 +92,7 @@ printd(a);
 
 
 //! TEST basic_pattern
+//! IGNORE compiler
 let [a, .., b] = [1, 2, 3, 4];
 let [a, ..b, c] = [1, 2, 3, 4];
 

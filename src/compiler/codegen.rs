@@ -1400,13 +1400,15 @@ impl Default for CodeGenerator {
 mod tests {
     use crate::test_utils::prelude::*;
 
-    load_tests!("_test_files/plir_llvm/codegen.gon");
-    load_tests!(EARLY_EXIT_TESTS, "_test_files/plir_llvm/early_exits.gon");
-    load_tests!(TYPE_TESTS, "_test_files/plir_llvm/compiler_types.gon");
+    load_tests!("codegen", 
+        TESTS = "_test_files/plir_llvm/codegen.gon"
+        EARLY_EXIT_TESTS = "_test_files/plir_llvm/early_exits.gon"
+        TYPE_TESTS = "_test_files/plir_llvm/compiler_types.gon"
+    );
 
     fn cg_test(test: Test) -> TestResult<()> {
         let cg = test.codegen();
-        println!("=== {} {} ===",  test.name, if cg.is_ok() { "PASS" } else { "FAIL" });
+        println!("=== {} {} ===",  test.header.name, if cg.is_ok() { "PASS" } else { "FAIL" });
 
         match &cg {
             Ok(t)  => println!("{t}"),
