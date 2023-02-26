@@ -1447,6 +1447,7 @@ mod tests {
         TYPE_TESTS.pass_all(cg_test, &[
             "class_chain",
             "initializer",
+            "class_operator_overloading",
             "method_access",
             "decl_cast_check",
             "fun_cast_check",
