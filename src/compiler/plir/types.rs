@@ -235,8 +235,10 @@ macro_rules! ty {
         $crate::compiler::plir::Type::Tuple(vec![$($p),+])
     };
 
-    ([$($p:expr),*] -> $r:expr) => {
-        $crate::compiler::plir::Type::Fun(vec![$($p),*], Box::new($r))
+    (($($p:expr),*) -> $r:expr) => {
+        $crate::compiler::plir::Type::Fun(
+            $crate::compiler::plir::FunType(vec![$($p),*], Box::new($r))
+        )
     };
 }
 pub(crate) use ty;
