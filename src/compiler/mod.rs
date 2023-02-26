@@ -586,23 +586,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
                 compiler.alloca_and_store(ident, val)?;
                 Ok(GonValue::Unit)
             },
-            ProcStmt::Return(me) => {
-                match me {
-                    Some(expr) => {
-                        let e = expr.write_value(compiler)?;
-                        compiler.build_return(e)
-                    }
-                    None => compiler.builder.build_return(None)
-                };
-
-                Ok(GonValue::Unit)
-            },
-            ProcStmt::Exit(_) => {
-                // Exits are resolved at the block level
-                Ok(GonValue::Unit)
-            },
-            ProcStmt::Break => todo!(),
-            ProcStmt::Continue => todo!(),
+            ProcStmt::Return(_) => unreachable!("return should be resolved at block level"),
+            ProcStmt::Exit(_)   => unreachable!("exit should be resolved at block level"),
+            ProcStmt::Break     => unreachable!("break should be resolved at block level"),
+            ProcStmt::Continue  => unreachable!("continue should be resolved at block level"),
             ProcStmt::Expr(e) => e.write_value(compiler),
         }
     }
