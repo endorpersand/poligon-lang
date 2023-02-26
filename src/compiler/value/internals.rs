@@ -118,7 +118,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _int = layout!(self, S_INT).into_int_type();
+        let _ptr = self.ptr_type(Default::default());
 
+        let malloc = self.std_import("malloc")?;
         let memcpy = self.std_import("memcpy")?;
         let free = self.std_import("free")?;
         
@@ -128,9 +130,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let dynarray = builder.build_typed_load(_dynarray, dynarray_ptr, "");
         
-        let old_buf = builder.build_extract_value(dynarray, 0, "old_buf")
-            .expect("#dynarray buf")
-            .into_pointer_value();
+        let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "")
+            .expect("#dynarray buf");
+        let old_buf = builder.build_typed_load(_ptr, buf_ptr, "old_buf");
         let len = builder.build_extract_value(dynarray, 1, "len")
             .expect("#dynarray len")
             .into_int_value();
@@ -146,20 +148,14 @@ impl<'ctx> Compiler<'ctx> {
         
         builder.position_at_end(realloc_bb);
 
-        let dn = self.std_import("#dynarray::new")?;
-        let alloc = builder.build_call(dn, params![new_cap], "alloc")
+        let new_buf = builder.build_call(malloc, params![new_cap], "dynarray_buf")
             .try_as_basic_value()
             .unwrap_left()
-            .into_struct_value();
-
-        let new_buf = builder.build_extract_value(alloc, 0, "new_buf")
-            .expect("#dynarray buf")
             .into_pointer_value();
 
         builder.build_call(memcpy, params![new_buf, old_buf, len], "copy_buf");
-        builder.build_insert_value(alloc, len, 1, "alloc");
-        
-        builder.build_store(dynarray_ptr, alloc);
+
+        builder.build_store(buf_ptr, new_buf);
         builder.build_call(free, params![old_buf], "free_old_buf");
 
         builder.build_unconditional_branch(merge_bb);
