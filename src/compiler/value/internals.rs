@@ -46,17 +46,23 @@ pub(in crate::compiler) use fn_type;
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let _ptr = self.ptr_type(Default::default());
+        let _str = layout!(self, S_STR);
+        let _dynarray = layout!(self, "#dynarray");
+        let _int = layout!(self, S_INT);
         
-        let ptr = fun.get_first_param().unwrap().into_pointer_value();
-        let dynarray_ptr = builder.build_struct_gep(layout!(self, S_STR), ptr, 0, "").unwrap();
-        let buf_ptr = builder.build_struct_gep(layout!(self, "#dynarray"), dynarray_ptr, 0, "").unwrap();
-
-        let puts = self.std_import("puts")?;
+        let str_ptr = fun.get_first_param().unwrap().into_pointer_value();
+        let dynarray_ptr = builder.build_struct_gep(_str, str_ptr, 0, "").unwrap();
+        
+        let buf_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 0, "").unwrap();
+        let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
+        let printf = self.std_import("printf")?;
+        let template = unsafe { builder.build_global_string("%.*s\n\0", "_tmpl_print") };
     
         let buf = builder.build_load(_ptr, buf_ptr, "buf");
-        builder.build_call(puts, &[buf.into()], "");
+        let len = builder.build_load(_int, len_ptr, "len");
+        builder.build_call(printf, params![template.as_pointer_value(), len, buf], "");
+        
         builder.build_return(None);
-    
         Ok(())
     }
 
@@ -64,11 +70,9 @@ impl<'ctx> Compiler<'ctx> {
         let _ptr = self.ptr_type(Default::default());
         let _int = layout!(self, S_INT);
 
-        let p0 = fun.get_first_param().unwrap();
-        let printf = self.std_import("printf")?;
-    
-        let template = unsafe { builder.build_global_string("%c\0", "printc") };
-        builder.build_call(printf, params![template.as_pointer_value(), p0], "");
+        let ch = fun.get_first_param().unwrap();
+        let putchar = self.std_import("putchar")?;
+        builder.build_call(putchar, params![ch], "");
         builder.build_return(None);
     
         Ok(())
@@ -81,7 +85,7 @@ impl<'ctx> Compiler<'ctx> {
         let p0 = fun.get_first_param().unwrap();
         let printf = self.std_import("printf")?;
     
-        let template = unsafe { builder.build_global_string("%d\0", "printd") };
+        let template = unsafe { builder.build_global_string("%d\0", "_tmpl_printd") };
         builder.build_call(printf, params![template.as_pointer_value(), p0], "");
         builder.build_return(None);
     
@@ -253,6 +257,9 @@ impl<'ctx> Compiler<'ctx> {
             builder.build_gep(_bytearr, buf, &[_int.const_zero(), old_len], "") 
         };
         builder.build_call(memcpy, params![shift_buf, bytes, add_len], "");
+        let len_ptr = builder.build_struct_gep(_dynarray, dynarray_ptr, 1, "").unwrap();
+        builder.build_store(len_ptr, new_len);
+
         builder.build_return(None);
         Ok(())
     }
@@ -281,14 +288,15 @@ impl<'ctx> Compiler<'ctx> {
     fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
         let _ptr  = self.ptr_type(Default::default());
         let _int  = layout!(self, S_INT);
+        let _char  = layout!(self, S_CHAR);
         let _void = self.ctx.void_type();
 
         match name {
-            "puts"   => Some(fn_type![(_ptr /* i8* */) -> _int]),
-            "printf" => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
-            "malloc" => Some(fn_type![(_int) -> _ptr]),
-            "free"   => Some(fn_type![(_ptr) -> _void]),
-            "memcpy" => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
+            "putchar" => Some(fn_type![(_char) -> _int]),
+            "printf"  => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
+            "malloc"  => Some(fn_type![(_int) -> _ptr]),
+            "free"    => Some(fn_type![(_ptr) -> _void]),
+            "memcpy"  => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
             _ => None
         }
     }

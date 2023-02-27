@@ -82,7 +82,7 @@ impl<'ctx> Compiler<'ctx> {
     }
     /// Create a new char value using a char from Rust.
     pub fn new_char(&self, c: char) -> GonValue<'ctx> {
-        GonValue::Int(self.ctx.i32_type().const_int(c as u32 as u64, true))
+        GonValue::Char(self.ctx.i32_type().const_int(c as u64, true))
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
@@ -95,17 +95,17 @@ impl<'ctx> Compiler<'ctx> {
         let arr_new = self.std_import("#dynarray::new").unwrap();
         let arr_ext = self.std_import("#dynarray::extend").unwrap();
 
-        let string = self.ctx.const_string(s.as_bytes(), true);
+        let string = self.ctx.const_string(s.as_bytes(), false);
         let len = _int.const_int(string.get_type().len() as _, false);
 
+        let dynarray_ptr = self.builder.build_alloca(_dynarray, "");
         let dynarray = self.builder.build_call(arr_new, params![len], "dynarray_new")
             .try_as_basic_value()
             .unwrap_left()
             .into_struct_value();
-        let dynarray_ptr = self.builder.build_alloca(_dynarray, "");
-        let string_ptr = self.builder.build_alloca(string.get_type(), "");
-
         self.builder.build_store(dynarray_ptr, dynarray);
+        
+        let string_ptr = self.builder.build_alloca(string.get_type(), "");
         self.builder.build_store(string_ptr, string);
 
         self.builder.build_call(arr_ext, params![dynarray_ptr, string_ptr, len], "");
@@ -131,7 +131,9 @@ impl<'ctx> Compiler<'ctx> {
                 
                 Ok(GonValue::Float(fv))
             },
-            // TODO: impl char -> str
+            (GonValue::Char(_), TypeRef::Prim(Type::S_STR)) => {
+                todo!("char -> str cast")
+            },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
             _ => Err(CompileErr::CannotCast(self.plir_type_of(v), ty.clone()))
