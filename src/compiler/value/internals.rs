@@ -71,8 +71,8 @@ impl<'ctx> Compiler<'ctx> {
         let _int = layout!(self, S_INT);
 
         let ch = fun.get_first_param().unwrap();
-        let putchar = self.std_import("putchar")?;
-        builder.build_call(putchar, params![ch], "");
+        let putwchar = self.std_import("putwchar")?;
+        builder.build_call(putwchar, params![ch], "");
         builder.build_return(None);
     
         Ok(())
@@ -264,14 +264,51 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
+    fn x_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>, fmt: &str, tmpl_name: &str) -> CompileResult<'ctx, ()> {
+        let _int = layout!(self, S_INT).into_int_type();
+        let _ptr = self.ptr_type(Default::default());
+        let _dynarray = layout!(self, "#dynarray").into_struct_type();
+        let _str = layout!(self, S_STR).into_struct_type();
+    
+        let val = fun.get_first_param().unwrap();
+        let buf_ptr = builder.build_alloca(_ptr, "buf_ptr");
+        
+        let template = unsafe { builder.build_global_string(fmt, tmpl_name) };
+        let asprintf = self.std_import("asprintf")?;
+        
+        let len = builder.build_call(asprintf, params![buf_ptr, template.as_pointer_value(), val], "len")
+            .try_as_basic_value()
+            .unwrap_left()
+            .into_int_value();
+        let buf = builder.build_typed_load(_ptr, buf_ptr, "buf");
+        let cap = builder.build_int_add(len, _int.const_int(1, false), "cap");
+    
+        // bc asprintf creates a malloc'd ptr, we can build dynarray by ourselves.
+        // Additionally, Poligon strings are represented without the null terminator,
+        // so, the extra null terminator is free capacity.
+        let dynarray = builder.create_struct_value(_dynarray, params![buf, len, cap])?;
+        let string = builder.create_struct_value(_str, params![dynarray])?;
+    
+        builder.build_return(Some(&string));
+        Ok(())
+    }
+
+    fn int_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        self.x_to_string(builder, fun, "%d\0", "_tmpl_printd")
+    }
+    fn float_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        self.x_to_string(builder, fun, "%#f\0", "_tmpl_print_float")
+    }
+
     // HACK
     std_map! {
         use c;
-        let _str  = layout!(c, S_STR);
-        let _char = layout!(c, S_CHAR);
-        let _int  = layout!(c, S_INT);
-        let _i8   = c.ctx.i8_type();
-        let _void = c.ctx.void_type();
+        let _str   = layout!(c, S_STR);
+        let _char  = layout!(c, S_CHAR);
+        let _int   = layout!(c, S_INT);
+        let _float = layout!(c, S_FLOAT);
+        let _i8    = c.ctx.i8_type();
+        let _void  = c.ctx.void_type();
         let _dynarray = layout!(c, "#dynarray");
         let _ptr = c.ptr_type(Default::default());
 
@@ -282,7 +319,9 @@ impl<'ctx> Compiler<'ctx> {
         "#dynarray::resize": dynarray_resize, fn_type![(_ptr /* "#dynarray"* */, _int) -> _void],
         "#dynarray::push": dynarray_push, fn_type![(_ptr /* "#dynarray"* */, _i8)  -> _void],
         "#dynarray::extend": dynarray_extend, fn_type![(_ptr /* "#dynarray"* */, _ptr /* i8* */, _int) -> _void],
-        "#dynarray::pop": dynarray_pop, fn_type![(_ptr /* "#dynarray"* */) -> _i8]
+        "#dynarray::pop": dynarray_pop, fn_type![(_ptr /* "#dynarray"* */) -> _i8],
+        "int__to_string": int_to_string, fn_type![(_int) -> _str],
+        "float__to_string": float_to_string, fn_type![(_float) -> _str]
     }
 
     fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
@@ -292,11 +331,13 @@ impl<'ctx> Compiler<'ctx> {
         let _void = self.ctx.void_type();
 
         match name {
-            "putchar" => Some(fn_type![(_char) -> _int]),
-            "printf"  => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
-            "malloc"  => Some(fn_type![(_int) -> _ptr]),
-            "free"    => Some(fn_type![(_ptr) -> _void]),
-            "memcpy"  => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
+            "putchar"  => Some(fn_type![(_char) -> _int]),
+            "putwchar" => Some(fn_type![(_char) -> _int]),
+            "printf"   => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
+            "malloc"   => Some(fn_type![(_int) -> _ptr]),
+            "free"     => Some(fn_type![(_ptr) -> _void]),
+            "memcpy"   => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
+            "asprintf" => Some(fn_type![(_ptr /* i8** */, _ptr /* i8* */, ~) -> _int]),
             _ => None
         }
     }

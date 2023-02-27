@@ -70,19 +70,19 @@ pub enum GonValue<'ctx> {
 impl<'ctx> Compiler<'ctx> {
     /// Create a new int value using an int from Rust.
     pub fn new_int(&self, v: isize) -> GonValue<'ctx> {
-        GonValue::Int(self.ctx.i64_type().const_int(v as u64, true))
+        GonValue::Int(layout!(self, S_INT).into_int_type().const_int(v as u64, true))
     }
     /// Create a new bool value using a bool from Rust.
     pub fn new_bool(&self, v: bool) -> GonValue<'ctx> {
-        GonValue::Bool(self.ctx.bool_type().const_int(v as u64, true))
+        GonValue::Bool(layout!(self, S_BOOL).into_int_type().const_int(v as u64, true))
     }
     /// Create a new float value using a float from Rust.
     pub fn new_float(&self, f: f64) -> GonValue<'ctx> {
-        GonValue::Float(self.ctx.f64_type().const_float(f))
+        GonValue::Float(layout!(self, S_FLOAT).into_float_type().const_float(f))
     }
     /// Create a new char value using a char from Rust.
     pub fn new_char(&self, c: char) -> GonValue<'ctx> {
-        GonValue::Char(self.ctx.i32_type().const_int(c as u64, true))
+        GonValue::Char(layout!(self, S_CHAR).into_int_type().const_int(c as u64, true))
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
