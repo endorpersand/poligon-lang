@@ -65,7 +65,7 @@ fn accept_cast(left: TypeRef, right: TypeRef, ct: CastType) -> bool {
         (Prim(Type::S_INT),  Prim(Type::S_FLOAT)) => matches!(ct, All | Decl | FunDecl | Call),
         (Prim(Type::S_CHAR), Prim(Type::S_STR))   => matches!(ct, All | Decl | FunDecl | Call),
         (_, Prim(Type::S_BOOL)) => matches!(ct, All),
-        (_, Prim(Type::S_VOID)) => matches!(ct, All | FunDecl | Call),
+        (_, Prim(Type::S_VOID)) => matches!(ct, All | FunDecl),
         _ => false
     }
 }
