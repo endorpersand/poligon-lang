@@ -655,7 +655,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     Some((&(tail_op, _), head)) => {
                         let first = compiler.apply_unary(&**expr, tail_op)?;
                         head.iter()
-                            .try_rfold(first, |e, &(op, _)| compiler.raw_unary(e, op))
+                            .try_rfold(first, |e, &(op, _)| compiler.apply_unary(e, op))
                             .and_then(|bv| compiler.reconstruct(expr_ty, bv))
                     },
                     None => expr.write_value(compiler),

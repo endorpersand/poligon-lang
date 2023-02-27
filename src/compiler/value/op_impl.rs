@@ -111,10 +111,6 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn truth<T: AsBVInfallible<'ctx>>(&self, left: T) -> IntValue<'ctx> /* bool */ {
         left.into_bvi(self).truth(self)
     }
-
-    pub(crate) fn raw_unary<T: Unary<'ctx>>(&mut self, left: T, op: op::Unary) -> T::Output {
-        left.apply_unary(op, self)
-    }
 }
 
 impl<'ctx> Unary<'ctx> for BV<'ctx> {
