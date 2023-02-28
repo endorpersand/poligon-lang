@@ -327,17 +327,19 @@ impl<'ctx> Compiler<'ctx> {
     fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
         let _ptr  = self.ptr_type(Default::default());
         let _int  = layout!(self, S_INT);
-        let _char  = layout!(self, S_CHAR);
+        let _char = layout!(self, S_CHAR);
         let _void = self.ctx.void_type();
+        let _i32  = self.ctx.i32_type();
 
         match name {
-            "putchar"  => Some(fn_type![(_char) -> _int]),
-            "putwchar" => Some(fn_type![(_char) -> _int]),
-            "printf"   => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
-            "malloc"   => Some(fn_type![(_int) -> _ptr]),
-            "free"     => Some(fn_type![(_ptr) -> _void]),
-            "memcpy"   => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
-            "asprintf" => Some(fn_type![(_ptr /* i8** */, _ptr /* i8* */, ~) -> _int]),
+            "putchar"   => Some(fn_type![(_char) -> _int]),
+            "putwchar"  => Some(fn_type![(_char) -> _int]),
+            "printf"    => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
+            "malloc"    => Some(fn_type![(_int) -> _ptr]),
+            "free"      => Some(fn_type![(_ptr) -> _void]),
+            "memcpy"    => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
+            "asprintf"  => Some(fn_type![(_ptr /* i8** */, _ptr /* i8* */, ~) -> _int]),
+            "setlocale" => Some(fn_type![(_i32, _ptr /* i8* */, ~) -> _ptr]),
             _ => None
         }
     }

@@ -544,7 +544,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             bodies.write_value(compiler)?;
         }
 
-        match (main_fun, proc.as_slice()) {
+        let main = match (main_fun, proc.as_slice()) {
             (Some(f), []) => Ok(f),
             (Some(_), _)  => Err(CompileErr::CannotDetermineMain),
             (None, stmts) => {
@@ -567,6 +567,22 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                     Err(CompileErr::InvalidFun)
                 }
             }
+        }?;
+
+        let fbb = main.get_first_basic_block().unwrap();
+        let bb = compiler.ctx.prepend_basic_block(fbb, "init");
+        compiler.builder.position_at_end(bb);
+
+        let setlocale = compiler.std_import("setlocale")?;
+        let _int = compiler.ctx.i32_type();
+        let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
+        compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
+        compiler.builder.build_unconditional_branch(fbb);
+        
+        if main.verify(true) {
+            Ok(main)
+        } else {
+            Err(CompileErr::InvalidFun)
         }
     }
 }
