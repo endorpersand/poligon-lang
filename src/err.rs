@@ -25,21 +25,21 @@ pub trait GonErr {
     fn message(&self) -> String;
 
     /// Designate that this error occurred at a specific position
-    fn at(self, p: Point) -> FullGonErr<Self> 
+    fn at(self, p: Cursor) -> FullGonErr<Self> 
         where Self: Sized
     {
         FullGonErr::new(self, ErrPos::from_point(p))
     }
     
     /// Designate that this error occurred at a few specific positions
-    fn at_points(self, pts: &[Point]) -> FullGonErr<Self> 
+    fn at_points(self, pts: &[Cursor]) -> FullGonErr<Self> 
         where Self: Sized
     {
         FullGonErr::new(self, ErrPos::from_points(pts))
     }
     
     /// Designate that this error occurred within a range of positions
-    fn at_range(self, range: impl RangeBounds<Point>) -> FullGonErr<Self> 
+    fn at_range(self, range: impl RangeBounds<Cursor>) -> FullGonErr<Self> 
         where Self: Sized
     {
         FullGonErr::new(self, ErrPos::from_range(range))
@@ -68,31 +68,39 @@ pub struct FullGonErr<E: GonErr> {
     position: ErrPos
 }
 
-type Point = (usize /* line */, usize /* line */);
+/**
+ * Indicates a specific character in given code.
+ */
+pub type Cursor = (usize /* line */, usize /* character */);
+
+/**
+ * Indicates a contiguous range of characters in given code.
+ */
+pub type CursorRange = RangeInclusive<Cursor>;
 
 #[derive(PartialEq, Eq, Debug)]
 enum ErrPos {
     /// Error occurred at a specific point
-    Point(Point),
+    Point(Cursor),
 
     /// Error occurred at a few specific points
-    Points(Vec<Point>),
+    Points(Vec<Cursor>),
 
     /// Error occurred at an inclusive range of points
-    Range(RangeInclusive<Point>),
+    Range(CursorRange),
 
     /// Error occurred at an range of points, going to the end
-    RangeFrom(RangeFrom<Point>),
+    RangeFrom(RangeFrom<Cursor>),
 
     /// Error occurred somewhere, unknown where
     Unknown
 }
 
 impl ErrPos {
-    pub fn from_point(p: Point) -> Self {
+    pub fn from_point(p: Cursor) -> Self {
         Self::Point(p)
     }
-    pub fn from_points(pts: &[Point]) -> Self {
+    pub fn from_points(pts: &[Cursor]) -> Self {
         if let [pt] = pts {
             Self::Point(*pt)
         } else {
@@ -102,7 +110,7 @@ impl ErrPos {
             Self::Points(vec)
         }
     }
-    pub fn from_range(range: impl RangeBounds<Point>) -> Self {
+    pub fn from_range(range: impl RangeBounds<Cursor>) -> Self {
         let start = match range.start_bound() {
             Bound::Included(p) | Bound::Excluded(p) => *p,
             Bound::Unbounded => (0, 0),
@@ -129,13 +137,13 @@ fn get_line(orig_txt: &str, lno: usize) -> String {
         .into()
 }
 
-fn ptr_point(orig_txt: &str, (lno, cno): Point) -> [String; 2] {
+fn ptr_point(orig_txt: &str, (lno, cno): Cursor) -> [String; 2] {
     let code = get_line(orig_txt, lno);
     let ptr = " ".repeat(cno) + "^";
 
     [code, ptr]
 }
-fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Point>) -> Vec<String> {
+fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Cursor>) -> Vec<String> {
     let (start_lno, start_cno) = match r.start_bound() {
         Bound::Included(p) | Bound::Excluded(p) => *p,
         Bound::Unbounded => (0, 0),

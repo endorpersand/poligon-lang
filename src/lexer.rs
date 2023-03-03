@@ -9,12 +9,11 @@
 
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
-use std::ops::RangeInclusive;
 
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use crate::err::{GonErr, FullGonErr};
+use crate::err::{GonErr, FullGonErr, CursorRange, Cursor};
 
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
@@ -130,8 +129,6 @@ impl GonErr for LexErr {
 fn wrapq(c: char) -> String {
     if c == '\'' { format!("\"{}\"", c) } else { format!("'{}'", c) }
 }
-
-type Cursor = (usize, usize);
 
 /// Shift cursor forward along a line
 fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
@@ -350,7 +347,7 @@ impl<'lx> LiteralBuffer<'lx> {
         self.lexer.cursor
     }
 
-    fn cursor_range(&self) -> RangeInclusive<Cursor> {
+    fn cursor_range(&self) -> CursorRange {
         self.lexer.token_start ..= self.lexer.cursor
     }
 }
@@ -662,7 +659,7 @@ impl Lexer {
     }
 
     /// Get the range of the current token being generated.
-    fn token_range(&self) -> RangeInclusive<Cursor> {
+    fn token_range(&self) -> CursorRange {
         self.token_start ..= self.cursor
     }
 
@@ -672,7 +669,7 @@ impl Lexer {
     }
 
     /// Add token to the token buffer, with a custom defined range
-    fn push_token_with_range(&mut self, t: Token, r: RangeInclusive<Cursor>) {
+    fn push_token_with_range(&mut self, t: Token, r: CursorRange) {
         let ft = FullToken::new(t, r);
         self.tokens.push(ft);
     }

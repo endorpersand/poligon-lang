@@ -4,8 +4,8 @@
 
 use std::fmt::{Debug, Display};
 use std::collections::BTreeMap;
-use std::ops::RangeInclusive;
 use lazy_static::lazy_static;
+use crate::err::CursorRange;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 /// A specific unit that carries some graphemic value in Poligon.
@@ -45,13 +45,13 @@ pub enum Token {
 /// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pub(crate) loc: RangeInclusive<(usize, usize)>,
+    pub(crate) loc: CursorRange,
     pub(crate) tt: Token
 }
 
 impl FullToken {
     /// Create a FullToken using a token and its given position.
-    pub fn new(tt: Token, loc: RangeInclusive<(usize, usize)>) -> Self {
+    pub fn new(tt: Token, loc: CursorRange) -> Self {
         Self { loc, tt }
     }
 }

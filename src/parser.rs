@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::GonErr;
-use crate::err::FullGonErr;
+use crate::err::{FullGonErr, CursorRange};
 use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{self, PatErr};
 
@@ -382,7 +382,7 @@ impl Parser {
     }
 
     /// Look at the range of the next token in the input (or return EOF).
-    pub fn peek_loc(&self) -> std::ops::RangeInclusive<(usize, usize)> {
+    pub fn peek_loc(&self) -> CursorRange {
         self.tokens.get(0)
             .map_or(
                 self.eof..=self.eof,
