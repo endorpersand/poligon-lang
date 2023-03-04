@@ -228,11 +228,7 @@ trait TRsDependent {
 
 impl<T: TraverseResolve> TraverseResolve for [T] {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        for t in self {
-            t.traverse_rs(map)?
-        }
-
-        Ok(())
+        self.iter().try_for_each(|t| t.traverse_rs(map))
     }
 }
 impl<T: TraverseResolve> TraverseResolve for Option<T> {
@@ -246,11 +242,7 @@ impl<T: TraverseResolve> TraverseResolve for Option<T> {
 }
 impl<T: TRsDependent> TRsDependent for [T] {
     fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
-        for t in self {
-            t.traverse_rs(map, e)?;
-        }
-
-        Ok(())
+        self.iter().try_for_each(|t| t.traverse_rs(map, e))
     }
 }
 
@@ -423,7 +415,7 @@ impl<T: TRsDependent> TRsDependent for ast::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
         match self {
             ast::Pat::Unit(u) => u.traverse_rs(map, e),
-            ast::Pat::List(lst) => lst.traverse_rs(map, e),
+            ast::Pat::List(lst) => lst.iter().try_for_each(|t| t.traverse_rs(map, e)),
             ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map, e),
                 None => Ok(()),
@@ -435,7 +427,7 @@ impl<T: TraverseResolve> TraverseResolve for ast::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
             ast::Pat::Unit(u) => u.traverse_rs(map),
-            ast::Pat::List(lst) => lst.traverse_rs(map),
+            ast::Pat::List(lst) => lst.iter().try_for_each(|t| t.traverse_rs(map)),
             ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map),
                 None => Ok(()),

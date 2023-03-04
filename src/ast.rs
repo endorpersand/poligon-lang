@@ -13,7 +13,7 @@
 
 use std::rc::Rc;
 
-use crate::err::CursorRange;
+use crate::err::{CursorRange, FullGonErr, GonErr};
 
 pub use self::types::*;
 
@@ -70,18 +70,23 @@ impl<T> Located<T> {
         opt.map(Box::new)
     }
 
-    pub fn transpose_option(opt: Located<Option<T>>) -> Option<Self> {
-        let Located(value, range) = opt;
-        value.map(|v| Located(v, range))
-    }
-
-    pub fn transpose_result<E>(opt: Located<Result<T, E>>) -> Result<Self, E> {
-        let Located(value, range) = opt;
-        value.map(|v| Located(v, range))
-    }
-
     pub fn range(&self) -> CursorRange {
         self.1.clone()
+    }
+
+}
+
+impl<T> Located<Option<T>> {
+    pub fn transpose_option(self) -> Option<Located<T>> {
+        let Located(value, range) = self;
+        value.map(|v| Located(v, range))
+    }
+}
+
+impl<T, E> Located<Result<T, E>> {
+    pub fn transpose_result(self) -> Result<Located<T>, E> {
+        let Located(value, range) = self;
+        value.map(|v| Located(v, range))
     }
 }
 
@@ -548,23 +553,27 @@ pub struct DeclUnit(pub String, pub MutType);
 #[derive(Debug, PartialEq)]
 pub enum Pat<T> {
     /// An indivisible unit. This can be directly assigned to.
+    // This should be used as LocatedPat<T>, in which case, the unit has a provided range.
     Unit(T),
 
     /// Spread (possibly with a pattern to assign to).
     /// 
     /// This collects the remainder of the current pattern 
     /// and assigns it to its parameter (if present).
-    Spread(Option<Box<Self>>),
+    Spread(Option<LocatedBox<Self>>),
 
     /// A list of patterns.
     /// 
     /// The values of the RHS are aligned by index.
-    List(Vec<Self>)
+    List(Vec<Located<Self>>)
 }
+
+/// A pattern with a known location.
+pub type LocatedPat<T> = Located<Pat<T>>;
 /// An assignment [pattern][`Pat`] (used for [assignments][`Expr::Assign`]).
-pub type AsgPat = Pat<AsgUnit>;
+pub type AsgPat = LocatedPat<AsgUnit>;
 /// A declaration [pattern][`Pat`] (used for [declarations][`Decl`]).
-pub type DeclPat = Pat<DeclUnit>;
+pub type DeclPat = LocatedPat<DeclUnit>;
 
 /// An error with converting an expression to a pattern.
 #[derive(Debug, PartialEq, Eq)]
@@ -575,57 +584,82 @@ pub enum PatErr {
     /// More than one spread appeared.
     CannotSpreadMultiple,
 }
+type FullPatErr = FullGonErr<PatErr>;
 
-impl TryFrom<Expr> for AsgUnit {
-    type Error = PatErr;
-    
-    fn try_from(value: Expr) -> Result<Self, Self::Error> {
-        match value {
-            Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
-            Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
-            Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
-            _ => Err(PatErr::InvalidAssignTarget)
+impl GonErr for PatErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            PatErr::InvalidAssignTarget => String::from("invalid assign target"),
+            PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
         }
     }
 }
 
-// TODO: replace with Located variant ?
-impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
-    type Error = PatErr;
+impl TryFrom<Located<Expr>> for Located<AsgUnit> {
+    type Error = FullPatErr;
+    
+    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
+        let Located(expr, range) = value;
+        match expr {
+            Expr::Ident(ident) => Ok(Located(AsgUnit::Ident(ident), range)),
+            Expr::Path(attrs)  => Ok(Located(AsgUnit::Path(attrs), range)),
+            Expr::Index(idx)   => Ok(Located(AsgUnit::Index(idx), range)),
+            _ => Err(PatErr::InvalidAssignTarget.at_range(range))
+        }
+    }
+}
+
+impl<T> TryFrom<Located<Expr>> for LocatedPat<T> 
+    where Located<T>: TryFrom<Located<Expr>, Error = FullPatErr>
+{
+    type Error = FullPatErr;
 
     /// Patterns can be created if the unit type of the pattern can 
     /// fallibly be parsed from an expression.
-    fn try_from(value: Expr) -> Result<Self, Self::Error> {
-        match value {
+    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
+        #[inline]
+        fn ok_located<T, E>(t: T, range: CursorRange) -> Result<Located<T>, E> {
+            Ok(Located::new(t, range))
+        }
+
+        let Located(expr, range) = value;
+
+        match expr {
             Expr::Spread(me) => match me {
                 Some(e) => {
-                    let inner = Some(Box::new(Self::try_from(**e)?));
+                    let pat = Self::try_from(*e)?;
+                    let inner = Some(Box::new(pat));
                     
-                    Ok(Self::Spread(inner))
+                    ok_located(Pat::Spread(inner), range)
                 },
-                None => Ok(Self::Spread(None)),
+                None => ok_located(Pat::Spread(None), range),
             }
             Expr::ListLiteral(lst) => {
-                let vec: Vec<_> = lst.into_iter()
-                    .map(|e| *e)
-                    .map(TryInto::try_into)
+                let vec: Vec<Self> = lst.into_iter()
+                    .map(TryFrom::try_from)
                     .collect::<Result<_, _>>()?;
 
                 // check spread count is <2
                 let mut it = vec.iter()
-                    .filter(|pat| matches!(pat, Self::Spread(_)));
+                    .filter(|pat| matches!(&***pat, Pat::Spread(_)));
                 
                 it.next(); // skip 
+
                 if it.next().is_some() {
-                    Err(PatErr::CannotSpreadMultiple)
+                    Err(PatErr::CannotSpreadMultiple.at_range(range))
                 } else {
-                    Ok(Self::List(vec))
+                    ok_located(Pat::List(vec), range)
                 }
             }
             e => {
-                let unit = T::try_from(e)?;
-                
-                Ok(Self::Unit(unit))
+                let value = Located::new(e, range);
+                let Located(unit, range) = Located::<T>::try_from(value)?;
+
+                ok_located(Pat::Unit(unit), range)
             }
         }
     }

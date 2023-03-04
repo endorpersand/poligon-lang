@@ -127,10 +127,7 @@ impl GonErr for ParseErr {
             ParseErr::ExpectedPattern    => String::from("expected pattern"),
             ParseErr::ExpectedEntry      => String::from("expected entry"),
             ParseErr::ExpectedParam      => String::from("expected param"),
-            ParseErr::AsgPatErr(e) => match e {
-                PatErr::InvalidAssignTarget => String::from("invalid assign target"),
-                PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
-            },
+            ParseErr::AsgPatErr(e)       => e.message(),
         }
     }
 }
@@ -675,6 +672,7 @@ impl Parser {
     /// This is used by [`Parser::expect_decl`].
     pub fn match_decl_pat(&mut self) -> ParseResult<Option<ast::DeclPat>> {
         if let Some(t) = self.peek_token() {
+            self.push_loc_block();
             let pat = match t {
                 token!["["] => {
                     self.expect1(token!["["])?;
@@ -684,13 +682,13 @@ impl Parser {
                         ParseErr::ExpectedPattern
                     )?;
 
-                    ast::DeclPat::List(tpl)
+                    Located::new(ast::Pat::List(tpl), self.pop_loc_block().unwrap())
                 },
                 token![..] => {
                     self.expect1(token![..])?;
                     let item = self.match_decl_pat()?.map(Box::new);
 
-                    ast::DeclPat::Spread(item)
+                    Located::new(ast::Pat::Spread(item), self.pop_loc_block().unwrap())
                 }
                 token![mut] | Token::Ident(_) => {
                     let mt = if self.match1(token![mut]) {
@@ -700,9 +698,12 @@ impl Parser {
                     };
 
                     let node = ast::DeclUnit(self.expect_ident()?, mt);
-                    ast::DeclPat::Unit(node)
+                    Located::new(ast::Pat::Unit(node), self.pop_loc_block().unwrap())
                 },
-                _ => return Ok(None)
+                _ => {
+                    self.pop_loc_block();
+                    return Ok(None);
+                }
             };
 
             Ok(Some(pat))
@@ -1001,13 +1002,8 @@ impl Parser {
             // if there was an equal sign, this expression must've been a pattern:
             let pat_expr = last
                 .ok_or_else(|| ParseErr::ExpectedPattern.at_range(eq_pos.clone()))?;
-            let pat = match ast::AsgPat::try_from(*pat_expr) {
-                Ok(p) => p,
-                Err(e) => {
-                    Err(ParseErr::AsgPatErr(e)
-                        .at_range(merge_ranges(pat_pos, eq_pos)))?
-                },
-            };
+            let pat = ast::AsgPat::try_from(pat_expr)
+                .map_err(|e| e.map(ParseErr::AsgPatErr))?;
             
             pats.push(pat);
 
@@ -1551,6 +1547,20 @@ mod tests {
         }
     }
 
+    macro_rules! asg_unit {
+        ($id:literal) => {
+            AsgUnit::Ident(String::from($id))
+        }
+
+    }
+    macro_rules! decl_unit {
+        (mut $id:literal) => {
+            DeclUnit(String::from($id), MutType::Mut)
+        };
+        ($id:literal) => {
+            DeclUnit(String::from($id), MutType::Immut)
+        }
+    }
     /// Unwrap the result (or print error if not possible).
     fn unwrap_fe<T>(result: Result<T, FullGonErr<impl GonErr>>, input: &str) -> T {
         match result {
@@ -1723,7 +1733,7 @@ mod tests {
         ", program![
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit(String::from("i"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("i")), (0, 4) ..= (0, 4)), 
                 ty: None, 
                 val: literal!(Int(0), (0, 8) ..= (0, 8))
             }),
@@ -1738,7 +1748,7 @@ mod tests {
                         params: vec![ident!("i", (2, 10) ..= (2, 10))]
                     }, (2, 4) ..= (2, 11))),
                     Stmt::Expr(Located::new(Expr::Assign(
-                        AsgPat::Unit(AsgUnit::Ident(String::from("i"))), 
+                        Located::new(Pat::Unit(asg_unit!("i")), (3, 4) ..= (3, 4)), 
                         Box::new(binop! {
                             Add, (3, 8) ..= (3,12),
                             ident!("i", (3, 8) ..= (3, 8)),
@@ -1798,19 +1808,19 @@ mod tests {
         ", program![
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("a")), (0, 4) ..= (0, 4)), 
                 ty: None, 
                 val: literal!(Int(0), (0, 8) ..= (0, 8))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit(String::from("b"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("b")), (0, 4) ..= (0, 4)), 
                 ty: None, 
                 val: literal!(Int(1), (1, 8) ..= (1, 8))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: DeclPat::Unit(DeclUnit(String::from("c"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("c")), (0, 4) ..= (0, 4)), 
                 ty: None, 
                 val: literal!(Int(2), (2, 8) ..= (2, 8))
             }),
@@ -1820,7 +1830,7 @@ mod tests {
                     Block(vec![
                         Stmt::Decl(Decl { 
                             rt: ReasgType::Let, 
-                            pat: DeclPat::Unit(DeclUnit(String::from("d"), MutType::Immut)), 
+                            pat: Located::new(Pat::Unit(decl_unit!("d")), (0, 4) ..= (0, 4)), 
                             ty: None, 
                             val: literal!(Int(3), (4, 12) ..= (4, 12))
                         })
@@ -1925,25 +1935,25 @@ mod tests {
         ", program![
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: Pat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("a")), (0, 4) ..= (0, 4)), 
                 ty: None, 
                 val: literal!(Int(0), (0, 14) ..= (0, 14))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
-                pat: Pat::Unit(DeclUnit(String::from("a"), MutType::Mut)), 
+                pat: Located::new(Pat::Unit(decl_unit!(mut "b")), (0, 4) ..= (0, 8)), 
                 ty: None, 
                 val: literal!(Int(1), (1, 14) ..= (1, 14))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Const, 
-                pat: Pat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
+                pat: Located::new(Pat::Unit(decl_unit!("c")), (0, 6) ..= (0, 6)), 
                 ty: None, 
                 val: literal!(Int(2), (2, 14) ..= (2, 14))
             }),
             Stmt::Decl(Decl { 
                 rt: ReasgType::Const, 
-                pat: Pat::Unit(DeclUnit(String::from("a"), MutType::Mut)), 
+                pat: Located::new(Pat::Unit(decl_unit!(mut "d")), (0, 6) ..= (0, 10)), 
                 ty: None, 
                 val: literal!(Int(3), (3, 14) ..= (3, 14))
             })

@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use super::semantic::{ResolveState, ResolveErr};
-use crate::ast;
+use crate::ast::{self, Located};
 
 use crate::ast::op;
 use crate::err::{GonErr, FullGonErr, CursorRange};
@@ -221,7 +221,7 @@ impl Default for RtContext<'_> {
     }
 }
 
-impl ast::Located<ast::Expr> {
+impl Located<ast::Expr> {
     /// Evaluate an expression and then apply the unary operator for it.
     pub fn apply_unary(&self, o: op::Unary, ctx: &mut RtContext) -> RtTraversal<Value> {
         let e = self.traverse_rt(ctx)?;
@@ -556,9 +556,9 @@ pub trait TraverseRt {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value>;
 }
 
-impl TraverseRt for ast::Located<ast::Expr> {
+impl TraverseRt for Located<ast::Expr> {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
-        let ast::Located(expr, range) = self;
+        let Located(expr, range) = self;
         let range = range.clone();
 
         match expr {
@@ -898,9 +898,9 @@ impl TraverseRt for ast::Stmt {
     }
 }
 
-impl TraverseRt for ast::Located<ast::Stmt> {
+impl TraverseRt for Located<ast::Stmt> {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
-        let ast::Located(stmt, range) = self;
+        let Located(stmt, range) = self;
         let range = range.clone();
 
         match stmt {
@@ -975,32 +975,32 @@ impl TraverseRt for ast::FunDecl {
 /// Given a pattern and a value, traverse the pattern
 /// and apply the mapper function to the individual units.
 fn unpack_pat<T>(
-    pat: &ast::Located<ast::Pat<T>>, 
+    pat: &Located<ast::Pat<T>>, 
     rhs: Value, 
-    mut unit_mapper: impl FnMut(&T, Value) -> RtResult<Value>,
+    mut unit_mapper: impl FnMut(Located<&T>, Value) -> RtResult<Value>,
 ) -> RtResult<Value> {
     return unpack_mut(pat, rhs, &mut unit_mapper);
 
     /// Unpack with a mutable reference to a closure.
     /// This is necessary because the mutable reference is passed several times.
-    fn unpack_mut<T, F>(pat: &ast::Located<ast::Pat<T>>, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
-        where F: FnMut(&T, Value) -> RtResult<Value>
+    fn unpack_mut<T, F>(pat: &Located<ast::Pat<T>>, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
+        where F: FnMut(Located<&T>, Value) -> RtResult<Value>
     {
-        let ast::Located(pat, pat_range) = pat;
+        let Located(pat, pat_range) = pat;
         let pat_range = pat_range.clone();
         match pat {
-            ast::Pat::Unit(unit) => unit_mapper(unit, rhs),
+            ast::Pat::Unit(unit) => unit_mapper(Located::new(unit, pat_range), rhs),
             ast::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
                     .ok_or_else(|| TypeErr::NotUnpackable(rhs.ty()).at_range(pat_range))?;
 
-                let has_spread = pats.iter().any(|p| matches!(p, ast::Pat::Spread(_)));
+                let has_spread = pats.iter().any(|p| matches!(&**p, ast::Pat::Spread(_)));
                 let mut left_values = vec![];
                 let mut right_values = vec![];
                 let mut consumed = 0;
 
                 for (i, p) in pats.iter().enumerate() {
-                    if matches!(p, ast::Pat::Spread(_)) {
+                    if matches!(&**p, ast::Pat::Spread(_)) {
                         consumed = i;
                         break;
                     } else if let Some(t) = it.next() {
@@ -1019,7 +1019,7 @@ fn unpack_pat<T>(
                 if has_spread {
                     // do the reverse pass:
                     for (i, p) in std::iter::zip(consumed.., pats.iter().rev()) {
-                        if matches!(p, ast::Pat::Spread(_)) {
+                        if matches!(&**p, ast::Pat::Spread(_)) {
                             break;
                         } else if let Some(t) = it.next_back() {
                             right_values.push(t);
@@ -1055,25 +1055,33 @@ fn unpack_pat<T>(
     }
 }
 
-fn assign_pat(pat: &ast::Located<ast::AsgPat>, rhs: Value, ctx: &mut RtContext, from: &ast::Expr) -> RtResult<Value> {
-    unpack_pat(pat, rhs, |unit, rhs| match unit {
-        ast::AsgUnit::Ident(ident) => {
-            ctx.set_var(ident, rhs, from)
-        },
-        ast::AsgUnit::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
-        ast::AsgUnit::Index(idx) => {
-            let ast::Index {expr, index} = idx;
-            
-            let mut val = expr.traverse_rt(ctx).map_err(TermOp::flatten)?;
-            let index_val = index.traverse_rt(ctx).map_err(TermOp::flatten)?;
-    
-            val.set_index(index_val, rhs)
-        },
+fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut RtContext, from: &ast::Expr) -> RtResult<Value> {
+    unpack_pat(pat, rhs, |value, rhs| {
+        let Located(unit, range) = value;
+        match unit {
+            ast::AsgUnit::Ident(ident) => {
+                ctx.set_var(ident, rhs, from)
+                    .map_err(|e| e.at_range(range))
+            },
+            ast::AsgUnit::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
+            ast::AsgUnit::Index(idx) => {
+                let ast::Index {expr, index} = idx;
+                
+                let mut val = expr.traverse_rt(ctx).map_err(TermOp::flatten)?;
+                let index_val = index.traverse_rt(ctx).map_err(TermOp::flatten)?;
+        
+                val.set_index(index_val, rhs)
+                    .map_err(|e| e.at_range(range))
+            },
+        }
     })
 }
 
-fn declare_pat(pat: &ast::Located<ast::DeclPat>, rhs: Value, ctx: &mut RtContext, rt: ast::ReasgType) -> RtResult<Value> {
-    unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| {
-        ctx.vars.declare_full(String::from(ident), rhs, rt, *mt).cloned()
+fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut RtContext, rt: ast::ReasgType) -> RtResult<Value> {
+    unpack_pat(pat, rhs, |Located(ast::DeclUnit(ident, mt), range), rhs| {
+        match ctx.vars.declare_full(String::from(ident), rhs, rt, *mt) {
+            Ok(t) => Ok(t.clone()),
+            Err(e) => Err(e.at_range(range)),
+        }
     })
 }

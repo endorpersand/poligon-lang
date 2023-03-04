@@ -276,11 +276,14 @@ impl<E: GonErr> FullGonErr<E> {
         lines.join("\n")
     }
 
-    pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
+    pub fn map<F: GonErr>(self, f: impl FnOnce(E) -> F) -> FullGonErr<F> {
         FullGonErr {
-            err: F::from(self.err),
-            position: self.position,
+            err: f(self.err),
+            position: self.position
         }
+    }
+    pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
+        self.map(F::from)
     }
 }
 
