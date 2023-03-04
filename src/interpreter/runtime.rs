@@ -210,7 +210,7 @@ impl<'ctx> RtContext<'ctx> {
 
     /// Set the variable specified by the identifier parameter,
     /// with the static resolution for the given expression.
-    pub fn set_var(&mut self, ident: &str, v: Value, e: &ast::Expr) -> RtResult<Value> {
+    pub fn set_var(&mut self, ident: &str, v: Value, e: &ast::Expr) -> BasicRtResult<Value> {
         self.vars.set_indexed(ident, v, self.rs.get_steps(e))
     }
 }
@@ -221,15 +221,13 @@ impl Default for RtContext<'_> {
     }
 }
 
-macro_rules! cast {
-    ($e:expr) => { Ok($e?) }
-}
-
 impl ast::Located<ast::Expr> {
     /// Evaluate an expression and then apply the unary operator for it.
     pub fn apply_unary(&self, o: op::Unary, ctx: &mut RtContext) -> RtTraversal<Value> {
-        self.traverse_rt(ctx)
-            .and_then(|v| cast! { v.apply_unary(o) })
+        let e = self.traverse_rt(ctx)?;
+        e.apply_unary(o)
+            .map_err(|e| e.at_range(self.range()))
+            .map_err(Into::into)
     }
 
     /// Evaluate the two arguments to the binary operator and then apply the operator to it.
@@ -248,8 +246,14 @@ impl ast::Located<ast::Expr> {
             },
     
             // fallback to eager value binary
-            _ => self.traverse_rt(ctx)
-                .and_then(|v| cast! { v.apply_binary(o, right.traverse_rt(ctx)?, self.range()) } )
+            _ => {
+                let left = self.traverse_rt(ctx)?;
+                let right = right.traverse_rt(ctx)?;
+
+                left.apply_binary(o, right)
+                    .map_err(|e| e.at_range(self.range()))
+                    .map_err(Into::into)
+            }
         }
     }
 }
@@ -743,19 +747,19 @@ impl TraverseRt for ast::Located<ast::Expr> {
                                     "contains" => {
                                         let var = ctx.get_var("in", e).cloned();
                                         if let Some(Value::Fun(f)) = var {
-                                            return f.call_computed(call_params, ctx)
+                                            return f.call_computed(call_params, ctx, funct.range())
                                         }
                                     },
                                     "push" => {
                                         let var = ctx.get_var("@@push", e).cloned();
                                         if let Some(Value::Fun(f)) = var {
-                                            return f.call_computed(call_params, ctx)
+                                            return f.call_computed(call_params, ctx, funct.range())
                                         }
                                     },
                                     "pop" => {
                                         let var = ctx.get_var("@@pop", e).cloned();
                                         if let Some(Value::Fun(f)) = var {
-                                            return f.call_computed(call_params, ctx)
+                                            return f.call_computed(call_params, ctx, funct.range())
                                         }
                                     },
                                     _ => {}
@@ -766,7 +770,7 @@ impl TraverseRt for ast::Located<ast::Expr> {
                         Err(FeatureErr::Incomplete("general attribute functionality").at_range(funct.range()))?
                     },
                     _ => match funct.traverse_rt(ctx)? {
-                        Value::Fun(f) => f.call(params, ctx),
+                        Value::Fun(f) => f.call(params, ctx, funct.range()),
                         val => Err(TypeErr::CannotCall(val.ty()).at_range(funct.range()))?
                     }
                 }
@@ -776,7 +780,9 @@ impl TraverseRt for ast::Located<ast::Expr> {
                 let val = expr.traverse_rt(ctx)?;
                 let index_val = index.traverse_rt(ctx)?;
 
-                val.get_index(index_val).map_err(TermOp::Err)
+                val.get_index(index_val)
+                    .map_err(|e| e.at_range(range))
+                    .map_err(TermOp::Err)
             },
             ast::Expr::Spread(_) => Err(ResolveErr::CannotSpread.at_range(range))?,
         }
