@@ -223,17 +223,17 @@ impl Default for RtContext<'_> {
 
 impl Located<ast::Expr> {
     /// Evaluate an expression and then apply the unary operator for it.
-    pub fn apply_unary(&self, o: op::Unary, ctx: &mut RtContext) -> RtTraversal<Value> {
+    pub fn apply_unary(&self, o: op::Unary, ctx: &mut RtContext, range: CursorRange) -> RtTraversal<Value> {
         let e = self.traverse_rt(ctx)?;
         e.apply_unary(o)
-            .map_err(|e| e.at_range(self.range()))
+            .map_err(|e| e.at_range(range))
             .map_err(Into::into)
     }
 
     /// Evaluate the two arguments to the binary operator and then apply the operator to it.
     /// 
     /// If the operator is `&&` or `||`, the evaluation can be short-circuited.
-    pub fn apply_binary(&self, o: op::Binary, right: &Self, ctx: &mut RtContext) -> RtTraversal<Value> {
+    pub fn apply_binary(&self, o: op::Binary, right: &Self, ctx: &mut RtContext, range: CursorRange) -> RtTraversal<Value> {
         match o {
             // &&, || have special short circuiting that needs to be dealt with
             op::Binary::LogAnd => {
@@ -251,7 +251,7 @@ impl Located<ast::Expr> {
                 let right = right.traverse_rt(ctx)?;
 
                 left.apply_binary(o, right)
-                    .map_err(|e| e.at_range(self.range()))
+                    .map_err(|e| e.at_range(range))
                     .map_err(Into::into)
             }
         }
@@ -611,7 +611,7 @@ impl TraverseRt for Located<ast::Expr> {
         
                 // ops should always have at least 1 unary op, so this should always be true
                 let mut e = if let Some(&op) = ops_iter.next() {
-                    expr.apply_unary(op, ctx)
+                    expr.apply_unary(op, ctx, range)
                 } else {
                     // should never happen, but in case it does
                     expr.traverse_rt(ctx)
@@ -624,7 +624,7 @@ impl TraverseRt for Located<ast::Expr> {
 
                 Ok(e)
             },
-            ast::Expr::BinaryOp { op, left, right } => left.apply_binary(*op, right, ctx),
+            ast::Expr::BinaryOp { op, left, right } => left.apply_binary(*op, right, ctx, range),
             ast::Expr::Comparison { left, rights } => {
                 let mut lval = left.traverse_rt(ctx)?;
                 // for cmp a < b < c < d < e,
@@ -633,7 +633,11 @@ impl TraverseRt for Located<ast::Expr> {
                 for (cmp, rexpr) in rights {
                     let rval = rexpr.traverse_rt(ctx)?;
 
-                    if lval.apply_cmp(*cmp, &rval)? {
+                    let cmp_result = match lval.apply_cmp(*cmp, &rval) {
+                        Ok(t) => t,
+                        Err(e) => return Err(e.at_range(range).into()),
+                    };
+                    if cmp_result {
                         lval = rval;
                     } else {
                         return Ok(Value::Bool(false));

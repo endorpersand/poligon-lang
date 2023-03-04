@@ -106,12 +106,12 @@ impl Interpreter {
     /// let interpreter = Interpreter::from_string("print(0);");
     /// 
     /// assert_eq!(interpreter.parse().unwrap(), Program(vec![
-    ///     Stmt::Expr(Expr::Call {
-    ///         funct: Box::new(Expr::Ident(String::from("print"))),
+    ///     Stmt::Expr(Located::new(Expr::Call {
+    ///         funct: Box::new(Located::new(Expr::Ident(String::from("print")), (0, 0) ..= (0, 4))),
     ///         params: vec![
-    ///             Expr::Literal(Literal::Int(0))
+    ///             Located::new(Expr::Literal(Literal::Int(0)), (0, 6) ..= (0, 6))
     ///         ]
-    ///     })
+    ///     }, (0, 0) ..= (0, 7)))
     /// ]));
     /// ```
     pub fn parse(&self) -> InterpretResult<ast::Program> {
