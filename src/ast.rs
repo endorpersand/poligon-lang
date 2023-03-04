@@ -55,10 +55,33 @@ impl<T> Located<T> {
         Self(t, loc)
     }
 
+    /// Create a new boxed located node.
+    pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
+        Located(Box::new(t), loc)
+    }
+
     /// Map a Located with a given type to a Located of another type.
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
         let Located(node, loc) = self;
         Located(f(node), loc)
+    }
+
+    pub fn option_box(opt: Option<Self>) -> Option<LocatedBox<T>> {
+        opt.map(|t| t.map(Box::new))
+    }
+
+    pub fn transpose_option(opt: Located<Option<T>>) -> Option<Self> {
+        let Located(value, range) = opt;
+        value.map(|v| Located(v, range))
+    }
+
+    pub fn transpose_result<E>(opt: Located<Result<T, E>>) -> Result<Self, E> {
+        let Located(value, range) = opt;
+        value.map(|v| Located(v, range))
+    }
+
+    pub fn range(&self) -> CursorRange {
+        self.1.clone()
     }
 }
 
@@ -117,7 +140,7 @@ pub enum Stmt {
     /// return; // no expr
     /// return 2; // with expr
     /// ```
-    Return(Option<Expr>),
+    Return(Option<Located<Expr>>),
     
     /// `break`
     Break,
@@ -141,7 +164,7 @@ pub enum Stmt {
     ExternFunDecl(FunSignature),
 
     /// An expression.
-    Expr(Expr),
+    Expr(Located<Expr>),
 
     /// A struct declaration.
     ClassDecl(Class)
@@ -153,10 +176,10 @@ impl Stmt {
         matches!(self, 
             | Stmt::FunDecl(_)
             | Stmt::ClassDecl(_)
-            | Stmt::Expr(Expr::Block(_))
-            | Stmt::Expr(Expr::If { .. })
-            | Stmt::Expr(Expr::While { .. })
-            | Stmt::Expr(Expr::For { .. })
+            | Stmt::Expr(Located(Expr::Block(_), _))
+            | Stmt::Expr(Located(Expr::If { .. }, _))
+            | Stmt::Expr(Located(Expr::While { .. }, _))
+            | Stmt::Expr(Located(Expr::For { .. }, _))
         )
     }
 }
@@ -194,7 +217,7 @@ pub struct Decl {
     pub ty: Option<Type>,
 
     /// The value to declare the variable to
-    pub val: Expr
+    pub val: Located<Expr>
 }
 
 /// A function parameter.
@@ -313,16 +336,16 @@ pub enum Expr {
     Literal(Literal),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
-    ListLiteral(Vec<Expr>),
+    ListLiteral(Vec<Located<Expr>>),
 
     /// A set literal (e.g. `set {1, 2, 3, 4}`).
-    SetLiteral(Vec<Expr>),
+    SetLiteral(Vec<Located<Expr>>),
     
     /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
-    DictLiteral(Vec<(Expr, Expr)>),
+    DictLiteral(Vec<(Located<Expr>, Located<Expr>)>),
 
     /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral(Type, Vec<(String, Expr)>),
+    ClassLiteral(Type, Vec<(String, Located<Expr>)>),
     
     /// An assignment operation.
     /// 
@@ -332,7 +355,7 @@ pub enum Expr {
     /// b[0] = 3;
     /// [a, b, c] = [1, 2, 3];
     /// ```
-    Assign(AsgPat, Box<Expr>),
+    Assign(AsgPat, LocatedBox<Expr>),
 
     /// A path.
     /// 
@@ -349,7 +372,7 @@ pub enum Expr {
         /// (i.e. they are applied to the expression from right to left).
         ops: Vec<op::Unary>,
         /// Expression to apply the unary operations to.
-        expr: Box<Expr>
+        expr: LocatedBox<Expr>
     },
 
     /// A binary operation (e.g. `a + b`).
@@ -357,9 +380,9 @@ pub enum Expr {
         /// Operator to apply.
         op: op::Binary,
         /// The left expression.
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// The right expression.
-        right: Box<Expr>
+        right: LocatedBox<Expr>
     },
 
     /// A comparison operation (e.g. `a < b < c < d`).
@@ -368,25 +391,25 @@ pub enum Expr {
     /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
     Comparison {
         /// The left expression
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// A list of comparison operators and a right expressions to apply.
-        rights: Vec<(op::Cmp, Expr)>
+        rights: Vec<(op::Cmp, Located<Expr>)>
     },
 
     /// A range (e.g. `1..10` or `1..10 step 1`).
     Range {
         /// The left expression
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// The right expression
-        right: Box<Expr>,
+        right: LocatedBox<Expr>,
         /// The expression for the step if it exists
-        step: Option<Box<Expr>>
+        step: Option<LocatedBox<Expr>>
     },
 
     /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
     If {
         /// The condition and block connected to each `if` of the chain
-        conditionals: Vec<(Expr, Block)>,
+        conditionals: Vec<(Located<Expr>, Block)>,
         /// The final bare `else` block (if it exists)
         last: Option<Block>
     },
@@ -394,7 +417,7 @@ pub enum Expr {
     /// A `while` loop.
     While {
         /// The condition to check before each iteration.
-        condition: Box<Expr>,
+        condition: LocatedBox<Expr>,
         /// The block to run in each iteration.
         block: Block
     },
@@ -404,7 +427,7 @@ pub enum Expr {
         /// Variable to bind elements of the iterator to.
         ident: String,
         /// The iterator.
-        iterator: Box<Expr>,
+        iterator: LocatedBox<Expr>,
         /// The block to run in each iteration.
         block: Block
     },
@@ -412,16 +435,16 @@ pub enum Expr {
     /// A function call.
     Call {
         /// The function to call.
-        funct: Box<Expr>,
+        funct: LocatedBox<Expr>,
         /// The parameters to the function call.
-        params: Vec<Expr>
+        params: Vec<Located<Expr>>
     },
     /// An index operation.
     /// 
     /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
-    Spread(Option<Box<Expr>>)
+    Spread(Option<LocatedBox<Expr>>)
 }
 
 /// A primitive literal.
@@ -472,7 +495,7 @@ impl Literal {
 #[derive(Debug, PartialEq)]
 pub struct Path {
     /// The expression to access an attribute of
-    pub obj: Box<Expr>,
+    pub obj: LocatedBox<Expr>,
 
     /// The chain of attributes
     pub attrs: Vec<String>
@@ -493,9 +516,9 @@ pub struct Path {
 #[derive(Debug, PartialEq)]
 pub struct Index {
     /// The expression to index
-    pub expr: Box<Expr>,
+    pub expr: LocatedBox<Expr>,
     /// The index
-    pub index: Box<Expr>
+    pub index: LocatedBox<Expr>
 }
 
 /// A unit to assign to.
@@ -566,6 +589,7 @@ impl TryFrom<Expr> for AsgUnit {
     }
 }
 
+// TODO: replace with Located variant ?
 impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
     type Error = PatErr;
 
@@ -575,7 +599,7 @@ impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
         match value {
             Expr::Spread(me) => match me {
                 Some(e) => {
-                    let inner = Some(Box::new(Self::try_from(*e)?));
+                    let inner = Some(Box::new(Self::try_from(**e)?));
                     
                     Ok(Self::Spread(inner))
                 },
@@ -583,6 +607,7 @@ impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
             }
             Expr::ListLiteral(lst) => {
                 let vec: Vec<_> = lst.into_iter()
+                    .map(|e| *e)
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()?;
 

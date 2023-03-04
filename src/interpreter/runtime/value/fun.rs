@@ -54,7 +54,8 @@ impl GonFun {
     /// 
     /// In specification, this would only compute the expressions needed for the function.
     /// In implementation, this computes all the expressions before inserting them to the function.
-    pub fn call(&self, params: &[ast::Expr], ctx: &mut RtContext) -> RtTraversal<Value> {
+    pub fn call(&self, params: &[ast::Located<ast::Expr>], ctx: &mut RtContext) -> RtTraversal<Value> {
+        // ^ HACK!, remove Located
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {

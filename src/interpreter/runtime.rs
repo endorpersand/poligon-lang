@@ -11,6 +11,7 @@ use super::semantic::{ResolveState, ResolveErr};
 use crate::ast;
 
 use crate::ast::op;
+use crate::err::GonErr;
 use self::value::*;
 use self::vars::VarContext;
 
@@ -552,13 +553,14 @@ impl TraverseRt for ast::Expr {
                 let mut vec = vec![];
                 
                 for e in exprs.iter() {
-                    match e {
+                    match &**e {
                         ast::Expr::Spread(inner) => {
                             let inner = inner.as_ref()
-                                .ok_or(ResolveErr::CannotSpreadNone)?
-                                .traverse_rt(ctx)?;
-                            let it = inner.as_iterator()
-                                .ok_or_else(|| TypeErr::NotIterable(inner.ty()))?;
+                                .ok_or_else(|| ResolveErr::CannotSpreadNone.at_range(e.range()))?;
+
+                            let inner_val = inner.traverse_rt(ctx)?;
+                            let it = inner_val.as_iterator()
+                                .ok_or_else(|| TypeErr::NotIterable(inner_val.ty()).at_range(inner.range()))?;
 
                             vec.extend(it);
                         },
@@ -703,7 +705,7 @@ impl TraverseRt for ast::Expr {
                 Ok(Value::new_list(result))
             },
             ast::Expr::Call { funct, params } => {
-                match &**funct {
+                match &***funct {
                     // HACK: generalize methods
                     e @ ast::Expr::Path(ast::Path { obj, attrs }) => {
                         if let this @ Value::List(_) = obj.traverse_rt(ctx)? {
@@ -741,9 +743,9 @@ impl TraverseRt for ast::Expr {
                         
                         Err(FeatureErr::Incomplete("general attribute functionality"))?
                     },
-                    funct => match funct.traverse_rt(ctx)? {
+                    f => match f.traverse_rt(ctx)? {
                         Value::Fun(f) => f.call(params, ctx),
-                        val => Err(TypeErr::CannotCall(val.ty()))?
+                        val => Err(TypeErr::CannotCall(val.ty()).at_range(funct.range()))?
                     }
                 }
             }
