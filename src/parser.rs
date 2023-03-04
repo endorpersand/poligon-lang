@@ -671,44 +671,44 @@ impl Parser {
     /// 
     /// This is used by [`Parser::expect_decl`].
     pub fn match_decl_pat(&mut self) -> ParseResult<Option<ast::DeclPat>> {
-        if let Some(t) = self.peek_token() {
-            let pat = match t {
-                token!["["] => {
-                    self.push_loc_block();
-                    self.expect1(token!["["])?;
-                    let tpl = self.expect_closing_tuple_of(
-                        Parser::match_decl_pat, 
-                        token!["]"], 
-                        ParseErr::ExpectedPattern
-                    )?;
+        let Some(peek) = self.peek_token() else {
+            return Ok(None)
+        };
 
-                    Located::new(ast::Pat::List(tpl), self.pop_loc_block().unwrap())
-                },
-                token![..] => {
-                    self.push_loc_block();
-                    self.expect1(token![..])?;
-                    let item = self.match_decl_pat()?.map(Box::new);
+        let pat = match peek {
+            token!["["] => {
+                self.push_loc_block();
+                self.expect1(token!["["])?;
+                let tpl = self.expect_closing_tuple_of(
+                    Parser::match_decl_pat, 
+                    token!["]"], 
+                    ParseErr::ExpectedPattern
+                )?;
 
-                    Located::new(ast::Pat::Spread(item), self.pop_loc_block().unwrap())
-                }
-                token![mut] | Token::Ident(_) => {
-                    self.push_loc_block();
-                    let mt = if self.match1(token![mut]) {
-                        ast::MutType::Mut
-                    } else {
-                        ast::MutType::Immut
-                    };
+                Located::new(ast::Pat::List(tpl), self.pop_loc_block().unwrap())
+            },
+            token![..] => {
+                self.push_loc_block();
+                self.expect1(token![..])?;
+                let item = self.match_decl_pat()?.map(Box::new);
 
-                    let node = ast::DeclUnit(self.expect_ident()?, mt);
-                    Located::new(ast::Pat::Unit(node), self.pop_loc_block().unwrap())
-                },
-                _ => return Ok(None)
-            };
+                Located::new(ast::Pat::Spread(item), self.pop_loc_block().unwrap())
+            }
+            token![mut] | Token::Ident(_) => {
+                self.push_loc_block();
+                let mt = if self.match1(token![mut]) {
+                    ast::MutType::Mut
+                } else {
+                    ast::MutType::Immut
+                };
 
-            Ok(Some(pat))
-        } else {
-            Ok(None)
-        }
+                let node = ast::DeclUnit(self.expect_ident()?, mt);
+                Located::new(ast::Pat::Unit(node), self.pop_loc_block().unwrap())
+            },
+            _ => return Ok(None)
+        };
+
+        Ok(Some(pat))
     }
 
     /// Match the next token to a reassignment type if it represents one.
