@@ -854,7 +854,7 @@ impl TraverseRt for ast::Literal {
     }
 }
 
-impl TraverseRt for Vec<ast::Stmt> {
+impl TraverseRt for Vec<Located<ast::Stmt>> {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
         match self.split_last() {
             Some((tail, head)) => {
@@ -875,30 +875,6 @@ impl TraverseRt for ast::Program {
 impl TraverseRt for ast::Block {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
         self.0.traverse_rt(ctx)
-    }
-}
-
-impl TraverseRt for ast::Stmt {
-    fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
-        // todo!("remove all instances of ast::Stmt for Located<ast::Stmt>")
-        match self {
-            ast::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
-            ast::Stmt::Return(mt) => {
-                let expr = mt.as_ref()
-                    .map_or(
-                        Ok(Value::Unit), 
-                        |t| t.traverse_rt(ctx)
-                    )?;
-                
-                Err(TermOp::Return(expr))
-            },
-            ast::Stmt::Break     => Err(TermOp::Break),
-            ast::Stmt::Continue  => Err(TermOp::Continue),
-            ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
-            ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations").at_unknown())?,
-            ast::Stmt::Expr(e) => e.traverse_rt(ctx),
-            ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes").at_unknown())?,
-        }
     }
 }
 

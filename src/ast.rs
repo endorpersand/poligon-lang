@@ -110,7 +110,7 @@ impl<T, E> Located<Result<T, E>> {
 ///  }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Vec<Stmt>);
+pub struct Program(pub Vec<Located<Stmt>>);
 
 /// An enclosed scope with a list of statements.
 /// 
@@ -128,7 +128,7 @@ pub struct Program(pub Vec<Stmt>);
 /// }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Block(pub Vec<Stmt>);
+pub struct Block(pub Vec<Located<Stmt>>);
 
 /// A statement.
 #[derive(Debug, PartialEq)]

@@ -9,6 +9,11 @@ impl StmtLike for Stmt {
         self.ends_with_block()
     }
 }
+impl StmtLike for Located<Stmt> {
+    fn ends_with_block(&self) -> bool {
+        (**self).ends_with_block()
+    }
+}
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

@@ -658,14 +658,14 @@ impl CodeGenerator {
 
     /// Convert a program into PLIR, and attach it to the CodeGenerator.
     pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
-        self.consume_stmts(prog.0)
+        self.consume_stmts(prog.0.into_iter().map(|stmt| stmt.0))
     }
 
     /// Consume an iterator of statements into the current insert block.
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, stmts: Vec<ast::Stmt>) -> PLIRResult<()> {
+    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=ast::Stmt>) -> PLIRResult<()> {
         let mut eager_stmts = vec![];
         for stmt in stmts {
             match stmt {
@@ -852,7 +852,7 @@ impl CodeGenerator {
     ) -> PLIRResult<plir::Block> {
         self.push_block();
         // collect all the statements from this block
-        self.consume_stmts(block.0)?;
+        self.consume_stmts(block.0.into_iter().map(|stmt| stmt.0))?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype, expected_ty)
     }
@@ -992,7 +992,7 @@ impl CodeGenerator {
             }
     
             // collect all the statements from this block
-            self.consume_stmts(old_block.0)?;
+            self.consume_stmts(old_block.0.into_iter().map(|stmt| stmt.0))?;
     
             let insert_block = self.pop_block().unwrap();
             self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?

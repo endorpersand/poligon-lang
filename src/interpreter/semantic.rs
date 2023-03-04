@@ -10,6 +10,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use ast::Located;
+
 use crate::err::{GonErr, FullGonErr};
 use crate::ast;
 
@@ -264,26 +266,29 @@ impl TraverseResolve for ast::Block {
     }
 }
 
-impl TraverseResolve for ast::Stmt {
+impl TraverseResolve for Located<ast::Stmt> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        match self {
+        let Located(stmt, range) = self;
+        let range = range.clone();
+
+        match stmt {
             ast::Stmt::Decl(d)   => d.traverse_rs(map),
             ast::Stmt::Return(e) => match map.block_type() {
                 BlockType::Function => e.traverse_rs(map),
-                _ => Err(ResolveErr::CannotReturn)?
+                _ => Err(ResolveErr::CannotReturn.at_range(range))?
             },
             ast::Stmt::Break => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotBreak)?
+                _ => Err(ResolveErr::CannotBreak.at_range(range))?
             },
             ast::Stmt::Continue => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotContinue)?
+                _ => Err(ResolveErr::CannotContinue.at_range(range))?
             },
             ast::Stmt::FunDecl(f) => f.traverse_rs(map),
-            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations"))?,
+            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e)   => e.traverse_rs(map),
-            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes"))?,
+            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes").at_range(range))?,
         }
     }
 }
@@ -522,9 +527,9 @@ mod tests {
             }
         ").parse().unwrap();
 
-        let Stmt::Expr(Located(Expr::Block(block), _)) = &program.0[0] else { unreachable!() };
-        let Stmt::Expr(Located(Expr::Block(block), _)) = &block.0[1] else { unreachable!() };
-        let Stmt::Expr(e) = &block.0[0] else { unreachable!() };
+        let Located(Stmt::Expr(Located(Expr::Block(block), _)), _) = &program.0[0] else { unreachable!() };
+        let Located(Stmt::Expr(Located(Expr::Block(block), _)), _) = &block.0[1] else { unreachable!() };
+        let Located(Stmt::Expr(e), _) = &block.0[0] else { unreachable!() };
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;

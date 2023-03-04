@@ -573,7 +573,7 @@ impl Parser {
     }
     
     /// Expect that the next tokens in the input represent a list of statements.
-    pub fn expect_stmts(&mut self) -> ParseResult<Vec<ast::Stmt>> {
+    pub fn expect_stmts(&mut self) -> ParseResult<Vec<Located<ast::Stmt>>> {
         let mut stmts = vec![];
         /*
             SAMPLE:
@@ -598,21 +598,30 @@ impl Parser {
             // - semicolon may be omitted at the end of a block
             // - therefore, an omitted semicolon indicates the end of the block
 
+            self.push_loc_block("expect_stmts");
             if let Some(st) = self.match_stmt()? {
-                let ends_with_block = st.ends_with_block();
-                stmts.push(st);
-
-                if ends_with_block {
+                if st.ends_with_block() {
+                    // for block-terminating statements, semi isn't needed
                     // drop the semi if it exists, but don't do anything with it
                     self.match1(token![;]);
                 } else if self.repl_mode {
-                    // in REPL mode, semicolon does not need to appear at the end of a line
-                    if !self.match1(token![;]) { break; }
+                    // in REPL mode, semicolon does not need to appear at the end of
+                    // the last statement of a block
+
+                    if !self.match1(token![;]) {
+                        let stmt = Located::new(st, self.pop_loc_block("expect_stmts").unwrap());
+                        stmts.push(stmt);
+                        break;
+                    }
                 } else {
                     // outside of REPL mode, semicolon does need to appear.
                     self.expect1(token![;])?;
-                }
+                };
+                
+                let stmt = Located::new(st, self.pop_loc_block("expect_stmts").unwrap());
+                stmts.push(stmt);
             } else if !self.match1(token![;]) {
+                self.pop_loc_block("expect_stmts");
                 break; 
             }
         }
@@ -629,6 +638,8 @@ impl Parser {
     }
 
     /// Expect that the next tokens in the input represent a statement.
+    /// 
+    /// This does not include the statement's ending semicolon.
     pub fn match_stmt(&mut self) -> ParseResult<Option<ast::Stmt>> {
         let st = match self.peek_token() {
             Some(token![let] | token![const]) => Some(self.expect_decl()?).map(ast::Stmt::Decl),
@@ -1525,7 +1536,26 @@ mod tests {
             Block(vec![$($e),*])
         }
     }
+    macro_rules! block_expr {
+        ($($e:expr),*) => {
+            Expr::Block(Block(vec![$($e),*]))
+        }
+    }
     
+    macro_rules! expr_stmt {
+        ($e:expr, $loc:expr) => {
+            Located::new(Stmt::Expr(Located::new($e, $loc)), $loc)
+        }
+    }
+    fn add_one(cr: CursorRange) -> CursorRange {
+        let (el, ec) = cr.end().clone();
+        cr.start().clone() ..= (el, ec + 1)
+    }
+    macro_rules! expr_stmt_with_semi {
+        ($e:expr, $loc:expr) => {
+            Located::new(Stmt::Expr(Located::new($e, $loc)), add_one($loc))
+        }
+    }
     macro_rules! binop {
         ($op:ident, $eloc:expr, $left:expr, $right:expr) => {
             Located::new(Expr::BinaryOp {
@@ -1596,15 +1626,15 @@ mod tests {
     #[test]
     fn bin_op_test() {
         assert_parse("2 + 3;", program![
-            Stmt::Expr(binop! {
+            Located::new(Stmt::Expr(binop! {
                 Add, (0, 0) ..= (0, 4),
                 literal!(Int(2), (0, 0) ..= (0, 0)),
                 literal!(Int(3), (0, 4) ..= (0, 4))
-            })
+            }), (0, 0) ..= (0, 5))
         ]);
 
         assert_parse("2 + 3 * 4;", program![
-            Stmt::Expr(binop! {
+            Located::new(Stmt::Expr(binop! {
                 Add, (0, 0) ..= (0, 8),
                 literal!(Int(2), (0, 0) ..= (0, 0)),
                 binop! {
@@ -1612,22 +1642,20 @@ mod tests {
                     literal!(Int(3), (0, 4) ..= (0, 4)),
                     literal!(Int(4), (0, 8) ..= (0, 8))
                 }
-            })
+            }), (0, 0) ..= (0, 9))
         ]);
     }
 
     #[test]
     fn block_test() {
         assert_parse("{}", program![
-            Stmt::Expr(Located::new(Expr::Block(block![]), (0, 0)..=(0, 1)))
+            expr_stmt!(block_expr![], (0, 0)..=(0, 1))
         ]);
 
         assert_parse("{{}}", program![
-            Stmt::Expr(Located::new(Expr::Block(block![
-                Stmt::Expr(
-                    Located::new(Expr::Block(block![]), (0, 1) ..= (0, 2))
-                )
-            ]), (0, 0)..=(0, 3)))
+            expr_stmt!(block_expr![
+                expr_stmt!(block_expr![], (0, 1) ..= (0, 2))
+            ], (0, 0)..=(0, 3))
         ])
     }
 
@@ -1639,12 +1667,12 @@ mod tests {
                 // :)
             }
         ", program![
-            Stmt::Expr(Located::new(Expr::If {
+            expr_stmt!(Expr::If {
                 conditionals: vec![
                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![])
                 ],
                 last: None
-            }, (1, 12)..=(3, 12)))
+            }, (1, 12)..=(3, 12))
         ]);
 
         assert_parse("
@@ -1654,12 +1682,12 @@ mod tests {
                 // :(
             }
         ", program![
-            Stmt::Expr(Located::new(Expr::If { 
+            expr_stmt!(Expr::If { 
                 conditionals: vec![
                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![])
                 ],
                 last: Some(block![])
-            }, (1, 12) ..= (5, 12)))
+            }, (1, 12) ..= (5, 12))
         ]);
 
         assert_parse("
@@ -1671,13 +1699,13 @@ mod tests {
                 // :(
             }
         ", program![
-            Stmt::Expr(Located::new(Expr::If { 
+            expr_stmt!(Expr::If { 
                 conditionals: vec![
                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![]),
                     (ident!("condition", (3, 22) ..= (3, 30)), block![])
                 ],
                 last: Some(block![])
-            }, (1, 12) ..= (7, 12)))
+            }, (1, 12) ..= (7, 12))
         ]);
 
         assert_parse("
@@ -1695,7 +1723,7 @@ mod tests {
                 // :(
             }
         ", program![
-            Stmt::Expr(Located::new(Expr::If { 
+            expr_stmt!(Expr::If { 
                 conditionals: vec![
                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![]),
                     (ident!("condition", (3, 22) ..= (3, 30)), block![]),
@@ -1704,7 +1732,7 @@ mod tests {
                     (ident!("condition", (9, 22) ..= (9, 30)), block![]),
                 ],
                 last: Some(block![])
-            }, (1, 12) ..= (13, 12)))
+            }, (1, 12) ..= (13, 12))
         ]);
     }
 
@@ -1714,17 +1742,17 @@ mod tests {
     fn loop_test() {
         // barebones
         assert_parse("while true {}", program![
-            Stmt::Expr(Located::new(Expr::While {
+            expr_stmt!(Expr::While {
                 condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
                 block: block![]
-            }, (0, 0) ..= (0, 12)))
+            }, (0, 0) ..= (0, 12))
         ]);
         assert_parse("for i in it {}", program![
-            Stmt::Expr(Located::new(Expr::For {
+            expr_stmt!(Expr::For {
                 ident: String::from("i"),
                 iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
                 block: block![]
-            }, (0, 0) ..= (0, 13)))
+            }, (0, 0) ..= (0, 13))
         ]);
 
         // full examples
@@ -1735,36 +1763,36 @@ mod tests {
                 i = i + 1;
             }
         ", program![
-            Stmt::Decl(Decl { 
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!("i")), (1, 16) ..= (1, 16)), 
                 ty: None, 
                 val: literal!(Int(0), (1, 20) ..= (1, 20))
-            }),
-            Stmt::Expr(Located::new(Expr::While {
+            }), (1, 12) ..= (1, 21)),
+            expr_stmt!(Expr::While {
                 condition: Located::boxed(Expr::Comparison {
                     left: Box::new(ident!("i", (2, 18) ..= (2, 18))), 
                     rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))]
                 }, (2, 18) ..= (2, 23)), 
                 block: Block(vec![
-                    Stmt::Expr(Located::new(Expr::Call {
+                    expr_stmt_with_semi!(Expr::Call {
                         funct: Box::new(ident!("print", (3, 16) ..= (3, 20))),
                         params: vec![ident!("i", (3, 22) ..= (3, 22))]
-                    }, (3, 16) ..= (3, 23))),
-                    Stmt::Expr(Located::new(Expr::Assign(
+                    }, (3, 16) ..= (3, 23)),
+                    expr_stmt_with_semi!(Expr::Assign(
                         Located::new(Pat::Unit(asg_unit!("i")), (4, 16) ..= (4, 16)), 
                         Box::new(binop! {
                             Add, (4, 20) ..= (4, 24),
                             ident!("i", (4, 20) ..= (4, 20)),
                             literal!(Int(1), (4, 24) ..= (4, 24))
                         })
-                    ), (4, 16) ..= (4, 24)))
+                    ), (4, 16) ..= (4, 24)),
                 ])
-            }, (2, 12) ..= (5, 12)))
+            }, (2, 12) ..= (5, 12))
         ]);
 
         assert_parse("for i in 1..10 { print(i); }", program![
-            Stmt::Expr(Located(Expr::For {
+            expr_stmt!(Expr::For {
                 ident: String::from("i"), 
                 iterator: Located::boxed(Expr::Range {
                     left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
@@ -1772,12 +1800,12 @@ mod tests {
                     step: None 
                 }, (0, 9) ..= (0, 13)), 
                 block: Block(vec![
-                    Stmt::Expr(Located::new(Expr::Call {
+                    expr_stmt_with_semi!(Expr::Call {
                         funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
                         params: vec![ident!("i", (0, 23) ..= (0, 23))]
-                    }, (0, 17) ..= (0, 24)))
+                    }, (0, 17) ..= (0, 24))
                 ])
-            }, (0, 0) ..= (0, 27)))
+            }, (0, 0) ..= (0, 27))
         ]);
     }
 
@@ -1786,20 +1814,20 @@ mod tests {
         assert_parse_fail("2 2", expected_tokens![;]);
 
         assert_parse("if cond {}", program![
-            Stmt::Expr(Located::new(Expr::If {
+            expr_stmt!(Expr::If {
                 conditionals: vec![
                     (ident!("cond", (0, 3) ..= (0, 6)), block![])
                 ],
                 last: None
-            }, (0, 0) ..= (0, 9)))
+            }, (0, 0) ..= (0, 9))
         ]);
         assert_parse("if cond {};", program![
-            Stmt::Expr(Located::new(Expr::If {
+            expr_stmt_with_semi!(Expr::If {
                 conditionals: vec![
                     (ident!("cond", (0, 3) ..= (0, 6)), block![])
                 ],
                 last: None
-            }, (0, 0) ..= (0, 9)))
+            }, (0, 0) ..= (0, 9))
         ]);
 
         assert_parse("
@@ -1810,38 +1838,38 @@ mod tests {
                 let d = 5;
             }
         ", program![
-            Stmt::Decl(Decl { 
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
                 ty: None, 
                 val: literal!(Int(1), (1, 20) ..= (1, 20))
-            }),
-            Stmt::Decl(Decl { 
+            }), (1, 12) ..= (1, 21)),
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!("b")), (2, 16) ..= (2, 16)), 
                 ty: None, 
                 val: literal!(Int(2), (2, 20) ..= (2, 20))
-            }),
-            Stmt::Decl(Decl { 
+            }), (2, 12) ..= (2, 21)),
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 16) ..= (3, 16)), 
                 ty: None, 
                 val: literal!(Int(3), (3, 20) ..= (3, 20))
-            }),
-            Stmt::Expr(Located::new(Expr::If {
+            }), (3, 12) ..= (3, 21)),
+            expr_stmt!(Expr::If {
                 conditionals: vec![(
                     ident!("cond", (4, 15) ..= (4, 18)),
                     Block(vec![
-                        Stmt::Decl(Decl { 
+                        Located::new(Stmt::Decl(Decl { 
                             rt: ReasgType::Let, 
                             pat: Located::new(Pat::Unit(decl_unit!("d")), (5, 20) ..= (5, 20)), 
                             ty: None, 
                             val: literal!(Int(5), (5, 24) ..= (5, 24))
-                        })
+                        }), (5, 16) ..= (5, 25))
                     ])
                 )],
                 last: None
-            }, (4, 12) ..= (6, 12)))
+            }, (4, 12) ..= (6, 12))
         ])
     }
 
@@ -1885,28 +1913,28 @@ mod tests {
     #[test]
     fn unary_ops_test() {
         assert_parse("+3;", program![
-            Stmt::Expr(Located::new(Expr::UnaryOps {
+            expr_stmt_with_semi!(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()],
                 expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1)))
-            }, (0, 0) ..= (0, 1)))
+            }, (0, 0) ..= (0, 1))
         ]);
 
         assert_parse("+++++++3;", program![
-            Stmt::Expr(Located::new(Expr::UnaryOps {
+            expr_stmt_with_semi!(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(7),
                 expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7)))
-            }, (0, 0) ..= (0, 7)))
+            }, (0, 0) ..= (0, 7))
         ]);
 
         assert_parse("+-+-+-+-3;", program![
-            Stmt::Expr(Located::new(Expr::UnaryOps {
+            expr_stmt_with_semi!(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
                 expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8)))
-            }, (0, 0) ..= (0, 8)))
+            }, (0, 0) ..= (0, 8))
         ]);
 
         assert_parse("!+-+-+-+-3;", program![
-            Stmt::Expr(Located::new(Expr::UnaryOps {
+            expr_stmt_with_semi!(Expr::UnaryOps {
                 ops: vec![
                     token![!].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
@@ -1918,14 +1946,14 @@ mod tests {
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap()],
                 expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9)))
-            }, (0, 0) ..= (0, 9)))
+            }, (0, 0) ..= (0, 9))
         ]);
 
         assert_parse("+(+2);", program![
-            Stmt::Expr(Located::new(Expr::UnaryOps {
+            expr_stmt_with_semi!(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(2),
                 expr: Box::new(literal!(Int(2), (0, 3) ..= (0, 3)))
-            }, (0, 0) ..= (0, 4)))
+            }, (0, 0) ..= (0, 4))
         ])
     }
 
@@ -1937,30 +1965,30 @@ mod tests {
             const c     = 2;
             const mut d = 3;
         ", program![
-            Stmt::Decl(Decl { 
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
                 ty: None, 
                 val: literal!(Int(0), (1, 26) ..= (1, 26))
-            }),
-            Stmt::Decl(Decl { 
+            }), (1, 12) ..= (1, 27)),
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Let, 
                 pat: Located::new(Pat::Unit(decl_unit!(mut "b")), (2, 16) ..= (2, 20)), 
                 ty: None, 
                 val: literal!(Int(1), (2, 26) ..= (2, 26))
-            }),
-            Stmt::Decl(Decl { 
+            }), (2, 12) ..= (2, 27)),
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Const, 
                 pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 18) ..= (3, 18)), 
                 ty: None, 
                 val: literal!(Int(2), (3, 26) ..= (3, 26))
-            }),
-            Stmt::Decl(Decl { 
+            }), (3, 12) ..= (3, 27)),
+            Located::new(Stmt::Decl(Decl { 
                 rt: ReasgType::Const, 
                 pat: Located::new(Pat::Unit(decl_unit!(mut "d")), (4, 18) ..= (4, 22)), 
                 ty: None, 
                 val: literal!(Int(3), (4, 26) ..= (4, 26))
-            })
+            }), (4, 12) ..= (4, 27))
         ])
     }
 }
