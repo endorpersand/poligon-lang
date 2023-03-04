@@ -12,6 +12,7 @@
 use lazy_static::lazy_static;
 
 use std::collections::VecDeque;
+use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use crate::GonErr;
@@ -195,11 +196,21 @@ macro_rules! expected_tokens {
 
 /// Combine two ranges, such that the new range at least spans over the two provided ranges.
 /// `l` should be left of `r`.
-fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T>) -> std::ops::RangeInclusive<T> {
+fn merge_ranges<T>(l: RangeInclusive<T>, r: RangeInclusive<T>) -> RangeInclusive<T> {
     let (start, _) = l.into_inner();
     let (_, end) = r.into_inner();
     
     start ..= end
+}
+
+/// Combine two ranges, such that `l` spans over the two provided ranges.
+fn merge_ranges_in_place<T: Clone>(mr1: &mut Option<RangeInclusive<T>>, r2: RangeInclusive<T>) {
+    let new_range = match mr1.as_ref() {
+        Some(r1) => merge_ranges(r1.clone(), r2),
+        None => r2
+    };
+
+    mr1.replace(new_range);
 }
 
 impl Iterator for Parser {
@@ -209,14 +220,7 @@ impl Iterator for Parser {
         let ft = self.tokens.pop_front()?;
 
         if let Some(range) = self.tree_locs.last_mut() {
-            let r2 = ft.loc.clone();
-
-            let new_range = match range.as_ref() {
-                Some(r1) => merge_ranges(r1.clone(), r2),
-                None => r2
-            };
-
-            range.replace(new_range);
+            merge_ranges_in_place(range, ft.loc.clone());
         }
 
         Some(ft)
@@ -427,13 +431,19 @@ impl Parser {
     /// Remove a cursor-tracking block from the parser.
     /// 
     /// This function expects that a given loc block will have at least 1 token,
-    /// otherwise it will panic.
+    /// otherwise it will return None.
     /// When this function is called, the top block's range is added to the range of 
     /// the block under it.
-    pub fn pop_loc_block(&mut self) -> CursorRange {
-        self.tree_locs.pop()
-            .expect("pop_loc_block called without a push")
-            .expect("loc block has no tokens")
+    pub fn pop_loc_block(&mut self) -> Option<CursorRange> {
+        let r2 = self.tree_locs.pop()
+            .expect("pop_loc_block called without a push")?;
+
+        // If r2 contained a range, then we need to merge r1 with the contained range.
+        if let Some(mr1) = self.tree_locs.last_mut() {
+            merge_ranges_in_place(mr1, r2.clone())
+        }
+
+        Some(r2)
     }
 
     /// Expect that the next tokens in input represent values of type `T` separated by commas 
