@@ -40,6 +40,11 @@ impl<T> std::ops::Deref for Located<T> {
         &self.0
     }
 }
+impl<T> std::ops::DerefMut for Located<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 pub(crate) type LocatedBox<T> = Box<Located<T>>;
 
@@ -66,10 +71,7 @@ impl<T> Located<T> {
         Located(f(node), loc)
     }
 
-    pub fn option_box(opt: Option<Self>) -> Option<LocatedBox<T>> {
-        opt.map(Box::new)
-    }
-
+    /// Gets this located node's range.
     pub fn range(&self) -> CursorRange {
         self.1.clone()
     }
@@ -77,6 +79,7 @@ impl<T> Located<T> {
 }
 
 impl<T> Located<Option<T>> {
+    /// Transpose a located Option into an Option of a located node.
     pub fn transpose_option(self) -> Option<Located<T>> {
         let Located(value, range) = self;
         value.map(|v| Located(v, range))
@@ -84,6 +87,7 @@ impl<T> Located<Option<T>> {
 }
 
 impl<T, E> Located<Result<T, E>> {
+    /// Transpose a located Result into a Result of a located node.
     pub fn transpose_result(self) -> Result<Located<T>, E> {
         let Located(value, range) = self;
         value.map(|v| Located(v, range))

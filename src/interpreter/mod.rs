@@ -16,7 +16,7 @@
 use std::{io, fs};
 use std::path::Path;
 
-use crate::{lexer, parser, FullGonErr, ast};
+use crate::{lexer, parser, ast};
 use runtime::value::Value;
 use runtime::{RtContext, TraverseRt};
 pub use repl::Repl;
@@ -136,7 +136,7 @@ impl Interpreter {
         
         let mut ctx = RtContext::new();
         parsed.run_with_ctx(&mut ctx)
-            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+            .map_err(|err| err.full_msg(&self.source))
     }
 
     /// Execute the source string.
@@ -173,6 +173,6 @@ impl Interpreter {
         
         let mut ctx = RtContext::new_with_io(hook);
         parsed.run_with_ctx(&mut ctx)
-            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+            .map_err(|err| err.full_msg(&self.source))
     }
 }

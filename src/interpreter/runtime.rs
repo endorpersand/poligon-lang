@@ -992,7 +992,7 @@ fn unpack_pat<T>(
             ast::Pat::Unit(unit) => unit_mapper(Located::new(unit, pat_range), rhs),
             ast::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
-                    .ok_or_else(|| TypeErr::NotUnpackable(rhs.ty()).at_range(pat_range))?;
+                    .ok_or_else(|| TypeErr::NotUnpackable(rhs.ty()).at_range(pat_range.clone()))?;
 
                 let has_spread = pats.iter().any(|p| matches!(&**p, ast::Pat::Spread(_)));
                 let mut left_values = vec![];
@@ -1007,12 +1007,12 @@ fn unpack_pat<T>(
                         left_values.push(t);
                     } else {
                         // we ran out of elements:
-
-                        if has_spread {
-                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range))
+                        let err = if has_spread {
+                            ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range)
                         } else {
-                            Err(ValueErr::UnpackTooLittle(pats.len(), i).at_range(pat_range))
-                        }?
+                            ValueErr::UnpackTooLittle(pats.len(), i).at_range(pat_range)
+                        };
+                        return Err(err.into());
                     };
                 }
 
@@ -1025,7 +1025,8 @@ fn unpack_pat<T>(
                             right_values.push(t);
                         } else {
                             // we ran out of elements:
-                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range))?
+                            let err = ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range);
+                            return Err(err.into());
                         };
                     }
                 } else {

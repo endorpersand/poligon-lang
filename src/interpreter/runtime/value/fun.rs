@@ -60,7 +60,8 @@ impl GonFun {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {
-                Err(ValueErr::WrongArity(arity).at_range(range))?;
+                let err = ValueErr::WrongArity(arity).at_range(range);
+                return Err(err.into());
             }
         }
 
@@ -77,7 +78,8 @@ impl GonFun {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if pvals.len() != arity {
-                Err(ValueErr::WrongArity(arity).at_range(range))?;
+                let err = ValueErr::WrongArity(arity).at_range(range);
+                return Err(err.into());
             }
         }
 

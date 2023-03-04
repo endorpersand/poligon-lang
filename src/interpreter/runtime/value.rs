@@ -295,8 +295,7 @@ impl Value {
 
                 match mi {
                     Some(i) => {
-                        let mut lst_ref = lst.try_borrow_mut()
-                            .map_err(|e| e)?;
+                        let mut lst_ref = lst.try_borrow_mut()?;
                         
                         lst_ref[i] = nv;
                         lst_ref.get(i).map(Value::clone)

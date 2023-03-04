@@ -672,9 +672,9 @@ impl Parser {
     /// This is used by [`Parser::expect_decl`].
     pub fn match_decl_pat(&mut self) -> ParseResult<Option<ast::DeclPat>> {
         if let Some(t) = self.peek_token() {
-            self.push_loc_block();
             let pat = match t {
                 token!["["] => {
+                    self.push_loc_block();
                     self.expect1(token!["["])?;
                     let tpl = self.expect_closing_tuple_of(
                         Parser::match_decl_pat, 
@@ -685,12 +685,14 @@ impl Parser {
                     Located::new(ast::Pat::List(tpl), self.pop_loc_block().unwrap())
                 },
                 token![..] => {
+                    self.push_loc_block();
                     self.expect1(token![..])?;
                     let item = self.match_decl_pat()?.map(Box::new);
 
                     Located::new(ast::Pat::Spread(item), self.pop_loc_block().unwrap())
                 }
                 token![mut] | Token::Ident(_) => {
+                    self.push_loc_block();
                     let mt = if self.match1(token![mut]) {
                         ast::MutType::Mut
                     } else {
@@ -700,10 +702,7 @@ impl Parser {
                     let node = ast::DeclUnit(self.expect_ident()?, mt);
                     Located::new(ast::Pat::Unit(node), self.pop_loc_block().unwrap())
                 },
-                _ => {
-                    self.pop_loc_block();
-                    return Ok(None);
-                }
+                _ => return Ok(None)
             };
 
             Ok(Some(pat))
@@ -991,7 +990,6 @@ impl Parser {
     pub fn match_asg(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         // a = b = c = d = e = [expr]
         let mut pats = vec![];
-        let mut pat_pos = self.peek_loc();
         
         self.push_loc_block();
         let mut last = self.match_lor()?;
@@ -1008,7 +1006,6 @@ impl Parser {
             pats.push(pat);
 
             self.push_loc_block();
-            pat_pos = self.peek_loc();
             last = self.match_lor()?;
             eq_pos = self.peek_loc();
         }
@@ -1120,7 +1117,7 @@ impl Parser {
         self.push_loc_block();
         if self.match1(token![..]) {
             let me = self.match_range()?;
-            let inner = Located::option_box(me);
+            let inner = me.map(Box::new);
 
             let spread_expr = ast::Expr::Spread(inner);
             let e = Located::new(spread_expr, self.pop_loc_block().unwrap());
@@ -1152,8 +1149,8 @@ impl Parser {
 
                 let range_expr = ast::Expr::Range {
                     left: Box::new(e),
-                    right: Box::new(e),
-                    step: Located::option_box(step)
+                    right: Box::new(right),
+                    step: step.map(Box::new)
                 };
                 e = Located::new(range_expr, self.pop_loc_block().unwrap());
             } else {
@@ -1332,36 +1329,37 @@ impl Parser {
     /// Match the next tokens in input if they represent any expression 
     /// with a higher precedence with a path.
     pub fn match_unit(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
-        if let Some(t) = self.peek_token() {
-            self.push_loc_block();
+        self.push_loc_block();
 
-            let unit = match t {
-                Token::Ident(_) => self.expect_ii()?,
-                Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
-                token!["["]       => self.expect_list()?,
-                token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
-                token![if]        => self.expect_if()?,
-                token![while]     => self.expect_while()?,
-                token![for]       => self.expect_for()?,
-                token!["("] => {
-                    self.expect1(token!["("])?;
-                    let e = self.expect_expr()?;
-                    self.expect1(token![")"])?;
-            
-                    // We can drop the inner expr in favor of the outer one,
-                    // it doesn't really matter.
-                    *e
-                },
-                _ => {
-                    self.pop_loc_block();
-                    return Ok(None);
-                }
-            };
+        let Some(peek) = self.peek_token() else {
+            self.pop_loc_block();
+            return Ok(None);
+        };
 
-            Ok(Some(Located::new(unit, self.pop_loc_block().unwrap())))
-        } else {
-            Ok(None)
-        }
+        let unit = match peek {
+            Token::Ident(_) => self.expect_ii()?,
+            Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
+            token!["["]       => self.expect_list()?,
+            token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
+            token![if]        => self.expect_if()?,
+            token![while]     => self.expect_while()?,
+            token![for]       => self.expect_for()?,
+            token!["("] => {
+                self.expect1(token!["("])?;
+                let e = self.expect_expr()?;
+                self.expect1(token![")"])?;
+        
+                // We can drop the inner expr in favor of the outer one,
+                // it doesn't really matter.
+                e.0
+            },
+            _ => {
+                self.pop_loc_block();
+                return Ok(None);
+            }
+        };
+
+        Ok(Some(Located::new(unit, self.pop_loc_block().unwrap())))
     }
 
     /// Expect that the next tokens in input represent some primitive literal (int, str, char, etc.).
