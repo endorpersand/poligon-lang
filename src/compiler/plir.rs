@@ -15,6 +15,7 @@ mod types;
 use std::borrow::Cow;
 
 use crate::ast::{op, self};
+pub use crate::ast::Located;
 pub use types::*;
 pub(crate) use types::ty;
 

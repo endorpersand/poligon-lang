@@ -13,11 +13,54 @@
 
 use std::rc::Rc;
 
+use crate::err::CursorRange;
+
 pub use self::types::*;
 
 pub mod op;
 mod display;
 mod types;
+
+/// AST node with a known location.
+#[derive(PartialEq, Eq)]
+pub struct Located<T>(pub T, pub CursorRange);
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Located(node, loc) = self;
+
+        write!(f, "[{:?} ..= {:?}]", loc.start(), loc.end())?;
+        write!(f, "{node:?}")
+    }
+}
+impl<T> std::ops::Deref for Located<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub(crate) type LocatedBox<T> = Located<Box<T>>;
+
+impl<T: PartialEq> PartialEq<T> for Located<T> {
+    fn eq(&self, other: &T) -> bool {
+        &self.0 == other
+    }
+}
+
+impl<T> Located<T> {
+    /// Create a new located node.
+    pub fn new(t: T, loc: CursorRange) -> Self {
+        Self(t, loc)
+    }
+
+    /// Map a Located with a given type to a Located of another type.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
+        let Located(node, loc) = self;
+        Located(f(node), loc)
+    }
+}
 
 /// A complete program.
 /// 

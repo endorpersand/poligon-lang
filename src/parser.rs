@@ -63,7 +63,8 @@ pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Prog
 pub struct Parser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
-    eof: (usize, usize)
+    eof: (usize, usize),
+    tree_locs: Vec<Option<CursorRange>>
 }
 
 /// An error that occurs in the parsing process.
@@ -240,7 +241,7 @@ impl Parser {
             (0, 0)
         };
 
-        Self { tokens, repl_mode, eof }
+        Self { tokens, repl_mode, eof, tree_locs: vec![] }
     }
 
     /// Consumes the parser and converts the tokens into an [`ast::Program`].
@@ -390,6 +391,27 @@ impl Parser {
             )
     }
 
+    /// Add a cursor-tracking block to the parser.
+    /// 
+    /// While this block is on top, any statements used to remove tokens
+    /// are added to this block's cursor range.
+    /// 
+    /// To remove the block and obtain the cursor range, use [`Parser::pop_loc_block`].
+    pub fn push_loc_block(&mut self) {
+        self.tree_locs.push(None);
+    }
+
+    /// Remove a cursor-tracking block from the parser.
+    /// 
+    /// This function expects that a given loc block will have at least 1 token,
+    /// otherwise it will panic.
+    /// When this function is called, the top block's range is added to the range of 
+    /// the block under it.
+    pub fn pop_loc_block(&mut self) -> CursorRange {
+        self.tree_locs.pop()
+            .expect("pop_loc_block called without a push")
+            .expect("loc block has no tokens")
+    }
 
     /// Expect that the next tokens in input represent values of type `T` separated by commas 
     /// (and optionally a terminating comma). If successful, this function returns the
