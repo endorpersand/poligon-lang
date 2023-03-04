@@ -68,14 +68,10 @@ pub struct FullGonErr<E: GonErr> {
     position: ErrPos
 }
 
-/**
- * Indicates a specific character in given code.
- */
+/// Indicates a specific character in given code.
 pub type Cursor = (usize /* line */, usize /* character */);
 
-/**
- * Indicates a contiguous range of characters in given code.
- */
+/// Indicates a contiguous range of characters in given code.
 pub type CursorRange = RangeInclusive<Cursor>;
 
 #[derive(PartialEq, Eq, Debug)]

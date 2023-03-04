@@ -468,13 +468,6 @@ mod tests {
 
     use super::ResolveResult;
 
-
-    macro_rules! program {
-        ($($e:expr),*) => {
-            Program(vec![$($e),*])
-        }
-    }
-
     macro_rules! map {
         () => {
             HashMap::new()
@@ -488,15 +481,10 @@ mod tests {
         };
     }
 
-    fn ident(s: &str) -> Expr {
-        Expr::Ident(String::from(s))
-    }
-
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
-        let program = program![
-            Stmt::Expr(ident("a"))
-        ];
+        let program = Interpreter::from_string("a;")
+            .parse().unwrap();
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
@@ -507,47 +495,36 @@ mod tests {
 
     #[test]
     fn declare_in_scope() -> ResolveResult<()> {
-        let program = program![
-            Stmt::Decl(Decl {
-                rt: ReasgType::Const, 
-                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
-                ty: None, 
-                val: Expr::Literal(Literal::Int(0)),
-            }),
-            Stmt::Expr(ident("a"))
-        ];
+        let program = Interpreter::from_string("
+            const a = 0;
+            a;
+        ").parse().unwrap();
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = program![
-            Stmt::Decl(Decl {
-                rt: ReasgType::Const, 
-                pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
-                ty: None, 
-                val: Expr::Literal(Literal::Int(0)),
-            }),
-            Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
-        ];
+        let program = Interpreter::from_string("
+            const a = 0;
+            {
+                a;
+            }
+        ").parse().unwrap();
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
 
         assert_eq!(&state.steps, &map!{});
 
-        let program = program![
-            Stmt::Expr(Expr::Block(Block(vec![
-                Stmt::Decl(Decl {
-                    rt: ReasgType::Const, 
-                    pat: DeclPat::Unit(DeclUnit(String::from("a"), MutType::Immut)), 
-                    ty: None, 
-                    val: Expr::Literal(Literal::Int(0)),
-                }),
-                Stmt::Expr(Expr::Block(Block(vec![Stmt::Expr(ident("a"))])))
-            ])))
-        ];
+        let program = Interpreter::from_string("
+            {
+                const a = 0;
+                {
+                    a;
+                }
+            }
+        ").parse().unwrap();
 
         let Stmt::Expr(Expr::Block(block)) = &program.0[0] else { unreachable!() };
         let Stmt::Expr(Expr::Block(block)) = &block.0[1] else { unreachable!() };

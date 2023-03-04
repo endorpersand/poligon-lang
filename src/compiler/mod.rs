@@ -117,10 +117,9 @@ impl<'ctx> From<VoidType<'ctx>> for ReturnableType<'ctx> {
     }
 }
 
-/**
- * Pointers to indicate where each exit statement type should send program flow.
- * Used in [`Compiler::write_block`].
- */
+
+/// Pointers to indicate where each exit statement type should send program flow.
+/// Used in [`Compiler::write_block`].
 #[derive(Default, Clone, Copy)]
 pub struct ExitPointers<'ctx> {
     exit: Option<BasicBlock<'ctx>>,
@@ -128,20 +127,16 @@ pub struct ExitPointers<'ctx> {
     cont: Option<BasicBlock<'ctx>>
 }
 impl<'ctx> ExitPointers<'ctx> {
-    /**
-     * Indicates this block is a bare (or conditional) block.
-     * The only valid statements out of this block are through `exit`, which
-     * should exit to the specified block.
-     */
+    /// Indicates this block is a bare (or conditional) block.
+    /// The only valid statements out of this block are through `exit`, which
+    /// should exit to the specified block.
     pub fn bare(exit: BasicBlock<'ctx>) -> Self {
         Self { exit: Some(exit), brk: None, cont: None }
     }
 
-    /**
-     * Indicates this block is a loop block.
-     * The specified blocks indicate where a `continue` or `break` statement 
-     * should exit out of.
-     */
+    /// Indicates this block is a loop block.
+    /// The specified blocks indicate where a `continue` or `break` statement 
+    /// should exit out of.
     pub fn loopy(cont: BasicBlock<'ctx>, brk: BasicBlock<'ctx>) -> Self {
         Self { exit: Some(cont), brk: Some(brk), cont: Some(cont) }
     }

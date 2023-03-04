@@ -125,7 +125,8 @@ mod stmt {
     impl HoistedStmt {
         /// Test if this statement ends with a block.
         /// 
-        /// This function corresponds to [`ast::Stmt::ends_with_block`].
+        /// This function corresponds to 
+        /// [`ast::Stmt::ends_with_block`][`crate::ast::Stmt::ends_with_block`].
         pub fn ends_with_block(&self) -> bool {
             use HoistedStmt::*;
 
@@ -139,7 +140,8 @@ mod stmt {
     impl ProcStmt {
         /// Test if this statement ends with a block.
         /// 
-        /// This function corresponds to [`ast::Stmt::ends_with_block`].
+        /// This function corresponds to 
+        /// [`ast::Stmt::ends_with_block`][`crate::ast::Stmt::ends_with_block`].
         pub fn ends_with_block(&self) -> bool {
             matches!(self,
                 | ProcStmt::Expr(Expr { expr: ExprType::Block(_), .. })
