@@ -2,71 +2,18 @@ use std::fmt::{Display, Formatter};
 
 use crate::ast::{ReasgType, MutType};
 
+use crate::compiler::plir::*;
+
 use super::*;
 
-/// Formats a list of statements.
-/// This accepts any display type, but should be used on Statement type structs.
-fn fmt_stmt_list(f: &mut Formatter<'_>, stmts: &[impl Display + EndsWithBlock]) -> std::fmt::Result {
-    for stmt in stmts {
-        write!(f, "{stmt}")?;
-
-        if !stmt.ends_with_block() {
-            write!(f, ";")?;
-        }
-        writeln!(f)?;
-    }
-    
-    Ok(())
+impl StmtLike for ProcStmt {
+    fn ends_with_block(&self) -> bool { self.ends_with_block() }
 }
 
-fn fmt_list<D: Display>(f: &mut Formatter<'_>, elems: &[D]) -> std::fmt::Result {
-    if let Some((tail, head)) = elems.split_last() {
-        for el in head {
-            write!(f, "{el}, ")?;
-        }
-
-        write!(f, "{tail}")
-    } else {
-        Ok(())
-    }
-}
-fn fmt_mapped_list<T, D: Display, F>(f: &mut Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
-    where F: Fn(&T) -> D
-{
-    if let Some((tail, head)) = elems.split_last() {
-        for el in head {
-            write!(f, "{}, ", map(el))?;
-        }
-
-        write!(f, "{}", map(tail))
-    } else {
-        Ok(())
-    }
+impl StmtLike for HoistedStmt {
+    fn ends_with_block(&self) -> bool { self.ends_with_block() }
 }
 
-struct StmtsDisplay<'b, D>(&'b [D]);
-impl<D: Display + EndsWithBlock> Display for StmtsDisplay<'_, D> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, self.0)
-    }
-}
-struct BlockDisplay<'b>(&'b [ProcStmt]);
-impl Display for BlockDisplay<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.0.is_empty() {
-            write!(f, "{{}}")
-        } else {
-            writeln!(f, "{{")?;
-
-            let buf = StmtsDisplay(self.0).to_string();
-            for line in buf.lines() {
-                writeln!(f, "{:4}{line}", "")?;
-            }
-
-            write!(f, "}}")
-        }
-    }
-}
 fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt::Result {
     if omit_ty {
         write!(f, "{}", BlockDisplay(&b.1))
@@ -119,9 +66,9 @@ impl Display for Class {
         writeln!(f, " }}")
     }
 }
-impl Display for types::FieldDecl {
+impl Display for FieldDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let types::FieldDecl { rt, mt, ty } = self;
+        let FieldDecl { rt, mt, ty } = self;
         
         match rt {
             ReasgType::Let => {},

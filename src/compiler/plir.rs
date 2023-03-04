@@ -9,7 +9,6 @@
 //! 
 //! [AST]: crate::ast
 
-mod display;
 mod types;
 
 use std::borrow::Cow;
@@ -189,7 +188,6 @@ mod stmt {
     }
 }
 
-use stmt::EndsWithBlock;
 pub use stmt::*;
 
 use super::codegen::{PLIRErr, PLIRResult};

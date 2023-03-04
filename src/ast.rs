@@ -18,7 +18,6 @@ use crate::err::{CursorRange, FullGonErr, GonErr};
 pub use self::types::*;
 
 pub mod op;
-mod display;
 mod types;
 
 /// AST node with a known location.
