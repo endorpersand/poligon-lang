@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::err::GonErr;
+use crate::err::{GonErr, FullGonErr};
 use crate::ast;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -86,8 +86,9 @@ impl GonErr for ResolveErr {
     }
 }
 
+type FullResolveErr = FullGonErr<ResolveErr>;
 /// A [`Result`] type for operations in the static resolution process.
-pub type ResolveResult<T> = Result<T, ResolveErr>;
+pub type ResolveResult<T> = Result<T, FullResolveErr>;
 
 /// A struct that holds the resolved variables during the static resolution process.
 #[derive(Debug, PartialEq, Eq)]
@@ -277,27 +278,30 @@ impl TraverseResolve for ast::Stmt {
             ast::Stmt::Decl(d)   => d.traverse_rs(map),
             ast::Stmt::Return(e) => match map.block_type() {
                 BlockType::Function => e.traverse_rs(map),
-                _ => Err(ResolveErr::CannotReturn)
+                _ => Err(ResolveErr::CannotReturn)?
             },
             ast::Stmt::Break => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotBreak)
+                _ => Err(ResolveErr::CannotBreak)?
             },
             ast::Stmt::Continue => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotContinue)
+                _ => Err(ResolveErr::CannotContinue)?
             },
             ast::Stmt::FunDecl(f) => f.traverse_rs(map),
-            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
+            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations"))?,
             ast::Stmt::Expr(e)   => e.traverse_rs(map),
-            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes")),
+            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes"))?,
         }
     }
 }
 
-impl TraverseResolve for ast::Expr {
+impl TraverseResolve for ast::Located<ast::Expr> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        match self {
+        let ast::Located(expr, range) = self;
+        let range = range.clone();
+
+        match expr {
             e @ ast::Expr::Ident(s) => {
                 map.resolve(e, s);
                 Ok(())
@@ -316,7 +320,7 @@ impl TraverseResolve for ast::Expr {
 
                 Ok(())
             },
-            ast::Expr::ClassLiteral(_, _) => Err(ResolveErr::CompilerOnly("classes")),
+            ast::Expr::ClassLiteral(_, _) => Err(ResolveErr::CompilerOnly("classes").at_range(range)),
             ast::Expr::Assign(lhs, rhs) => {
                 rhs.traverse_rs(map)?;
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
@@ -371,10 +375,10 @@ impl TraverseResolve for ast::Expr {
             },
             ast::Expr::Index(idx) => idx.traverse_rs(map),
             ast::Expr::Spread(e) => match map.sub_type() {
-                SubType::None => Err(ResolveErr::CannotSpread),
+                SubType::None => Err(ResolveErr::CannotSpread.at_range(range)),
                 SubType::List => match e {
                     Some(inner) => inner.traverse_rs(map),
-                    None => Err(ResolveErr::CannotSpreadNone),
+                    None => Err(ResolveErr::CannotSpreadNone.at_range(range)),
                 },
                 SubType::Pattern => match e {
                     Some(inner) => inner.traverse_rs(map),
@@ -526,15 +530,15 @@ mod tests {
             }
         ").parse().unwrap();
 
-        let Stmt::Expr(Expr::Block(block)) = &program.0[0] else { unreachable!() };
-        let Stmt::Expr(Expr::Block(block)) = &block.0[1] else { unreachable!() };
+        let Stmt::Expr(Located(Expr::Block(block), _)) = &program.0[0] else { unreachable!() };
+        let Stmt::Expr(Located(Expr::Block(block), _)) = &block.0[1] else { unreachable!() };
         let Stmt::Expr(e) = &block.0[0] else { unreachable!() };
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
 
         let steps = map! {
-            e as _ => 1
+            &**e as _ => 1
         };
 
         assert_eq!(&state.steps, &steps);

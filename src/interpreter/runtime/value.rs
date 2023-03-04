@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::ops::Deref;
 
-use super::{RtResult, TypeErr, ValueErr, rtio};
+use super::{TypeErr, ValueErr, rtio, BasicRtResult};
 use crate::ast::{self, op};
 
 mod fun;
@@ -252,7 +252,7 @@ impl Value {
     }
 
     /// Try to index this value.
-    pub fn get_index(&self, idx: Value) -> RtResult<Value> {
+    pub fn get_index(&self, idx: Value) -> BasicRtResult<Value> {
         match self {
             // There is a more efficient method of indexing lists 
             // than just "conv to iter => get nth item":
@@ -287,7 +287,7 @@ impl Value {
     }
 
     /// Try to set an index of this value.
-    pub fn set_index(&mut self, idx: Value, nv: Value) -> RtResult<Value> {
+    pub fn set_index(&mut self, idx: Value, nv: Value) -> BasicRtResult<Value> {
         match self {
             e @ Value::List(_) => if let Value::Int(signed_idx) = idx {
                 let mi = usize::try_from(signed_idx).ok();
@@ -295,7 +295,8 @@ impl Value {
 
                 match mi {
                     Some(i) => {
-                        let mut lst_ref = lst.try_borrow_mut()?;
+                        let mut lst_ref = lst.try_borrow_mut()
+                            .map_err(|e| e)?;
                         
                         lst_ref[i] = nv;
                         lst_ref.get(i).map(Value::clone)
@@ -311,7 +312,7 @@ impl Value {
     }
 
     /// Apply a unary operator to a computed value.
-    pub fn apply_unary(self, o: op::Unary) -> super::RtResult<Value> {
+    pub fn apply_unary(self, o: op::Unary) -> BasicRtResult<Value> {
         let ty = self.ty();
         match o {
             op::Unary::Plus   => if self.is_numeric() { Some(self) } else { None },
@@ -326,7 +327,7 @@ impl Value {
     }
     
     /// Apply a comparison operator between two computed values.
-    pub fn apply_cmp(&self, o: op::Cmp, right: &Self) -> super::RtResult<bool> {
+    pub fn apply_cmp(&self, o: op::Cmp, right: &Self) -> BasicRtResult<bool> {
         match o {
             op::Cmp::Lt | op::Cmp::Gt | op::Cmp::Le | op::Cmp::Ge => {
                 match (self, right) {
@@ -391,7 +392,7 @@ impl Value {
     }
 
     /// Create a function value, using a function defined in Rust.
-    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> RtResult<rtio::Io<Value>>) -> Self {
+    pub fn new_rust_fn(name: Option<&str>, ty: FunType, fun: fn(Vec<Value>) -> BasicRtResult<rtio::Io<Value>>) -> Self {
         let gf = GonFun {
             ident: name.map(ToString::to_string),
             ty,

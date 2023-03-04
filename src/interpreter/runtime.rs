@@ -11,7 +11,7 @@ use super::semantic::{ResolveState, ResolveErr};
 use crate::ast;
 
 use crate::ast::op;
-use crate::err::GonErr;
+use crate::err::{GonErr, FullGonErr, CursorRange};
 use self::value::*;
 use self::vars::VarContext;
 
@@ -225,7 +225,7 @@ macro_rules! cast {
     ($e:expr) => { Ok($e?) }
 }
 
-impl ast::Expr {
+impl ast::Located<ast::Expr> {
     /// Evaluate an expression and then apply the unary operator for it.
     pub fn apply_unary(&self, o: op::Unary, ctx: &mut RtContext) -> RtTraversal<Value> {
         self.traverse_rt(ctx)
@@ -249,7 +249,7 @@ impl ast::Expr {
     
             // fallback to eager value binary
             _ => self.traverse_rt(ctx)
-                .and_then(|v| cast! { v.apply_binary(o, right.traverse_rt(ctx)?) } )
+                .and_then(|v| cast! { v.apply_binary(o, right.traverse_rt(ctx)?, self.range()) } )
         }
     }
 }
@@ -276,7 +276,7 @@ impl ast::Program {
         rs.clear();
         rs.traverse(self)?;
 
-        ctx.execute(self).map_err(into_err)
+        ctx.execute(self).map_err(TermOp::flatten)
     }
 }
 
@@ -290,6 +290,7 @@ pub mod err {
     use super::value::RvErr;
     use super::super::semantic::ResolveErr;
     use crate::GonErr;
+    use crate::err::full_gon_cast_impl;
 
     use std::io::Error as IoErr;
 
@@ -310,6 +311,8 @@ pub mod err {
                         Self::$e(e)
                     }
                 }
+
+                full_gon_cast_impl!($e, RuntimeErr);
             )*
             
             impl GonErr for RuntimeErr {
@@ -352,6 +355,9 @@ pub mod err {
         /// Cannot iterate over this type.
         NotIterable(ValueType),
 
+        /// Cannot unpack this pattern because the corresponding value is not iterable.
+        NotUnpackable(ValueType),
+
         /// A specific type was expected here.
         ExpectedType(ValueType),
 
@@ -380,6 +386,7 @@ pub mod err {
                 TypeErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
                 TypeErr::CannotRange(t1, t2) => format!("cannot create range {t1}..{t2}"),
                 TypeErr::NotIterable(t1) => format!("{t1} is not iterable"),
+                TypeErr::NotUnpackable(t1) => format!("{t1} cannot be assigned to this pattern"),
                 TypeErr::ExpectedType(t1) => format!("expected {t1}"),
                 TypeErr::CannotIndex(t1) => format!("cannot index {t1}"),
                 TypeErr::CannotSetIndex(t1) => format!("cannot assign to elements of {t1}"),
@@ -495,13 +502,15 @@ pub mod err {
 }
 use err::*;
 
+type FullRuntimeErr = FullGonErr<RuntimeErr>;
+pub(super) type BasicRtResult<T> = Result<T, RuntimeErr>;
 /// A [`Result`] type for operations in runtime execution. 
 /// 
 /// This is for functions that compute during runtime. 
 /// For operations whose normal runtime flow may be interrupted
 /// (where `return`, `break`, and `continue` have observable effects),
 /// see [`RtTraversal`].
-pub type RtResult<T> = Result<T, RuntimeErr>;
+pub type RtResult<T> = Result<T, FullRuntimeErr>;
 
 /// Operations that result in interruption of normal program flow.
 pub enum TermOp<R, E> {
@@ -518,6 +527,11 @@ pub enum TermOp<R, E> {
     Continue
 }
 
+impl<T, E: Into<FullRuntimeErr>> From<E> for TermOp<T, FullRuntimeErr> {
+    fn from(e: E) -> Self {
+        TermOp::Err(e.into())
+    }
+}
 impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
     fn from(e: E) -> Self {
         TermOp::Err(e.into())
@@ -527,7 +541,7 @@ impl<T, E: Into<RuntimeErr>> From<E> for TermOp<T, RuntimeErr> {
 /// have their normal runtime flow broken.
 /// 
 /// If the function's flow is interrupted, [`TermOp`] is returned.
-pub type RtTraversal<T> = Result<T, TermOp<T, RuntimeErr>>;
+pub type RtTraversal<T> = Result<T, TermOp<T, FullRuntimeErr>>;
 
 /// This trait is implemented for values that can be traversed in runtime.
 /// 
@@ -538,12 +552,15 @@ pub trait TraverseRt {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value>;
 }
 
-impl TraverseRt for ast::Expr {
+impl TraverseRt for ast::Located<ast::Expr> {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
-        match self {
+        let ast::Located(expr, range) = self;
+        let range = range.clone();
+
+        match expr {
             ast::Expr::Ident(ident) => {
                 ctx.get_var(ident, self)
-                    .ok_or_else(|| NameErr::UndefinedVar(String::from(ident)).into())
+                    .ok_or_else(|| NameErr::UndefinedVar(String::from(ident)).at_range(range).into())
                     .map(Value::clone)
                     .map_err(TermOp::Err)
             },
@@ -556,31 +573,35 @@ impl TraverseRt for ast::Expr {
                     match &**e {
                         ast::Expr::Spread(inner) => {
                             let inner = inner.as_ref()
-                                .ok_or_else(|| ResolveErr::CannotSpreadNone.at_range(e.range()))?;
+                                .ok_or_else(|| {
+                                    ResolveErr::CannotSpreadNone.at_range(e.range())
+                                })?
+                                .traverse_rt(ctx)?;
 
-                            let inner_val = inner.traverse_rt(ctx)?;
-                            let it = inner_val.as_iterator()
-                                .ok_or_else(|| TypeErr::NotIterable(inner_val.ty()).at_range(inner.range()))?;
+                            let it = inner.as_iterator()
+                                .ok_or_else(|| {
+                                    TypeErr::NotIterable(inner.ty()).at_range(e.range())
+                                })?;
 
                             vec.extend(it);
                         },
-                        e => vec.push(e.traverse_rt(ctx)?)
+                        _ => vec.push(e.traverse_rt(ctx)?)
                     }
                 }
 
                 Ok(Value::new_list(vec))
             },
-            ast::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets"))?,
-            ast::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts"))?,
-            ast::Expr::ClassLiteral(_, _) => Err(FeatureErr::CompilerOnly("classes"))?,
+            ast::Expr::SetLiteral(_) => Err(FeatureErr::Incomplete("sets").at_range(range))?,
+            ast::Expr::DictLiteral(_) => Err(FeatureErr::Incomplete("dicts").at_range(range))?,
+            ast::Expr::ClassLiteral(_, _) => Err(FeatureErr::CompilerOnly("classes").at_range(range))?,
             ast::Expr::Assign(pat, expr) => {
                 let result = expr.traverse_rt(ctx)?;
                 
                 assign_pat(pat, result, ctx, self)
                     .map_err(TermOp::Err)
             },
-            ast::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
-            ast::Expr::StaticPath(_, _) => Err(FeatureErr::Incomplete("general attribute functionality"))?,
+            ast::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
+            ast::Expr::StaticPath(_, _) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
             ast::Expr::UnaryOps { ops, expr } => {
                 let mut ops_iter = ops.iter().rev();
         
@@ -617,21 +638,20 @@ impl TraverseRt for ast::Expr {
 
                 Ok(Value::Bool(true))
             },
-            ast::Expr::Range { left, right, step } => {
+            ast::Expr::Range { left, right, step: step_expr } => {
                 let (l, r) = (left.traverse_rt(ctx)?, right.traverse_rt(ctx)?);
-                let step_value = step.as_ref()
-                    .map(|e| e.traverse_rt(ctx))
-                    .unwrap_or(Ok(Value::Int(1)))?;
-
-                // for now, step can only be int:
-                let step = match step_value { 
-                    Value::Int(s) => s,
-                    _ => Err(TypeErr::ExpectedType(ValueType::Int))?
+                
+                let step = match step_expr {
+                    Some(e) => match e.traverse_rt(ctx)? {
+                        Value::Int(s) => s,
+                        _ => Err(TypeErr::ExpectedType(ValueType::Int).at_range(e.range()))?
+                    },
+                    None => 1,
                 };
 
                 match (&l, &r) {
                     (Value::Int(a), Value::Int(b)) => {
-                        let values = compute_int_range(*a, *b, step)?
+                        let values = compute_int_range(*a, *b, step, range)?
                             .into_iter()
                             .map(Value::Int)
                             .collect();
@@ -642,7 +662,7 @@ impl TraverseRt for ast::Expr {
                     // (a @ Value::Float(_), b) => compute_float_range(a, b, &step_value),
                     (Value::Char(a), Value::Char(b)) => {
                         let (a, b) = (*a as u32, *b as u32);
-                        let values = compute_uint_range(a, b, step)?
+                        let values = compute_uint_range(a, b, step, range)?
                             .into_iter()
                             .map(|i| {
                                 char::from_u32(i)
@@ -653,7 +673,7 @@ impl TraverseRt for ast::Expr {
 
                         Ok(Value::new_list(values))
                     },
-                    _ => Err(TypeErr::CannotRange(l.ty(), r.ty()))?
+                    _ => Err(TypeErr::CannotRange(l.ty(), r.ty()).at_range(range))?
                 }
             },
             ast::Expr::If { conditionals, last } => {
@@ -686,7 +706,9 @@ impl TraverseRt for ast::Expr {
             ast::Expr::For { ident, iterator, block } => {
                 let it_val = iterator.traverse_rt(ctx)?;
                 let it = it_val.as_iterator()
-                    .ok_or_else(|| TypeErr::NotIterable(it_val.ty()))?;
+                    .ok_or_else(|| {
+                        TypeErr::NotIterable(it_val.ty()).at_range(iterator.range())
+                    })?;
 
                 let mut result = vec![];
                 for val in it {
@@ -741,9 +763,9 @@ impl TraverseRt for ast::Expr {
                             }
                         }
                         
-                        Err(FeatureErr::Incomplete("general attribute functionality"))?
+                        Err(FeatureErr::Incomplete("general attribute functionality").at_range(funct.range()))?
                     },
-                    f => match f.traverse_rt(ctx)? {
+                    _ => match funct.traverse_rt(ctx)? {
                         Value::Fun(f) => f.call(params, ctx),
                         val => Err(TypeErr::CannotCall(val.ty()).at_range(funct.range()))?
                     }
@@ -756,14 +778,14 @@ impl TraverseRt for ast::Expr {
 
                 val.get_index(index_val).map_err(TermOp::Err)
             },
-            ast::Expr::Spread(_) => Err(ResolveErr::CannotSpread)?,
+            ast::Expr::Spread(_) => Err(ResolveErr::CannotSpread.at_range(range))?,
         }
     }
 }
 
-fn compute_int_range(left: isize, right: isize, step: isize) -> RtResult<Vec<isize>>
+fn compute_int_range(left: isize, right: isize, step: isize, token_range: CursorRange) -> RtResult<Vec<isize>>
 {
-    if step == 0 { Err(ValueErr::RangeIsInfinite)? }
+    if step == 0 { Err(ValueErr::RangeIsInfinite.at_range(token_range))? }
     let mut values = vec![];
     let mut n = left;
 
@@ -780,9 +802,9 @@ fn compute_int_range(left: isize, right: isize, step: isize) -> RtResult<Vec<isi
     }
     Ok(values)
 }
-fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
+fn compute_uint_range(left: u32, right: u32, step: isize, token_range: CursorRange) -> RtResult<Vec<u32>>
 {
-    if step == 0 { Err(ValueErr::RangeIsInfinite)? }
+    if step == 0 { Err(ValueErr::RangeIsInfinite.at_range(token_range))? }
     let mut values = vec![];
 
     let positive = step > 0;
@@ -805,36 +827,14 @@ fn compute_uint_range(left: u32, right: u32, step: isize) -> RtResult<Vec<u32>>
     Ok(values)
 }
 
-// fn compute_float_range(left: &Value, right: &Value, step: &Value) -> RtResult<Value> {
-//     if let (Some(a), Some(b)) = (left.as_float(), right.as_float()) {
-//         let s = step.as_float()
-//             .ok_or(RuntimeErr::ExpectedType(ValueType::Float)?;
-        
-//         let n_steps_f = (b - a) / s;
-
-//         if n_steps_f.is_finite() && n_steps_f.is_sign_positive() {
-//             let n_steps = n_steps_f.floor() as isize;
-
-//             let values = (0..n_steps)
-//                 .map(|i| a + (i as f64) * s)
-//                 .map(Value::Float)
-//                 .collect();
-
-//             Ok(Value::List(values))
-//         } else {
-//             Err(RuntimeErr::RangeIsInfinite)
-//         }
-//     } else {
-//         Err(RuntimeErr::CannotApplyRange(left.ty(), right.ty()))
-//     }
-// }
-
-fn into_err<T>(t: TermOp<T, RuntimeErr>) -> RuntimeErr {
-    match t {
-        TermOp::Err(e)    => e,
-        TermOp::Return(_) => ResolveErr::CannotReturn.into(),
-        TermOp::Break     => ResolveErr::CannotBreak.into(),
-        TermOp::Continue  => ResolveErr::CannotContinue.into(),
+impl<T> TermOp<T, FullRuntimeErr> {
+    fn flatten(self) -> FullRuntimeErr {
+        match self {
+            TermOp::Err(e)    => e,
+            TermOp::Return(_) => RuntimeErr::from(ResolveErr::CannotReturn).at_unknown(),
+            TermOp::Break     => RuntimeErr::from(ResolveErr::CannotBreak).at_unknown(),
+            TermOp::Continue  => RuntimeErr::from(ResolveErr::CannotContinue).at_unknown(),
+        }
     }
 }
 
@@ -870,6 +870,7 @@ impl TraverseRt for ast::Block {
 
 impl TraverseRt for ast::Stmt {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
+        // todo!("remove all instances of ast::Stmt for Located<ast::Stmt>")
         match self {
             ast::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
             ast::Stmt::Return(mt) => {
@@ -884,9 +885,35 @@ impl TraverseRt for ast::Stmt {
             ast::Stmt::Break     => Err(TermOp::Break),
             ast::Stmt::Continue  => Err(TermOp::Continue),
             ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
-            ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations"))?,
+            ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations").at_unknown())?,
             ast::Stmt::Expr(e) => e.traverse_rt(ctx),
-            ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes"))?,
+            ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes").at_unknown())?,
+        }
+    }
+}
+
+impl TraverseRt for ast::Located<ast::Stmt> {
+    fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
+        let ast::Located(stmt, range) = self;
+        let range = range.clone();
+
+        match stmt {
+            ast::Stmt::Decl(dcl) => dcl.traverse_rt(ctx),
+            ast::Stmt::Return(mt) => {
+                let expr = mt.as_ref()
+                    .map_or(
+                        Ok(Value::Unit), 
+                        |t| t.traverse_rt(ctx)
+                    )?;
+                
+                Err(TermOp::Return(expr))
+            },
+            ast::Stmt::Break     => Err(TermOp::Break),
+            ast::Stmt::Continue  => Err(TermOp::Continue),
+            ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
+            ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations").at_range(range))?,
+            ast::Stmt::Expr(e) => e.traverse_rt(ctx),
+            ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes").at_range(range))?,
         }
     }
 }
@@ -942,22 +969,24 @@ impl TraverseRt for ast::FunDecl {
 /// Given a pattern and a value, traverse the pattern
 /// and apply the mapper function to the individual units.
 fn unpack_pat<T>(
-    pat: &ast::Pat<T>, 
+    pat: &ast::Located<ast::Pat<T>>, 
     rhs: Value, 
-    mut unit_mapper: impl FnMut(&T, Value) -> RtResult<Value>
+    mut unit_mapper: impl FnMut(&T, Value) -> RtResult<Value>,
 ) -> RtResult<Value> {
     return unpack_mut(pat, rhs, &mut unit_mapper);
 
     /// Unpack with a mutable reference to a closure.
     /// This is necessary because the mutable reference is passed several times.
-    fn unpack_mut<T, F>(pat: &ast::Pat<T>, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
+    fn unpack_mut<T, F>(pat: &ast::Located<ast::Pat<T>>, rhs: Value, unit_mapper: &mut F) -> RtResult<Value>
         where F: FnMut(&T, Value) -> RtResult<Value>
     {
+        let ast::Located(pat, pat_range) = pat;
+        let pat_range = pat_range.clone();
         match pat {
             ast::Pat::Unit(unit) => unit_mapper(unit, rhs),
             ast::Pat::List(pats) => {
                 let mut it = rhs.as_iterator()
-                    .ok_or_else(|| TypeErr::NotIterable(rhs.ty()))?;
+                    .ok_or_else(|| TypeErr::NotUnpackable(rhs.ty()).at_range(pat_range))?;
 
                 let has_spread = pats.iter().any(|p| matches!(p, ast::Pat::Spread(_)));
                 let mut left_values = vec![];
@@ -974,9 +1003,9 @@ fn unpack_pat<T>(
                         // we ran out of elements:
 
                         if has_spread {
-                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i))
+                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range))
                         } else {
-                            Err(ValueErr::UnpackTooLittle(pats.len(), i))
+                            Err(ValueErr::UnpackTooLittle(pats.len(), i).at_range(pat_range))
                         }?
                     };
                 }
@@ -990,13 +1019,13 @@ fn unpack_pat<T>(
                             right_values.push(t);
                         } else {
                             // we ran out of elements:
-                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i))?
+                            Err(ValueErr::UnpackTooLittleS(pats.len() - 1, i).at_range(pat_range))?
                         };
                     }
                 } else {
                     // confirm no extra elements:
                     if it.next().is_some() {
-                        Err(ValueErr::UnpackTooMany(pats.len()))?
+                        Err(ValueErr::UnpackTooMany(pats.len()).at_range(pat_range))?
                     }
                 }
                 
@@ -1020,7 +1049,7 @@ fn unpack_pat<T>(
     }
 }
 
-fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut RtContext, from: &ast::Expr) -> RtResult<Value> {
+fn assign_pat(pat: &ast::Located<ast::AsgPat>, rhs: Value, ctx: &mut RtContext, from: &ast::Expr) -> RtResult<Value> {
     unpack_pat(pat, rhs, |unit, rhs| match unit {
         ast::AsgUnit::Ident(ident) => {
             ctx.set_var(ident, rhs, from)
@@ -1029,15 +1058,15 @@ fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut RtContext, from: &ast::Ex
         ast::AsgUnit::Index(idx) => {
             let ast::Index {expr, index} = idx;
             
-            let mut val = expr.traverse_rt(ctx).map_err(into_err)?;
-            let index_val = index.traverse_rt(ctx).map_err(into_err)?;
+            let mut val = expr.traverse_rt(ctx).map_err(TermOp::flatten)?;
+            let index_val = index.traverse_rt(ctx).map_err(TermOp::flatten)?;
     
             val.set_index(index_val, rhs)
         },
     })
 }
 
-fn declare_pat(pat: &ast::DeclPat, rhs: Value, ctx: &mut RtContext, rt: ast::ReasgType) -> RtResult<Value> {
+fn declare_pat(pat: &ast::Located<ast::DeclPat>, rhs: Value, ctx: &mut RtContext, rt: ast::ReasgType) -> RtResult<Value> {
     unpack_pat(pat, rhs, |ast::DeclUnit(ident, mt), rhs| {
         ctx.vars.declare_full(String::from(ident), rhs, rt, *mt).cloned()
     })
