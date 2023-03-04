@@ -202,6 +202,27 @@ fn merge_ranges<T>(l: std::ops::RangeInclusive<T>, r: std::ops::RangeInclusive<T
     start ..= end
 }
 
+impl Iterator for Parser {
+    type Item = FullToken;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ft = self.tokens.pop_front()?;
+
+        if let Some(range) = self.tree_locs.last_mut() {
+            let r2 = ft.loc.clone();
+
+            let new_range = match range.as_ref() {
+                Some(r1) => merge_ranges(r1.clone(), r2),
+                None => r2
+            };
+
+            range.replace(new_range);
+        }
+
+        Some(ft)
+    }
+}
+
 impl Parser {
     /// Create a new Parser to read a given set of tokens.
     /// 
@@ -285,7 +306,7 @@ impl Parser {
     /// assert!(parser.expect1(token![||]).is_err());
     /// ```
     pub fn expect1(&mut self, u: Token) -> ParseResult<()> {
-        if let Some(FullToken {tt: t, loc}) = self.tokens.pop_front() {
+        if let Some(FullToken {tt: t, loc}) = self.next() {
             if t == u {
                 Ok(())
             } else {
@@ -312,7 +333,7 @@ impl Parser {
     /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
     /// ```
     pub fn expect_n(&mut self, one_of: &[Token]) -> ParseResult<FullToken> {
-        if let Some(ft) = self.tokens.pop_front() {
+        if let Some(ft) = self.next() {
             if one_of.contains(&ft.tt) {
                 Ok(ft)
             } else {
@@ -341,9 +362,9 @@ impl Parser {
     /// ```
     pub fn match1(&mut self, u: Token) -> bool {
         match self.peek_token() {
-            Some(t) if t == &u => self.tokens.pop_front(),
-            _ => None,
-        }.is_some()
+            Some(t) if t == &u => self.next().is_some(),
+            _ => false
+        }
     }
 
     /// Check whether the next token in the input is in the specified list of tokens, 
@@ -367,7 +388,7 @@ impl Parser {
     /// ```
     pub fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
         match self.peek_token() {
-            Some(t) if one_of.contains(t) => self.tokens.pop_front(),
+            Some(t) if one_of.contains(t) => self.next(),
             _ => None,
         }
     }
@@ -377,9 +398,11 @@ impl Parser {
         self.tokens.get(0).map(|FullToken {tt, ..}| tt)
     }
 
-    /// Consume the next token in the input and return it if present.
+    /// Consumes the next token in input.
+    /// 
+    /// If you want a FullToken, see [`Parser::next`].
     pub fn next_token(&mut self) -> Option<Token> {
-        self.tokens.pop_front().map(|FullToken {tt, ..}| tt)
+        self.next().map(|FullToken {tt, ..}| tt)
     }
 
     /// Look at the range of the next token in the input (or return EOF).
@@ -862,7 +885,7 @@ impl Parser {
     /// returning the identifier's string if successfully matched.
     pub fn match_ident(&mut self) -> Option<String> {
         matches!(self.peek_token(), Some(Token::Ident(_))).then(|| {
-            let Some(FullToken { tt: Token::Ident(s), .. }) = self.tokens.pop_front() else {
+            let Some(Token::Ident(s)) = self.next_token() else {
                 unreachable!()
             };
             s
@@ -872,7 +895,7 @@ impl Parser {
     /// Expect that the next token in the input is an identifier token,
     /// returning the identifier's string if successfully matched.
     pub fn expect_ident(&mut self) -> ParseResult<String> {
-        match self.tokens.pop_front() {
+        match self.next() {
             Some(FullToken { tt: Token::Ident(s), .. }) => Ok(s),
             Some(FullToken { loc, .. }) => Err(ParseErr::ExpectedIdent.at_range(loc)),
             None => Err(ParseErr::ExpectedIdent.at(self.eof))
@@ -1268,7 +1291,7 @@ impl Parser {
 
     /// Expect that the next tokens in input represent some primitive literal (int, str, char, etc.).
     pub fn expect_literal(&mut self) -> ParseResult<ast::Expr> {
-        let FullToken { tt, loc } = self.tokens.pop_front().expect("unreachable");
+        let FullToken { tt, loc } = self.next().expect("unreachable");
         
         let lit = match tt {
             Token::Numeric(s) => ast::Literal::from_numeric(&s)
