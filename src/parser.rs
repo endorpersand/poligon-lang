@@ -159,10 +159,10 @@ macro_rules! left_assoc_op {
                 while let Some(op) = self.match_n(&[$(token![$op]),+]) {
                     let binop = ast::Expr::BinaryOp {
                         op: op.tt.try_into().unwrap(),
-                        left: e.map(Box::new),
+                        left: Box::new(e),
                         right: self.$ds()?
-                            .ok_or(ParseErr::ExpectedExpr.at_range(self.peek_loc()))?
                             .map(Box::new)
+                            .ok_or(ParseErr::ExpectedExpr.at_range(self.peek_loc()))?
                     };
 
                     e = Located::new(binop, self.peek_loc_block().unwrap());
@@ -1029,7 +1029,7 @@ impl Parser {
                     let range = self.pop_loc_block().unwrap();
                     
                     Located::new(
-                        ast::Expr::Assign(pat, e.map(Box::new)),
+                        ast::Expr::Assign(pat, Box::new(e)),
                         range
                     )
                 });
@@ -1102,7 +1102,7 @@ impl Parser {
             let range = self.pop_loc_block();
             if !rights.is_empty() {
                 let cmp_expr = ast::Expr::Comparison { 
-                    left: e.map(Box::new), 
+                    left: Box::new(e), 
                     rights 
                 };
 
@@ -1155,8 +1155,8 @@ impl Parser {
                 };
 
                 let range_expr = ast::Expr::Range {
-                    left: e.map(Box::new), 
-                    right: e.map(Box::new), 
+                    left: Box::new(e),
+                    right: Box::new(e),
                     step: Located::option_box(step)
                 };
                 e = Located::new(range_expr, self.pop_loc_block().unwrap());
@@ -1236,7 +1236,7 @@ impl Parser {
             // wrap otherwise
             Located(ast::Expr::UnaryOps {
                 ops,
-                expr: inner.map(Box::new)
+                expr: Box::new(inner)
             }, range)
         }
     }
@@ -1258,7 +1258,7 @@ impl Parser {
                         let range = self.peek_loc_block().unwrap();
                         
                         let call_expr = ast::Expr::Call {
-                            funct: e.map(Box::new), 
+                            funct: Box::new(e), 
                             params
                         };
                         e = Located::new(call_expr, range);
@@ -1269,8 +1269,8 @@ impl Parser {
                         let range = self.peek_loc_block().unwrap();
 
                         let idx_expr = ast::Expr::Index(ast::Index {
-                            expr: e.map(Box::new), 
-                            index: index.map(Box::new)
+                            expr: Box::new(e), 
+                            index: Box::new(index)
                         });
                         e = Located::new(idx_expr, range);
                     },
@@ -1320,7 +1320,7 @@ impl Parser {
             let range = self.pop_loc_block();
             if !attrs.is_empty() {
                 let path = ast::Expr::Path(ast::Path {
-                    obj: e.map(Box::new),
+                    obj: Box::new(e),
                     attrs
                 });
 
@@ -1488,7 +1488,7 @@ impl Parser {
         let block = self.expect_block()?;
         
         Ok(ast::Expr::While {
-            condition: condition.map(Box::new), block
+            condition: Box::new(condition), block
         })
     }
 
@@ -1501,7 +1501,7 @@ impl Parser {
         let block = self.expect_block()?;
         
         Ok(ast::Expr::For {
-            ident, iterator: iterator.map(Box::new), block
+            ident, iterator: Box::new(iterator), block
         })
     }
 }
@@ -1530,8 +1530,8 @@ mod tests {
         ($op:ident, $eloc:expr, $left:expr, $right:expr) => {
             Located::new(Expr::BinaryOp {
                 op: op::Binary::$op,
-                left: $left.map(Box::new),
-                right: $right.map(Box::new)
+                left: Box::new($left),
+                right: Box::new($right)
             }, $eloc)
         };
     }
@@ -1701,14 +1701,14 @@ mod tests {
         // barebones
         assert_parse("while true {}", program![
             Stmt::Expr(Located::new(Expr::While {
-                condition: literal!(Bool(true), (0, 6) ..= (0, 9)).map(Box::new),
+                condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
                 block: block![]
             }, (0, 0) ..= (0, 12)))
         ]);
         assert_parse("for i in it {}", program![
             Stmt::Expr(Located::new(Expr::For {
                 ident: String::from("i"),
-                iterator: ident!("it", (0, 9) ..= (0, 10)).map(Box::new),
+                iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
                 block: block![]
             }, (0, 0) ..= (0, 13)))
         ]);
@@ -1729,21 +1729,21 @@ mod tests {
             }),
             Stmt::Expr(Located::new(Expr::While {
                 condition: Located::boxed(Expr::Comparison {
-                    left: ident!("i", (1, 6) ..= (1, 6)).map(Box::new), 
+                    left: Box::new(ident!("i", (1, 6) ..= (1, 6))), 
                     rights: vec![(op::Cmp::Lt, literal!(Int(10), (1, 10) ..= (1, 11)))]
                 }, (1, 6) ..= (1, 11)), 
                 block: Block(vec![
                     Stmt::Expr(Located::new(Expr::Call {
-                        funct: ident!("print", (2, 4) ..= (2, 8)).map(Box::new),
+                        funct: Box::new(ident!("print", (2, 4) ..= (2, 8))),
                         params: vec![ident!("i", (2, 10) ..= (2, 10))]
                     }, (2, 4) ..= (2, 11))),
                     Stmt::Expr(Located::new(Expr::Assign(
                         AsgPat::Unit(AsgUnit::Ident(String::from("i"))), 
-                        binop! {
+                        Box::new(binop! {
                             Add, (3, 8) ..= (3,12),
                             ident!("i", (3, 8) ..= (3, 8)),
                             literal!(Int(1), (3, 12) ..= (3, 12))
-                        }.map(Box::new)
+                        })
                     ), (2, 4) ..= (2, 12)))
                 ])
             }, (1, 0) ..= (4, 0)))
@@ -1752,14 +1752,14 @@ mod tests {
         assert_parse("for i in 1..10 { print(i); }", program![
             Stmt::Expr(Located(Expr::For {
                 ident: String::from("i"), 
-                iterator: Located::new(Box::new(Expr::Range {
-                    left: literal!(Int(1), (0, 9) ..= (0, 9)).map(Box::new), 
-                    right: literal!(Int(10), (0, 12) ..= (0, 12)).map(Box::new), 
+                iterator: Located::boxed(Expr::Range {
+                    left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
+                    right: Box::new(literal!(Int(10), (0, 12) ..= (0, 12))), 
                     step: None 
-                }), (0, 9) ..= (0, 12)), 
+                }, (0, 9) ..= (0, 12)), 
                 block: Block(vec![
                     Stmt::Expr(Located::new(Expr::Call {
-                        funct: ident!("print", (0, 17) ..= (0, 21)).map(Box::new),
+                        funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
                         params: vec![ident!("i", (0, 23) ..= (0, 23))]
                     }, (0, 17) ..= (0, 24)))
                 ])
@@ -1873,21 +1873,21 @@ mod tests {
         assert_parse("+3;", program![
             Stmt::Expr(Located::new(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()],
-                expr: literal!(Int(3), (0, 1) ..= (0, 1)).map(Box::new)
+                expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1)))
             }, (0, 0) ..= (0, 1)))
         ]);
 
         assert_parse("+++++++3;", program![
             Stmt::Expr(Located::new(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(7),
-                expr: literal!(Int(3), (0, 7) ..= (0, 7)).map(Box::new)
+                expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7)))
             }, (0, 0) ..= (0, 7)))
         ]);
 
         assert_parse("+-+-+-+-3;", program![
             Stmt::Expr(Located::new(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
-                expr: literal!(Int(3), (0, 8) ..= (0, 8)).map(Box::new)
+                expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8)))
             }, (0, 0) ..= (0, 8)))
         ]);
 
@@ -1903,14 +1903,14 @@ mod tests {
                     token![-].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap()],
-                expr: literal!(Int(3), (0, 9) ..= (0, 9)).map(Box::new)
+                expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9)))
             }, (0, 0) ..= (0, 9)))
         ]);
 
         assert_parse("+(+2);", program![
             Stmt::Expr(Located::new(Expr::UnaryOps {
                 ops: vec![token![+].try_into().unwrap()].repeat(2),
-                expr: literal!(Int(2), (0, 4) ..= (0, 4)).map(Box::new)
+                expr: Box::new(literal!(Int(2), (0, 4) ..= (0, 4)))
             }, (0, 0) ..= (0, 4)))
         ])
     }

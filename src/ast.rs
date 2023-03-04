@@ -41,7 +41,7 @@ impl<T> std::ops::Deref for Located<T> {
     }
 }
 
-pub(crate) type LocatedBox<T> = Located<Box<T>>;
+pub(crate) type LocatedBox<T> = Box<Located<T>>;
 
 impl<T: PartialEq> PartialEq<T> for Located<T> {
     fn eq(&self, other: &T) -> bool {
@@ -57,7 +57,7 @@ impl<T> Located<T> {
 
     /// Create a new boxed located node.
     pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
-        Located(Box::new(t), loc)
+        Box::new(Located(t, loc))
     }
 
     /// Map a Located with a given type to a Located of another type.
@@ -67,7 +67,7 @@ impl<T> Located<T> {
     }
 
     pub fn option_box(opt: Option<Self>) -> Option<LocatedBox<T>> {
-        opt.map(|t| t.map(Box::new))
+        opt.map(Box::new)
     }
 
     pub fn transpose_option(opt: Located<Option<T>>) -> Option<Self> {
