@@ -947,7 +947,8 @@ impl Parser {
     /// 
     /// This is used to enable [`parser::expect_tuple_of(Parser::match_type)`][`Parser::expect_tuple_of`].
     /// The function that *should* be used for type expression parsing purposes is [`Parser::expect_type`].
-    fn match_type(&mut self) -> ParseResult<Option<ast::Type>> {
+    fn match_type(&mut self) -> ParseResult<Option<Located<ast::Type>>> {
+        self.push_loc_block("match_type");
         if matches!(self.peek_token(), Some(Token::Ident(_))) {
             let ident = self.expect_ident()?;
 
@@ -974,14 +975,16 @@ impl Parser {
                 vec![]
             };
 
-            Ok(Some(ast::Type(ident, params)))
+            let result = Located::new(ast::Type(ident, params), self.pop_loc_block("match_type").unwrap());
+            Ok(Some(result))
         } else {
+            self.pop_loc_block("match_type");
             Ok(None)
         }
     }
 
     /// Expect that the next tokens in the input represent a type expression.
-    pub fn expect_type(&mut self) -> ParseResult<ast::Type> {
+    pub fn expect_type(&mut self) -> ParseResult<Located<ast::Type>> {
         self.match_type()?
             .ok_or_else(|| ParseErr::ExpectedType.at_range(self.peek_loc()))
     }
@@ -1901,8 +1904,8 @@ mod tests {
         assert_parse_type(
             "dict<a, b>",
             Type("dict".to_string(), vec![
-                Type("a".to_string(), vec![]),
-                Type("b".to_string(), vec![])
+                Located::new(Type("a".to_string(), vec![]), (0, 5) ..= (0, 5)),
+                Located::new(Type("b".to_string(), vec![]), (0, 8) ..= (0, 8))
             ])
 
         );
@@ -1910,12 +1913,12 @@ mod tests {
         assert_parse_type(
             "dict<list<list<int>>, str>",
             Type("dict".to_string(), vec![
-                Type("list".to_string(), vec![
-                    Type("list".to_string(), vec![
-                        Type("int".to_string(), vec![])
-                    ])
-                ]),
-                Type("str".to_string(), vec![])
+                Located::new(Type("list".to_string(), vec![
+                    Located::new(Type("list".to_string(), vec![
+                        Located::new(Type("int".to_string(), vec![]), (0, 15) ..= (0,17))
+                    ]), (0, 11) ..= (0, 18))
+                ]), (0, 6) ..= (0, 19)),
+                Located::new(Type("str".to_string(), vec![]), (0, 22) ..= (0, 24))
             ])
         );
     }

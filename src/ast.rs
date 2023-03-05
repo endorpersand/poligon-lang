@@ -21,7 +21,7 @@ pub mod op;
 mod types;
 
 /// AST node with a known location.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Located<T>(pub T, pub CursorRange);
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
@@ -222,7 +222,7 @@ pub struct Decl {
     pub pat: DeclPat,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Option<Type>,
+    pub ty: Option<Located<Type>>,
 
     /// The value to declare the variable to
     pub val: Located<Expr>
@@ -259,7 +259,7 @@ pub struct Param {
     pub ident: String,
 
     /// The type of the parameter variable (inferred if not present)
-    pub ty: Option<Type>
+    pub ty: Option<Located<Type>>
 }
 
 /// Reassignment types for variables, parameters, etc.
@@ -303,7 +303,7 @@ pub struct FunSignature {
     /// The function's parameters
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Type>,
+    pub ret: Option<Located<Type>>,
 }
 
 /// A complete function declaration with a function body.
@@ -373,7 +373,7 @@ pub enum Expr {
     /// A static path.
     /// 
     /// This does a static access on a type (e.g. `Type::attr`).
-    StaticPath(Type, String),
+    StaticPath(Located<Type>, String),
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 

@@ -924,14 +924,14 @@ impl TraverseRt for ast::FunDecl {
             let ast::Param { ident, ty, .. } = p;
 
             param_types.push(
-                ty.as_ref()
+                ty.as_deref()
                     .map_or(VArbType::Unk, VArbType::lookup)
             );
             param_names.push(ident.clone());
         }
 
         let p = FunParamType::Positional(param_types);
-        let r = ret.as_ref()
+        let r = ret.as_deref()
             .map_or(
                 VArbType::Value(ValueType::Unit), 
                 VArbType::lookup

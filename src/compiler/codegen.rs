@@ -605,12 +605,15 @@ impl CodeGenerator {
         self.find_scoped(|ib| ib.vars.get(ident))
     }
 
-    fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
 
         match ty {
             plir::Type::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
-                .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident))),
+                .ok_or_else(|| {
+                    PLIRErr::UndefinedType(String::from(ident))
+                        .at_range(range)
+                }),
             _ => todo!()
         }
     }
@@ -1020,11 +1023,12 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
-    fn consume_type(&mut self, ty: ast::Type) -> PLIRResult<plir::Type> {
+    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+        let Located(ty, range) = ty;
         let ty = plir::Type::from(ty);
 
         // See if class is initialized, and if so, return the plir Type
-        self.get_class(&ty).map(|_| ty)
+        self.get_class(&ty, range).map(|_| ty)
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
@@ -1055,7 +1059,7 @@ impl CodeGenerator {
                     rt: Default::default(), 
                     mt: Default::default(), 
                     ident: this, 
-                    ty: Some(ast::Type(cls.ident.clone(), vec![]))
+                    ty: Some(Located::new(ast::Type(cls.ident.clone(), vec![]), (0, 0) ..= (0, 0)))
                 });
             } else {
                 // TODO, use this ident
@@ -1149,7 +1153,7 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::ClassLiteral(ty, entries) => {
-                let Located(ty, tyrange) = ty;
+                let tyrange = ty.range();
                 let ty = self.consume_type(ty)?;
 
                 let mut entries: HashMap<_, _> = entries.into_iter()
@@ -1158,7 +1162,7 @@ impl CodeGenerator {
                     })
                     .collect::<PLIRResult<_>>()?;
                 
-                let cls = self.get_class(&ty)?;
+                let cls = self.get_class(&ty, tyrange.clone())?;
                 let fields = cls.fields()
                     .ok_or_else(|| {
                         PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
@@ -1364,12 +1368,13 @@ impl CodeGenerator {
 
     fn consume_path(&mut self, p: Located<ast::Path>) -> PLIRResult<plir::Path> {
         let Located(ast::Path { obj, attrs }, expr_range) = p;
+
         let obj = self.consume_expr_and_box(*obj)?;
         let mut path = plir::Path::Struct(obj, vec![]);
 
         for attr in attrs {
             let top_ty = path.ty();
-            let cls = self.get_class(&top_ty)?;
+            let cls = self.get_class(&top_ty, expr_range.clone())?;
 
             if let Some(metref) = cls.get_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
