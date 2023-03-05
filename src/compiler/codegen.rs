@@ -26,22 +26,6 @@ pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
     cg.unwrap()
 }
 
-fn create_splits<T>(pats: &[ast::Pat<T>]) -> Vec<plir::Split> {
-    let len = pats.len();
-    match pats.iter().position(|pat| matches!(pat, ast::Pat::Spread(_))) {
-        Some(pt) => {
-            let rpt = len - pt;
-            
-            let mut splits: Vec<_> = (0..pt).map(plir::Split::Left).collect();
-            splits.push(plir::Split::Middle(pt, rpt));
-            splits.extend((0..rpt).rev().map(plir::Split::Right));
-
-            splits
-        },
-        None => (0..len).map(plir::Split::Left).collect(),
-    }
-}
-
 /// Errors that can occur during the PLIR creation process.
 #[derive(Debug)]
 pub enum PLIRErr {
@@ -661,24 +645,24 @@ impl CodeGenerator {
 
     /// Convert a program into PLIR, and attach it to the CodeGenerator.
     pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
-        self.consume_stmts(prog.0.into_iter().map(|stmt| stmt.0))
+        self.consume_stmts(prog.0)
     }
 
     /// Consume an iterator of statements into the current insert block.
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=ast::Stmt>) -> PLIRResult<()> {
+    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=Located<ast::Stmt>>) -> PLIRResult<()> {
         let mut eager_stmts = vec![];
         for stmt in stmts {
             match stmt {
-                ast::Stmt::FunDecl(fd) => {
+                Located(ast::Stmt::FunDecl(fd), _) => {
                     self.peek_block().insert_unresolved(Unresolved::Fun(fd));
                 },
-                ast::Stmt::ExternFunDecl(fs) => {
+                Located(ast::Stmt::ExternFunDecl(fs), _) => {
                     self.peek_block().insert_unresolved(Unresolved::ExternFun(fs));
                     }
-                ast::Stmt::ClassDecl(cls) => {
+                Located(ast::Stmt::ClassDecl(cls), _) => {
                     self.peek_block().insert_unresolved(Unresolved::Class(cls));
                 }
                 s => eager_stmts.push(s),
@@ -718,9 +702,11 @@ impl CodeGenerator {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_eager_stmt(&mut self, stmt: ast::Stmt) -> PLIRResult<bool> {
+    fn consume_eager_stmt(&mut self, stmt: Located<ast::Stmt>) -> PLIRResult<bool> {
+        let Located(stmt, range) = stmt;
+
         match stmt {
-            ast::Stmt::Decl(d) => self.consume_decl(d),
+            ast::Stmt::Decl(d) => self.consume_decl(Located::new(d, range)),
             ast::Stmt::Return(me) => {
                 let maybe_expr = match me {
                     Some(e) => Some(self.consume_expr(e)?),
@@ -855,18 +841,18 @@ impl CodeGenerator {
     ) -> PLIRResult<plir::Block> {
         self.push_block();
         // collect all the statements from this block
-        self.consume_stmts(block.0.into_iter().map(|stmt| stmt.0))?;
+        self.consume_stmts(block.0)?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype, expected_ty)
     }
 
     fn unpack_pat<T, E>(
         &mut self, 
-        pat: ast::Pat<T>, 
-        expr: plir::Expr, 
+        pat: Located<ast::Pat<T>>, 
+        expr: Located<plir::Expr>, 
         extra: E, 
         mut split_extra: impl FnMut(&E, plir::Split) -> PLIRResult<E>,
-        mut map: impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
+        mut map: impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
         consume_var: bool
     ) -> PLIRResult<()> {
         self.unpack_pat_inner(pat, expr, extra, &mut split_extra, &mut map, consume_var)
@@ -874,25 +860,44 @@ impl CodeGenerator {
 
     fn unpack_pat_inner<T, E>(
         &mut self, 
-        pat: ast::Pat<T>, 
-        expr: plir::Expr, 
+        pat: Located<ast::Pat<T>>, 
+        expr: Located<plir::Expr>, 
         extra: E, 
         split_extra: &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>,
-        map: &mut impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
+        map: &mut impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
         consume_var: bool
     ) -> PLIRResult<()> {
+        fn create_splits<T>(pats: &[&ast::Pat<T>]) -> Vec<plir::Split> {
+            let len = pats.len();
+            match pats.iter().position(|pat| matches!(pat, ast::Pat::Spread(_))) {
+                Some(pt) => {
+                    let rpt = len - pt;
+                    
+                    let mut splits: Vec<_> = (0..pt).map(plir::Split::Left).collect();
+                    splits.push(plir::Split::Middle(pt, rpt));
+                    splits.extend((0..rpt).rev().map(plir::Split::Right));
+
+                    splits
+                },
+                None => (0..len).map(plir::Split::Left).collect(),
+            }
+        }
+
+        let Located(pat, range) = pat;
         match pat {
-            ast::Pat::Unit(t) => map(self, t, expr, extra),
+            ast::Pat::Unit(t) => map(self, Located::new(t, range), expr, extra),
             ast::Pat::Spread(spread) => match spread {
-                Some(pat) => self.unpack_pat_inner(pat.0, expr, extra, split_extra, map, consume_var),
+                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, split_extra, map, consume_var),
                 None => Ok(()),
             },
             ast::Pat::List(pats) => {
-                let pats: Vec<_> = pats.into_iter().map(|t| t.0).collect();
-                let var = self.push_tmp_decl("decl", expr);
+                let var = expr.map(|e| self.push_tmp_decl("decl", e));
 
-                for (idx, pat) in std::iter::zip(create_splits(&pats), pats) {
-                    let rhs = var.clone().split(idx)?;
+                let delocated: Vec<_> = pats.iter().map(|t| &t.0).collect();
+                for (idx, pat) in std::iter::zip(create_splits(&delocated), pats) {
+                    let rhs = var.map(|v| v.clone().split(idx))
+                        .transpose_result()?;
+
                     let extr = split_extra(&extra, idx)?;
                     self.unpack_pat_inner(pat, rhs, extr, split_extra, map, false)?;
                 }
@@ -908,31 +913,33 @@ impl CodeGenerator {
     /// Consume a declaration into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_decl(&mut self, decl: ast::Decl) -> PLIRResult<bool> {
-        let ast::Decl { rt, pat, ty, val } = decl;
-
-        let e = self.consume_expr(val)?;
+    fn consume_decl(&mut self, decl: Located<ast::Decl>) -> PLIRResult<bool> {
+        let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
+        
+        let e = self.consume_located_expr(val)?;
         let ty = match ty {
             Some(t) => Some(self.consume_type(t)?),
             None => None,
         };
 
-        self.unpack_pat(pat.0, e, (rt, ty), 
+        self.unpack_pat(pat, e, (rt, ty), 
             |(rt, mty), idx| {
                 Ok((*rt, match mty {
-                    Some(t) => Some(t.split(idx)?),
+                    Some(t) => Some(t.split(idx).map_err(|e| e.at_range(decl_range))?),
                     None => None,
                 }))
             }, 
             |this, unit, e, extra| {
-                let ast::DeclUnit(ident, mt) = unit;
+                let Located(ast::DeclUnit(ident, mt), urange) = unit;
+                let Located(e, erange) = e;
+
                 let (rt, ty) = extra;
 
                 let ty = ty.unwrap_or_else(|| e.ty.clone());
                 // Type check decl, casting if possible
                 let e = match op_impl::apply_special_cast(e, &ty, CastType::Decl) {
                     Ok(e) => e,
-                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty)),
+                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty).at_range(erange)),
                 };
 
                 this.declare(&ident, ty.clone());
@@ -995,7 +1002,7 @@ impl CodeGenerator {
             }
     
             // collect all the statements from this block
-            self.consume_stmts(old_block.0.into_iter().map(|stmt| stmt.0))?;
+            self.consume_stmts(old_block.0)?;
     
             let insert_block = self.pop_block().unwrap();
             self.consume_insert_block(insert_block, BlockBehavior::Function, Some(sig.ret.clone()))?
@@ -1167,30 +1174,31 @@ impl CodeGenerator {
                 }
             },
             ast::Expr::Assign(pat, expr) => {
-                let expr = self.consume_expr(*expr)?;
+                let expr = self.consume_located_expr(*expr)?;
 
                 self.push_block();
-                self.unpack_pat(pat.0, expr, (), |_, _| Ok(()),
+                self.unpack_pat(pat, expr, (), |_, _| Ok(()),
                     |this, unit, e, _| {
+                        let Located(unit, range) = unit;
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
                             ast::AsgUnit::Path(p) => {
                                 let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
-                                    Err(PLIRErr::CannotAssignToMethod)?
+                                    Err(PLIRErr::CannotAssignToMethod.at_range(range))?
                                 } else {
                                     plir::AsgUnit::Path(p)
                                 }
                             },
                             ast::AsgUnit::Index(idx) => {
-                                let (_, idx) = this.consume_index(idx)?;
+                                let (_, idx) = this.consume_index(idx, range)?;
                                 plir::AsgUnit::Index(idx)
                             },
                         };
                         
                         let asg = plir::Expr::new(
                             e.ty.clone(),
-                            plir::ExprType::Assign(unit, Box::new(e))
+                            plir::ExprType::Assign(unit, Box::new(e.0))
                         );
 
                         this.peek_block().push_stmt(asg);
