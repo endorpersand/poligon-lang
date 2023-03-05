@@ -134,7 +134,12 @@ fn wrapq(c: char) -> String {
 fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
     (lno, cno + chars)
 }
-/// Advance cursor given the character at the cursor and the characters following it
+
+/// Advance cursor to its next position.
+/// 
+/// This function returns the position of the cursor after
+/// the last provided character
+/// (whether that is the current char or the last char of extra).
 fn advance_cursor((lno, cno): Cursor, current: Option<char>, extra: &[char]) -> Cursor {
     let (mut dl, mut nc) = match current {
         Some('\n') => (1, 0),
@@ -652,9 +657,13 @@ impl Lexer {
         let mut front = self.remaining.split_off(n);
         std::mem::swap(&mut self.remaining, &mut front);
 
-        let slice = front.make_contiguous();
-        self.cursor = advance_cursor(self.cursor, self._current, slice);
-        self._current = slice.last().copied();
+        let (last, rest) = match &*front.make_contiguous() {
+            [rest @ .., last] => (Some(last), rest),
+            rest @ [] => (None, rest)
+        };
+
+        self.cursor = advance_cursor(self.cursor, self._current, rest);
+        self._current = last.copied();
         front
     }
 
@@ -1218,10 +1227,15 @@ mod tests {
         assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail("''", LexErr::EmptyChar.at((0, 0)));
 
+        // length check
+        assert_lex("\"abc\"", literal![Str("abc"), (0, 0) ..= (0, 4)]); // "abc"
+        assert_lex("\"abc\n\"", literal![Str("abc\n"), (0, 0) ..= (1, 0)]); // "abc[new line]"
+        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), (0, 0) ..= (1, 2)]); // "abc[new line]de"
+
         // basic escape tests
         assert_lex("'\\''", literal![Char('\''), (0, 0) ..= (0, 3)]); // '\''
-        assert_lex("'\\n'", literal![Char('\n'), (0, 0) ..= (0, 4)]); // '\n'
-        assert_lex("\"\\e\"", literal![Str("\\e"), (0, 0) ..= (0, 4)]); // "\e"
+        assert_lex("'\\n'", literal![Char('\n'), (0, 0) ..= (0, 3)]); // '\n'
+        assert_lex("\"\\e\"", literal![Str("\\e"), (0, 0) ..= (0, 3)]); // "\e"
         assert_lex_fail("'\\n", LexErr::UnclosedQuote); // '\n
         assert_lex_fail("'\\\n'", LexErr::UnclosedQuote); // '\[new line]'
         
