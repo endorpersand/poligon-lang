@@ -224,10 +224,7 @@ impl Iterator for Parser {
 
     fn next(&mut self) -> Option<Self::Item> {
         let ft = self.tokens.pop_front()?;
-
-        if let Some(range) = self.tree_locs.last_mut() {
-            merge_ranges_in_place(&mut range.1, ft.loc.clone());
-        }
+        self.append_range(ft.loc.clone());
         Some(ft)
     }
 }
@@ -455,10 +452,7 @@ impl Parser {
         assert_eq!(pushed, name, "requested {name}, popped {pushed}");
 
         let r2 = mr2?;
-        // If r2 contained a range, then we need to merge r1 with the contained range.
-        if let Some(mr1) = self.tree_locs.last_mut() {
-            merge_ranges_in_place(&mut mr1.1, r2.clone())
-        }
+        self.append_range(r2.clone());
 
         Some(r2)
     }
@@ -543,6 +537,7 @@ impl Parser {
                 let &(slno, scno) = loc.start();
                 let &end = loc.end();
 
+                self.append_range((slno, scno) ..= (slno, scno));
                 self.tokens[0] = FullToken::new(token![<], (slno, scno + 1)..=end);
             }
 
@@ -565,6 +560,8 @@ impl Parser {
 
                 let &(slno, scno) = loc.start();
                 let &end = loc.end();
+
+                self.append_range((slno, scno) ..= (slno, scno));
                 self.tokens[0] = FullToken::new(token![>], (slno, scno + 1)..=end);
             }
 
@@ -627,6 +624,13 @@ impl Parser {
         }
 
         Ok(stmts)
+    }
+
+    /// Extends the range of the top cursor-tracking block to reach the bounds of new_range.
+    fn append_range(&mut self, new_range: CursorRange) {
+        if let Some(rb) = self.tree_locs.last_mut() {
+            merge_ranges_in_place(&mut rb.1, new_range);
+        }
     }
 
     /// Expect that the next tokens in the input represent a block.
@@ -1916,8 +1920,8 @@ mod tests {
                 Located::new(Type("list".to_string(), vec![
                     Located::new(Type("list".to_string(), vec![
                         Located::new(Type("int".to_string(), vec![]), (0, 15) ..= (0,17))
-                    ]), (0, 11) ..= (0, 18))
-                ]), (0, 6) ..= (0, 19)),
+                    ]), (0, 10) ..= (0, 18))
+                ]), (0, 5) ..= (0, 19)),
                 Located::new(Type("str".to_string(), vec![]), (0, 22) ..= (0, 24))
             ])
         );
