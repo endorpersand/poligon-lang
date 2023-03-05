@@ -16,7 +16,7 @@
 use std::{io, fs};
 use std::path::Path;
 
-use crate::{lexer, parser, FullGonErr, ast};
+use crate::{lexer, parser, ast};
 use runtime::value::Value;
 use runtime::{RtContext, TraverseRt};
 pub use repl::Repl;
@@ -106,12 +106,12 @@ impl Interpreter {
     /// let interpreter = Interpreter::from_string("print(0);");
     /// 
     /// assert_eq!(interpreter.parse().unwrap(), Program(vec![
-    ///     Stmt::Expr(Expr::Call {
-    ///         funct: Box::new(Expr::Ident(String::from("print"))),
+    ///     Located::new(Stmt::Expr(Located::new(Expr::Call {
+    ///         funct: Box::new(Located::new(Expr::Ident(String::from("print")), (0, 0) ..= (0, 4))),
     ///         params: vec![
-    ///             Expr::Literal(Literal::Int(0))
+    ///             Located::new(Expr::Literal(Literal::Int(0)), (0, 6) ..= (0, 6))
     ///         ]
-    ///     })
+    ///     }, (0, 0) ..= (0, 7))), (0, 0) ..= (0, 8))
     /// ]));
     /// ```
     pub fn parse(&self) -> InterpretResult<ast::Program> {
@@ -136,7 +136,7 @@ impl Interpreter {
         
         let mut ctx = RtContext::new();
         parsed.run_with_ctx(&mut ctx)
-            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+            .map_err(|err| err.full_msg(&self.source))
     }
 
     /// Execute the source string.
@@ -173,6 +173,6 @@ impl Interpreter {
         
         let mut ctx = RtContext::new_with_io(hook);
         parsed.run_with_ctx(&mut ctx)
-            .map_err(|err| FullGonErr::from(err).full_msg(&self.source))
+            .map_err(|err| err.full_msg(&self.source))
     }
 }

@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use crate::ast;
 use crate::compiler::codegen::OpErr;
 
-use super::Split;
+use super::{Split, Located};
 
 /// A type expression.
 /// 
@@ -251,7 +251,7 @@ impl From<ast::Type> for Type {
             Type::Prim(ident)
         } else {
             let p = params.into_iter()
-                .map(Type::from)
+                .map(|Located(t, _)| t.into())
                 .collect();
             Type::Generic(ident, p)
         }

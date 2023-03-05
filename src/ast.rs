@@ -13,16 +13,15 @@
 
 use std::rc::Rc;
 
-use crate::err::CursorRange;
+use crate::err::{CursorRange, FullGonErr, GonErr};
 
 pub use self::types::*;
 
 pub mod op;
-mod display;
 mod types;
 
 /// AST node with a known location.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Located<T>(pub T, pub CursorRange);
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
@@ -40,8 +39,13 @@ impl<T> std::ops::Deref for Located<T> {
         &self.0
     }
 }
+impl<T> std::ops::DerefMut for Located<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
-pub(crate) type LocatedBox<T> = Located<Box<T>>;
+pub(crate) type LocatedBox<T> = Box<Located<T>>;
 
 impl<T: PartialEq> PartialEq<T> for Located<T> {
     fn eq(&self, other: &T) -> bool {
@@ -55,10 +59,37 @@ impl<T> Located<T> {
         Self(t, loc)
     }
 
+    /// Create a new boxed located node.
+    pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
+        Box::new(Located(t, loc))
+    }
+
     /// Map a Located with a given type to a Located of another type.
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
         let Located(node, loc) = self;
         Located(f(node), loc)
+    }
+
+    /// Gets this located node's range.
+    pub fn range(&self) -> CursorRange {
+        self.1.clone()
+    }
+
+}
+
+impl<T> Located<Option<T>> {
+    /// Transpose a located Option into an Option of a located node.
+    pub fn transpose_option(self) -> Option<Located<T>> {
+        let Located(value, range) = self;
+        value.map(|v| Located(v, range))
+    }
+}
+
+impl<T, E> Located<Result<T, E>> {
+    /// Transpose a located Result into a Result of a located node.
+    pub fn transpose_result(self) -> Result<Located<T>, E> {
+        let Located(value, range) = self;
+        value.map(|v| Located(v, range))
     }
 }
 
@@ -79,7 +110,7 @@ impl<T> Located<T> {
 ///  }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Program(pub Vec<Stmt>);
+pub struct Program(pub Vec<Located<Stmt>>);
 
 /// An enclosed scope with a list of statements.
 /// 
@@ -97,7 +128,7 @@ pub struct Program(pub Vec<Stmt>);
 /// }
 /// ```
 #[derive(Debug, PartialEq)]
-pub struct Block(pub Vec<Stmt>);
+pub struct Block(pub Vec<Located<Stmt>>);
 
 /// A statement.
 #[derive(Debug, PartialEq)]
@@ -117,7 +148,7 @@ pub enum Stmt {
     /// return; // no expr
     /// return 2; // with expr
     /// ```
-    Return(Option<Expr>),
+    Return(Option<Located<Expr>>),
     
     /// `break`
     Break,
@@ -141,7 +172,7 @@ pub enum Stmt {
     ExternFunDecl(FunSignature),
 
     /// An expression.
-    Expr(Expr),
+    Expr(Located<Expr>),
 
     /// A struct declaration.
     ClassDecl(Class)
@@ -153,10 +184,10 @@ impl Stmt {
         matches!(self, 
             | Stmt::FunDecl(_)
             | Stmt::ClassDecl(_)
-            | Stmt::Expr(Expr::Block(_))
-            | Stmt::Expr(Expr::If { .. })
-            | Stmt::Expr(Expr::While { .. })
-            | Stmt::Expr(Expr::For { .. })
+            | Stmt::Expr(Located(Expr::Block(_), _))
+            | Stmt::Expr(Located(Expr::If { .. }, _))
+            | Stmt::Expr(Located(Expr::While { .. }, _))
+            | Stmt::Expr(Located(Expr::For { .. }, _))
         )
     }
 }
@@ -191,10 +222,10 @@ pub struct Decl {
     pub pat: DeclPat,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Option<Type>,
+    pub ty: Option<Located<Type>>,
 
     /// The value to declare the variable to
-    pub val: Expr
+    pub val: Located<Expr>
 }
 
 /// A function parameter.
@@ -228,7 +259,7 @@ pub struct Param {
     pub ident: String,
 
     /// The type of the parameter variable (inferred if not present)
-    pub ty: Option<Type>
+    pub ty: Option<Located<Type>>
 }
 
 /// Reassignment types for variables, parameters, etc.
@@ -272,7 +303,7 @@ pub struct FunSignature {
     /// The function's parameters
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Type>,
+    pub ret: Option<Located<Type>>,
 }
 
 /// A complete function declaration with a function body.
@@ -293,7 +324,7 @@ pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
     /// The function's body
-    pub block: Rc<Block>
+    pub block: Located<Rc<Block>>
 }
 
 /// An expression.
@@ -305,7 +336,7 @@ pub enum Expr {
     /// A block of statements.
     /// 
     /// See [`Block`] for examples.
-    Block(Block),
+    Block(Located<Block>),
 
     /// An int, float, char, or string literal.
     /// 
@@ -313,16 +344,16 @@ pub enum Expr {
     Literal(Literal),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
-    ListLiteral(Vec<Expr>),
+    ListLiteral(Vec<Located<Expr>>),
 
     /// A set literal (e.g. `set {1, 2, 3, 4}`).
-    SetLiteral(Vec<Expr>),
+    SetLiteral(Vec<Located<Expr>>),
     
     /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
-    DictLiteral(Vec<(Expr, Expr)>),
+    DictLiteral(Vec<(Located<Expr>, Located<Expr>)>),
 
     /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral(Type, Vec<(String, Expr)>),
+    ClassLiteral(Located<Type>, Vec<(Located<String>, Located<Expr>)>),
     
     /// An assignment operation.
     /// 
@@ -332,7 +363,7 @@ pub enum Expr {
     /// b[0] = 3;
     /// [a, b, c] = [1, 2, 3];
     /// ```
-    Assign(AsgPat, Box<Expr>),
+    Assign(AsgPat, LocatedBox<Expr>),
 
     /// A path.
     /// 
@@ -342,14 +373,14 @@ pub enum Expr {
     /// A static path.
     /// 
     /// This does a static access on a type (e.g. `Type::attr`).
-    StaticPath(Type, String),
+    StaticPath(Located<Type>, String),
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 
         /// (i.e. they are applied to the expression from right to left).
         ops: Vec<op::Unary>,
         /// Expression to apply the unary operations to.
-        expr: Box<Expr>
+        expr: LocatedBox<Expr>
     },
 
     /// A binary operation (e.g. `a + b`).
@@ -357,9 +388,9 @@ pub enum Expr {
         /// Operator to apply.
         op: op::Binary,
         /// The left expression.
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// The right expression.
-        right: Box<Expr>
+        right: LocatedBox<Expr>
     },
 
     /// A comparison operation (e.g. `a < b < c < d`).
@@ -368,35 +399,35 @@ pub enum Expr {
     /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
     Comparison {
         /// The left expression
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// A list of comparison operators and a right expressions to apply.
-        rights: Vec<(op::Cmp, Expr)>
+        rights: Vec<(op::Cmp, Located<Expr>)>
     },
 
     /// A range (e.g. `1..10` or `1..10 step 1`).
     Range {
         /// The left expression
-        left: Box<Expr>,
+        left: LocatedBox<Expr>,
         /// The right expression
-        right: Box<Expr>,
+        right: LocatedBox<Expr>,
         /// The expression for the step if it exists
-        step: Option<Box<Expr>>
+        step: Option<LocatedBox<Expr>>
     },
 
     /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
     If {
         /// The condition and block connected to each `if` of the chain
-        conditionals: Vec<(Expr, Block)>,
+        conditionals: Vec<(Located<Expr>, Located<Block>)>,
         /// The final bare `else` block (if it exists)
-        last: Option<Block>
+        last: Option<Located<Block>>
     },
 
     /// A `while` loop.
     While {
         /// The condition to check before each iteration.
-        condition: Box<Expr>,
+        condition: LocatedBox<Expr>,
         /// The block to run in each iteration.
-        block: Block
+        block: Located<Block>
     },
 
     /// A `for` loop.
@@ -404,24 +435,24 @@ pub enum Expr {
         /// Variable to bind elements of the iterator to.
         ident: String,
         /// The iterator.
-        iterator: Box<Expr>,
+        iterator: LocatedBox<Expr>,
         /// The block to run in each iteration.
-        block: Block
+        block: Located<Block>
     },
 
     /// A function call.
     Call {
         /// The function to call.
-        funct: Box<Expr>,
+        funct: LocatedBox<Expr>,
         /// The parameters to the function call.
-        params: Vec<Expr>
+        params: Vec<Located<Expr>>
     },
     /// An index operation.
     /// 
     /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
-    Spread(Option<Box<Expr>>)
+    Spread(Option<LocatedBox<Expr>>)
 }
 
 /// A primitive literal.
@@ -472,7 +503,7 @@ impl Literal {
 #[derive(Debug, PartialEq)]
 pub struct Path {
     /// The expression to access an attribute of
-    pub obj: Box<Expr>,
+    pub obj: LocatedBox<Expr>,
 
     /// The chain of attributes
     pub attrs: Vec<String>
@@ -493,9 +524,9 @@ pub struct Path {
 #[derive(Debug, PartialEq)]
 pub struct Index {
     /// The expression to index
-    pub expr: Box<Expr>,
+    pub expr: LocatedBox<Expr>,
     /// The index
-    pub index: Box<Expr>
+    pub index: LocatedBox<Expr>
 }
 
 /// A unit to assign to.
@@ -525,23 +556,27 @@ pub struct DeclUnit(pub String, pub MutType);
 #[derive(Debug, PartialEq)]
 pub enum Pat<T> {
     /// An indivisible unit. This can be directly assigned to.
+    // This should be used as LocatedPat<T>, in which case, the unit has a provided range.
     Unit(T),
 
     /// Spread (possibly with a pattern to assign to).
     /// 
     /// This collects the remainder of the current pattern 
     /// and assigns it to its parameter (if present).
-    Spread(Option<Box<Self>>),
+    Spread(Option<LocatedBox<Self>>),
 
     /// A list of patterns.
     /// 
     /// The values of the RHS are aligned by index.
-    List(Vec<Self>)
+    List(Vec<Located<Self>>)
 }
+
+/// A pattern with a known location.
+pub type LocatedPat<T> = Located<Pat<T>>;
 /// An assignment [pattern][`Pat`] (used for [assignments][`Expr::Assign`]).
-pub type AsgPat = Pat<AsgUnit>;
+pub type AsgPat = LocatedPat<AsgUnit>;
 /// A declaration [pattern][`Pat`] (used for [declarations][`Decl`]).
-pub type DeclPat = Pat<DeclUnit>;
+pub type DeclPat = LocatedPat<DeclUnit>;
 
 /// An error with converting an expression to a pattern.
 #[derive(Debug, PartialEq, Eq)]
@@ -552,55 +587,82 @@ pub enum PatErr {
     /// More than one spread appeared.
     CannotSpreadMultiple,
 }
+type FullPatErr = FullGonErr<PatErr>;
 
-impl TryFrom<Expr> for AsgUnit {
-    type Error = PatErr;
-    
-    fn try_from(value: Expr) -> Result<Self, Self::Error> {
-        match value {
-            Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
-            Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
-            Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
-            _ => Err(PatErr::InvalidAssignTarget)
+impl GonErr for PatErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+
+    fn message(&self) -> String {
+        match self {
+            PatErr::InvalidAssignTarget => String::from("invalid assign target"),
+            PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
         }
     }
 }
 
-impl<T: TryFrom<Expr, Error = PatErr>> TryFrom<Expr> for Pat<T> {
-    type Error = PatErr;
+impl TryFrom<Located<Expr>> for Located<AsgUnit> {
+    type Error = FullPatErr;
+    
+    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
+        let Located(expr, range) = value;
+        match expr {
+            Expr::Ident(ident) => Ok(Located(AsgUnit::Ident(ident), range)),
+            Expr::Path(attrs)  => Ok(Located(AsgUnit::Path(attrs), range)),
+            Expr::Index(idx)   => Ok(Located(AsgUnit::Index(idx), range)),
+            _ => Err(PatErr::InvalidAssignTarget.at_range(range))
+        }
+    }
+}
+
+impl<T> TryFrom<Located<Expr>> for LocatedPat<T> 
+    where Located<T>: TryFrom<Located<Expr>, Error = FullPatErr>
+{
+    type Error = FullPatErr;
 
     /// Patterns can be created if the unit type of the pattern can 
     /// fallibly be parsed from an expression.
-    fn try_from(value: Expr) -> Result<Self, Self::Error> {
-        match value {
+    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
+        #[inline]
+        fn ok_located<T, E>(t: T, range: CursorRange) -> Result<Located<T>, E> {
+            Ok(Located::new(t, range))
+        }
+
+        let Located(expr, range) = value;
+
+        match expr {
             Expr::Spread(me) => match me {
                 Some(e) => {
-                    let inner = Some(Box::new(Self::try_from(*e)?));
+                    let pat = Self::try_from(*e)?;
+                    let inner = Some(Box::new(pat));
                     
-                    Ok(Self::Spread(inner))
+                    ok_located(Pat::Spread(inner), range)
                 },
-                None => Ok(Self::Spread(None)),
+                None => ok_located(Pat::Spread(None), range),
             }
             Expr::ListLiteral(lst) => {
-                let vec: Vec<_> = lst.into_iter()
-                    .map(TryInto::try_into)
+                let vec: Vec<Self> = lst.into_iter()
+                    .map(TryFrom::try_from)
                     .collect::<Result<_, _>>()?;
 
                 // check spread count is <2
                 let mut it = vec.iter()
-                    .filter(|pat| matches!(pat, Self::Spread(_)));
+                    .filter(|pat| matches!(&***pat, Pat::Spread(_)));
                 
                 it.next(); // skip 
+
                 if it.next().is_some() {
-                    Err(PatErr::CannotSpreadMultiple)
+                    Err(PatErr::CannotSpreadMultiple.at_range(range))
                 } else {
-                    Ok(Self::List(vec))
+                    ok_located(Pat::List(vec), range)
                 }
             }
             e => {
-                let unit = T::try_from(e)?;
-                
-                Ok(Self::Unit(unit))
+                let value = Located::new(e, range);
+                let Located(unit, range) = Located::<T>::try_from(value)?;
+
+                ok_located(Pat::Unit(unit), range)
             }
         }
     }

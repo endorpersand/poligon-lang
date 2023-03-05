@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use super::{MutType, ReasgType, Block, Param};
+use super::{MutType, ReasgType, Block, Param, Located};
 
 /// A type expression.
 /// 
@@ -14,7 +14,7 @@ use super::{MutType, ReasgType, Block, Param};
 /// map<string, list<int>>
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type(pub String, pub Vec<Type>);
+pub struct Type(pub String, pub Vec<Located<Type>>);
 
 /// A class declaration.
 /// 
@@ -68,7 +68,7 @@ pub struct FieldDecl {
     pub ident: String,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Type
+    pub ty: Located<Type>
 }
 
 /// A method signature.
@@ -98,7 +98,7 @@ pub struct MethodSignature {
     /// The function's parameters
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Type>,
+    pub ret: Option<Located<Type>>,
 }
 
 /// A method declaration.
@@ -110,5 +110,5 @@ pub struct MethodDecl {
     /// The method's signature
     pub sig: MethodSignature,
     /// The method's body
-    pub block: Rc<Block>
+    pub block: Located<Rc<Block>>
 }

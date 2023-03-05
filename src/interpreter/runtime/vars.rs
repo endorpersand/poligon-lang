@@ -104,14 +104,14 @@ impl<T> ScopeContext<'_, T> {
     }
 
     /// Declares a variable in the current scope
-    pub fn declare(&mut self, ident: String, v: T) -> super::RtResult<&T> {
+    pub fn declare(&mut self, ident: String, v: T) -> super::BasicRtResult<&T> {
         self.declare_full(ident, v, ReasgType::Let, MutType::Mut)
     }
 
     /// Declares a variable in the current scope (with a reassignment type and mutability type)
     pub fn declare_full(
         &mut self, ident: String, v: T, _rt: ReasgType, _mt: MutType
-    ) -> super::RtResult<&T> {
+    ) -> super::BasicRtResult<&T> {
         let entry = self.scope.entry(ident.clone());
 
         // only allow declare if variable in the top level is not declared
@@ -123,7 +123,7 @@ impl<T> ScopeContext<'_, T> {
 
     /// Set a variable (or error if it is not declared)
     #[allow(unused)]
-    pub fn set(&mut self, ident: &str, v: T) -> super::RtResult<&T> {
+    pub fn set(&mut self, ident: &str, v: T) -> super::BasicRtResult<&T> {
         let maybe_m = self.hash_maps_mut()
             .find(|m| m.contains_key(ident));
 
@@ -149,7 +149,7 @@ impl<T> ScopeContext<'_, T> {
         maybe_m.and_then(|m| m.get(ident))
     }
 
-    pub fn set_indexed(&mut self, ident: &str, v: T, midx: Option<usize>) -> super::RtResult<T> 
+    pub fn set_indexed(&mut self, ident: &str, v: T, midx: Option<usize>) -> super::BasicRtResult<T> 
         where T: Clone
     {
         let maybe_m = {
@@ -203,13 +203,13 @@ impl VarContext<'_> {
 }
 #[cfg(test)]
 mod tests {
-    use crate::interpreter::runtime::RtResult;
+    use crate::interpreter::runtime::BasicRtResult;
     use crate::interpreter::runtime::Value;
 
     use super::VarContext;
 
     #[test]
-    fn scope_test() -> RtResult<()> {
+    fn scope_test() -> BasicRtResult<()> {
         let mut a = VarContext::new_with_std();
         a.declare(String::from("a"), Value::Int(1))?;
         

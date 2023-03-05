@@ -1,8 +1,9 @@
 use std::io::Write;
 use std::rc::Rc;
 
+use crate::err::{GonErr, CursorRange};
 use crate::interpreter::{RtContext, TraverseRt, ast};
-use crate::interpreter::runtime::{RtResult, RtTraversal, TermOp, ValueErr, ResolveErr, rtio};
+use crate::interpreter::runtime::{RtTraversal, TermOp, ValueErr, ResolveErr, rtio, BasicRtResult};
 
 use super::{VArbType, Value};
 
@@ -33,7 +34,7 @@ pub enum FunParamType {
 
 #[derive(PartialEq, Clone, Debug)]
 pub(super) enum GInternalFun {
-    Rust(fn(Vec<Value>) -> RtResult<rtio::Io<Value>>),
+    Rust(fn(Vec<Value>) -> BasicRtResult<rtio::Io<Value>>),
     Poligon(Vec<String>, Rc<ast::Block>, usize /* scope idx */)
 }
 
@@ -54,11 +55,13 @@ impl GonFun {
     /// 
     /// In specification, this would only compute the expressions needed for the function.
     /// In implementation, this computes all the expressions before inserting them to the function.
-    pub fn call(&self, params: &[ast::Expr], ctx: &mut RtContext) -> RtTraversal<Value> {
+    pub fn call(&self, params: &[ast::Located<ast::Expr>], ctx: &mut RtContext, range: CursorRange) -> RtTraversal<Value> {
+        // ^ HACK!, remove Located
         // check if arity matches
         if let Some(arity) = self.arity() {
             if params.len() != arity {
-                Err(ValueErr::WrongArity(arity))?;
+                let err = ValueErr::WrongArity(arity).at_range(range);
+                return Err(err.into());
             }
         }
 
@@ -67,23 +70,30 @@ impl GonFun {
             .map(|e| e.traverse_rt(ctx))
             .collect::<Result<_, _>>()?;
 
-        self.call_computed(pvals, ctx)
+        self.call_computed(pvals, ctx, range)
     }
 
     /// Call this function with a list of computed values.
-    pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut RtContext) -> RtTraversal<Value> {
+    pub fn call_computed(&self, pvals: Vec<Value>, ctx: &mut RtContext, range: CursorRange) -> RtTraversal<Value> {
         // check if arity matches
         if let Some(arity) = self.arity() {
             if pvals.len() != arity {
-                Err(ValueErr::WrongArity(arity))?;
+                let err = ValueErr::WrongArity(arity).at_range(range);
+                return Err(err.into());
             }
         }
 
         match &self.fun {
             GInternalFun::Rust(f) => {
-                let rtio::Io(out, val) = (f)(pvals).map_err(TermOp::Err)?;
-                ctx.io.write_all(&out)?;
-                Ok(val)
+                match (f)(pvals) {
+                    Ok(rtio::Io(out, val)) => {
+                        ctx.io.write_all(&out)
+                            .map_err(|e| e.at_range(range))?;
+
+                        Ok(val)
+                    },
+                    Err(e) => Err(e.at_range(range))?,
+                }
             },
             GInternalFun::Poligon(params, block, idx) => {
                 let mut fscope = ctx.branch_at(*idx);
@@ -97,8 +107,8 @@ impl GonFun {
                     Ok(t) => Ok(t),
                     Err(TermOp::Return(t)) => Ok(t),
                     Err(TermOp::Err(e))    => Err(e)?,
-                    Err(TermOp::Break)     => Err(ResolveErr::CannotBreak)?,
-                    Err(TermOp::Continue)  => Err(ResolveErr::CannotContinue)?,
+                    Err(TermOp::Break)     => Err(ResolveErr::CannotBreak.at_unknown())?,
+                    Err(TermOp::Continue)  => Err(ResolveErr::CannotContinue.at_unknown())?,
                 }
             },
         }

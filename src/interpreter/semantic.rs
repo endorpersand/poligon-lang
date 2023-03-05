@@ -10,7 +10,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::err::GonErr;
+use ast::Located;
+
+use crate::err::{GonErr, FullGonErr};
 use crate::ast;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -86,8 +88,9 @@ impl GonErr for ResolveErr {
     }
 }
 
+type FullResolveErr = FullGonErr<ResolveErr>;
 /// A [`Result`] type for operations in the static resolution process.
-pub type ResolveResult<T> = Result<T, ResolveErr>;
+pub type ResolveResult<T> = Result<T, FullResolveErr>;
 
 /// A struct that holds the resolved variables during the static resolution process.
 #[derive(Debug, PartialEq, Eq)]
@@ -227,11 +230,12 @@ trait TRsDependent {
 
 impl<T: TraverseResolve> TraverseResolve for [T] {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        for t in self {
-            t.traverse_rs(map)?
-        }
-
-        Ok(())
+        self.iter().try_for_each(|t| t.traverse_rs(map))
+    }
+}
+impl<T: TraverseResolve> TraverseResolve for &T {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        (*self).traverse_rs(map)
     }
 }
 impl<T: TraverseResolve> TraverseResolve for Option<T> {
@@ -245,11 +249,7 @@ impl<T: TraverseResolve> TraverseResolve for Option<T> {
 }
 impl<T: TRsDependent> TRsDependent for [T] {
     fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
-        for t in self {
-            t.traverse_rs(map, e)?;
-        }
-
-        Ok(())
+        self.iter().try_for_each(|t| t.traverse_rs(map, e))
     }
 }
 
@@ -271,33 +271,39 @@ impl TraverseResolve for ast::Block {
     }
 }
 
-impl TraverseResolve for ast::Stmt {
+impl TraverseResolve for Located<ast::Stmt> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        match self {
+        let Located(stmt, range) = self;
+        let range = range.clone();
+
+        match stmt {
             ast::Stmt::Decl(d)   => d.traverse_rs(map),
             ast::Stmt::Return(e) => match map.block_type() {
                 BlockType::Function => e.traverse_rs(map),
-                _ => Err(ResolveErr::CannotReturn)
+                _ => Err(ResolveErr::CannotReturn.at_range(range))?
             },
             ast::Stmt::Break => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotBreak)
+                _ => Err(ResolveErr::CannotBreak.at_range(range))?
             },
             ast::Stmt::Continue => match map.block_type() {
                 BlockType::Loop => Ok(()),
-                _ => Err(ResolveErr::CannotContinue)
+                _ => Err(ResolveErr::CannotContinue.at_range(range))?
             },
             ast::Stmt::FunDecl(f) => f.traverse_rs(map),
-            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations")),
+            ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e)   => e.traverse_rs(map),
-            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes")),
+            ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes").at_range(range))?,
         }
     }
 }
 
-impl TraverseResolve for ast::Expr {
+impl TraverseResolve for ast::Located<ast::Expr> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
-        match self {
+        let ast::Located(expr, range) = self;
+        let range = range.clone();
+
+        match expr {
             e @ ast::Expr::Ident(s) => {
                 map.resolve(e, s);
                 Ok(())
@@ -316,7 +322,7 @@ impl TraverseResolve for ast::Expr {
 
                 Ok(())
             },
-            ast::Expr::ClassLiteral(_, _) => Err(ResolveErr::CompilerOnly("classes")),
+            ast::Expr::ClassLiteral(_, _) => Err(ResolveErr::CompilerOnly("classes").at_range(range)),
             ast::Expr::Assign(lhs, rhs) => {
                 rhs.traverse_rs(map)?;
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
@@ -349,7 +355,7 @@ impl TraverseResolve for ast::Expr {
                     p.traverse_rs(map)?;
                 }
         
-                last.traverse_rs(map)
+                last.as_deref().traverse_rs(map)
             },
             ast::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
@@ -371,10 +377,10 @@ impl TraverseResolve for ast::Expr {
             },
             ast::Expr::Index(idx) => idx.traverse_rs(map),
             ast::Expr::Spread(e) => match map.sub_type() {
-                SubType::None => Err(ResolveErr::CannotSpread),
+                SubType::None => Err(ResolveErr::CannotSpread.at_range(range)),
                 SubType::List => match e {
                     Some(inner) => inner.traverse_rs(map),
-                    None => Err(ResolveErr::CannotSpreadNone),
+                    None => Err(ResolveErr::CannotSpreadNone.at_range(range)),
                 },
                 SubType::Pattern => match e {
                     Some(inner) => inner.traverse_rs(map),
@@ -419,7 +425,7 @@ impl<T: TRsDependent> TRsDependent for ast::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState, e: &ast::Expr) -> ResolveResult<()> {
         match self {
             ast::Pat::Unit(u) => u.traverse_rs(map, e),
-            ast::Pat::List(lst) => lst.traverse_rs(map, e),
+            ast::Pat::List(lst) => lst.iter().try_for_each(|t| t.traverse_rs(map, e)),
             ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map, e),
                 None => Ok(()),
@@ -431,7 +437,7 @@ impl<T: TraverseResolve> TraverseResolve for ast::Pat<T> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         match self {
             ast::Pat::Unit(u) => u.traverse_rs(map),
-            ast::Pat::List(lst) => lst.traverse_rs(map),
+            ast::Pat::List(lst) => lst.iter().try_for_each(|t| t.traverse_rs(map)),
             ast::Pat::Spread(mp) => match mp {
                 Some(p) => p.traverse_rs(map),
                 None => Ok(()),
@@ -481,6 +487,9 @@ mod tests {
         };
     }
 
+    macro_rules! Block {
+        ($e:ident) => { Located(Stmt::Expr(Located(Expr::Block(Located($e, _)), _)), _) }
+    }
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
         let program = Interpreter::from_string("a;")
@@ -526,15 +535,15 @@ mod tests {
             }
         ").parse().unwrap();
 
-        let Stmt::Expr(Expr::Block(block)) = &program.0[0] else { unreachable!() };
-        let Stmt::Expr(Expr::Block(block)) = &block.0[1] else { unreachable!() };
-        let Stmt::Expr(e) = &block.0[0] else { unreachable!() };
+        let Block!(block) = &program.0[0] else { unreachable!() };
+        let Block!(block) = &block.0[1] else { unreachable!() };
+        let Located(Stmt::Expr(e), _) = &block.0[0] else { unreachable!() };
 
         let mut state = ResolveState::new();
         state.traverse(&program)?;
 
         let steps = map! {
-            e as _ => 1
+            &**e as _ => 1
         };
 
         assert_eq!(&state.steps, &steps);

@@ -275,6 +275,19 @@ impl<E: GonErr> FullGonErr<E> {
 
         lines.join("\n")
     }
+
+    /// Map the inner error to another error.
+    pub fn map<F: GonErr>(self, f: impl FnOnce(E) -> F) -> FullGonErr<F> {
+        FullGonErr {
+            err: f(self.err),
+            position: self.position
+        }
+    }
+
+    /// Cast the inner error to another error.
+    pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
+        self.map(F::from)
+    }
 }
 
 impl<E: GonErr + PartialEq> PartialEq<E> for FullGonErr<E> {
@@ -282,3 +295,14 @@ impl<E: GonErr + PartialEq> PartialEq<E> for FullGonErr<E> {
         &self.err == other
     }
 }
+
+macro_rules! full_gon_cast_impl {
+    ($t:ty, $u:ty) => {
+        impl From<$crate::err::FullGonErr<$t>> for $crate::err::FullGonErr<$u> {
+            fn from(err: $crate::err::FullGonErr<$t>) -> Self {
+                err.cast_err()
+            }
+        }
+    }
+}
+pub(crate) use full_gon_cast_impl;

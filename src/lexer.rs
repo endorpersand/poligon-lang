@@ -134,7 +134,12 @@ fn wrapq(c: char) -> String {
 fn cur_shift((lno, cno): Cursor, chars: usize) -> Cursor {
     (lno, cno + chars)
 }
-/// Advance cursor given the character at the cursor and the characters following it
+
+/// Advance cursor to its next position.
+/// 
+/// This function returns the position of the cursor after
+/// the last provided character
+/// (whether that is the current char or the last char of extra).
 fn advance_cursor((lno, cno): Cursor, current: Option<char>, extra: &[char]) -> Cursor {
     let (mut dl, mut nc) = match current {
         Some('\n') => (1, 0),
@@ -652,9 +657,13 @@ impl Lexer {
         let mut front = self.remaining.split_off(n);
         std::mem::swap(&mut self.remaining, &mut front);
 
-        let slice = front.make_contiguous();
-        self.cursor = advance_cursor(self.cursor, self._current, slice);
-        self._current = slice.last().copied();
+        let (last, rest) = match &*front.make_contiguous() {
+            [rest @ .., last] => (Some(last), rest),
+            rest @ [] => (None, rest)
+        };
+
+        self.cursor = advance_cursor(self.cursor, self._current, rest);
+        self._current = last.copied();
         front
     }
 
@@ -1204,27 +1213,41 @@ mod tests {
 
     #[test]
     fn char_lex() {
+        macro_rules! literal {
+            (Char($e:expr), $r:expr) => {
+                &[FullToken::new(Token::Char($e), $r)]
+            };
+            (Str($e:literal), $r:expr) => {
+                &[FullToken::new(Token::Str(String::from($e)), $r)]
+            };
+        }
+
         // basic char checks
-        assert_lex("'a'", &[Token::Char('a')]);
+        assert_lex("'a'", literal![Char('a'), (0, 0) ..= (0, 2)]);
         assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail("''", LexErr::EmptyChar.at((0, 0)));
 
+        // length check
+        assert_lex("\"abc\"", literal![Str("abc"), (0, 0) ..= (0, 4)]); // "abc"
+        assert_lex("\"abc\n\"", literal![Str("abc\n"), (0, 0) ..= (1, 0)]); // "abc[new line]"
+        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), (0, 0) ..= (1, 2)]); // "abc[new line]de"
+
         // basic escape tests
-        assert_lex("'\\''", &[Token::Char('\'')]); // '\''
-        assert_lex("'\\n'", &[Token::Char('\n')]); // '\n'
-        assert_lex("\"\\e\"", &[Token::Str(String::from("\\e"))]); // '\e'
+        assert_lex("'\\''", literal![Char('\''), (0, 0) ..= (0, 3)]); // '\''
+        assert_lex("'\\n'", literal![Char('\n'), (0, 0) ..= (0, 3)]); // '\n'
+        assert_lex("\"\\e\"", literal![Str("\\e"), (0, 0) ..= (0, 3)]); // "\e"
         assert_lex_fail("'\\n", LexErr::UnclosedQuote); // '\n
         assert_lex_fail("'\\\n'", LexErr::UnclosedQuote); // '\[new line]'
         
         // \x test
-        assert_lex("'\\x14'", &[Token::Char('\x14')]);   // '\x14'
+        assert_lex("'\\x14'", literal![Char('\x14'), (0, 0) ..= (0, 5)]);   // '\x14'
         assert_lex_fail("'\\x'", LexErr::InvalidX);   // '\x'
         assert_lex_fail("'\\x0'", LexErr::InvalidX);  // '\x0'
         assert_lex_fail("'\\xqq'", LexErr::InvalidX); // '\xqq'
 
         // \u test
-        assert_lex("'\\u{0}'", &[Token::Char('\0')]); // '\u{0}'
-        assert_lex("'\\u{1f97a}'", &[Token::Char('\u{1f97a}')]); // '\u{1f97a}'
+        assert_lex("'\\u{0}'", literal![Char('\0'), (0, 0) ..= (0, 6)]); // '\u{0}'
+        assert_lex("'\\u{1f97a}'", literal![Char('\u{1f97a}'), (0, 0) ..= (0, 10)]); // '\u{1f97a}'
         assert_lex_fail("'\\u{21f97a}'", LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
         assert_lex_fail("'\\u{0000000}'", LexErr::InvalidU); // '\u{0000000}'
     }

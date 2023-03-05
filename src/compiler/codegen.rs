@@ -13,33 +13,17 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{self, ReasgType, MutType};
-use crate::err::GonErr;
+use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
 pub(crate) use self::op_impl::{CastType, OpErr};
 
-use super::plir;
+use super::plir::{self, Located};
 
 /// Produce the PLIR tree from the AST tree.
 pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
     let mut cg = CodeGenerator::new();
     cg.consume_program(t)?;
     cg.unwrap()
-}
-
-fn create_splits<T>(pats: &[ast::Pat<T>]) -> Vec<plir::Split> {
-    let len = pats.len();
-    match pats.iter().position(|pat| matches!(pat, ast::Pat::Spread(_))) {
-        Some(pt) => {
-            let rpt = len - pt;
-            
-            let mut splits: Vec<_> = (0..pt).map(plir::Split::Left).collect();
-            splits.push(plir::Split::Middle(pt, rpt));
-            splits.extend((0..rpt).rev().map(plir::Split::Right));
-
-            splits
-        },
-        None => (0..len).map(plir::Split::Left).collect(),
-    }
 }
 
 /// Errors that can occur during the PLIR creation process.
@@ -81,14 +65,17 @@ pub enum PLIRErr {
     /// Operation between two types cannot be computed.
     OpErr(OpErr)
 }
+
+type FullPLIRErr = FullGonErr<PLIRErr>;
 /// A [`Result`] type for operations in the PLIR tree creation process.
-pub type PLIRResult<T> = Result<T, PLIRErr>;
+pub type PLIRResult<T> = Result<T, FullPLIRErr>;
 
 impl From<OpErr> for PLIRErr {
     fn from(err: OpErr) -> Self {
         Self::OpErr(err)
     }
 }
+full_gon_cast_impl!(OpErr, PLIRErr);
 
 impl GonErr for PLIRErr {
     fn err_name(&self) -> &'static str {
@@ -145,7 +132,7 @@ impl GonErr for PLIRErr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum BlockExit {
     /// This block exited by returning a value.
     Return(plir::Type),
@@ -193,7 +180,7 @@ enum BlockExitHandle {
 }
 
 impl BlockBehavior {
-    fn handle_exit(&self, exit: BlockExit) -> PLIRResult<BlockExitHandle> {
+    fn handle_exit(&self, exit: BlockExit) -> Result<BlockExitHandle, PLIRErr> {
         match self {
             BlockBehavior::Function => match exit {
                 BlockExit::Return(t) => Ok(BlockExitHandle::Continue(t)),
@@ -234,19 +221,20 @@ enum Unresolved {
     Class(ast::Class),
     ExternFun(ast::FunSignature),
     Fun(ast::FunDecl),
-    FunBlock(plir::FunSignature, Rc<ast::Block>)
+    FunBlock(plir::FunSignature, Located<Rc<ast::Block>>)
 }
 
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::ProcStmt>,
+    last_stmt_loc: CursorRange, 
 
     /// All conditional exits.
-    exits: Vec<BlockExit>,
+    exits: Vec<Located<BlockExit>>,
     /// The *unconditional* exit.
     /// If this is present, this is the last statement of the block.
     /// If a conditional exit does not pass, this exit is how the block exits.
-    final_exit: Option<BlockExit>,
+    final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<String, plir::Type>,
     types: HashMap<String, TypeData>,
@@ -254,9 +242,10 @@ struct InsertBlock {
 }
 
 impl InsertBlock {
-    fn new() -> Self {
+    fn new(block_range: CursorRange) -> Self {
         Self {
             block: vec![],
+            last_stmt_loc: block_range,
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
@@ -268,6 +257,7 @@ impl InsertBlock {
     fn top() -> Self {
         Self {
             block: vec![],
+            last_stmt_loc: (0, 0) ..= (0, 0),
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
@@ -323,15 +313,18 @@ impl InsertBlock {
     /// 
     /// The return indicates whether or not another statement 
     /// can be pushed into the insert block (whether a final exit has been set).
-    fn push_stmt(&mut self, stmt: impl Into<plir::ProcStmt>) -> bool {
+    fn push_stmt(&mut self, stmt: Located<impl Into<plir::ProcStmt>>) -> bool {
         use plir::ProcStmt;
+
+        let Located(stmt, stmt_range) = stmt;
         match stmt.into() {
-            ProcStmt::Return(e) => self.push_return(e),
-            ProcStmt::Break => self.push_break(),
-            ProcStmt::Continue => self.push_cont(),
+            ProcStmt::Return(e) => self.push_return(e, stmt_range),
+            ProcStmt::Break => self.push_break(stmt_range),
+            ProcStmt::Continue => self.push_cont(stmt_range),
             st => {
                 if self.is_open() {
-                    self.block.push(st)
+                    self.block.push(st);
+                    self.last_stmt_loc = stmt_range;
                 }
 
                 self.is_open()
@@ -343,14 +336,14 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_return(&mut self, me: Option<plir::Expr>) -> bool {
+    fn push_return(&mut self, me: Option<plir::Expr>, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             let ty = match me {
                 Some(ref e) => e.ty.clone(),
                 None => plir::ty!(plir::Type::S_VOID),
             };
             self.block.push(plir::ProcStmt::Return(me));
-            self.final_exit.replace(BlockExit::Return(ty));
+            self.final_exit.replace(Located::new(BlockExit::Return(ty), stmt_range));
         }
 
         false
@@ -360,10 +353,10 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_break(&mut self) -> bool {
+    fn push_break(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Break);
-            self.final_exit.replace(BlockExit::Break);
+            self.final_exit.replace(Located::new(BlockExit::Break, stmt_range));
         }
 
         false
@@ -373,10 +366,10 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_cont(&mut self) -> bool {
+    fn push_cont(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Continue);
-            self.final_exit.replace(BlockExit::Continue);
+            self.final_exit.replace(Located::new(BlockExit::Continue, stmt_range));
         }
 
         false
@@ -403,7 +396,8 @@ impl InsertBlock {
 #[derive(Clone, PartialEq, Eq)]
 struct Var {
     ident: String,
-    ty: plir::Type
+    ty: plir::Type,
+    decl_range: CursorRange
 }
 impl Var {
     fn into_expr(self) -> plir::Expr {
@@ -411,7 +405,8 @@ impl Var {
     }
 
     fn split(self, sp: plir::Split) -> PLIRResult<plir::Expr> {
-        let t = self.ty.split(sp)?;
+        let t = self.ty.split(sp)
+            .map_err(|e| e.at_range(self.decl_range))?;
         let e = plir::Expr::new(t, plir::ExprType::Split(self.ident, sp));
         Ok(e)
     }
@@ -519,20 +514,22 @@ impl CodeGenerator {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, exits, unresolved, .. } = self.program;
+        let InsertBlock {block, mut exits, unresolved, .. } = self.program;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
-        match exits.last() {
+        match exits.pop() {
             None => Ok(plir::Program(self.globals, block)),
-            Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
-            Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
-            Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
-            Some(BlockExit::Exit(_))   => Err(PLIRErr::CannotReturn),
+            Some(Located(exit, range)) => match exit {
+                BlockExit::Break     => Err(PLIRErr::CannotBreak.at_range(range)),
+                BlockExit::Continue  => Err(PLIRErr::CannotContinue.at_range(range)),
+                BlockExit::Return(_) => Err(PLIRErr::CannotReturn.at_range(range)),
+                BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn.at_range(range)),
+            }
         }
     }
 
-    fn push_block(&mut self) {
-        self.blocks.push(InsertBlock::new())
+    fn push_block(&mut self, block_range: CursorRange) {
+        self.blocks.push(InsertBlock::new(block_range))
     }
     fn pop_block(&mut self) -> Option<InsertBlock> {
         self.blocks.pop()
@@ -604,11 +601,11 @@ impl CodeGenerator {
             .find_map(f)
     }
 
-    fn get_var_type(&mut self, ident: &str) -> PLIRResult<&plir::Type> {
+    fn get_var_type(&mut self, ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
         self.resolve_ident(ident)?;
 
         self.find_scoped(|ib| ib.vars.get(ident))
-            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
+            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)).at_range(range))
     }
 
     /// Identifier needs to be resolved beforehand, via [`CodeGenerator::resolve_ident`].
@@ -616,12 +613,15 @@ impl CodeGenerator {
         self.find_scoped(|ib| ib.vars.get(ident))
     }
 
-    fn get_class(&mut self, ty: &plir::Type) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
 
         match ty {
             plir::Type::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
-                .ok_or_else(|| PLIRErr::UndefinedType(String::from(ident))),
+                .ok_or_else(|| {
+                    PLIRErr::UndefinedType(String::from(ident))
+                        .at_range(range)
+                }),
             _ => todo!()
         }
     }
@@ -632,7 +632,7 @@ impl CodeGenerator {
         string
     }
 
-    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr) -> Var {
+    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr, decl_range: CursorRange) -> Var {
         let ident = self.tmp_var_name(ident);
         let ety = e.ty.clone();
 
@@ -644,11 +644,12 @@ impl CodeGenerator {
             val: e,
         };
 
-        self.peek_block().push_stmt(decl);
+        self.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
 
         Var {
             ident,
-            ty: ety
+            ty: ety,
+            decl_range
         }
     }
 
@@ -665,17 +666,17 @@ impl CodeGenerator {
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, stmts: Vec<ast::Stmt>) -> PLIRResult<()> {
+    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=Located<ast::Stmt>>) -> PLIRResult<()> {
         let mut eager_stmts = vec![];
         for stmt in stmts {
             match stmt {
-                ast::Stmt::FunDecl(fd) => {
+                Located(ast::Stmt::FunDecl(fd), _) => {
                     self.peek_block().insert_unresolved(Unresolved::Fun(fd));
                 },
-                ast::Stmt::ExternFunDecl(fs) => {
+                Located(ast::Stmt::ExternFunDecl(fs), _) => {
                     self.peek_block().insert_unresolved(Unresolved::ExternFun(fs));
                     }
-                ast::Stmt::ClassDecl(cls) => {
+                Located(ast::Stmt::ClassDecl(cls), _) => {
                     self.peek_block().insert_unresolved(Unresolved::Class(cls));
                 }
                 s => eager_stmts.push(s),
@@ -715,24 +716,26 @@ impl CodeGenerator {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_eager_stmt(&mut self, stmt: ast::Stmt) -> PLIRResult<bool> {
+    fn consume_eager_stmt(&mut self, stmt: Located<ast::Stmt>) -> PLIRResult<bool> {
+        let Located(stmt, range) = stmt;
+
         match stmt {
-            ast::Stmt::Decl(d) => self.consume_decl(d),
+            ast::Stmt::Decl(d) => self.consume_decl(Located::new(d, range)),
             ast::Stmt::Return(me) => {
                 let maybe_expr = match me {
                     Some(e) => Some(self.consume_expr(e)?),
                     None => None,
                 };
-                Ok(self.peek_block().push_return(maybe_expr))
+                Ok(self.peek_block().push_return(maybe_expr, range))
             },
             ast::Stmt::Break => {
-                Ok(self.peek_block().push_break())
+                Ok(self.peek_block().push_break(range))
             },
             ast::Stmt::Continue => {
-                Ok(self.peek_block().push_cont())
+                Ok(self.peek_block().push_cont(range))
             },
             ast::Stmt::Expr(e) => {
-                let e = self.consume_expr(e)?;
+                let e = self.consume_located_expr(e)?;
                 Ok(self.peek_block().push_stmt(e))
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
@@ -748,7 +751,8 @@ impl CodeGenerator {
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
-            mut block, exits, final_exit, 
+            mut block, last_stmt_loc, 
+            exits, final_exit, 
             vars: _, types: _, unresolved 
         } = block;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
@@ -777,16 +781,19 @@ impl CodeGenerator {
 
             if btype == BlockBehavior::Function {
                 block.push(ProcStmt::Return(exit_expr));
-                BlockExit::Return(exit_ty)
+                Located::new(BlockExit::Return(exit_ty), last_stmt_loc)
             } else {
                 block.push(ProcStmt::Exit(exit_expr));
-                BlockExit::Exit(exit_ty)
+                Located::new(BlockExit::Exit(exit_ty), last_stmt_loc)
             }
         });
 
         // Type check block:
         if let Some(exp_ty) = expected_ty {
-            match &mut final_exit {
+            let Located(fexit, exit_range) = &mut final_exit;
+            let exit_range = exit_range.clone();
+
+            match fexit {
                 | BlockExit::Return(exit_ty) 
                 | BlockExit::Exit(exit_ty) 
                 => if exit_ty.as_ref() != exp_ty.as_ref() {
@@ -801,10 +808,10 @@ impl CodeGenerator {
                                 me.replace(e);
                                 *exit_ty = exp_ty;
                             },
-                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
                         },
                         // exit_ty is void, and we already checked that exp_ty is not void
-                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
                     }
                 },
                 // what is done here?
@@ -815,8 +822,8 @@ impl CodeGenerator {
 
         // resolve block's types and handle the methods of exiting the block
         let mut type_branches = vec![];
-        for exit in exits {
-            match btype.handle_exit(exit)? {
+        for Located(exit, exit_range) in exits {
+            match btype.handle_exit(exit.clone())? {
                 BlockExitHandle::Continue(ty) => type_branches.push(ty),
                 BlockExitHandle::LoopExit => {},
 
@@ -824,18 +831,21 @@ impl CodeGenerator {
                 // this is already conditional.
                 // as such, just propagate as a conditional exit.
                 BlockExitHandle::Propagate(exit, _) => {
-                    self.peek_block().exits.push(exit);
+                    self.peek_block().exits.push(Located::new(exit, exit_range));
                 },
             }
         }
+
+        let Located(final_exit, exit_range) = final_exit;
         match btype.handle_exit(final_exit)? {
             BlockExitHandle::Continue(ty) => type_branches.push(ty),
             BlockExitHandle::LoopExit => {},
             BlockExitHandle::Propagate(exit, conditional) => {
+                let located_exit = Located::new(exit, exit_range);
                 if conditional {
-                    self.peek_block().exits.push(exit);
+                    self.peek_block().exits.push(located_exit);
                 } else {
-                    self.peek_block().final_exit.replace(exit);
+                    self.peek_block().final_exit.replace(located_exit);
                 }
             },
         }
@@ -846,55 +856,79 @@ impl CodeGenerator {
     }
     fn consume_tree_block(
         &mut self, 
-        block: ast::Block, 
+        block: Located<ast::Block>, 
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
-        self.push_block();
+        let Located(ast::Block(stmts), block_range) = block;
+
+        self.push_block(block_range);
         // collect all the statements from this block
-        self.consume_stmts(block.0)?;
+        self.consume_stmts(stmts)?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype, expected_ty)
     }
 
     fn unpack_pat<T, E>(
         &mut self, 
-        pat: ast::Pat<T>, 
-        expr: plir::Expr, 
-        extra: E, 
-        mut split_extra: impl FnMut(&E, plir::Split) -> PLIRResult<E>,
-        mut map: impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
-        consume_var: bool
+        pat: Located<ast::Pat<T>>, 
+        expr: Located<plir::Expr>, 
+        (extra, mut split_extra): (E, impl FnMut(&E, plir::Split) -> PLIRResult<E>),
+        mut map: impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
+        consume_var: bool,
+        stmt_range: CursorRange
     ) -> PLIRResult<()> {
-        self.unpack_pat_inner(pat, expr, extra, &mut split_extra, &mut map, consume_var)
+        self.unpack_pat_inner(pat, expr, (extra, &mut split_extra), &mut map, consume_var, stmt_range)
     }
 
     fn unpack_pat_inner<T, E>(
         &mut self, 
-        pat: ast::Pat<T>, 
-        expr: plir::Expr, 
-        extra: E, 
-        split_extra: &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>,
-        map: &mut impl FnMut(&mut Self, T, plir::Expr, E) -> PLIRResult<()>,
-        consume_var: bool
+        pat: Located<ast::Pat<T>>, 
+        expr: Located<plir::Expr>, 
+        extra: (E, &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>),
+        map: &mut impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
+        consume_var: bool,
+        stmt_range: CursorRange
     ) -> PLIRResult<()> {
+        fn create_splits<T>(pats: &[&ast::Pat<T>]) -> Vec<plir::Split> {
+            let len = pats.len();
+            match pats.iter().position(|pat| matches!(pat, ast::Pat::Spread(_))) {
+                Some(pt) => {
+                    let rpt = len - pt;
+                    
+                    let mut splits: Vec<_> = (0..pt).map(plir::Split::Left).collect();
+                    splits.push(plir::Split::Middle(pt, rpt));
+                    splits.extend((0..rpt).rev().map(plir::Split::Right));
+
+                    splits
+                },
+                None => (0..len).map(plir::Split::Left).collect(),
+            }
+        }
+
+        let Located(pat, range) = pat;
         match pat {
-            ast::Pat::Unit(t) => map(self, t, expr, extra),
+            ast::Pat::Unit(t) => map(self, Located::new(t, range), expr, extra.0),
             ast::Pat::Spread(spread) => match spread {
-                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, split_extra, map, consume_var),
+                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, map, consume_var, stmt_range),
                 None => Ok(()),
             },
             ast::Pat::List(pats) => {
-                let var = self.push_tmp_decl("decl", expr);
+                let var = expr.map(|e| self.push_tmp_decl("decl", e, stmt_range.clone()));
+                let delocated: Vec<_> = pats.iter().map(|t| &t.0).collect();
+                let (extra, split_extra) = extra;
 
-                for (idx, pat) in std::iter::zip(create_splits(&pats), pats) {
-                    let rhs = var.clone().split(idx)?;
+                for (idx, pat) in std::iter::zip(create_splits(&delocated), pats) {
+                    let rhs = var.clone().map(|v| v.split(idx))
+                        .transpose_result()?;
+
                     let extr = split_extra(&extra, idx)?;
-                    self.unpack_pat_inner(pat, rhs, extr, split_extra, map, false)?;
+                    self.unpack_pat_inner(pat, rhs, (extr, split_extra), map, false, stmt_range.clone())?;
                 }
 
+                // On final statement, consume the var, and return its original value.
                 if consume_var {
-                    self.peek_block().push_stmt(var.into_expr());
+                    self.peek_block().push_stmt(Located::new(var.0.into_expr(), stmt_range));
                 }
                 Ok(())
             },
@@ -904,40 +938,45 @@ impl CodeGenerator {
     /// Consume a declaration into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_decl(&mut self, decl: ast::Decl) -> PLIRResult<bool> {
-        let ast::Decl { rt, pat, ty, val } = decl;
-
-        let e = self.consume_expr(val)?;
+    fn consume_decl(&mut self, decl: Located<ast::Decl>) -> PLIRResult<bool> {
+        let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
+        
+        let e = self.consume_located_expr(val)?;
         let ty = match ty {
             Some(t) => Some(self.consume_type(t)?),
             None => None,
         };
 
-        self.unpack_pat(pat, e, (rt, ty), 
-            |(rt, mty), idx| {
+        self.unpack_pat(pat, e, 
+            ((rt, ty), |(rt, mty), idx| {
                 Ok((*rt, match mty {
-                    Some(t) => Some(t.split(idx)?),
+                    Some(t) => Some(t.split(idx).map_err(|e| {
+                        e.at_range(decl_range.clone())
+                    })?),
                     None => None,
                 }))
-            }, 
+            }),
             |this, unit, e, extra| {
-                let ast::DeclUnit(ident, mt) = unit;
+                let Located(ast::DeclUnit(ident, mt), _) = unit;
+                let Located(e, erange) = e;
+
                 let (rt, ty) = extra;
 
                 let ty = ty.unwrap_or_else(|| e.ty.clone());
                 // Type check decl, casting if possible
                 let e = match op_impl::apply_special_cast(e, &ty, CastType::Decl) {
                     Ok(e) => e,
-                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty)),
+                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty).at_range(erange)),
                 };
 
                 this.declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                this.peek_block().push_stmt(decl);
+                this.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
 
                 Ok(())
             },
-            false
+            false,
+            decl_range.clone()
         )?;
 
         Ok(self.peek_block().is_open())
@@ -979,12 +1018,13 @@ impl CodeGenerator {
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Rc<ast::Block>) -> PLIRResult<bool> {
-        let old_block = std::rc::Rc::try_unwrap(block)
+    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<bool> {
+        let Located(block, block_range) = block;
+        let old_block = Rc::try_unwrap(block)
             .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
     
         let block = {
-            self.push_block();
+            self.push_block(block_range);
 
             for plir::Param { ident, ty, .. } in sig.params.iter() {
                 self.declare(ident, ty.clone());
@@ -1003,11 +1043,12 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
-    fn consume_type(&mut self, ty: ast::Type) -> PLIRResult<plir::Type> {
+    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+        let Located(ty, range) = ty;
         let ty = plir::Type::from(ty);
 
         // See if class is initialized, and if so, return the plir Type
-        self.get_class(&ty).map(|_| ty)
+        self.get_class(&ty, range).map(|_| ty)
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
@@ -1038,7 +1079,9 @@ impl CodeGenerator {
                     rt: Default::default(), 
                     mt: Default::default(), 
                     ident: this, 
-                    ty: Some(ast::Type(cls.ident.clone(), vec![]))
+                    // since this is synthesized, there's no real cursor,
+                    // so just assign an arbitary one
+                    ty: Some(Located::new(ast::Type(cls.ident.clone(), vec![]), (0, 0) ..= (0, 0)))
                 });
             } else {
                 // TODO, use this ident
@@ -1059,11 +1102,13 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
-    fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
+    fn consume_expr(&mut self, value: Located<ast::Expr>) -> PLIRResult<plir::Expr> {
+        let Located(expr, range) = value;
+        
         match expr {
             ast::Expr::Ident(ident) => {
                 Ok(plir::Expr::new(
-                    self.get_var_type(&ident)?.clone(),
+                    self.get_var_type(&ident, range)?.clone(),
                     plir::ExprType::Ident(ident)
                 ))
             },
@@ -1130,29 +1175,38 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::ClassLiteral(ty, entries) => {
+                let tyrange = ty.range();
                 let ty = self.consume_type(ty)?;
+
                 let mut entries: HashMap<_, _> = entries.into_iter()
-                    .map(|(k, v)| Ok((k, self.consume_expr(v)?)))
+                    .map(|(Located(k, krange), v)| {
+                        Ok((k, (krange, self.consume_located_expr(v)?)))
+                    })
                     .collect::<PLIRResult<_>>()?;
                 
-                let cls = self.get_class(&ty)?;
+                let cls = self.get_class(&ty, tyrange.clone())?;
                 let fields = cls.fields()
-                    .ok_or_else(|| PLIRErr::CannotInitialize(ty.clone()))?;
+                    .ok_or_else(|| {
+                        PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
+                    })?;
                 
                 let new_entries = fields.iter()
                     .map(|(k, fd)| {
-                        let fexpr = entries.remove(k)
-                            .ok_or_else(|| PLIRErr::UninitializedField(ty.clone(), k.clone()))?;
+                        let (_, Located(fexpr, erange)) = entries.remove(k)
+                            .ok_or_else(|| {
+                                PLIRErr::UninitializedField(ty.clone(), k.clone())
+                                    .at_range(tyrange.clone())
+                            })?;
                         
                         let fexpr = op_impl::apply_special_cast(fexpr, &fd.ty, CastType::Decl)
-                            .map_err(|e| PLIRErr::ExpectedType(fd.ty.clone(), e.ty))?;
+                            .map_err(|e| PLIRErr::ExpectedType(fd.ty.clone(), e.ty).at_range(erange))?;
 
                         Ok(fexpr)
                     })
                     .collect::<PLIRResult<_>>()?;
                 
-                if let Some((f, _)) = entries.into_iter().next() {
-                    Err(PLIRErr::UnexpectedField(ty, f))
+                if let Some((f, (krange, _))) = entries.into_iter().next() {
+                    Err(PLIRErr::UnexpectedField(ty, f).at_range(krange))
                 } else {
                     Ok(plir::Expr::new(
                         ty.clone(), 
@@ -1161,36 +1215,38 @@ impl CodeGenerator {
                 }
             },
             ast::Expr::Assign(pat, expr) => {
-                let expr = self.consume_expr(*expr)?;
+                let expr = self.consume_located_expr(*expr)?;
 
-                self.push_block();
-                self.unpack_pat(pat, expr, (), |_, _| Ok(()),
+                self.push_block(range.clone());
+                self.unpack_pat(pat, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
+                        let Located(unit, range) = unit;
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
                             ast::AsgUnit::Path(p) => {
-                                let p = this.consume_path(p)?;
+                                let p = this.consume_path(Located::new(p, range.clone()))?;
                                 if matches!(p, plir::Path::Method(..)) {
-                                    Err(PLIRErr::CannotAssignToMethod)?
+                                    Err(PLIRErr::CannotAssignToMethod.at_range(range.clone()))?
                                 } else {
                                     plir::AsgUnit::Path(p)
                                 }
                             },
                             ast::AsgUnit::Index(idx) => {
-                                let (_, idx) = this.consume_index(idx)?;
+                                let (_, idx) = this.consume_index(idx, range.clone())?;
                                 plir::AsgUnit::Index(idx)
                             },
                         };
                         
                         let asg = plir::Expr::new(
                             e.ty.clone(),
-                            plir::ExprType::Assign(unit, Box::new(e))
+                            plir::ExprType::Assign(unit, Box::new(e.0))
                         );
 
-                        this.peek_block().push_stmt(asg);
+                        this.peek_block().push_stmt(Located::new(asg, range));
                         Ok(())
                     },
-                    true
+                    true,
+                    range
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
@@ -1198,24 +1254,24 @@ impl CodeGenerator {
                     .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
             },
             ast::Expr::Path(p) => {
-                self.consume_path(p).map(Into::into)
+                self.consume_path(Located::new(p, range)).map(Into::into)
             },
             ast::Expr::StaticPath(ty, attr) => {
                 let ty = self.consume_type(ty)?;
                 let ident = format!("{ty}::{attr}");
-                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident)?.clone()))
+                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident, range)?.clone()))
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
                 let e = self.consume_expr(*expr)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(e, |expr, op| self.apply_unary(expr, op))
+                    .try_fold(e, |expr, op| self.apply_unary(expr, op, range.clone()))
             },
             ast::Expr::BinaryOp { op, left, right } => {
                 let left = self.consume_expr(*left)?;
                 let right = self.consume_expr(*right)?;
-                self.apply_binary(op, left, right)
+                self.apply_binary(op, left, right, range)
             },
             ast::Expr::Comparison { left, rights } => {
                 let left = self.consume_expr_and_box(*left)?;
@@ -1291,53 +1347,63 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let funct = self.consume_expr(*funct)?;
+                let funct = self.consume_located_expr(*funct)?;
+
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType(param_tys, _)) => {
                         if param_tys.len() != params.len() {
-                            Err(PLIRErr::WrongArity(param_tys.len(), params.len()))?;
+                            let err = PLIRErr::WrongArity(param_tys.len(), params.len()).at_range(range);
+                            return Err(err);
                         }
 
                         let params = std::iter::zip(param_tys.iter(), params)
                             .map(|(pty, expr)| {
-                                let param = self.consume_expr(expr)?;
+                                let Located(param, prange) = self.consume_located_expr(expr)?;
                                 op_impl::apply_special_cast(param, pty, CastType::Call)
-                                    .map_err(|e| PLIRErr::ExpectedType(pty.clone(), e.ty))
+                                    .map_err(|e| {
+                                        PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)
+                                    })
                             })
                             .collect::<Result<_, _>>()?;
 
                         plir::Expr::call(funct, params)
                     },
-                    t => Err(PLIRErr::CannotCall(t.clone()))
+                    t => Err(PLIRErr::CannotCall(t.clone()).at_range(funct.range()))
                 }
             },
             ast::Expr::Index(idx) => {
-                self.consume_index(idx)
+                self.consume_index(idx, range)
                     .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
-            ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
+            ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread.at_range(range)),
         }
     }
 
-    fn consume_expr_and_box(&mut self, expr: ast::Expr) -> PLIRResult<Box<plir::Expr>> {
+    fn consume_located_expr(&mut self, expr: Located<ast::Expr>) -> PLIRResult<Located<plir::Expr>> {
+        let range = expr.range();
+        self.consume_expr(expr)
+            .map(|e| Located::new(e, range))
+    }
+    fn consume_expr_and_box(&mut self, expr: Located<ast::Expr>) -> PLIRResult<Box<plir::Expr>> {
         self.consume_expr(expr).map(Box::new)
     }
 
-    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
-        let ast::Path { obj, attrs } = p;
+    fn consume_path(&mut self, p: Located<ast::Path>) -> PLIRResult<plir::Path> {
+        let Located(ast::Path { obj, attrs }, expr_range) = p;
+
         let obj = self.consume_expr_and_box(*obj)?;
         let mut path = plir::Path::Struct(obj, vec![]);
 
         for attr in attrs {
             let top_ty = path.ty();
-            let cls = self.get_class(&top_ty)?;
+            let cls = self.get_class(&top_ty, expr_range.clone())?;
 
             if let Some(metref) = cls.get_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
                     Err(PLIRErr::CannotAccessOnMethod)?;
                 } else {
                     let metref = metref.to_string();
-                    let mut fun_ty: plir::FunType = self.get_var_type(&metref)?
+                    let mut fun_ty: plir::FunType = self.get_var_type(&metref, expr_range.clone())?
                         .clone()
                         .try_into()?;
                     fun_ty.pop_front();
@@ -1360,15 +1426,15 @@ impl CodeGenerator {
 
         Ok(path)
     }
-    fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
+    fn consume_index(&mut self, idx: ast::Index, expr_range: CursorRange) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
 
         let ast::Index { expr, index } = idx;
 
-        let expr = self.consume_expr(*expr)?;
+        let expr = self.consume_located_expr(*expr)?;
         let index = self.consume_expr(*index)?;
         
-        op_impl::apply_index(expr, index)
+        op_impl::apply_index(expr, index, expr_range)
     }
 }
 
@@ -1462,6 +1528,7 @@ mod tests {
             "fun_cast_check_fail_1",
             "fun_cast_check_fail_2",
             "fun_cast_check_fail_3",
+            "fun_cast_check_fail_4",
             "type_res_fail_1",
             "type_res_fail_2",
             "type_res_fail_3",

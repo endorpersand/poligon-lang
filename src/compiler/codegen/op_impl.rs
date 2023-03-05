@@ -1,6 +1,6 @@
 use crate::ast::{op, Literal};
 use crate::compiler::plir::*;
-use crate::err::GonErr;
+use crate::err::{GonErr, CursorRange};
 
 use super::PLIRResult;
 
@@ -151,7 +151,7 @@ impl super::CodeGenerator {
         Ok(e)
     }
     
-    pub(super) fn apply_unary(&mut self, e: Expr, op: op::Unary) -> PLIRResult<Expr> {
+    pub(super) fn apply_unary(&mut self, e: Expr, op: op::Unary, unary_range: CursorRange) -> PLIRResult<Expr> {
         // Check for any valid casts that can be applied here:
         let cast = match op {
             op::Unary::Plus => {
@@ -177,9 +177,11 @@ impl super::CodeGenerator {
                 (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
                 (op, tyref) => {
                     let fun = self.find_unary(op, tyref)?
-                        .ok_or(OpErr::CannotUnary(op, ty))?;
+                        .ok_or_else(|| {
+                            OpErr::CannotUnary(op, ty).at_range(unary_range.clone())
+                        })?;
                     
-                    return Expr::call(fun, vec![cast]);
+                    return Expr::call(Located::new(fun, unary_range), vec![cast]);
                 }
             }
         };
@@ -225,7 +227,13 @@ impl super::CodeGenerator {
         Ok(e)
     }
 
-    pub(super) fn apply_binary(&mut self, op: op::Binary, left: Expr, right: Expr) -> PLIRResult<Expr> {
+    pub(super) fn apply_binary(
+        &mut self, 
+        op: op::Binary, 
+        left: Expr, 
+        right: Expr, 
+        expr_range: CursorRange
+    ) -> PLIRResult<Expr> {
         // Check for any valid casts that can be applied here:
         let (lcast, rcast) = match op {
             op::Binary::Add => {
@@ -282,9 +290,12 @@ impl super::CodeGenerator {
                 (op::Binary::LogOr, l, r) if l == r => left,
                 (op, leftref, rightref) => {
                     let fun = self.find_binary(op, leftref, rightref)?
-                        .ok_or_else(|| OpErr::CannotBinary(op, left, right.clone()))?;
+                        .ok_or_else(|| {
+                            OpErr::CannotBinary(op, left, right.clone())
+                                .at_range(expr_range.clone())
+                        })?;
 
-                    return Expr::call(fun, vec![lcast, rcast]);
+                    return Expr::call(Located::new(fun, expr_range), vec![lcast, rcast]);
                 }
             }
         };
@@ -295,7 +306,9 @@ impl super::CodeGenerator {
 }
 
 
-pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
+pub fn apply_index(left: Located<Expr>, index: Expr, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
+    let Located(left, lrange) = left;
+
     // Check for any valid casts that can be applied here:
     let lcast = apply_cast(left, &ty!(Type::S_STR)).into_inner();
 
@@ -307,7 +320,7 @@ pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
         
         TypeRef::Generic(Type::S_DICT, [k, _]) => apply_cast(index, k).into_inner(),
         
-        _ => return Err(OpErr::CannotIndex(lcast.ty).into())
+        _ => return Err(OpErr::CannotIndex(lcast.ty).at_range(lrange).into())
     };
 
     // Type check and compute resulting expr type:
@@ -320,15 +333,17 @@ pub fn apply_index(left: Expr, index: Expr) -> PLIRResult<(Type, Index)> {
             (TypeRef::Generic(Type::S_DICT, [k, v]), idx) if idx == k => v.clone(),
             (TypeRef::Tuple(tys), TypeRef::Prim(Type::S_INT)) => {
                 let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
-                    return Err(OpErr::TupleIndexNonLiteral(left).into());
+                    let err = OpErr::TupleIndexNonLiteral(left).at_range(expr_range);
+                    return Err(err.into());
                 };
                 let Ok(idx) = usize::try_from(lit) else {
-                    return Err(OpErr::TupleIndexOOB(left, lit).into());
+                    let err = OpErr::TupleIndexOOB(left, lit).at_range(expr_range);
+                    return Err(err.into());
                 };
 
-                tys.get(idx).cloned().ok_or_else(|| OpErr::TupleIndexOOB(left, lit))?
+                tys.get(idx).cloned().ok_or_else(|| OpErr::TupleIndexOOB(left, lit).at_range(expr_range))?
             },
-            _ => Err(OpErr::CannotIndexWith(left, index.clone()))?
+            _ => Err(OpErr::CannotIndexWith(left, index.clone()).at_range(expr_range))?
         }
     };
 

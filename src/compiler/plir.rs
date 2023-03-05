@@ -9,13 +9,13 @@
 //! 
 //! [AST]: crate::ast
 
-mod display;
 mod types;
 
 use std::borrow::Cow;
 
 use crate::ast::{op, self};
 pub use crate::ast::Located;
+use crate::err::GonErr;
 pub use types::*;
 pub(crate) use types::ty;
 
@@ -189,7 +189,6 @@ mod stmt {
     }
 }
 
-use stmt::EndsWithBlock;
 pub use stmt::*;
 
 use super::codegen::{PLIRErr, PLIRResult};
@@ -326,8 +325,12 @@ impl Expr {
     }
 
     /// Creates a call using call parameters.
-    pub fn call(fun: Expr, params: Vec<Expr>) -> PLIRResult<Self> {
-        let Type::Fun(ft) = &fun.ty else { return Err(PLIRErr::CannotCall(fun.ty)) };
+    pub fn call(lfun: Located<Expr>, params: Vec<Expr>) -> PLIRResult<Self> {
+        let Located(fun, range) = lfun;
+        
+        let Type::Fun(ft) = &fun.ty else {
+            return Err(PLIRErr::CannotCall(fun.ty).at_range(range))
+        };
 
         Ok(Expr::new(
             (*ft.1).clone(), 
