@@ -13,11 +13,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{self, ReasgType, MutType};
-use crate::err::GonErr;
+use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
 pub(crate) use self::op_impl::{CastType, OpErr};
 
-use super::plir;
+use super::plir::{self, Located};
 
 /// Produce the PLIR tree from the AST tree.
 pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
@@ -81,14 +81,17 @@ pub enum PLIRErr {
     /// Operation between two types cannot be computed.
     OpErr(OpErr)
 }
+
+type FullPLIRErr = FullGonErr<PLIRErr>;
 /// A [`Result`] type for operations in the PLIR tree creation process.
-pub type PLIRResult<T> = Result<T, PLIRErr>;
+pub type PLIRResult<T> = Result<T, FullPLIRErr>;
 
 impl From<OpErr> for PLIRErr {
     fn from(err: OpErr) -> Self {
         Self::OpErr(err)
     }
 }
+full_gon_cast_impl!(OpErr, PLIRErr);
 
 impl GonErr for PLIRErr {
     fn err_name(&self) -> &'static str {
@@ -720,7 +723,7 @@ impl CodeGenerator {
             ast::Stmt::Decl(d) => self.consume_decl(d),
             ast::Stmt::Return(me) => {
                 let maybe_expr = match me {
-                    Some(e) => Some(self.consume_expr(e.0)?),
+                    Some(e) => Some(self.consume_expr(e)?),
                     None => None,
                 };
                 Ok(self.peek_block().push_return(maybe_expr))
@@ -732,7 +735,7 @@ impl CodeGenerator {
                 Ok(self.peek_block().push_cont())
             },
             ast::Stmt::Expr(e) => {
-                let e = self.consume_expr(e.0)?;
+                let e = self.consume_expr(e)?;
                 Ok(self.peek_block().push_stmt(e))
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
@@ -908,7 +911,7 @@ impl CodeGenerator {
     fn consume_decl(&mut self, decl: ast::Decl) -> PLIRResult<bool> {
         let ast::Decl { rt, pat, ty, val } = decl;
 
-        let e = self.consume_expr(val.0)?;
+        let e = self.consume_expr(val)?;
         let ty = match ty {
             Some(t) => Some(self.consume_type(t)?),
             None => None,
@@ -1060,7 +1063,9 @@ impl CodeGenerator {
         Ok(self.peek_block().is_open())
     }
 
-    fn consume_expr(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
+    fn consume_expr(&mut self, value: Located<ast::Expr>) -> PLIRResult<plir::Expr> {
+        let Located(expr, range) = value;
+        
         match expr {
             ast::Expr::Ident(ident) => {
                 Ok(plir::Expr::new(
@@ -1088,7 +1093,7 @@ impl CodeGenerator {
             },
             ast::Expr::ListLiteral(lst) => {
                 let new_inner: Vec<_> = lst.into_iter()
-                    .map(|e| self.consume_expr(e.0))
+                    .map(|e| self.consume_expr(e))
                     .collect::<Result<_, _>>()?;
 
                 let elem_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
@@ -1101,7 +1106,7 @@ impl CodeGenerator {
             },
             ast::Expr::SetLiteral(set) => {
                 let new_inner: Vec<_> = set.into_iter()
-                    .map(|e| self.consume_expr(e.0))
+                    .map(|e| self.consume_expr(e))
                     .collect::<Result<_, _>>()?;
 
                 let elem_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
@@ -1114,7 +1119,7 @@ impl CodeGenerator {
             },
             ast::Expr::DictLiteral(entries) => {
                 let new_inner: Vec<_> = entries.into_iter()
-                    .map(|(k, v)| Ok((self.consume_expr(k.0)?, self.consume_expr(v.0)?)))
+                    .map(|(k, v)| Ok((self.consume_expr(k)?, self.consume_expr(v)?)))
                     .collect::<PLIRResult<_>>()?;
 
                 let (key_tys, val_tys): (Vec<_>, Vec<_>) = new_inner.iter()
@@ -1133,7 +1138,7 @@ impl CodeGenerator {
             ast::Expr::ClassLiteral(ty, entries) => {
                 let ty = self.consume_type(ty)?;
                 let mut entries: HashMap<_, _> = entries.into_iter()
-                    .map(|(k, v)| Ok((k, self.consume_expr(v.0)?)))
+                    .map(|(k, v)| Ok((k, self.consume_expr(v)?)))
                     .collect::<PLIRResult<_>>()?;
                 
                 let cls = self.get_class(&ty)?;
@@ -1162,7 +1167,7 @@ impl CodeGenerator {
                 }
             },
             ast::Expr::Assign(pat, expr) => {
-                let expr = self.consume_expr(expr.0)?;
+                let expr = self.consume_expr(*expr)?;
 
                 self.push_block();
                 self.unpack_pat(pat.0, expr, (), |_, _| Ok(()),
@@ -1208,20 +1213,20 @@ impl CodeGenerator {
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
-                let e = self.consume_expr(expr.0)?;
+                let e = self.consume_expr(*expr)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(e, |expr, op| self.apply_unary(expr, op))
+                    .try_fold(e, |expr, op| self.apply_unary(expr, op, range.clone()))
             },
             ast::Expr::BinaryOp { op, left, right } => {
-                let left = self.consume_expr(left.0)?;
-                let right = self.consume_expr(right.0)?;
-                self.apply_binary(op, left, right)
+                let left = self.consume_expr(*left)?;
+                let right = self.consume_expr(*right)?;
+                self.apply_binary(op, left, right, range)
             },
             ast::Expr::Comparison { left, rights } => {
-                let left = self.consume_expr_and_box(left.0)?;
+                let left = self.consume_expr_and_box(*left)?;
                 let rights = rights.into_iter()
-                    .map(|(op, right)| Ok((op, self.consume_expr(right.0)?)))
+                    .map(|(op, right)| Ok((op, self.consume_expr(right)?)))
                     .collect::<PLIRResult<_>>()?;
 
                 Ok(plir::Expr::new(
@@ -1230,10 +1235,10 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Range { left, right, step } => {
-                let left = self.consume_expr_and_box(left.0)?;
-                let right = self.consume_expr_and_box(right.0)?;
+                let left = self.consume_expr_and_box(*left)?;
+                let right = self.consume_expr_and_box(*right)?;
                 let step = match step {
-                    Some(st) => Some(self.consume_expr_and_box(st.0)?),
+                    Some(st) => Some(self.consume_expr_and_box(*st)?),
                     None => None,
                 };
 
@@ -1248,7 +1253,7 @@ impl CodeGenerator {
             ast::Expr::If { conditionals, last } => {
                 let conditionals: Vec<_> = conditionals.into_iter()
                     .map(|(cond, block)| {
-                        let c = self.consume_expr(cond.0)?;
+                        let c = self.consume_expr(cond)?;
                         let b = self.consume_tree_block(block, BlockBehavior::Conditional, None)?;
                         Ok((c, b))
                     })
@@ -1274,7 +1279,7 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::While { condition, block } => {
-                let condition = self.consume_expr(condition.0)?;
+                let condition = self.consume_expr(*condition)?;
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
@@ -1283,7 +1288,7 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::For { ident, iterator, block } => {
-                let iterator = self.consume_expr_and_box(iterator.0)?;
+                let iterator = self.consume_expr_and_box(*iterator)?;
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
@@ -1292,41 +1297,50 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let funct = self.consume_expr(funct.0)?;
+                let funct = self.consume_located_expr(*funct)?;
+
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType(param_tys, _)) => {
                         if param_tys.len() != params.len() {
-                            Err(PLIRErr::WrongArity(param_tys.len(), params.len()))?;
+                            let err = PLIRErr::WrongArity(param_tys.len(), params.len()).at_range(range);
+                            return Err(err);
                         }
 
                         let params = std::iter::zip(param_tys.iter(), params)
                             .map(|(pty, expr)| {
-                                let param = self.consume_expr(expr.0)?;
+                                let Located(param, prange) = self.consume_located_expr(expr)?;
                                 op_impl::apply_special_cast(param, pty, CastType::Call)
-                                    .map_err(|e| PLIRErr::ExpectedType(pty.clone(), e.ty))
+                                    .map_err(|e| {
+                                        PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)
+                                    })
                             })
                             .collect::<Result<_, _>>()?;
 
                         plir::Expr::call(funct, params)
                     },
-                    t => Err(PLIRErr::CannotCall(t.clone()))
+                    t => Err(PLIRErr::CannotCall(t.clone()).at_range(funct.range()))
                 }
             },
             ast::Expr::Index(idx) => {
-                self.consume_index(idx)
+                self.consume_index(idx, range)
                     .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
-            ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread),
+            ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread.at_range(range)),
         }
     }
 
-    fn consume_expr_and_box(&mut self, expr: ast::Expr) -> PLIRResult<Box<plir::Expr>> {
+    fn consume_located_expr(&mut self, expr: Located<ast::Expr>) -> PLIRResult<Located<plir::Expr>> {
+        let range = expr.range();
+        self.consume_expr(expr)
+            .map(|e| Located::new(e, range))
+    }
+    fn consume_expr_and_box(&mut self, expr: Located<ast::Expr>) -> PLIRResult<Box<plir::Expr>> {
         self.consume_expr(expr).map(Box::new)
     }
 
     fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
         let ast::Path { obj, attrs } = p;
-        let obj = self.consume_expr_and_box(obj.0)?;
+        let obj = self.consume_expr_and_box(*obj)?;
         let mut path = plir::Path::Struct(obj, vec![]);
 
         for attr in attrs {
@@ -1361,15 +1375,15 @@ impl CodeGenerator {
 
         Ok(path)
     }
-    fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
+    fn consume_index(&mut self, idx: ast::Index, expr_range: CursorRange) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
 
         let ast::Index { expr, index } = idx;
 
-        let expr = self.consume_expr(expr.0)?;
-        let index = self.consume_expr(index.0)?;
+        let expr = self.consume_located_expr(*expr)?;
+        let index = self.consume_expr(*index)?;
         
-        op_impl::apply_index(expr, index)
+        op_impl::apply_index(expr, index, expr_range)
     }
 }
 
