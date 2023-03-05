@@ -233,6 +233,11 @@ impl<T: TraverseResolve> TraverseResolve for [T] {
         self.iter().try_for_each(|t| t.traverse_rs(map))
     }
 }
+impl<T: TraverseResolve> TraverseResolve for &T {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        (*self).traverse_rs(map)
+    }
+}
 impl<T: TraverseResolve> TraverseResolve for Option<T> {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         if let Some(t) = self {
@@ -350,7 +355,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
                     p.traverse_rs(map)?;
                 }
         
-                last.traverse_rs(map)
+                last.as_deref().traverse_rs(map)
             },
             ast::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
@@ -482,6 +487,9 @@ mod tests {
         };
     }
 
+    macro_rules! Block {
+        ($e:ident) => { Located(Stmt::Expr(Located(Expr::Block(Located($e, _)), _)), _) }
+    }
     #[test]
     fn nonexistent_var() -> ResolveResult<()> {
         let program = Interpreter::from_string("a;")
@@ -527,8 +535,8 @@ mod tests {
             }
         ").parse().unwrap();
 
-        let Located(Stmt::Expr(Located(Expr::Block(block), _)), _) = &program.0[0] else { unreachable!() };
-        let Located(Stmt::Expr(Located(Expr::Block(block), _)), _) = &block.0[1] else { unreachable!() };
+        let Block!(block) = &program.0[0] else { unreachable!() };
+        let Block!(block) = &block.0[1] else { unreachable!() };
         let Located(Stmt::Expr(e), _) = &block.0[0] else { unreachable!() };
 
         let mut state = ResolveState::new();

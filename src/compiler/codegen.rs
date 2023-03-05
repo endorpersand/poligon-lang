@@ -221,12 +221,13 @@ enum Unresolved {
     Class(ast::Class),
     ExternFun(ast::FunSignature),
     Fun(ast::FunDecl),
-    FunBlock(plir::FunSignature, Rc<ast::Block>)
+    FunBlock(plir::FunSignature, Located<Rc<ast::Block>>)
 }
 
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::ProcStmt>,
+    last_stmt_loc: CursorRange, 
 
     /// All conditional exits.
     exits: Vec<Located<BlockExit>>,
@@ -241,9 +242,10 @@ struct InsertBlock {
 }
 
 impl InsertBlock {
-    fn new() -> Self {
+    fn new(block_range: CursorRange) -> Self {
         Self {
             block: vec![],
+            last_stmt_loc: block_range,
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
@@ -255,6 +257,7 @@ impl InsertBlock {
     fn top() -> Self {
         Self {
             block: vec![],
+            last_stmt_loc: (0, 0) ..= (0, 0),
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
@@ -320,7 +323,8 @@ impl InsertBlock {
             ProcStmt::Continue => self.push_cont(stmt_range),
             st => {
                 if self.is_open() {
-                    self.block.push(st)
+                    self.block.push(st);
+                    self.last_stmt_loc = stmt_range;
                 }
 
                 self.is_open()
@@ -524,8 +528,8 @@ impl CodeGenerator {
         }
     }
 
-    fn push_block(&mut self) {
-        self.blocks.push(InsertBlock::new())
+    fn push_block(&mut self, block_range: CursorRange) {
+        self.blocks.push(InsertBlock::new(block_range))
     }
     fn pop_block(&mut self) -> Option<InsertBlock> {
         self.blocks.pop()
@@ -747,7 +751,8 @@ impl CodeGenerator {
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
         let InsertBlock { 
-            mut block, exits, final_exit, 
+            mut block, last_stmt_loc, 
+            exits, final_exit, 
             vars: _, types: _, unresolved 
         } = block;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
@@ -776,10 +781,10 @@ impl CodeGenerator {
 
             if btype == BlockBehavior::Function {
                 block.push(ProcStmt::Return(exit_expr));
-                Located::new(BlockExit::Return(exit_ty), (0, 0) ..= (0, 0)) // not my problem
+                Located::new(BlockExit::Return(exit_ty), last_stmt_loc)
             } else {
                 block.push(ProcStmt::Exit(exit_expr));
-                Located::new(BlockExit::Exit(exit_ty), (0, 0) ..= (0, 0)) // not my problem
+                Located::new(BlockExit::Exit(exit_ty), last_stmt_loc)
             }
         });
 
@@ -851,13 +856,15 @@ impl CodeGenerator {
     }
     fn consume_tree_block(
         &mut self, 
-        block: ast::Block, 
+        block: Located<ast::Block>, 
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
-        self.push_block();
+        let Located(ast::Block(stmts), block_range) = block;
+
+        self.push_block(block_range);
         // collect all the statements from this block
-        self.consume_stmts(block.0)?;
+        self.consume_stmts(stmts)?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype, expected_ty)
     }
@@ -1011,12 +1018,13 @@ impl CodeGenerator {
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Rc<ast::Block>) -> PLIRResult<bool> {
-        let old_block = std::rc::Rc::try_unwrap(block)
+    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<bool> {
+        let Located(block, block_range) = block;
+        let old_block = Rc::try_unwrap(block)
             .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
     
         let block = {
-            self.push_block();
+            self.push_block(block_range);
 
             for plir::Param { ident, ty, .. } in sig.params.iter() {
                 self.declare(ident, ty.clone());
@@ -1071,6 +1079,8 @@ impl CodeGenerator {
                     rt: Default::default(), 
                     mt: Default::default(), 
                     ident: this, 
+                    // since this is synthesized, there's no real cursor,
+                    // so just assign an arbitary one
                     ty: Some(Located::new(ast::Type(cls.ident.clone(), vec![]), (0, 0) ..= (0, 0)))
                 });
             } else {
@@ -1207,7 +1217,7 @@ impl CodeGenerator {
             ast::Expr::Assign(pat, expr) => {
                 let expr = self.consume_located_expr(*expr)?;
 
-                self.push_block();
+                self.push_block(range.clone());
                 self.unpack_pat(pat, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
                         let Located(unit, range) = unit;
@@ -1518,6 +1528,7 @@ mod tests {
             "fun_cast_check_fail_1",
             "fun_cast_check_fail_2",
             "fun_cast_check_fail_3",
+            "fun_cast_check_fail_4",
             "type_res_fail_1",
             "type_res_fail_2",
             "type_res_fail_3",

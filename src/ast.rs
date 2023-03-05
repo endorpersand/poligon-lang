@@ -324,7 +324,7 @@ pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
     /// The function's body
-    pub block: Rc<Block>
+    pub block: Located<Rc<Block>>
 }
 
 /// An expression.
@@ -336,7 +336,7 @@ pub enum Expr {
     /// A block of statements.
     /// 
     /// See [`Block`] for examples.
-    Block(Block),
+    Block(Located<Block>),
 
     /// An int, float, char, or string literal.
     /// 
@@ -417,9 +417,9 @@ pub enum Expr {
     /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
     If {
         /// The condition and block connected to each `if` of the chain
-        conditionals: Vec<(Located<Expr>, Block)>,
+        conditionals: Vec<(Located<Expr>, Located<Block>)>,
         /// The final bare `else` block (if it exists)
-        last: Option<Block>
+        last: Option<Located<Block>>
     },
 
     /// A `while` loop.
@@ -427,7 +427,7 @@ pub enum Expr {
         /// The condition to check before each iteration.
         condition: LocatedBox<Expr>,
         /// The block to run in each iteration.
-        block: Block
+        block: Located<Block>
     },
 
     /// A `for` loop.
@@ -437,7 +437,7 @@ pub enum Expr {
         /// The iterator.
         iterator: LocatedBox<Expr>,
         /// The block to run in each iteration.
-        block: Block
+        block: Located<Block>
     },
 
     /// A function call.

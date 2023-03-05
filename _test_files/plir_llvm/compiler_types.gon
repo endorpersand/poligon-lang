@@ -196,6 +196,8 @@ fun str2bool(s: string) -> bool { s; }
 fun float2int(f: float) -> int { f; }
 //! TEST fun_cast_check_fail_3
 fun str2chr(s: string) -> char { s; }
+//! TEST fun_cast_check_fail_4
+fun void2int() -> int {}
 
 //! TEST type_res
 extern fun printd(s: int);

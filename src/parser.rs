@@ -654,11 +654,14 @@ impl Parser {
     }
 
     /// Expect that the next tokens in the input represent a block.
-    pub fn expect_block(&mut self) -> ParseResult<ast::Block> {
+    pub fn expect_block(&mut self) -> ParseResult<Located<ast::Block>> {
+        self.push_loc_block("expect_block");
+
         self.expect1(token!["{"])?;
         let p = self.expect_stmts()?;
         self.expect1(token!["}"])?;
-        Ok(ast::Block(p))
+
+        Ok(Located::new(ast::Block(p), self.pop_loc_block("expect_block").unwrap()))
     }
 
     /// Expect that the next tokens in the input represent a statement.
@@ -846,7 +849,7 @@ impl Parser {
 
         Ok(ast::FunDecl {
             sig,
-            block: Rc::new(block)
+            block: block.map(Rc::new)
         })
     }
 
@@ -942,7 +945,7 @@ impl Parser {
             let sig = self.expect_method_sig()?;
             let block = self.expect_block()?;
 
-            Ok(ast::MethodDecl { sig, block: Rc::new(block) })
+            Ok(ast::MethodDecl { sig, block: block.map(Rc::new) })
         }).transpose()
     }
 
@@ -1569,13 +1572,13 @@ mod tests {
         }
     }
     macro_rules! block {
-        ($($e:expr),*) => {
-            Block(vec![$($e),*])
+        ($($e:expr),*; $loc:expr) => {
+            Located::new(Block(vec![$($e),*]), $loc)
         }
     }
     macro_rules! block_expr {
-        ($($e:expr),*) => {
-            Expr::Block(Block(vec![$($e),*]))
+        ($($e:expr),*; $loc:expr) => {
+            Expr::Block(block![$($e),*; $loc])
         }
     }
     
@@ -1686,13 +1689,13 @@ mod tests {
     #[test]
     fn block_test() {
         assert_parse("{}", program![
-            expr_stmt!(block_expr![], (0, 0)..=(0, 1))
+            expr_stmt!(block_expr![;(0, 0)..=(0, 1)], (0, 0)..=(0, 1))
         ]);
 
         assert_parse("{{}}", program![
             expr_stmt!(block_expr![
-                expr_stmt!(block_expr![], (0, 1) ..= (0, 2))
-            ], (0, 0)..=(0, 3))
+                expr_stmt!(block_expr![;(0, 1) ..= (0, 2)], (0, 1) ..= (0, 2));
+            (0, 0) ..= (0, 3)], (0, 0)..=(0, 3))
         ])
     }
 
@@ -1706,7 +1709,7 @@ mod tests {
         ", program![
             expr_stmt!(Expr::If {
                 conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![])
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
                 ],
                 last: None
             }, (1, 12)..=(3, 12))
@@ -1721,9 +1724,9 @@ mod tests {
         ", program![
             expr_stmt!(Expr::If { 
                 conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![])
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
                 ],
-                last: Some(block![])
+                last: Some(block![; (3, 19) ..= (5, 12)])
             }, (1, 12) ..= (5, 12))
         ]);
 
@@ -1738,10 +1741,10 @@ mod tests {
         ", program![
             expr_stmt!(Expr::If { 
                 conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![]),
-                    (ident!("condition", (3, 22) ..= (3, 30)), block![])
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
+                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)])
                 ],
-                last: Some(block![])
+                last: Some(block![; (5, 19) ..= (7, 12)])
             }, (1, 12) ..= (7, 12))
         ]);
 
@@ -1762,13 +1765,13 @@ mod tests {
         ", program![
             expr_stmt!(Expr::If { 
                 conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![]),
-                    (ident!("condition", (3, 22) ..= (3, 30)), block![]),
-                    (ident!("condition", (5, 22) ..= (5, 30)), block![]),
-                    (ident!("condition", (7, 22) ..= (7, 30)), block![]),
-                    (ident!("condition", (9, 22) ..= (9, 30)), block![]),
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
+                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)]),
+                    (ident!("condition", (5, 22) ..= (5, 30)), block![; (5, 32) ..= (7, 12)]),
+                    (ident!("condition", (7, 22) ..= (7, 30)), block![; (7, 32) ..= (9, 12)]),
+                    (ident!("condition", (9, 22) ..= (9, 30)), block![; (9, 32) ..= (11, 12)]),
                 ],
-                last: Some(block![])
+                last: Some(block![; (11, 19) ..= (13, 12)])
             }, (1, 12) ..= (13, 12))
         ]);
     }
@@ -1781,14 +1784,14 @@ mod tests {
         assert_parse("while true {}", program![
             expr_stmt!(Expr::While {
                 condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
-                block: block![]
+                block: block![; (0, 11) ..= (0, 12)]
             }, (0, 0) ..= (0, 12))
         ]);
         assert_parse("for i in it {}", program![
             expr_stmt!(Expr::For {
                 ident: String::from("i"),
                 iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
-                block: block![]
+                block: block![; (0, 12) ..= (0, 13)]
             }, (0, 0) ..= (0, 13))
         ]);
 
@@ -1811,7 +1814,7 @@ mod tests {
                     left: Box::new(ident!("i", (2, 18) ..= (2, 18))), 
                     rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))]
                 }, (2, 18) ..= (2, 23)), 
-                block: Block(vec![
+                block: block![
                     expr_stmt_with_semi!(Expr::Call {
                         funct: Box::new(ident!("print", (3, 16) ..= (3, 20))),
                         params: vec![ident!("i", (3, 22) ..= (3, 22))]
@@ -1823,8 +1826,8 @@ mod tests {
                             ident!("i", (4, 20) ..= (4, 20)),
                             literal!(Int(1), (4, 24) ..= (4, 24))
                         })
-                    ), (4, 16) ..= (4, 24)),
-                ])
+                    ), (4, 16) ..= (4, 24));
+                (2, 25) ..= (5, 12)]
             }, (2, 12) ..= (5, 12))
         ]);
 
@@ -1836,12 +1839,12 @@ mod tests {
                     right: Box::new(literal!(Int(10), (0, 12) ..= (0, 13))), 
                     step: None 
                 }, (0, 9) ..= (0, 13)), 
-                block: Block(vec![
+                block: block![
                     expr_stmt_with_semi!(Expr::Call {
                         funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
                         params: vec![ident!("i", (0, 23) ..= (0, 23))]
-                    }, (0, 17) ..= (0, 24))
-                ])
+                    }, (0, 17) ..= (0, 24));
+                (0, 15) ..= (0, 27)]
             }, (0, 0) ..= (0, 27))
         ]);
     }
@@ -1853,7 +1856,7 @@ mod tests {
         assert_parse("if cond {}", program![
             expr_stmt!(Expr::If {
                 conditionals: vec![
-                    (ident!("cond", (0, 3) ..= (0, 6)), block![])
+                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
                 ],
                 last: None
             }, (0, 0) ..= (0, 9))
@@ -1861,7 +1864,7 @@ mod tests {
         assert_parse("if cond {};", program![
             expr_stmt_with_semi!(Expr::If {
                 conditionals: vec![
-                    (ident!("cond", (0, 3) ..= (0, 6)), block![])
+                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
                 ],
                 last: None
             }, (0, 0) ..= (0, 9))
@@ -1896,14 +1899,14 @@ mod tests {
             expr_stmt!(Expr::If {
                 conditionals: vec![(
                     ident!("cond", (4, 15) ..= (4, 18)),
-                    Block(vec![
+                    block![
                         Located::new(Stmt::Decl(Decl { 
                             rt: ReasgType::Let, 
                             pat: Located::new(Pat::Unit(decl_unit!("d")), (5, 20) ..= (5, 20)), 
                             ty: None, 
                             val: literal!(Int(5), (5, 24) ..= (5, 24))
-                        }), (5, 16) ..= (5, 25))
-                    ])
+                        }), (5, 16) ..= (5, 25));
+                    (4, 20) ..= (6, 12)]
                 )],
                 last: None
             }, (4, 12) ..= (6, 12))

@@ -110,5 +110,5 @@ pub struct MethodDecl {
     /// The method's signature
     pub sig: MethodSignature,
     /// The method's body
-    pub block: Rc<Block>
+    pub block: Located<Rc<Block>>
 }
