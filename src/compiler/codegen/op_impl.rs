@@ -177,7 +177,9 @@ impl super::CodeGenerator {
                 (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
                 (op, tyref) => {
                     let fun = self.find_unary(op, tyref)?
-                        .ok_or_else(|| OpErr::CannotUnary(op, ty).at_range(unary_range))?;
+                        .ok_or_else(|| {
+                            OpErr::CannotUnary(op, ty).at_range(unary_range.clone())
+                        })?;
                     
                     return Expr::call(Located::new(fun, unary_range), vec![cast]);
                 }
@@ -289,7 +291,8 @@ impl super::CodeGenerator {
                 (op, leftref, rightref) => {
                     let fun = self.find_binary(op, leftref, rightref)?
                         .ok_or_else(|| {
-                            OpErr::CannotBinary(op, left, right.clone()).at_range(expr_range)
+                            OpErr::CannotBinary(op, left, right.clone())
+                                .at_range(expr_range.clone())
                         })?;
 
                     return Expr::call(Located::new(fun, expr_range), vec![lcast, rcast]);

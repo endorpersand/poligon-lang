@@ -1561,8 +1561,8 @@ mod tests {
         }
     }
     fn add_one(cr: CursorRange) -> CursorRange {
-        let (el, ec) = cr.end().clone();
-        cr.start().clone() ..= (el, ec + 1)
+        let &(el, ec) = cr.end();
+        *cr.start() ..= (el, ec + 1)
     }
     macro_rules! expr_stmt_with_semi {
         ($e:expr, $loc:expr) => {
