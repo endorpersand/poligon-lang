@@ -132,7 +132,7 @@ impl GonErr for PLIRErr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum BlockExit {
     /// This block exited by returning a value.
     Return(plir::Type),
@@ -180,7 +180,7 @@ enum BlockExitHandle {
 }
 
 impl BlockBehavior {
-    fn handle_exit(&self, exit: BlockExit) -> PLIRResult<BlockExitHandle> {
+    fn handle_exit(&self, exit: BlockExit) -> Result<BlockExitHandle, PLIRErr> {
         match self {
             BlockBehavior::Function => match exit {
                 BlockExit::Return(t) => Ok(BlockExitHandle::Continue(t)),
@@ -229,11 +229,11 @@ struct InsertBlock {
     block: Vec<plir::ProcStmt>,
 
     /// All conditional exits.
-    exits: Vec<BlockExit>,
+    exits: Vec<Located<BlockExit>>,
     /// The *unconditional* exit.
     /// If this is present, this is the last statement of the block.
     /// If a conditional exit does not pass, this exit is how the block exits.
-    final_exit: Option<BlockExit>,
+    final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<String, plir::Type>,
     types: HashMap<String, TypeData>,
@@ -310,12 +310,14 @@ impl InsertBlock {
     /// 
     /// The return indicates whether or not another statement 
     /// can be pushed into the insert block (whether a final exit has been set).
-    fn push_stmt(&mut self, stmt: impl Into<plir::ProcStmt>) -> bool {
+    fn push_stmt(&mut self, stmt: Located<impl Into<plir::ProcStmt>>) -> bool {
         use plir::ProcStmt;
+
+        let Located(stmt, stmt_range) = stmt;
         match stmt.into() {
-            ProcStmt::Return(e) => self.push_return(e),
-            ProcStmt::Break => self.push_break(),
-            ProcStmt::Continue => self.push_cont(),
+            ProcStmt::Return(e) => self.push_return(e, stmt_range),
+            ProcStmt::Break => self.push_break(stmt_range),
+            ProcStmt::Continue => self.push_cont(stmt_range),
             st => {
                 if self.is_open() {
                     self.block.push(st)
@@ -330,14 +332,14 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_return(&mut self, me: Option<plir::Expr>) -> bool {
+    fn push_return(&mut self, me: Option<plir::Expr>, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             let ty = match me {
                 Some(ref e) => e.ty.clone(),
                 None => plir::ty!(plir::Type::S_VOID),
             };
             self.block.push(plir::ProcStmt::Return(me));
-            self.final_exit.replace(BlockExit::Return(ty));
+            self.final_exit.replace(Located::new(BlockExit::Return(ty), stmt_range));
         }
 
         false
@@ -347,10 +349,10 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_break(&mut self) -> bool {
+    fn push_break(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Break);
-            self.final_exit.replace(BlockExit::Break);
+            self.final_exit.replace(Located::new(BlockExit::Break, stmt_range));
         }
 
         false
@@ -360,10 +362,10 @@ impl InsertBlock {
     /// 
     /// The return will be false, indicating another statement cannot
     /// be pushed into the insert block (as a final exit has been set).
-    fn push_cont(&mut self) -> bool {
+    fn push_cont(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Continue);
-            self.final_exit.replace(BlockExit::Continue);
+            self.final_exit.replace(Located::new(BlockExit::Continue, stmt_range));
         }
 
         false
@@ -508,15 +510,17 @@ impl CodeGenerator {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, exits, unresolved, .. } = self.program;
+        let InsertBlock {block, mut exits, unresolved, .. } = self.program;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
-        match exits.last() {
+        match exits.pop() {
             None => Ok(plir::Program(self.globals, block)),
-            Some(BlockExit::Break)     => Err(PLIRErr::CannotBreak),
-            Some(BlockExit::Continue)  => Err(PLIRErr::CannotContinue),
-            Some(BlockExit::Return(_)) => Err(PLIRErr::CannotReturn),
-            Some(BlockExit::Exit(_))   => Err(PLIRErr::CannotReturn),
+            Some(Located(exit, range)) => match exit {
+                BlockExit::Break     => Err(PLIRErr::CannotBreak.at_range(range)),
+                BlockExit::Continue  => Err(PLIRErr::CannotContinue.at_range(range)),
+                BlockExit::Return(_) => Err(PLIRErr::CannotReturn.at_range(range)),
+                BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn.at_range(range)),
+            }
         }
     }
 
@@ -636,7 +640,7 @@ impl CodeGenerator {
             val: e,
         };
 
-        self.peek_block().push_stmt(decl);
+        self.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
 
         Var {
             ident,
@@ -718,16 +722,16 @@ impl CodeGenerator {
                     Some(e) => Some(self.consume_expr(e)?),
                     None => None,
                 };
-                Ok(self.peek_block().push_return(maybe_expr))
+                Ok(self.peek_block().push_return(maybe_expr, range))
             },
             ast::Stmt::Break => {
-                Ok(self.peek_block().push_break())
+                Ok(self.peek_block().push_break(range))
             },
             ast::Stmt::Continue => {
-                Ok(self.peek_block().push_cont())
+                Ok(self.peek_block().push_cont(range))
             },
             ast::Stmt::Expr(e) => {
-                let e = self.consume_expr(e)?;
+                let e = self.consume_located_expr(e)?;
                 Ok(self.peek_block().push_stmt(e))
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
@@ -772,16 +776,19 @@ impl CodeGenerator {
 
             if btype == BlockBehavior::Function {
                 block.push(ProcStmt::Return(exit_expr));
-                BlockExit::Return(exit_ty)
+                Located::new(BlockExit::Return(exit_ty), (0, 0) ..= (0, 0)) // not my problem
             } else {
                 block.push(ProcStmt::Exit(exit_expr));
-                BlockExit::Exit(exit_ty)
+                Located::new(BlockExit::Exit(exit_ty), (0, 0) ..= (0, 0)) // not my problem
             }
         });
 
         // Type check block:
         if let Some(exp_ty) = expected_ty {
-            match &mut final_exit {
+            let Located(fexit, exit_range) = &mut final_exit;
+            let exit_range = exit_range.clone();
+
+            match fexit {
                 | BlockExit::Return(exit_ty) 
                 | BlockExit::Exit(exit_ty) 
                 => if exit_ty.as_ref() != exp_ty.as_ref() {
@@ -796,10 +803,10 @@ impl CodeGenerator {
                                 me.replace(e);
                                 *exit_ty = exp_ty;
                             },
-                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
                         },
                         // exit_ty is void, and we already checked that exp_ty is not void
-                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()))?,
+                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
                     }
                 },
                 // what is done here?
@@ -810,8 +817,8 @@ impl CodeGenerator {
 
         // resolve block's types and handle the methods of exiting the block
         let mut type_branches = vec![];
-        for exit in exits {
-            match btype.handle_exit(exit)? {
+        for Located(exit, exit_range) in exits {
+            match btype.handle_exit(exit.clone())? {
                 BlockExitHandle::Continue(ty) => type_branches.push(ty),
                 BlockExitHandle::LoopExit => {},
 
@@ -819,18 +826,21 @@ impl CodeGenerator {
                 // this is already conditional.
                 // as such, just propagate as a conditional exit.
                 BlockExitHandle::Propagate(exit, _) => {
-                    self.peek_block().exits.push(exit);
+                    self.peek_block().exits.push(Located::new(exit, exit_range));
                 },
             }
         }
+
+        let Located(final_exit, exit_range) = final_exit;
         match btype.handle_exit(final_exit)? {
             BlockExitHandle::Continue(ty) => type_branches.push(ty),
             BlockExitHandle::LoopExit => {},
             BlockExitHandle::Propagate(exit, conditional) => {
+                let located_exit = Located::new(exit, exit_range);
                 if conditional {
-                    self.peek_block().exits.push(exit);
+                    self.peek_block().exits.push(located_exit);
                 } else {
-                    self.peek_block().final_exit.replace(exit);
+                    self.peek_block().final_exit.replace(located_exit);
                 }
             },
         }
@@ -911,7 +921,7 @@ impl CodeGenerator {
                 }
 
                 if consume_var {
-                    self.peek_block().push_stmt(var.into_expr());
+                    self.peek_block().push_stmt(Located::new(var.into_expr(), stmt_range.clone()));
                 }
                 Ok(())
             },
@@ -952,7 +962,7 @@ impl CodeGenerator {
 
                 this.declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                this.peek_block().push_stmt(decl);
+                this.peek_block().push_stmt(Located::new(decl, decl_range));
 
                 Ok(())
             },
@@ -1220,7 +1230,7 @@ impl CodeGenerator {
                             plir::ExprType::Assign(unit, Box::new(e.0))
                         );
 
-                        this.peek_block().push_stmt(asg);
+                        this.peek_block().push_stmt(Located::new(asg, range.clone()));
                         Ok(())
                     },
                     true,
