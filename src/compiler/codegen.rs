@@ -390,7 +390,8 @@ impl InsertBlock {
 #[derive(Clone, PartialEq, Eq)]
 struct Var {
     ident: String,
-    ty: plir::Type
+    ty: plir::Type,
+    decl_range: CursorRange
 }
 impl Var {
     fn into_expr(self) -> plir::Expr {
@@ -398,7 +399,8 @@ impl Var {
     }
 
     fn split(self, sp: plir::Split) -> PLIRResult<plir::Expr> {
-        let t = self.ty.split(sp)?;
+        let t = self.ty.split(sp)
+            .map_err(|e| e.at_range(self.decl_range))?;
         let e = plir::Expr::new(t, plir::ExprType::Split(self.ident, sp));
         Ok(e)
     }
@@ -591,11 +593,11 @@ impl CodeGenerator {
             .find_map(f)
     }
 
-    fn get_var_type(&mut self, ident: &str) -> PLIRResult<&plir::Type> {
+    fn get_var_type(&mut self, ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
         self.resolve_ident(ident)?;
 
         self.find_scoped(|ib| ib.vars.get(ident))
-            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)))
+            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)).at_range(range))
     }
 
     /// Identifier needs to be resolved beforehand, via [`CodeGenerator::resolve_ident`].
@@ -619,7 +621,7 @@ impl CodeGenerator {
         string
     }
 
-    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr) -> Var {
+    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr, decl_range: CursorRange) -> Var {
         let ident = self.tmp_var_name(ident);
         let ety = e.ty.clone();
 
@@ -635,7 +637,8 @@ impl CodeGenerator {
 
         Var {
             ident,
-            ty: ety
+            ty: ety,
+            decl_range
         }
     }
 
@@ -853,9 +856,10 @@ impl CodeGenerator {
         extra: E, 
         mut split_extra: impl FnMut(&E, plir::Split) -> PLIRResult<E>,
         mut map: impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
-        consume_var: bool
+        consume_var: bool,
+        stmt_range: CursorRange
     ) -> PLIRResult<()> {
-        self.unpack_pat_inner(pat, expr, extra, &mut split_extra, &mut map, consume_var)
+        self.unpack_pat_inner(pat, expr, extra, &mut split_extra, &mut map, consume_var, stmt_range)
     }
 
     fn unpack_pat_inner<T, E>(
@@ -865,7 +869,8 @@ impl CodeGenerator {
         extra: E, 
         split_extra: &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>,
         map: &mut impl FnMut(&mut Self, Located<T>, Located<plir::Expr>, E) -> PLIRResult<()>,
-        consume_var: bool
+        consume_var: bool,
+        stmt_range: CursorRange
     ) -> PLIRResult<()> {
         fn create_splits<T>(pats: &[&ast::Pat<T>]) -> Vec<plir::Split> {
             let len = pats.len();
@@ -887,11 +892,11 @@ impl CodeGenerator {
         match pat {
             ast::Pat::Unit(t) => map(self, Located::new(t, range), expr, extra),
             ast::Pat::Spread(spread) => match spread {
-                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, split_extra, map, consume_var),
+                Some(pat) => self.unpack_pat_inner(*pat, expr, extra, split_extra, map, consume_var, stmt_range),
                 None => Ok(()),
             },
             ast::Pat::List(pats) => {
-                let var = expr.map(|e| self.push_tmp_decl("decl", e));
+                let var = expr.map(|e| self.push_tmp_decl("decl", e, stmt_range.clone()));
 
                 let delocated: Vec<_> = pats.iter().map(|t| &t.0).collect();
                 for (idx, pat) in std::iter::zip(create_splits(&delocated), pats) {
@@ -899,7 +904,7 @@ impl CodeGenerator {
                         .transpose_result()?;
 
                     let extr = split_extra(&extra, idx)?;
-                    self.unpack_pat_inner(pat, rhs, extr, split_extra, map, false)?;
+                    self.unpack_pat_inner(pat, rhs, extr, split_extra, map, false, stmt_range.clone())?;
                 }
 
                 if consume_var {
@@ -948,7 +953,8 @@ impl CodeGenerator {
 
                 Ok(())
             },
-            false
+            false,
+            decl_range
         )?;
 
         Ok(self.peek_block().is_open())
@@ -1076,7 +1082,7 @@ impl CodeGenerator {
         match expr {
             ast::Expr::Ident(ident) => {
                 Ok(plir::Expr::new(
-                    self.get_var_type(&ident)?.clone(),
+                    self.get_var_type(&ident, range)?.clone(),
                     plir::ExprType::Ident(ident)
                 ))
             },
@@ -1192,7 +1198,7 @@ impl CodeGenerator {
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
                             ast::AsgUnit::Path(p) => {
-                                let p = this.consume_path(p)?;
+                                let p = this.consume_path(Located::new(p, range.clone()))?;
                                 if matches!(p, plir::Path::Method(..)) {
                                     Err(PLIRErr::CannotAssignToMethod.at_range(range))?
                                 } else {
@@ -1213,7 +1219,8 @@ impl CodeGenerator {
                         this.peek_block().push_stmt(asg);
                         Ok(())
                     },
-                    true
+                    true,
+                    range
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
@@ -1221,12 +1228,12 @@ impl CodeGenerator {
                     .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
             },
             ast::Expr::Path(p) => {
-                self.consume_path(p).map(Into::into)
+                self.consume_path(Located::new(p, range)).map(Into::into)
             },
             ast::Expr::StaticPath(ty, attr) => {
                 let ty = self.consume_type(ty)?;
                 let ident = format!("{ty}::{attr}");
-                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident)?.clone()))
+                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident, range)?.clone()))
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
@@ -1355,8 +1362,8 @@ impl CodeGenerator {
         self.consume_expr(expr).map(Box::new)
     }
 
-    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
-        let ast::Path { obj, attrs } = p;
+    fn consume_path(&mut self, p: Located<ast::Path>) -> PLIRResult<plir::Path> {
+        let Located(ast::Path { obj, attrs }, expr_range) = p;
         let obj = self.consume_expr_and_box(*obj)?;
         let mut path = plir::Path::Struct(obj, vec![]);
 
@@ -1369,7 +1376,7 @@ impl CodeGenerator {
                     Err(PLIRErr::CannotAccessOnMethod)?;
                 } else {
                     let metref = metref.to_string();
-                    let mut fun_ty: plir::FunType = self.get_var_type(&metref)?
+                    let mut fun_ty: plir::FunType = self.get_var_type(&metref, expr_range.clone())?
                         .clone()
                         .try_into()?;
                     fun_ty.pop_front();
