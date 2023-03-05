@@ -1143,29 +1143,38 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::ClassLiteral(ty, entries) => {
+                let Located(ty, tyrange) = ty;
                 let ty = self.consume_type(ty)?;
+
                 let mut entries: HashMap<_, _> = entries.into_iter()
-                    .map(|(k, v)| Ok((k, self.consume_expr(v)?)))
+                    .map(|(Located(k, krange), v)| {
+                        Ok((k, (krange, self.consume_located_expr(v)?)))
+                    })
                     .collect::<PLIRResult<_>>()?;
                 
                 let cls = self.get_class(&ty)?;
                 let fields = cls.fields()
-                    .ok_or_else(|| PLIRErr::CannotInitialize(ty.clone()))?;
+                    .ok_or_else(|| {
+                        PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
+                    })?;
                 
                 let new_entries = fields.iter()
                     .map(|(k, fd)| {
-                        let fexpr = entries.remove(k)
-                            .ok_or_else(|| PLIRErr::UninitializedField(ty.clone(), k.clone()))?;
+                        let (_, Located(fexpr, erange)) = entries.remove(k)
+                            .ok_or_else(|| {
+                                PLIRErr::UninitializedField(ty.clone(), k.clone())
+                                    .at_range(tyrange.clone())
+                            })?;
                         
                         let fexpr = op_impl::apply_special_cast(fexpr, &fd.ty, CastType::Decl)
-                            .map_err(|e| PLIRErr::ExpectedType(fd.ty.clone(), e.ty))?;
+                            .map_err(|e| PLIRErr::ExpectedType(fd.ty.clone(), e.ty).at_range(erange))?;
 
                         Ok(fexpr)
                     })
                     .collect::<PLIRResult<_>>()?;
                 
-                if let Some((f, _)) = entries.into_iter().next() {
-                    Err(PLIRErr::UnexpectedField(ty, f))
+                if let Some((f, (krange, _))) = entries.into_iter().next() {
+                    Err(PLIRErr::UnexpectedField(ty, f).at_range(krange))
                 } else {
                     Ok(plir::Expr::new(
                         ty.clone(), 

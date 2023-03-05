@@ -1421,17 +1421,24 @@ impl Parser {
             }
         }
         /// Entry for class initializers
-        fn match_init_entry(this: &mut Parser) -> ParseResult<Option<(String, Located<ast::Expr>)>> {
+        fn match_init_entry(this: &mut Parser) -> ParseResult<Option<(Located<String>, Located<ast::Expr>)>> {
+            let krange = this.peek_loc();
             if let Some(k) = this.match_ident() {
-                this.expect1(token![:])?;
-                let v = this.expect_expr()?;
-                Ok(Some((k, v)))
+                let v = if this.match1(token![:]) {
+                    this.expect_expr()?
+                } else {
+                    Located::new(ast::Expr::Ident(k.clone()), krange.clone())
+                };
+                
+                Ok(Some((Located::new(k, krange), v)))
             } else {
                 Ok(None)
             }
         }
 
+        let tyrange = self.peek_loc();
         let id = self.expect_ident()?;
+
         let e = if self.match1(token![#]) {
             self.expect1(token!["{"])?;
             match id.as_str() {
@@ -1453,7 +1460,10 @@ impl Parser {
                         token!["}"], 
                         ParseErr::ExpectedIdent
                     )?;
-                    ast::Expr::ClassLiteral(ast::Type(id, vec![]), entries)
+                    ast::Expr::ClassLiteral(
+                        Located::new(ast::Type(id, vec![]), tyrange), 
+                        entries
+                    )
                 }
             }
         } else {

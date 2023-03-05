@@ -353,7 +353,7 @@ pub enum Expr {
     DictLiteral(Vec<(Located<Expr>, Located<Expr>)>),
 
     /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral(Type, Vec<(String, Located<Expr>)>),
+    ClassLiteral(Located<Type>, Vec<(Located<String>, Located<Expr>)>),
     
     /// An assignment operation.
     /// 
