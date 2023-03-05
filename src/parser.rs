@@ -33,7 +33,12 @@ use crate::ast::{self, PatErr};
 /// 
 /// let tokens = tokenize("hello;").unwrap();
 /// let program = parse(tokens).unwrap();
-/// assert_eq!(program, Program(vec![Stmt::Expr(Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4)))]));
+/// assert_eq!(program, Program(vec![
+///     Located::new(Stmt::Expr(
+///         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))),
+///         (0, 0) ..= (0, 5)
+///     )
+/// ]));
 /// ```
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
     Parser::new(tokens, false).parse()
@@ -60,7 +65,12 @@ pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Prog
 /// 
 /// let tokens = tokenize("hello;").unwrap();
 /// let program = Parser::new(tokens, false).parse().unwrap();
-/// assert_eq!(program, Program(vec![Stmt::Expr(Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4)))]));
+/// assert_eq!(program, Program(vec![
+///     Located::new(Stmt::Expr(
+///         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))),
+///         (0, 0) ..= (0, 5)
+///     )
+/// ]));
 /// ```
 pub struct Parser {
     tokens: VecDeque<FullToken>,
@@ -242,20 +252,25 @@ impl Parser {
     /// # use poligon_lang::parser::Parser;
     /// # use poligon_lang::ast::*;
     /// #
-    /// # let result = Program(vec![
-    /// #     Stmt::Expr(
-    /// #         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))
-    /// #     )
-    /// # ]);
     /// 
     /// // Not REPL mode
     /// let tokens = tokenize("hello;").unwrap();
     /// let program = Parser::new(tokens, false).parse().unwrap();
+    /// # let result = Program(vec![
+    /// #     Located::new(Stmt::Expr(
+    /// #         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))
+    /// #     ), (0, 0) ..= (0, 5))
+    /// # ]);
     /// # assert_eq!(program, result);
     /// 
     /// // REPL mode
     /// let tokens = tokenize("hello").unwrap();
     /// let program = Parser::new(tokens, true).parse().unwrap();
+    /// # let result = Program(vec![
+    /// #     Located::new(Stmt::Expr(
+    /// #         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))
+    /// #     ), (0, 0) ..= (0, 4))
+    /// # ]);
     /// # assert_eq!(program, result);
     /// ```
     pub fn new(tokens: impl IntoIterator<Item=FullToken>, repl_mode: bool) -> Self {
@@ -283,7 +298,12 @@ impl Parser {
     /// 
     /// let tokens = tokenize("hello;").unwrap();
     /// let program = Parser::new(tokens, false).parse().unwrap();
-    /// assert_eq!(program, Program(vec![Stmt::Expr(Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4)))]));
+    /// assert_eq!(program, Program(vec![
+    ///     Located::new(Stmt::Expr(
+    ///         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))),
+    ///         (0, 0) ..= (0, 5)
+    ///     )
+    /// ]));
     /// ```
     pub fn parse(mut self) -> ParseResult<ast::Program> {
         let program = self.expect_stmts()?;
