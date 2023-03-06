@@ -254,12 +254,9 @@ impl<'ctx> Compiler<'ctx> {
     /// ExitPointers stack. If an outer block is a loop, and the inner block is a bare block,
     /// `break` and `continue` will branch through the pointers of the outer block.
     /// 
-    /// The closer indicates how the block should be closed 
-    /// if this block exits with the `exit`, `continue`, or `break` statement.
-    /// This is useful, for example, for adding to a phi value.
-    pub fn write_block<F>(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>, close: F) -> CompileResult<'ctx, GonValue<'ctx>>
-        where F: FnOnce(&mut Self, GonValue<'ctx>)
-    {
+    /// This returns the GonValue of the block and the block branched to
+    /// (for `break`, `continue`, and `exit` statements).
+    pub fn write_block(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>) -> CompileResult<'ctx, (GonValue<'ctx>, Option<BasicBlock<'ctx>>)> {
         use plir::ProcStmt;
 
         self.exit_pointers.push(exits);
@@ -281,21 +278,18 @@ impl<'ctx> Compiler<'ctx> {
                         self.build_return(value);
                         (None, None)
                     }
-                    _ => (Some(GonValue::Unit), None) // unreachable?
+                    _ => unreachable!("block should have ended with exit statement")
                 }
             },
-            None => (Some(GonValue::Unit), None), // {}
+            None => unreachable!("block had no statements")
         };
         self.exit_pointers.pop();
 
         if let Some(jump) = mjump {
             self.builder.build_unconditional_branch(jump);
         }
-        if let Some(close_value) = mcvalue {
-            close(self, close_value);
-        }
 
-        Ok(mcvalue.unwrap_or(GonValue::Unit))
+        Ok((mcvalue.unwrap_or(GonValue::Unit), mjump))
     }
 
     /// Creates an opaque pointer type.
@@ -632,7 +626,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 compiler.builder.position_at_end(orig_bb);
                 compiler.builder.branch_and_goto(expr_bb);
-                let bval = compiler.write_block(block, ExitPointers::bare(exit_bb), |_, _| {})?;
+                let (bval, _) = compiler.write_block(block, ExitPointers::bare(exit_bb))?;
 
                 compiler.builder.position_at_end(exit_bb);
                 Ok(bval)
@@ -743,41 +737,38 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     let cmp_val = compiler.truth(cmp_val);
                         
                     // create blocks and branch
-                    let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
-                    let else_bb     = compiler.ctx.prepend_basic_block(merge_bb, "else");
+                    let then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
+                    let else_bb = compiler.ctx.prepend_basic_block(merge_bb, "else");
             
                     compiler.builder.build_conditional_branch(cmp_val, then_bb, else_bb);
 
                     // build then block
                     compiler.builder.position_at_end(then_bb);
                     // write ir from the block
-                    compiler.write_block(block, ExitPointers::bare(merge_bb), |compiler, result| {
-                        // add block to phi
-                        then_bb = compiler.builder.get_insert_block().unwrap();
+                    let (result, out_bb) = compiler.write_block(block, ExitPointers::bare(merge_bb))?;
+                    // add block to phi if branches to merge
+                    if out_bb == Some(merge_bb) {
                         incoming.push((result, then_bb));
-                    })?;
-
+                    }
                     prev_else.replace(else_bb);
                 }
 
                 // handle last
-                let mut else_bb = prev_else.unwrap();
+                let else_bb = prev_else.unwrap();
 
                 // build else block
                 compiler.builder.position_at_end(else_bb);
 
-                let mut close = |compiler: &mut Compiler<'ctx>, result| {
-                    // update else block
-                    else_bb = compiler.builder.get_insert_block().unwrap();
-                    incoming.push((result, else_bb));
-                };
-                match last {
-                    Some(block) => { compiler.write_block(block, ExitPointers::bare(merge_bb), close)?; },
+                let (result, out_bb) = match last {
+                    Some(block) => compiler.write_block(block, ExitPointers::bare(merge_bb))?,
                     None => {
                         compiler.builder.build_unconditional_branch(merge_bb);
-                        close(compiler, GonValue::Unit)
+                        (GonValue::Unit, Some(merge_bb))
                     },
                 };
+                if out_bb == Some(merge_bb) {
+                    incoming.push((result, else_bb));
+                }
 
                 compiler.builder.position_at_end(merge_bb);
 
@@ -804,7 +795,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.build_conditional_branch(cond, loop_bb, exit_loop_bb);
 
                 compiler.builder.position_at_end(loop_bb);
-                compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb), |_, _| {})?; 
+                compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb))?; 
 
                 compiler.builder.position_at_end(exit_loop_bb);
                 Ok(compiler.new_bool(true)) // TODO
@@ -1051,7 +1042,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
         }
 
         // return nothing if the return value is Unit
-        compiler.write_block(block, Default::default(), |_, _| {})?;
+        compiler.write_block(block, Default::default())?;
         
         if fun.verify(true) {
             Ok(fun)
