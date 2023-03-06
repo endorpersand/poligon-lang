@@ -128,8 +128,8 @@ pub struct ExitPointers<'ctx> {
 }
 impl<'ctx> ExitPointers<'ctx> {
     /// Indicates this block is a bare (or conditional) block.
-    /// The only valid statements out of this block are through `exit`, which
-    /// should exit to the specified block.
+    /// If this block hits an `exit` statement, it will exit through the provided
+    /// block.
     pub fn bare(exit: BasicBlock<'ctx>) -> Self {
         Self { exit: Some(exit), brk: None, cont: None }
     }
@@ -248,10 +248,15 @@ impl<'ctx> Compiler<'ctx> {
     /// [`plir::Block`] does not implement [`TraverseIR`] 
     /// because how the block should be closed cannot be generalized with that trait.
     /// 
+    /// Exit pointers indicate where the block should branch when a statement is called.
+    /// See [`ExitPointers`] for details as to how it can be defined.
+    /// 
+    /// ExitPointers stack. If an outer block is a loop, and the inner block is a bare block,
+    /// `break` and `continue` will branch through the pointers of the outer block.
+    /// 
     /// The closer indicates how the block should be closed 
-    /// if this block exits with the `exit` statement.
-    /// This is useful, for example, for adding an unconditional branch to an LLVM block
-    /// but only if there was no return statement already emitted.
+    /// if this block exits with the `exit`, `continue`, or `break` statement.
+    /// This is useful, for example, for adding to a phi value.
     pub fn write_block<F>(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>, close: F) -> CompileResult<'ctx, GonValue<'ctx>>
         where F: FnOnce(&mut Self, GonValue<'ctx>)
     {
