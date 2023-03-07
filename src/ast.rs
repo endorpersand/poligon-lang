@@ -1,14 +1,18 @@
-//! The components of the AST generated through the [parser][`crate::parser`] module.
-//! These structs are used to construct an AST within Rust.
+//! This module holds an abstract syntax tree (AST) generated through 
+//! the [parser][`crate::parser`] module.
 //! 
-//! A full program is described as [`Program`] struct.
+//! These structs are used directly in the interpreter runtime to
+//! execute a program and are converted to simpler bytecode in the
+//! compiler.
+//! 
+//! A full program is held in the [`Program`] struct.
 //! 
 //! # Further notes
 //! 
-//! The AST only holds the expressions. It does *not* hold computed values 
-//! (this is done in [runtime][crate::interpreter::runtime]).
+//! The AST only holds the semantic expressions of the program. 
+//! It does *not* hold computed values (this is done in [runtime][crate::interpreter::runtime]).
 //! 
-//! Typically, an AST should not be defined manually because it is painful. 
+//! An AST *can* be built manually by using these structs, but that is very painful.
 //! Instead, [`crate::lexer`] and [`crate::parser`] should be used to create one from a string.
 
 use std::rc::Rc;
