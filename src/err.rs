@@ -208,22 +208,22 @@ impl<E: GonErr> FullGonErr<E> {
     /// and the message associated with the error.
     pub fn short_msg(&self) -> String {
         let line_fmt = match &self.position {
-            ErrPos::Point((lno, cno)) => format!("{}:{}", lno, cno),
+            ErrPos::Point((lno, cno)) => format!("{}:{}", lno + 1, cno + 1),
 
             ErrPos::Points(pts) => pts.iter()
-                .map(|(lno, cno)| format!("{}:{}", lno, cno))
+                .map(|(lno, cno)| format!("{}:{}", lno + 1, cno + 1))
                 .collect::<Vec<_>>()
                 .join(", "),
 
             ErrPos::Range(ri) => {
                 let (start_lno, start_cno) = ri.start();
                 let (end_lno, end_cno) = ri.end();
-                format!("{}:{}-{}:{}", start_lno, start_cno, end_lno, end_cno)
+                format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
             },
             
             ErrPos::RangeFrom(RangeFrom { start }) => {
                 let (start_lno, start_cno) = start;
-                format!("{}:{}-..", start_lno, start_cno)
+                format!("{}:{}-..", start_lno + 1, start_cno + 1)
             },
 
             ErrPos::Unknown => String::new()
