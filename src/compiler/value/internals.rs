@@ -66,32 +66,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn std_printc(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        let _ptr = self.ptr_type(Default::default());
-        let _int = layout!(self, S_INT);
-
-        let ch = fun.get_first_param().unwrap();
-        let putwchar = self.std_import("putwchar")?;
-        builder.build_call(putwchar, params![ch], "");
-        builder.build_return(None);
-    
-        Ok(())
-    }
-    
-    fn std_printd(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        let _ptr = self.ptr_type(Default::default());
-        let _int = layout!(self, S_INT);
-
-        let p0 = fun.get_first_param().unwrap();
-        let printf = self.std_import("printf")?;
-    
-        let template = unsafe { builder.build_global_string("%d\0", "_tmpl_printd") };
-        builder.build_call(printf, params![template.as_pointer_value(), p0], "");
-        builder.build_return(None);
-    
-        Ok(())
-    }
-
     fn dynarray_new(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
         let _i64 = self.ctx.i64_type();
         let _dynarray = layout!(self, "#dynarray")
@@ -294,10 +268,13 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn int_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        self.x_to_string(builder, fun, "%d\0", "_tmpl_printd")
+        self.x_to_string(builder, fun, "%d\0", "_tmpl_int_to_string")
     }
     fn float_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
-        self.x_to_string(builder, fun, "%#f\0", "_tmpl_print_float")
+        self.x_to_string(builder, fun, "%#f\0", "_tmpl_float_to_string")
+    }
+    fn char_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        self.x_to_string(builder, fun, "%lc\0", "_tmpl_char_to_string")
     }
 
     // HACK
@@ -312,16 +289,15 @@ impl<'ctx> Compiler<'ctx> {
         let _dynarray = layout!(c, "#dynarray");
         let _ptr = c.ptr_type(Default::default());
 
-        "print": std_print,   fn_type![(_str)  -> _void],
-        "printc": std_printc, fn_type![(_char) -> _void],
-        "printd": std_printd, fn_type![(_int)  -> _void],
+        "print": std_print, fn_type![(_str)  -> _void],
         "#dynarray::new": dynarray_new, fn_type![(_int) -> _dynarray],
         "#dynarray::resize": dynarray_resize, fn_type![(_ptr /* "#dynarray"* */, _int) -> _void],
         "#dynarray::push": dynarray_push, fn_type![(_ptr /* "#dynarray"* */, _i8)  -> _void],
         "#dynarray::extend": dynarray_extend, fn_type![(_ptr /* "#dynarray"* */, _ptr /* i8* */, _int) -> _void],
         "#dynarray::pop": dynarray_pop, fn_type![(_ptr /* "#dynarray"* */) -> _i8],
         "int__to_string": int_to_string, fn_type![(_int) -> _str],
-        "float__to_string": float_to_string, fn_type![(_float) -> _str]
+        "float__to_string": float_to_string, fn_type![(_float) -> _str],
+        "char__to_string": char_to_string, fn_type![(_char) -> _str]
     }
 
     fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {

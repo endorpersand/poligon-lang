@@ -131,8 +131,14 @@ impl<'ctx> Compiler<'ctx> {
                 
                 Ok(GonValue::Float(fv))
             },
-            (GonValue::Char(_), TypeRef::Prim(Type::S_STR)) => {
-                todo!("char -> str cast")
+            (GonValue::Char(c), TypeRef::Prim(Type::S_STR)) => {
+                let to_str = self.std_import("char__to_string")?;
+                let string = self.builder.build_call(to_str, params![c], "cast")
+                    .try_as_basic_value()
+                    .unwrap_left()
+                    .into_struct_value();
+
+                Ok(GonValue::Struct(string))
             },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
