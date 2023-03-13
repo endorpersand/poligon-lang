@@ -1,10 +1,55 @@
 //! Internally defined structs for LLVM representation
 
+use std::collections::HashMap;
+
 use inkwell::types::{FunctionType, BasicType};
 use inkwell::values::FunctionValue;
+use lazy_static::lazy_static;
 
 use crate::compiler::llvm::Builder2;
-use crate::compiler::{Compiler, CompileResult, layout, params, CompileErr};
+use crate::compiler::llvm::types::{FnTypeS, IntTypeS, PtrTypeS, VoidTypeS, RetTypeS, Concretize};
+use crate::compiler::{Compiler, CompileResult, layout, params, CompileErr, fn_type};
+
+macro_rules! map {
+    () => { HashMap::new() };
+    ($($k:expr => $v:expr),+) => {{
+        let mut m = HashMap::new();
+        $(
+            m.insert($k, $v);
+        )+
+        m
+    }}
+}
+
+macro_rules! fn_type_s {
+    (($($e:expr),*) -> $r:expr) => {
+        FnTypeS::new(params![$($e),*], false, RetTypeS::from($r))
+    };
+    ((~) -> $r:expr) => {
+        FnTypeS::new(params![], true, RetTypeS::from($r))
+    };
+    (($($e:expr),+,~) -> $r:expr) => {
+        FnTypeS::new(params![$($e),+], true, RetTypeS::from($r))
+    };
+}
+
+lazy_static! {
+    static ref CHAR: IntTypeS  = IntTypeS::I32;
+    static ref I32:  IntTypeS  = IntTypeS::I32;
+    static ref INT:  IntTypeS  = IntTypeS::I64;
+    static ref PTR:  PtrTypeS  = PtrTypeS;
+    static ref VOID: VoidTypeS = VoidTypeS;
+
+    static ref C_INTRINSICS: HashMap<&'static str, FnTypeS> = map! {
+        "putwchar"  => fn_type_s![(*CHAR) -> *INT],
+        "printf"    => fn_type_s![(*PTR /* i8* */, ~) -> *INT],
+        "malloc"    => fn_type_s![(*INT) -> *PTR],
+        "free"      => fn_type_s![(*PTR) -> *VOID],
+        "memcpy"    => fn_type_s![(*PTR, *PTR, *INT) -> *PTR],
+        "asprintf"  => fn_type_s![(*PTR /* i8** */, *PTR /* i8* */, ~) -> *INT],
+        "setlocale" => fn_type_s![(*I32, *PTR /* i8* */, ~) -> *PTR]
+    };
+}
 
 macro_rules! std_map {
     (use $compiler:ident; $($(let $t:ident = $u:expr;)+)? $($l:literal: $i:ident, $closure:expr),+) => {
@@ -27,21 +72,6 @@ macro_rules! std_map {
         }
     }
 }
-
-/// A macro that makes the syntax for creating [`FunctionType`]s simpler.
-macro_rules! fn_type {
-    (($($e:expr),*) -> $r:expr) => {
-        $r.fn_type(params![$($e),*], false)
-    };
-    ((~) -> $r:expr) => {
-        $r.fn_type(params![], true)
-    };
-    (($($e:expr),+,~) -> $r:expr) => {
-        $r.fn_type(params![$($e),+], true)
-    };
-}
-
-pub(in crate::compiler) use fn_type;
 
 impl<'ctx> Compiler<'ctx> {
     fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
@@ -300,37 +330,17 @@ impl<'ctx> Compiler<'ctx> {
         "char__to_string": char_to_string, fn_type![(_char) -> _str]
     }
 
-    fn intrinsic(&self, name: &str) -> Option<FunctionType<'ctx>> {
-        let _ptr  = self.ptr_type(Default::default());
-        let _int  = layout!(self, S_INT);
-        let _char = layout!(self, S_CHAR);
-        let _void = self.ctx.void_type();
-        let _i32  = self.ctx.i32_type();
-
-        match name {
-            "putchar"   => Some(fn_type![(_char) -> _int]),
-            "putwchar"  => Some(fn_type![(_char) -> _int]),
-            "printf"    => Some(fn_type![(_ptr /* i8* */, ~) -> _int]),
-            "malloc"    => Some(fn_type![(_int) -> _ptr]),
-            "free"      => Some(fn_type![(_ptr) -> _void]),
-            "memcpy"    => Some(fn_type![(_ptr, _ptr, _int) -> _ptr]),
-            "asprintf"  => Some(fn_type![(_ptr /* i8** */, _ptr /* i8* */, ~) -> _int]),
-            "setlocale" => Some(fn_type![(_i32, _ptr /* i8* */, ~) -> _ptr]),
-            _ => None
-        }
-    }
     /// Import a defined internal function or a libc function.
     /// 
     /// Internal functions are currently defined in [`compiler::value::internals`].
     /// The type signature and identifier need to match exactly, or else defined internals may fail 
     /// or a segmentation fault may occur.
     pub(crate) fn std_import(&self, s: &str) -> CompileResult<'ctx, FunctionValue<'ctx>> {
-        let intrinsic = self.intrinsic(s);
+        let intrinsic = C_INTRINSICS.get(s).map(|f| f.as_concrete(self));
         let fun = match self.module.get_function(s) {
             Some(fun) => fun,
             None => {
-                let ty = intrinsic
-                    .or_else(|| self.lookup(s))
+                let ty = intrinsic.or_else(|| self.lookup(s))
                     .ok_or_else(|| CompileErr::CannotImport(String::from(s)))?;
 
                 self.module.add_function(s, ty, None)

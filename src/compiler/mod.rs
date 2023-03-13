@@ -96,6 +96,21 @@ macro_rules! params {
 }
 pub(self) use params;
 
+/// A macro that makes the syntax for creating [`FunctionType`]s simpler.
+macro_rules! fn_type {
+    (($($e:expr),*) -> $r:expr) => {
+        $r.fn_type(params![$($e),*], false)
+    };
+    ((~) -> $r:expr) => {
+        $r.fn_type(params![], true)
+    };
+    (($($e:expr),+,~) -> $r:expr) => {
+        $r.fn_type(params![$($e),+], true)
+    };
+}
+
+pub(self) use fn_type;
+
 enum ReturnableType<'ctx> {
     Basic(BasicTypeEnum<'ctx>),
     Void(VoidType<'ctx>)
