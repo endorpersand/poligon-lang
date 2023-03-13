@@ -305,11 +305,11 @@ impl InsertBlock {
                     void_ty()
                 }
             },
-            Some(ProcStmt::Return(_))        => never_ty(),
-            Some(ProcStmt::Break)            => never_ty(),
-            Some(ProcStmt::Continue)         => never_ty(),
-            Some(ProcStmt::Exit(_))          => never_ty(),
-            Some(ProcStmt::Expr(e))          => Cow::Borrowed(&e.ty),
+            Some(ProcStmt::Return(_)) => never_ty(),
+            Some(ProcStmt::Break)     => never_ty(),
+            Some(ProcStmt::Continue)  => never_ty(),
+            Some(ProcStmt::Exit(_))   => never_ty(),
+            Some(ProcStmt::Expr(e))   => Cow::Borrowed(&e.ty),
             None => void_ty(),
         }
     }
