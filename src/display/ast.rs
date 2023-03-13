@@ -36,6 +36,7 @@ impl Display for Stmt {
             Stmt::Expr(e) => write!(f, "{e}"),
             Stmt::ClassDecl(s) => write!(f, "{s}"),
             Stmt::Import(sp) => write!(f, "import {sp}"),
+            Stmt::ImportIntrinsic => write!(f, "import intrinsic"),
         }
     }
 }

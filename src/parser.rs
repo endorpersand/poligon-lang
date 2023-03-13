@@ -114,7 +114,10 @@ pub enum ParseErr {
     ExpectedParam,
 
     /// An error occurred in creating an assignment pattern.
-    AsgPatErr(PatErr)
+    AsgPatErr(PatErr),
+
+    /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
+    CannotUseIntrinsic
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
@@ -141,6 +144,7 @@ impl GonErr for ParseErr {
             ParseErr::ExpectedPattern    => String::from("expected pattern"),
             ParseErr::ExpectedEntry      => String::from("expected entry"),
             ParseErr::ExpectedParam      => String::from("expected param"),
+            ParseErr::CannotUseIntrinsic => String::from("cannot use intrinsic identifier"),
             ParseErr::AsgPatErr(e)       => e.message(),
         }
     }
@@ -425,6 +429,11 @@ impl Parser {
     /// Read the next token in the input if present.
     pub fn peek_token(&self) -> Option<&Token> {
         self.tokens.get(0).map(|FullToken {tt, ..}| tt)
+    }
+
+    /// Read the nth following token in the input if present.
+    pub fn peek_nth_token(&self, i: usize) -> Option<&Token> {
+        self.tokens.get(i).map(|FullToken {tt, ..}| tt)
     }
 
     /// Consumes the next token in input.
@@ -739,7 +748,7 @@ impl Parser {
 
                 Located::new(ast::Pat::Spread(item), self.pop_loc_block("match_decl_pat spread").unwrap())
             }
-            token![mut] | Token::Ident(_) => {
+            token![mut] | token![#] | Token::Ident(_) => {
                 self.push_loc_block("match_decl_pat unit");
                 let mt = if self.match1(token![mut]) {
                     ast::MutType::Mut
@@ -747,7 +756,7 @@ impl Parser {
                     ast::MutType::Immut
                 };
 
-                let node = ast::DeclUnit(self.expect_ident()?, mt);
+                let node = ast::DeclUnit(self.expect_ident()?.0, mt);
                 Located::new(ast::Pat::Unit(node), self.pop_loc_block("match_decl_pat unit").unwrap())
             },
             _ => return Ok(None)
@@ -782,11 +791,11 @@ impl Parser {
         };
 
         // the param checked so far is fully empty and probably not an actual param:
-        if empty && !matches!(self.peek_token(), Some(Token::Ident(_))) {
+        if empty && self.has_ident().is_none() {
             return Ok(None);
         }
 
-        let ident = self.expect_ident()?;
+        let ident = self.expect_ident()?.0;
         let ty = if self.match1(token![:]) {
             Some(self.expect_type()?)
         } else {
@@ -826,7 +835,7 @@ impl Parser {
     pub fn expect_fun_sig(&mut self) -> ParseResult<ast::FunSignature> {
         self.expect1(token![fun])?;
 
-        let ident = self.expect_ident()?;
+        let ident = self.expect_ident()?.0;
 
         self.expect1(token!["("])?;
         let params = self.expect_closing_tuple_of(
@@ -858,7 +867,7 @@ impl Parser {
     /// Expect that the next tokens in the input represent a class declaration.
     pub fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
         self.expect1(token![class])?;
-        let ident = self.expect_ident()?;
+        let ident = self.expect_ident()?.0;
 
         self.expect1(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
@@ -886,11 +895,11 @@ impl Parser {
             ast::MutType::Immut
         };
 
-        if empty && !matches!(self.peek_token(), Some(Token::Ident(_))) {
+        if empty && self.has_ident().is_none() {
             return Ok(None);
         }
 
-        let ident = self.expect_ident()?;
+        let ident = self.expect_ident()?.0;
         self.expect1(token![:])?;
         let ty = self.expect_type()?;
 
@@ -903,14 +912,14 @@ impl Parser {
     /// The return of this function holds the self parameter, the identifier, 
     /// and whether or not the method is static.
     pub fn expect_method_ident(&mut self) -> ParseResult<(Option<String>, String, bool)> {
-        let referent = self.match_ident();
+        let referent = self.match_ident()?.map(|ls| ls.0);
 
         let is_static = match self.expect_n(&[token![.], token![::]])?.tt {
             token![.] => false,
             token![::] => true,
             _ => unreachable!()
         };
-        let method = self.expect_ident()?;
+        let method = self.expect_ident()?.0;
 
         Ok((referent, method, is_static))
     }
@@ -958,39 +967,66 @@ impl Parser {
     pub fn expect_import_decl(&mut self) -> ParseResult<Option<ast::Stmt>> {
         self.expect1(token![import])?;
         
-        let ident_loc = self.peek_loc();
-        let ident = self.expect_ident()?;
-        if let "intrinsic" = ident.as_str() {
+        let ident = self.expect_ident()?
+            .map(|id| ast::Type(id, vec![]));
+        if let "intrinsic" = (*ident).0.as_str() {
             self.intrinsic_mode = true;
             Ok(None)
         } else {
             self.expect1(token![::])?;
-            let sub = self.expect_ident()?;
+            let sub = self.expect_ident()?.0;
             Ok(Some(ast::Stmt::Import(ast::StaticPath {
-                ty: Located::new(ast::Type(ident, vec![]), ident_loc),
+                ty: ident,
                 attr: sub,
             })))
         }
     }
+
+    /// Check if the next input is an identifier.
+    /// 
+    /// If the next input is an identifier, this function returns the number of tokens
+    /// held by this identifier.
+    pub fn has_ident(&self) -> Option<usize> {
+        match (self.peek_token(), self.peek_nth_token(1)) {
+            (Some(Token::Ident(_)), _) => Some(1),
+            (Some(token![#]), Some(Token::Ident(_))) => Some(2),
+            _ => None
+        }
+    }
+
     /// Match the next token in input if it is an identifier token,
     /// returning the identifier's string if successfully matched.
-    pub fn match_ident(&mut self) -> Option<String> {
-        matches!(self.peek_token(), Some(Token::Ident(_))).then(|| {
-            let Some(Token::Ident(s)) = self.next_token() else {
-                unreachable!()
-            };
-            s
-        })
+    pub fn match_ident(&mut self) -> ParseResult<Option<Located<String>>> {
+        match self.has_ident() {
+            None => Ok(None),
+            Some(1) => {
+                let Some(FullToken { tt: Token::Ident(s), loc }) = self.next() else { unreachable!() };
+
+                Ok(Some(Located::new(s, loc)))
+            },
+            Some(2) => {
+                self.push_loc_block("match_ident");
+
+                self.expect1(token![#])?;
+                let Some(Token::Ident(s)) = self.next_token() else { unreachable!() };
+
+                let ident_loc = self.pop_loc_block("match_ident").unwrap();
+
+                if self.intrinsic_mode {
+                    Ok(Some(Located::new(s, ident_loc)))
+                } else {
+                    Err(ParseErr::CannotUseIntrinsic.at_range(ident_loc))
+                }
+            },
+            s => unreachable!("has_ident should not return {s:?}")
+        }
     }
 
     /// Expect that the next token in the input is an identifier token,
     /// returning the identifier's string if successfully matched.
-    pub fn expect_ident(&mut self) -> ParseResult<String> {
-        match self.next() {
-            Some(FullToken { tt: Token::Ident(s), .. }) => Ok(s),
-            Some(FullToken { loc, .. }) => Err(ParseErr::ExpectedIdent.at_range(loc)),
-            None => Err(ParseErr::ExpectedIdent.at(self.eof))
-        }
+    pub fn expect_ident(&mut self) -> ParseResult<Located<String>> {
+        self.match_ident()?
+            .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))
     }
     
     /// Match the next tokens in the input if they represent a type expression.
@@ -999,8 +1035,8 @@ impl Parser {
     /// The function that *should* be used for type expression parsing purposes is [`Parser::expect_type`].
     fn match_type(&mut self) -> ParseResult<Option<Located<ast::Type>>> {
         self.push_loc_block("match_type");
-        if matches!(self.peek_token(), Some(Token::Ident(_))) {
-            let ident = self.expect_ident()?;
+        if self.has_ident().is_some() {
+            let ident = self.expect_ident()?.0;
 
             let params = if self.match_langle() {
                 let token_pos = self.peek_loc();
@@ -1353,30 +1389,27 @@ impl Parser {
     /// 
     /// The next expression above in precedence is [`Parser::match_unit`].
     pub fn match_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
-        macro_rules! pat_arr {
-            ($($p:pat),*) => {[$(
-                FullToken { tt: $p, .. }
-            ),*]}
-        }
-
         self.push_loc_block("match_path");
+        
         // TODO: support generics?
-        if let Some(pat_arr![Token::Ident(_), token![::]]) = self.tokens.make_contiguous().get(0..2) {
-            let ty = self.expect_type()?;
-            self.expect1(token![::])?;
-            let attr = self.expect_ident()?;
-
-            let e = Located::new(
-                ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
-                self.pop_loc_block("match_path").unwrap()
-            );
-            return Ok(Some(e));
+        if let Some(next_i) = self.has_ident() {
+            if matches!(self.peek_nth_token(next_i), Some(token![::])) {
+                let ty = self.expect_type()?;
+                self.expect1(token![::])?;
+                let attr = self.expect_ident()?.0;
+    
+                let e = Located::new(
+                    ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
+                    self.pop_loc_block("match_path").unwrap()
+                );
+                return Ok(Some(e));
+            }
         } 
         
         if let Some(mut e) = self.match_unit()? {
             let mut attrs = vec![];
             while self.match1(token![.]) {
-                attrs.push(self.expect_ident()?);
+                attrs.push(self.expect_ident()?.0);
             }
 
             let range = self.pop_loc_block("match_path");
@@ -1407,7 +1440,7 @@ impl Parser {
         };
 
         let unit = match peek {
-            Token::Ident(_) => self.expect_ii()?,
+            token![#] | Token::Ident(_) => self.expect_ii()?,
             Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
             token!["["]       => self.expect_list()?,
             token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
@@ -1476,7 +1509,7 @@ impl Parser {
         /// Entry for class initializers
         fn match_init_entry(this: &mut Parser) -> ParseResult<Option<(Located<String>, Located<ast::Expr>)>> {
             let krange = this.peek_loc();
-            if let Some(k) = this.match_ident() {
+            if let Some(Located(k, _)) = this.match_ident()? {
                 let v = if this.match1(token![:]) {
                     this.expect_expr()?
                 } else {
@@ -1489,7 +1522,6 @@ impl Parser {
             }
         }
 
-        let tyrange = self.peek_loc();
         let id = self.expect_ident()?;
 
         let e = if self.match1(token![#]) {
@@ -1514,13 +1546,13 @@ impl Parser {
                         ParseErr::ExpectedIdent
                     )?;
                     ast::Expr::ClassLiteral(
-                        Located::new(ast::Type(id, vec![]), tyrange), 
+                        id.map(|s| ast::Type(s, vec![])),
                         entries
                     )
                 }
             }
         } else {
-            ast::Expr::Ident(id)
+            ast::Expr::Ident(id.0)
         };
 
         Ok(e)
@@ -1569,7 +1601,7 @@ impl Parser {
     /// Expect that the next tokens in input represent an `for` loop.
     fn expect_for(&mut self) -> ParseResult<ast::Expr> {
         self.expect1(token![for])?;
-        let ident = self.expect_ident()?;
+        let ident = self.expect_ident()?.0;
         self.expect1(token![in])?;
         let iterator = self.expect_expr()?;
         let block = self.expect_block()?;

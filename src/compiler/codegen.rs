@@ -749,6 +749,7 @@ impl CodeGenerator {
             ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
             ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
             ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
+            ast::Stmt::ImportIntrinsic => Ok(self.peek_block().is_open()), // no-op
         }
     }
 

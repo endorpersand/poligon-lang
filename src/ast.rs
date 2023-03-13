@@ -183,6 +183,9 @@ pub enum Stmt {
 
     /// An import declaration.
     Import(StaticPath),
+
+    /// `import intrinsic`. Enables intrinsic functionality.
+    ImportIntrinsic
 }
 
 impl Stmt {
