@@ -654,6 +654,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     plir::AsgUnit::Ident(ident) => compiler.get_ptr(ident)?,
                     plir::AsgUnit::Path(p)      => p.write_ptr(compiler)?,
                     plir::AsgUnit::Index(_)     => todo!(),
+                    plir::AsgUnit::Deref(d)     => d.write_ptr(compiler)?,
                 };
 
                 compiler.builder.build_store(ptr, compiler.basic_value_of(val));
@@ -849,6 +850,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 e.write_value(compiler)
                     .and_then(|val| compiler.cast(val, expr_ty))
             },
+            plir::ExprType::Deref(d) => d.write_value(compiler),
         }
     }
 }
@@ -857,6 +859,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
         match &self.expr {
             plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
             plir::ExprType::Path(p) => p.write_ptr(compiler),
+            plir::ExprType::Deref(d) => d.write_ptr(compiler),
             _ => {
                 self.write_value(compiler)
                     .and_then(|value| compiler.alloca_and_store("", value))
@@ -1008,6 +1011,27 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
                 // Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
             }
         }
+    }
+}
+
+impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
+    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+
+    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+        let ptr = self.write_ptr(compiler)?;
+        let layout = compiler.get_layout(&self.ty)?;
+
+        let bv = compiler.builder.build_load(layout, ptr, "deref");
+        compiler.reconstruct(&self.ty, bv)
+    }
+}
+impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
+    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+        // expr should always be a ptr
+        self.expr.write_value(compiler)
+            .map(|gv| {
+                compiler.basic_value_of(gv).into_pointer_value()
+            })
     }
 }
 

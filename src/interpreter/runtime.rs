@@ -789,6 +789,7 @@ impl TraverseRt for Located<ast::Expr> {
                     .map_err(TermOp::Err)
             },
             ast::Expr::Spread(_) => Err(ResolveErr::CannotSpread.at_range(range))?,
+            ast::Expr::Deref(_) => Err(FeatureErr::CompilerOnly("intrinsic dereferencing").at_range(range))?,
         }
     }
 }
@@ -1056,6 +1057,7 @@ fn assign_pat(pat: &ast::AsgPat, rhs: Value, ctx: &mut RtContext, from: &ast::Ex
                 val.set_index(index_val, rhs)
                     .map_err(|e| e.at_range(range))
             },
+            ast::AsgUnit::Deref(_) => Err(FeatureErr::CompilerOnly("intrinsic dereferencing").at_range(range))?,
         }
     })
 }

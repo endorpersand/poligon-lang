@@ -462,7 +462,12 @@ pub enum Expr {
     /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
-    Spread(Option<LocatedBox<Expr>>)
+    Spread(Option<LocatedBox<Expr>>),
+
+    /// Dereferencing intrinsic pointers.
+    /// 
+    /// See [`IDeref`] for examples.
+    Deref(IDeref)
 }
 
 /// A primitive literal.
@@ -560,6 +565,15 @@ pub struct Index {
     pub index: LocatedBox<Expr>
 }
 
+/// Dereferencing of an intrinsic pointer.
+/// 
+/// # Example
+/// ```text
+/// *ptr
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct IDeref(pub LocatedBox<Expr>);
+
 /// A unit to assign to.
 /// 
 /// See [`Expr::Assign`].
@@ -568,6 +582,7 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
     #[allow(missing_docs)] Index(Index),
+    #[allow(missing_docs)] Deref(IDeref),
 }
 
 /// A unit to declare to.

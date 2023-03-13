@@ -297,6 +297,7 @@ impl Display for ExprType {
                 write!(f, "]")
             },
             ExprType::Cast(e) => write!(f, "castfrom {e}"),
+            ExprType::Deref(d) => write!(f," {d}"),
         }
     }
 }
@@ -316,6 +317,7 @@ impl Display for AsgUnit {
             AsgUnit::Ident(ident) => write!(f, "{ident}"),
             AsgUnit::Path(p) => write!(f, "{p}"),
             AsgUnit::Index(idx) => write!(f, "{idx}"),
+            AsgUnit::Deref(d) => write!(f, "{d}"),
         }
     }
 }
@@ -347,5 +349,13 @@ impl Display for Index {
         let Index { expr, index } = self;
 
         write!(f, "{expr}[{index}]")
+    }
+}
+
+impl Display for IDeref {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let IDeref { expr, ty: _ } = self;
+
+        write!(f, "*{expr}")
     }
 }

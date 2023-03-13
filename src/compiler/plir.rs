@@ -474,7 +474,12 @@ pub enum ExprType {
     /// Change the type of this expression to a new type.
     /// 
     /// This enables int to float casts and char to string casts.
-    Cast(Box<Expr>)
+    Cast(Box<Expr>),
+    
+    /// Dereferencing intrinsic pointers.
+    /// 
+    /// See [`IDeref`] for examples.
+    Deref(IDeref)
 }
 
 /// A path.
@@ -579,6 +584,22 @@ pub struct Index {
     pub index: Box<Expr>
 }
 
+/// Dereferencing of an intrinsic pointer.
+/// 
+/// This struct corresponds to [`ast::IDeref`].
+/// # Example
+/// ```text
+/// <int>*(<#ptr> ptr)
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct IDeref {
+    /// Value being dereferenced
+    pub expr: Box<Expr>,
+
+    /// Type to dereference to
+    pub ty: Type
+}
+
 /// A literal index used for splitting patterns.
 // TODO: can this be combined with Index?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -599,4 +620,5 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
     #[allow(missing_docs)] Index(Index),
+    #[allow(missing_docs)] Deref(IDeref),
 }

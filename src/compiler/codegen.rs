@@ -1241,8 +1241,12 @@ impl CodeGenerator {
                                 }
                             },
                             ast::AsgUnit::Index(idx) => {
-                                let (_, idx) = this.consume_index(idx, range.clone())?;
+                                let (_, idx) = this.consume_index(Located::new(idx, range.clone()))?;
                                 plir::AsgUnit::Index(idx)
+                            },
+                            ast::AsgUnit::Deref(d) => {
+                                let deref = this.consume_deref(Located::new(d, range.clone()), e.ty.clone())?;
+                                plir::AsgUnit::Deref(deref)
                             },
                         };
                         
@@ -1382,10 +1386,14 @@ impl CodeGenerator {
                 }
             },
             ast::Expr::Index(idx) => {
-                self.consume_index(idx, range)
+                self.consume_index(Located::new(idx, range))
                     .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
             ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread.at_range(range)),
+            ast::Expr::Deref(d) => {
+                self.consume_deref(Located::new(d, range), plir::ty!("#unresolved"))
+                    .map(|deref| plir::Expr::new(deref.ty.clone(), plir::ExprType::Deref(deref)))
+            },
         }
     }
 
@@ -1436,15 +1444,23 @@ impl CodeGenerator {
 
         Ok(path)
     }
-    fn consume_index(&mut self, idx: ast::Index, expr_range: CursorRange) -> PLIRResult<(plir::Type, plir::Index)> {
+
+    fn consume_index(&mut self, idx: Located<ast::Index>) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
 
-        let ast::Index { expr, index } = idx;
+        let Located(ast::Index { expr, index }, expr_range) = idx;
 
         let expr = self.consume_located_expr(*expr)?;
         let index = self.consume_expr(*index)?;
         
         op_impl::apply_index(expr, index, expr_range)
+    }
+
+    fn consume_deref(&mut self, d: Located<ast::IDeref>, ty: plir::Type) -> PLIRResult<plir::IDeref> {
+        let Located(ast::IDeref(e), _) = d;
+
+        let expr = self.consume_expr_and_box(*e)?;
+        Ok(plir::IDeref { expr, ty })
     }
 }
 

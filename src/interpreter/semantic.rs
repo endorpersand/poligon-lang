@@ -389,6 +389,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
                     None => Ok(()),
                 },
             },
+            ast::Expr::Deref(d) => d.traverse_rs(map),
         }
     }
 }
@@ -420,6 +421,12 @@ impl TraverseResolve for ast::Index {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         self.expr.traverse_rs(map)?;
         self.index.traverse_rs(map)
+    }
+}
+
+impl TraverseResolve for ast::IDeref {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        self.0.traverse_rs(map)
     }
 }
 
@@ -457,6 +464,7 @@ impl TRsDependent for ast::AsgUnit {
             },
             ast::AsgUnit::Path(p) => p.obj.traverse_rs(map),
             ast::AsgUnit::Index(idx) => idx.traverse_rs(map),
+            ast::AsgUnit::Deref(d) => d.traverse_rs(map),
         }
     }
 }
