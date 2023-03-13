@@ -35,6 +35,7 @@ impl Display for Stmt {
             Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
             Stmt::ClassDecl(s) => write!(f, "{s}"),
+            Stmt::Import(sp) => write!(f, "import {sp}"),
         }
     }
 }
@@ -237,7 +238,7 @@ impl Display for Expr {
             },
             Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             Expr::Path(p) => write!(f, "{p}"),
-            Expr::StaticPath(t, a) => write!(f, "{t}::{a}"),
+            Expr::StaticPath(sp) => write!(f, "{sp}"),
             Expr::UnaryOps { ops, expr } => {
                 for op in ops {
                     write!(f, "{op}")?;
@@ -340,6 +341,12 @@ impl Display for Path {
         }
 
         Ok(())
+    }
+}
+
+impl Display for StaticPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}::{}", self.ty, self.attr)
     }
 }
 

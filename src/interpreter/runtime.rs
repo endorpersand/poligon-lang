@@ -605,7 +605,7 @@ impl TraverseRt for Located<ast::Expr> {
                     .map_err(TermOp::Err)
             },
             ast::Expr::Path(_) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
-            ast::Expr::StaticPath(_, _) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
+            ast::Expr::StaticPath(_) => Err(FeatureErr::Incomplete("general attribute functionality").at_range(range))?,
             ast::Expr::UnaryOps { ops, expr } => {
                 let mut ops_iter = ops.iter().rev();
         
@@ -900,6 +900,7 @@ impl TraverseRt for Located<ast::Stmt> {
             ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e) => e.traverse_rt(ctx),
             ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes").at_range(range))?,
+            ast::Stmt::Import(_) => Err(ResolveErr::CompilerOnly("importing").at_range(range))?,
         }
     }
 }

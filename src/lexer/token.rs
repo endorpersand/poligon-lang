@@ -199,7 +199,8 @@ define_keywords! {
     In:       "in",      // for x in y
     True:     "true",
     False:    "false",
-    Extern:   "extern"
+    Extern:   "extern",
+    Import:   "import"
 }
 
 define_operators_and_delimiters! {
@@ -278,7 +279,7 @@ macro_rules! token {
     (true)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::True)     };
     (false)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::False)    };
     (extern)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extern)   };
-    
+    (import)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Import)   };
     (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
     (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
     (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };

@@ -221,7 +221,8 @@ enum Unresolved {
     Class(ast::Class),
     ExternFun(ast::FunSignature),
     Fun(ast::FunDecl),
-    FunBlock(plir::FunSignature, Located<Rc<ast::Block>>)
+    FunBlock(plir::FunSignature, Located<Rc<ast::Block>>),
+    Import(ast::StaticPath)
 }
 
 #[derive(Debug)]
@@ -382,6 +383,7 @@ impl InsertBlock {
             Unresolved::ExternFun(fs)   => &fs.ident,
             Unresolved::Fun(fd)         => &fd.sig.ident,
             Unresolved::FunBlock(fs, _) => &fs.ident,
+            Unresolved::Import(mp)      => &mp.attr,
         };
 
         self.unresolved.insert(k.clone(), unresolved);
@@ -580,6 +582,7 @@ impl CodeGenerator {
                     self.peek_block().unresolved.insert(k, Unresolved::FunBlock(sig, block));
                 },
                 Unresolved::FunBlock(_, _) => {},
+                Unresolved::Import(_) => todo!(),
             }
 
             // revert peek block after
@@ -669,17 +672,20 @@ impl CodeGenerator {
     fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=Located<ast::Stmt>>) -> PLIRResult<()> {
         let mut eager_stmts = vec![];
         for stmt in stmts {
-            match stmt {
-                Located(ast::Stmt::FunDecl(fd), _) => {
+            match stmt.0 {
+                ast::Stmt::FunDecl(fd) => {
                     self.peek_block().insert_unresolved(Unresolved::Fun(fd));
                 },
-                Located(ast::Stmt::ExternFunDecl(fs), _) => {
+                ast::Stmt::ExternFunDecl(fs) => {
                     self.peek_block().insert_unresolved(Unresolved::ExternFun(fs));
                     }
-                Located(ast::Stmt::ClassDecl(cls), _) => {
+                ast::Stmt::ClassDecl(cls) => {
                     self.peek_block().insert_unresolved(Unresolved::Class(cls));
-                }
-                s => eager_stmts.push(s),
+                },
+                ast::Stmt::Import(mp) => {
+                    self.peek_block().insert_unresolved(Unresolved::Import(mp));
+                },
+                _ => eager_stmts.push(stmt),
             }
         }
 
@@ -706,6 +712,7 @@ impl CodeGenerator {
                 Unresolved::FunBlock(sig, block) => {
                     self.consume_fun_block(sig, block)?;
                 },
+                Unresolved::Import(_) => todo!(),
             }
             unresolved = &mut self.peek_block().unresolved;
         }
@@ -741,6 +748,7 @@ impl CodeGenerator {
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
             ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
             ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
+            ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
         }
     }
 
@@ -1256,7 +1264,8 @@ impl CodeGenerator {
             ast::Expr::Path(p) => {
                 self.consume_path(Located::new(p, range)).map(Into::into)
             },
-            ast::Expr::StaticPath(ty, attr) => {
+            ast::Expr::StaticPath(sp) => {
+                let ast::StaticPath { ty, attr } = sp;
                 let ty = self.consume_type(ty)?;
                 let ident = format!("{ty}::{attr}");
                 Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident, range)?.clone()))

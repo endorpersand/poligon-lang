@@ -179,7 +179,10 @@ pub enum Stmt {
     Expr(Located<Expr>),
 
     /// A struct declaration.
-    ClassDecl(Class)
+    ClassDecl(Class),
+
+    /// An import declaration.
+    Import(StaticPath),
 }
 
 impl Stmt {
@@ -377,7 +380,7 @@ pub enum Expr {
     /// A static path.
     /// 
     /// This does a static access on a type (e.g. `Type::attr`).
-    StaticPath(Located<Type>, String),
+    StaticPath(StaticPath),
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 
@@ -511,6 +514,27 @@ pub struct Path {
 
     /// The chain of attributes
     pub attrs: Vec<String>
+}
+
+/// A path, which accesses attributes from an expression.
+/// 
+/// # Syntax
+/// ```text
+/// path = expr ("." ident)+;
+/// ```
+/// 
+/// # Examples
+/// ```text
+/// a.b
+/// a.b.c.d.e
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct StaticPath {
+    /// The type to access an attribute of
+    pub ty: Located<Type>,
+
+    /// The attribute to access
+    pub attr: String
 }
 
 /// Value indexing.

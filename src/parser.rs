@@ -76,7 +76,8 @@ pub struct Parser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
     eof: (usize, usize),
-    tree_locs: Vec<RangeBlock>
+    tree_locs: Vec<RangeBlock>,
+    intrinsic_mode: bool
 }
 
 #[derive(Clone, Debug)]
@@ -285,7 +286,7 @@ impl Parser {
             (0, 0)
         };
 
-        Self { tokens, repl_mode, eof, tree_locs: vec![] }
+        Self { tokens, repl_mode, eof, tree_locs: vec![], intrinsic_mode: false }
     }
 
     /// Consumes the parser and converts the tokens into an [`ast::Program`].
@@ -679,6 +680,7 @@ impl Parser {
                 Some(self.expect_fun_sig()?).map(ast::Stmt::ExternFunDecl)
             },
             Some(token![class])    => Some(self.expect_class_decl()?).map(ast::Stmt::ClassDecl),
+            Some(token![import])   => self.expect_import_decl()?,
             Some(_)                => self.match_expr()?.map(ast::Stmt::Expr),
             None                   => None
         };
@@ -949,6 +951,27 @@ impl Parser {
         }).transpose()
     }
 
+    /// Expect the next tokens are an import declaration or "import intrinsic" declaration.
+    /// 
+    /// If this is an "import intrinsic" declaration, return None and switch the intrinsic mode.
+    /// Otherwise, return the import declaration.
+    pub fn expect_import_decl(&mut self) -> ParseResult<Option<ast::Stmt>> {
+        self.expect1(token![import])?;
+        
+        let ident_loc = self.peek_loc();
+        let ident = self.expect_ident()?;
+        if let "intrinsic" = ident.as_str() {
+            self.intrinsic_mode = true;
+            Ok(None)
+        } else {
+            self.expect1(token![::])?;
+            let sub = self.expect_ident()?;
+            Ok(Some(ast::Stmt::Import(ast::StaticPath {
+                ty: Located::new(ast::Type(ident, vec![]), ident_loc),
+                attr: sub,
+            })))
+        }
+    }
     /// Match the next token in input if it is an identifier token,
     /// returning the identifier's string if successfully matched.
     pub fn match_ident(&mut self) -> Option<String> {
@@ -1344,7 +1367,7 @@ impl Parser {
             let attr = self.expect_ident()?;
 
             let e = Located::new(
-                ast::Expr::StaticPath(ty, attr), 
+                ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
                 self.pop_loc_block("match_path").unwrap()
             );
             return Ok(Some(e));
