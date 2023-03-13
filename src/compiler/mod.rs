@@ -71,6 +71,8 @@ fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
             ], false);
             st
         },
+        "#ptr" => ctx.i8_type().ptr_type(Default::default()),
+        "#byte" => ctx.i8_type(),
         Type::S_VOID  => ctx.struct_type(&[], false)
     }
 }

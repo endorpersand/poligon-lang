@@ -276,6 +276,8 @@ impl InsertBlock {
                 plir::Type::S_BOOL,
                 plir::Type::S_CHAR,
                 plir::Type::S_STR,
+                "#ptr",
+                "#byte"
             ]),
             unresolved: HashMap::new(),
             expected_ty: None

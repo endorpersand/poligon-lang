@@ -45,7 +45,7 @@ class #dynarray {
         self.resize(self.len + add.len);
 
         let shift_buf = #gep(self.buf, self.len);
-        memcpy(shift_buf, add.buf, add.len);
+        #memcpy(shift_buf, add.buf, add.len);
 
         self.len = self.len + add.len;
     }
@@ -55,7 +55,7 @@ class string {
     inner: #dynarray
 }
 
-global _tmpl_print = "%.*s\n\0";
+// global _tmpl_print = "%.*s\n\0";
 fun print(s: string) {
-    printf(_tmpl_print, s.inner.len, s.inner.buf);
+    #printf(_tmpl_print, s.inner.len, s.inner.buf);
 }

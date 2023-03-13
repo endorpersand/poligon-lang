@@ -1013,7 +1013,7 @@ impl Parser {
                 let ident_loc = self.pop_loc_block("match_ident").unwrap();
 
                 if self.intrinsic_mode {
-                    Ok(Some(Located::new(s, ident_loc)))
+                    Ok(Some(Located::new(format!("#{s}"), ident_loc)))
                 } else {
                     Err(ParseErr::CannotUseIntrinsic.at_range(ident_loc))
                 }
