@@ -1288,7 +1288,7 @@ impl Parser {
     /// Match the next tokens in input if they represent a unary expression (`!expr`, `-expr`)
     /// or any expression with higher precedence.
     /// 
-    /// The next expression above in precedence is [`Parser::match_call_index`].
+    /// The next expression above in precedence is [`Parser::match_deref`].
     pub fn match_unary(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         lazy_static! {
             static ref UNARY_OPS: [Token; 4] = [token![!], token![~], token![-], token![+]];
@@ -1302,9 +1302,9 @@ impl Parser {
 
         let me = if ops.is_empty() {
             self.pop_loc_block("match_unary");
-            self.match_call_index()?
+            self.match_deref()?
         } else {
-            let e = self.match_call_index()?
+            let e = self.match_deref()?
                 .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
             let range = self.pop_loc_block("match_unary").unwrap();
@@ -1336,6 +1336,30 @@ impl Parser {
                 ops,
                 expr: Box::new(inner)
             }, range)
+        }
+    }
+
+    /// Match the next tokens in input if they represent an intrinsic dereferencing expression.
+    /// (`*self.a`)
+    /// or any expression with higher precedence.
+    /// 
+    /// The next expression above in precedence is [`Parser::match_call_index`].
+    pub fn match_deref(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
+        let peek = self.peek_loc();
+        let is_deref_expr = self.match1(token![*]);
+        let ci = self.match_call_index();
+
+        if is_deref_expr {
+            let inner = ci?.ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
+
+            let outer_range = merge_ranges(peek, inner.range());
+            
+            let deref_expr = Located::new(ast::Expr::Deref(
+                ast::IDeref(Box::new(inner))
+            ), outer_range);
+            Ok(Some(deref_expr))
+        } else {
+            ci
         }
     }
 

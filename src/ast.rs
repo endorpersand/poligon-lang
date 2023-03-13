@@ -657,6 +657,7 @@ impl TryFrom<Located<Expr>> for Located<AsgUnit> {
             Expr::Ident(ident) => Ok(Located(AsgUnit::Ident(ident), range)),
             Expr::Path(attrs)  => Ok(Located(AsgUnit::Path(attrs), range)),
             Expr::Index(idx)   => Ok(Located(AsgUnit::Index(idx), range)),
+            Expr::Deref(deref) => Ok(Located(AsgUnit::Deref(deref), range)),
             _ => Err(PatErr::InvalidAssignTarget.at_range(range))
         }
     }
