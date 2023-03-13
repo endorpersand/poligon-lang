@@ -7,7 +7,7 @@ class #dynarray {
 
     fun ::new(cap: int) -> #dynarray {
         let buf = #malloc(cap);
-        #dynarray {
+        #dynarray #{
             buf, len: 0, cap
         };
     }
