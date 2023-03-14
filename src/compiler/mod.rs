@@ -843,7 +843,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .ok_or_else(|| CompileErr::UndefinedFun(fun_ident.into_owned()))?;
 
                 let fun_ret = match &funct.ty {
-                    plir::Type::Fun(plir::FunType(_, ret)) => &**ret,
+                    plir::Type::Fun(plir::FunType{ ret, .. }) => &**ret,
                     _ => unreachable!()
                 };
                 

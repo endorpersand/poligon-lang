@@ -1038,7 +1038,7 @@ impl CodeGenerator {
 
         // declare function before parsing block
         self.declare(&ident, 
-            plir::Type::fun_type(param_tys, ret.clone())
+            plir::Type::fun_type(param_tys, ret.clone(), false)
         );
 
         Ok(plir::FunSignature { ident, params, ret })
@@ -1408,22 +1408,33 @@ impl CodeGenerator {
                 let funct = self.consume_located_expr(*funct, None)?;
 
                 match &funct.ty {
-                    plir::Type::Fun(plir::FunType(param_tys, _)) => {
-                        if param_tys.len() != params.len() {
+                    plir::Type::Fun(plir::FunType { params: param_tys, ret: _, varargs }) => {
+                        let bad_arity = if *varargs {
+                            param_tys.len() > params.len()
+                        } else {
+                            param_tys.len() != params.len()
+                        };
+
+                        if bad_arity {
                             let err = PLIRErr::WrongArity(param_tys.len(), params.len()).at_range(range);
                             return Err(err);
                         }
 
-                        let params = std::iter::zip(param_tys.iter(), params)
-                            .map(|(pty, expr)| {
+                        let mut pty_iter = param_tys.iter();
+                        let params = params.into_iter()
+                            .map(|expr| {
                                 let Located(param, prange) = self.consume_located_expr(expr, None)?;
-                                op_impl::apply_special_cast(param, pty, CastType::Call)
-                                    .map_err(|e| {
-                                        PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)
-                                    })
+                                if let Some(pty) = pty_iter.next() {
+                                    op_impl::apply_special_cast(param, pty, CastType::Call)
+                                        .map_err(|e| {
+                                            PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)
+                                        })
+                                } else {
+                                    Ok(param)
+                                }
                             })
                             .collect::<Result<_, _>>()?;
-
+                        
                         plir::Expr::call(funct, params)
                     },
                     t => Err(PLIRErr::CannotCall(t.clone()).at_range(funct.range()))

@@ -162,9 +162,15 @@ impl Display for TypeRef<'_> {
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
-            TypeRef::Fun(params, ret) => {
+            TypeRef::Fun(params, ret, varargs) => {
                 write!(f, "(")?;
-                fmt_list(f, params)?;
+
+                let mut pd: Vec<_> = params.iter()
+                    .map(|t| t as _)
+                    .collect();
+                if *varargs { pd.push(&".." as _); }
+                fmt_dyn_list(f, &pd)?;
+
                 write!(f, ") -> {ret}")
             },
         }
@@ -173,9 +179,15 @@ impl Display for TypeRef<'_> {
 
 impl Display for FunType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunType(params, ret) = self;
+        let FunType { params, ret, varargs } = self;
         write!(f, "(")?;
-        fmt_list(f, params)?;
+
+        let mut pd: Vec<_> = params.iter()
+            .map(|t| t as _)
+            .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
         write!(f, ") -> {ret}")
     }
 }

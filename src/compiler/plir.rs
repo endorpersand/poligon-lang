@@ -333,7 +333,7 @@ impl Expr {
         };
 
         Ok(Expr::new(
-            (*ft.1).clone(), 
+            (*ft.ret).clone(), 
             ExprType::Call {funct: Box::new(fun), params }
         ))
     }
