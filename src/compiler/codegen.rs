@@ -604,6 +604,16 @@ impl CodeGenerator {
         // check for intrinsic
         if let Some(intrinsic) = ident.strip_prefix('#') {
             if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
+                self.push_global(plir::FunSignature {
+                    ident: ident.to_string(),
+                    params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
+                        rt: Default::default(),
+                        mt: Default::default(),
+                        ident: format!("arg{i}"),
+                        ty: t.clone(),
+                    }).collect(),
+                    ret: (*t.ret).clone(),
+                });
                 self.declare(ident, plir::Type::Fun(t.clone()));
             }
         }
