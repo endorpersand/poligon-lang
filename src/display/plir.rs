@@ -105,9 +105,15 @@ impl Display for Decl {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, params, ret } = self;
+        let FunSignature { ident, params, ret, varargs } = self;
         write!(f, "fun {ident}(")?;
-        fmt_list(f, params)?;
+
+        let mut pd: Vec<_> = params.iter()
+            .map(|t| t as _)
+            .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
         write!(f, ") -> {ret}")
     }
 }

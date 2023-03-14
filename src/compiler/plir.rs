@@ -269,11 +269,13 @@ pub struct Param {
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
-        /// The function's identifier
+    /// The function's identifier
     pub ident: String,
-        /// The function's parameters
+    /// The function's parameters
     pub params: Vec<Param>,
-        /// The function's return type
+    /// Whether the function is varargs
+    pub varargs: bool,
+    /// The function's return type
     pub ret: Type
 }
 

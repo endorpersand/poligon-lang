@@ -617,6 +617,7 @@ impl CodeGenerator {
                         ident: format!("arg{i}"),
                         ty: t.clone(),
                     }).collect(),
+                    varargs: t.varargs,
                     ret: (*t.ret).clone(),
                 });
                 self.declare(intrinsic, plir::Type::Fun(t.clone()));
@@ -1069,7 +1070,7 @@ impl CodeGenerator {
             plir::Type::fun_type(param_tys, ret.clone(), false)
         );
 
-        Ok(plir::FunSignature { ident, params, ret })
+        Ok(plir::FunSignature { ident, params, ret, varargs: false })
     }
     /// Consume a function declaration statement into the current insert block.
     /// 

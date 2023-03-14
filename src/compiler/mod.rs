@@ -322,14 +322,14 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Create a function value from the function's PLIR signature.
     fn define_fun(&self, sig: &plir::FunSignature) -> CompileResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
-        let plir::FunSignature { ident, params, ret } = sig;
+        let plir::FunSignature { ident, params, ret, varargs } = sig;
 
         let arg_tys: Vec<_> = params.iter()
             .map(|p| self.get_ref_layout(&p.ty).map(Into::into))
             .collect::<Result<_, _>>()?;
 
         let fun_ty = self.get_layout_or_void(ret)?
-            .fn_type(&arg_tys, false);
+            .fn_type(&arg_tys, *varargs);
         let fun = self.module.add_function(ident, fun_ty, None);
 
         // set arguments names
