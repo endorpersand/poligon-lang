@@ -15,6 +15,7 @@ use std::rc::Rc;
 use indexmap::IndexMap;
 
 use crate::ast::{self, ReasgType, MutType};
+use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
 pub(crate) use self::op_impl::{CastType, OpErr};
@@ -600,6 +601,13 @@ impl CodeGenerator {
             self.blocks.extend(storage);
         }
 
+        // check for intrinsic
+        if let Some(intrinsic) = ident.strip_prefix('#') {
+            if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
+                self.declare(ident, plir::Type::Fun(t.clone()));
+            }
+        }
+
         Ok(())
     }
 
@@ -636,7 +644,7 @@ impl CodeGenerator {
                     PLIRErr::UndefinedType(String::from(ident))
                         .at_range(range)
                 }),
-            _ => todo!()
+            s => todo!("{s}")
         }
     }
 

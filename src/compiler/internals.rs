@@ -47,12 +47,12 @@ macro_rules! fn_type_s {
 macro_rules! c_intrinsics {
     ($($c:ident: {$f1:expr, $f2:expr}),*) => {
         lazy_static! {
-            static ref C_INTRINSICS_LLVM: HashMap<&'static str, FnTypeS> = map! {
+            pub(in crate::compiler) static ref C_INTRINSICS_LLVM: HashMap<&'static str, FnTypeS> = map! {
                 $(stringify!($c) => $f2),*
             };
         }
         lazy_static! {
-            static ref C_INTRINSICS_PLIR: HashMap<&'static str, plir::FunType> = map! {
+            pub(in crate::compiler) static ref C_INTRINSICS_PLIR: HashMap<&'static str, plir::FunType> = map! {
                 $(stringify!($c) => $f1),*
             };
         }

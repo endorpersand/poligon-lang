@@ -1,5 +1,4 @@
 mod op_impl;
-mod internals;
 
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, BasicValue};
 

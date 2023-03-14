@@ -55,7 +55,7 @@ class string {
     inner: #dynarray
 }
 
-// global _tmpl_print = "%.*s\n\0";
+global _tmpl_print = "%.*s\n\0";
 fun print(s: string) {
     #printf(_tmpl_print, s.inner.len, s.inner.buf);
 }

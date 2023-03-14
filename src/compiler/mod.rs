@@ -17,6 +17,7 @@ mod value;
 pub mod codegen;
 pub mod plir;
 mod llvm;
+pub(self) mod internals;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
