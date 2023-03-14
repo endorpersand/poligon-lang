@@ -316,6 +316,16 @@ impl Display for ExprType {
             },
             ExprType::Cast(e) => write!(f, "castfrom {e}"),
             ExprType::Deref(d) => write!(f,"{d}"),
+            ExprType::GEP(ty, ptr, rest) => {
+                write!(f, "<{ty}>::#gep(")?;
+                write!(f, "{ptr}")?;
+                
+                if !rest.is_empty() {
+                    write!(f, ", ")?;
+                    fmt_list(f, rest)?;
+                }
+                write!(f, ")")
+            },
         }
     }
 }

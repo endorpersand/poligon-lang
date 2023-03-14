@@ -197,10 +197,10 @@ impl Type {
         match self.as_ref() {
             TypeRef::Prim(ident) => Cow::from(ident),
             TypeRef::Generic(ident, params) => {
-                Cow::from(format!("{ident}::({})", param_tuple(params)))
+                Cow::from(format!("{ident}<{}>", param_tuple(params)))
             },
             TypeRef::Tuple(params) => {
-                Cow::from(format!("#tuple::({})", param_tuple(params)))
+                Cow::from(format!("#tuple<{}>", param_tuple(params)))
             },
             TypeRef::Fun(params, ret, varargs) => {
                 let va_filler = match (params.is_empty(), varargs) {
@@ -209,7 +209,7 @@ impl Type {
                     (_, false) => ""
                 };
 
-                Cow::from(format!("#fun::({}{}; {})", param_tuple(params), va_filler, ret.ident()))
+                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(params), va_filler, ret.ident()))
             },
         }
     }

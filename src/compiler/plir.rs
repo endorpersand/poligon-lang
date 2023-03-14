@@ -481,7 +481,10 @@ pub enum ExprType {
     /// Dereferencing intrinsic pointers.
     /// 
     /// See [`IDeref`] for examples.
-    Deref(IDeref)
+    Deref(IDeref),
+
+    /// Get element pointer (intrinsic)
+    GEP(Type, Box<Expr>, Vec<Expr>),
 }
 
 /// A path.

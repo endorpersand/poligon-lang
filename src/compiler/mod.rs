@@ -354,8 +354,12 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type.
     fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
-        self.get_layout_by_name(&ty.ident())
-            .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
+        if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
+            Ok(self.get_layout(t)?.array_type(0).into())
+        } else {
+            self.get_layout_by_name(&ty.ident())
+                .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
+        }
     }
     /// Get the LLVM layout using the layout's identifier.
     fn get_layout_by_name(&self, ident: &str) -> Option<BasicTypeEnum<'ctx>> {
@@ -869,6 +873,25 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .and_then(|val| compiler.cast(val, expr_ty))
             },
             plir::ExprType::Deref(d) => d.write_value(compiler),
+            plir::ExprType::GEP(ty, ptr_expr, params) => {
+                let params: Vec<_> = params.iter()
+                    .map(|e| {
+                        let value = e.write_value(compiler)?;
+                        Ok(compiler.basic_value_of(value).into_int_value())
+                    })
+                    .collect::<Result<_, _>>()?;
+                let layout = compiler.get_layout(ty)?;
+                
+                let ptr_gv = ptr_expr.write_value(compiler)?;
+                let ptr = compiler.basic_value_of(ptr_gv)
+                    .into_pointer_value();
+
+                let gep_ptr = unsafe {
+                    compiler.builder.build_gep(layout, ptr, &params, "gep")
+                };
+
+                compiler.reconstruct(expr_ty, gep_ptr)
+            },
         }
     }
 }

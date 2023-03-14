@@ -57,6 +57,8 @@ pub enum PLIRErr {
     CannotCall(plir::Type),
     /// Wrong number of parameters
     WrongArity(usize /* expected */, usize /* got */),
+    /// Wrong number of type parameters
+    WrongTypeArity(usize /* expected */, usize /* got */),
     /// Cannot spread here.
     CannotSpread,
     /// Cannot use class initializer syntax on this type.
@@ -98,6 +100,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
             | PLIRErr::WrongArity(_, _)
+            | PLIRErr::WrongTypeArity(_, _)
             | PLIRErr::CannotInitialize(_)
             | PLIRErr::CannotDeref
             => "type error",
@@ -129,6 +132,7 @@ impl GonErr for PLIRErr {
             PLIRErr::CannotAssignToMethod => String::from("cannot assign to method"),
             PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
             PLIRErr::WrongArity(e, g) => format!("wrong number of parameters - expected {e}, got {g}"),
+            PLIRErr::WrongTypeArity(e, g) => format!("wrong number of type parameters - expected {e}, got {g}"),
             PLIRErr::CannotSpread => String::from("cannot spread here"),
             PLIRErr::CannotInitialize(t) => format!("cannot use initializer syntax on type '{t}'"),
             PLIRErr::UninitializedField(t, f) => format!("uninitialized field '{f}' on type '{t}'"),
@@ -659,12 +663,28 @@ impl CodeGenerator {
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
         self.resolve_ty(ty)?;
 
-        match ty {
-            plir::Type::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
+        match ty.as_ref() {
+            plir::TypeRef::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
                 .ok_or_else(|| {
                     PLIRErr::UndefinedType(String::from(ident))
                         .at_range(range)
                 }),
+            
+            // HACK ll_array
+            plir::TypeRef::Generic("#ll_array", [t]) => {
+                let ty_ident = ty.ident();
+
+                if self.find_scoped(|ib| ib.types.get(&*ty_ident)).is_none() {
+                    self.get_class(t, range)?;
+                    self.program.types.insert(ty_ident.to_string(), TypeData::primitive());
+                }
+
+                Ok(&self.program.types[&*ty_ident])
+            },
+            plir::TypeRef::Generic("#ll_array", a) => {
+                Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
+            },
+
             s => todo!("{s}")
         }
     }
@@ -1440,7 +1460,58 @@ impl CodeGenerator {
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let funct = self.consume_located_expr(*funct, None)?;
+                let funct = match *funct {
+                    // HACK: GEP
+                    Located(ast::Expr::StaticPath(sp), path_range) if sp.attr == "#gep" => {
+                        let tyrange = sp.ty.1.clone();
+                        let ty = self.consume_type(sp.ty)?;
+
+                        let can_gep = match ty.as_ref() {
+                            plir::TypeRef::Generic("#ll_array", _) => true,
+                            _ => matches!(self.get_class(&ty, tyrange)?.ty, TypeStructure::Class(_))
+                        };
+
+                        return if can_gep {
+                            let _ptr = plir::ty!("#ptr");
+                            let _int = plir::ty!(plir::Type::S_INT);
+
+                            let mut piter = params.into_iter();
+                            let ptr = piter.next()
+                                .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
+                                .and_then(|e| self.consume_located_expr(e, Some(_ptr.clone())))
+                                .and_then(|le| {
+                                    let Located(e, erange) = le;
+
+                                    op_impl::apply_special_cast(e, &_ptr, CastType::Call)
+                                    .map_err(|e| {
+                                        PLIRErr::ExpectedType(_ptr.clone(), e.ty).at_range(erange)
+                                    })
+                                })
+                                .map(Box::new)?;
+
+                            let params = piter.map(|expr| {
+                                let _int = plir::ty!(plir::Type::S_INT);
+                                let Located(param, prange) = self.consume_located_expr(
+                                    expr, Some(_int.clone())
+                                )?;
+                                
+                                op_impl::apply_special_cast(param, &_int, CastType::Call)
+                                    .map_err(|e| {
+                                        PLIRErr::ExpectedType(_int.clone(), e.ty).at_range(prange)
+                                    })
+                            })
+                            .collect::<Result<_, _>>()?;
+
+                            Ok(plir::Expr::new(
+                                plir::ty!("#ptr"),
+                                plir::ExprType::GEP(ty, ptr, params)
+                            ))
+                        } else {
+                            Err(PLIRErr::UndefinedAttr(ty, String::from("gep")).at_range(path_range))?
+                        };
+                    },
+                    e => self.consume_located_expr(e, None)?
+                };
 
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType { params: param_tys, ret: _, varargs }) => {
@@ -1517,7 +1588,7 @@ impl CodeGenerator {
 
             if let Some(metref) = cls.get_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
-                    Err(PLIRErr::CannotAccessOnMethod)?;
+                    Err(PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
                 } else {
                     let metref = metref.to_string();
                     let mut fun_ty: plir::FunType = self.get_var_type(&metref, expr_range.clone())?
@@ -1534,10 +1605,13 @@ impl CodeGenerator {
             } else {
                 let field = cls.get_field(&attr)
                     .map(|(i, t)| (i, t.clone()))
-                    .ok_or_else(|| PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone()))?;
+                    .ok_or_else(|| {
+                        PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone())
+                            .at_range(expr_range.clone())
+                    })?;
     
                 path.add_struct_seg(field)
-                    .map_err(|_| PLIRErr::CannotAccessOnMethod)?;
+                    .map_err(|_| PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
             }
         }
 
