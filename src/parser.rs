@@ -1415,22 +1415,40 @@ impl Parser {
     pub fn match_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_path");
         
-        // TODO: support generics?
-        if let Some(next_i) = self.has_ident() {
+        let mty = if let Some(next_i) = self.has_ident() {
+            // Single ident can be directly accessed by static path.
             if matches!(self.peek_nth_token(next_i), Some(token![::])) {
-                let ty = self.expect_type()?;
-                self.expect1(token![::])?;
-                let attr = self.expect_ident()?.0;
-    
-                let e = Located::new(
-                    ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
-                    self.pop_loc_block("match_path").unwrap()
-                );
-                return Ok(Some(e));
+                Some(self.expect_type()?)
+            } else {
+                None
             }
-        } 
-        
-        if let Some(mut e) = self.match_unit()? {
+        } else if self.match_langle() {
+            // wrap in <...> otherwise.
+            let t = self.expect_type()?;
+            
+            let loc = self.peek_loc();
+            if !self.match_rangle() {
+                Err(expected_tokens![>].at_range(loc))?;
+            }
+
+            Some(t)
+        } else {
+            None
+        };
+
+        // If a type was found, this indicates this is a static path
+        if let Some(ty) = mty {
+            self.expect1(token![::])?;
+            let attr = self.expect_ident()?.0;
+    
+            let e = Located::new(
+                ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
+                self.pop_loc_block("match_path").unwrap()
+            );
+
+            Ok(Some(e))
+        } else if let Some(mut e) = self.match_unit()? {
+            // Otherwise this is an instance path or something else.
             let mut attrs = vec![];
             while self.match1(token![.]) {
                 attrs.push(self.expect_ident()?.0);
