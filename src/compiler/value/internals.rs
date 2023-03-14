@@ -35,7 +35,6 @@ macro_rules! fn_type_s {
 
 lazy_static! {
     static ref CHAR: IntTypeS  = IntTypeS::I32;
-    static ref I32:  IntTypeS  = IntTypeS::I32;
     static ref INT:  IntTypeS  = IntTypeS::I64;
     static ref PTR:  PtrTypeS  = PtrTypeS;
     static ref VOID: VoidTypeS = VoidTypeS;
@@ -47,7 +46,7 @@ lazy_static! {
         "free"      => fn_type_s![(*PTR) -> *VOID],
         "memcpy"    => fn_type_s![(*PTR, *PTR, *INT) -> *PTR],
         "asprintf"  => fn_type_s![(*PTR /* i8** */, *PTR /* i8* */, ~) -> *INT],
-        "setlocale" => fn_type_s![(*I32, *PTR /* i8* */, ~) -> *PTR]
+        "setlocale" => fn_type_s![(*INT, *PTR /* i8* */) -> *PTR]
     };
 }
 

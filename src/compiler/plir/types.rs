@@ -26,6 +26,13 @@ pub enum Type {
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct FunType(pub Vec<Type>, pub Box<Type>);
 
+impl FunType {
+    /// Constructs a new function type.
+    pub fn new(params: Vec<Type>, ret: Type) -> Self {
+        FunType(params, Box::new(ret))
+    }
+}
+
 impl TryFrom<Type> for FunType {
     type Error = crate::compiler::codegen::PLIRErr;
 
@@ -86,7 +93,7 @@ impl Type {
     }
 
     pub(crate) fn fun_type(params: Vec<Type>, ret: Type) -> Self {
-        Type::Fun(FunType(params, Box::new(ret)))
+        Type::Fun(FunType::new(params, ret))
     }
 
     /// Test if this type is `never`.
