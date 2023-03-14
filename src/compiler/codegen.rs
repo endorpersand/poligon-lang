@@ -507,8 +507,7 @@ pub struct CodeGenerator {
     globals: Vec<plir::HoistedStmt>,
     blocks: Vec<InsertBlock>,
     var_id: usize,
-
-    // steps: HashMap<*const plir::Expr, usize>
+    aliases: HashMap<String, String>
 }
 
 impl CodeGenerator {
@@ -518,7 +517,8 @@ impl CodeGenerator {
             program: InsertBlock::top(), 
             globals: vec![],
             blocks: vec![],
-            var_id: 0
+            var_id: 0,
+            aliases: HashMap::new()
         }
     }
 
@@ -557,8 +557,13 @@ impl CodeGenerator {
         self.peek_block().vars.insert(String::from(ident), ty);
     }
 
+    /// All references to ident will be replaced with the new_ident
+    fn alias(&mut self, ident: &str, new_ident: &str) {
+        self.aliases.insert(String::from(ident), String::from(new_ident));
+    }
+
     /// If there is an unresolved structure present at the identifier, try to resolve it.
-    fn resolve_ident(&mut self, ident: &str) -> PLIRResult<()> {
+    fn resolve_ident<'a>(&mut self, ident: &'a str) -> PLIRResult<&'a str> {
         use std::collections::hash_map::Entry;
 
         // mi is 0 to len
@@ -605,7 +610,7 @@ impl CodeGenerator {
         if let Some(intrinsic) = ident.strip_prefix('#') {
             if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
                 self.push_global(plir::FunSignature {
-                    ident: ident.to_string(),
+                    ident: intrinsic.to_string(),
                     params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
                         rt: Default::default(),
                         mt: Default::default(),
@@ -614,16 +619,21 @@ impl CodeGenerator {
                     }).collect(),
                     ret: (*t.ret).clone(),
                 });
-                self.declare(ident, plir::Type::Fun(t.clone()));
+                self.declare(intrinsic, plir::Type::Fun(t.clone()));
+                self.alias(ident, intrinsic);
+                
+                Ok(intrinsic)
+            } else {
+                Ok(ident)
             }
+        } else {
+            Ok(ident)
         }
-
-        Ok(())
     }
 
     /// [`CodeGenerator::resolve_ident`], but using a type parameter
     fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
-        self.resolve_ident(&ty.ident())
+        self.resolve_ident(&ty.ident()).map(|_| ())
     }
 
     /// Find a specific item, starting from the deepest scope and scaling out.
@@ -633,8 +643,8 @@ impl CodeGenerator {
             .find_map(f)
     }
 
-    fn get_var_type(&mut self, ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
-        self.resolve_ident(ident)?;
+    fn get_var_type(&mut self, mut ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
+        ident = self.resolve_ident(ident)?;
 
         self.find_scoped(|ib| ib.vars.get(ident))
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)).at_range(range))
@@ -1153,9 +1163,15 @@ impl CodeGenerator {
         
         match expr {
             ast::Expr::Ident(ident) => {
+                let ty = self.get_var_type(&ident, range)?.clone();
+
+                let ref_ident = self.aliases.get(&ident)
+                    .cloned()
+                    .unwrap_or(ident);
+
                 Ok(plir::Expr::new(
-                    self.get_var_type(&ident, range)?.clone(),
-                    plir::ExprType::Ident(ident)
+                    ty,
+                    plir::ExprType::Ident(ref_ident)
                 ))
             },
             ast::Expr::Block(b) => {

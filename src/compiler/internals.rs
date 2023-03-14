@@ -385,11 +385,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Internal functions are currently defined in [`compiler::value::internals`].
     /// The type signature and identifier need to match exactly, or else defined internals may fail 
     /// or a segmentation fault may occur.
-    pub(crate) fn std_import(&self, mut s: &str) -> CompileResult<'ctx, FunctionValue<'ctx>> {
-        // try with # (if present)
-        if let Some(id2) = s.strip_prefix('#') {
-            if C_INTRINSICS_LLVM.contains_key(id2) { s = id2; }
-        }
+    pub(crate) fn std_import(&self, s: &str) -> CompileResult<'ctx, FunctionValue<'ctx>> {
         let intrinsic = C_INTRINSICS_LLVM.get(s)
             .map(|f| f.as_concrete(self));
         let fun = match self.module.get_function(s) {
