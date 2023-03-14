@@ -37,6 +37,7 @@ impl Display for Stmt {
             Stmt::ClassDecl(s) => write!(f, "{s}"),
             Stmt::Import(sp) => write!(f, "import {sp}"),
             Stmt::ImportIntrinsic => write!(f, "import intrinsic"),
+            Stmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
         }
     }
 }

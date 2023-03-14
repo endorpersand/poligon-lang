@@ -409,6 +409,11 @@ impl InsertBlock {
     fn insert_class(&mut self, cls: &plir::Class) {
         self.types.insert(cls.ident.clone(), TypeData::structural(cls.clone()));
     }
+
+    /// Declares a variable within this insert block.
+    fn declare(&mut self, ident: &str, ty: plir::Type) {
+        self.vars.insert(String::from(ident), ty);
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -558,7 +563,7 @@ impl CodeGenerator {
 
     /// Declares a variable with a given type.
     fn declare(&mut self, ident: &str, ty: plir::Type) {
-        self.peek_block().vars.insert(String::from(ident), ty);
+        self.peek_block().declare(ident, ty)
     }
 
     /// All references to ident will be replaced with the new_ident
@@ -745,6 +750,10 @@ impl CodeGenerator {
                 ast::Stmt::Import(mp) => {
                     self.peek_block().insert_unresolved(Unresolved::Import(mp));
                 },
+                ast::Stmt::IGlobal(id, s) => {
+                    self.program.declare(&id, plir::ty!("#ptr"));
+                    self.push_global(plir::HoistedStmt::IGlobal(id, s));
+                }
                 _ => eager_stmts.push(stmt),
             }
         }
@@ -818,6 +827,7 @@ impl CodeGenerator {
             ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
             ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
             ast::Stmt::ImportIntrinsic => Ok(self.peek_block().is_open()), // no-op
+            ast::Stmt::IGlobal(_, _) => unimplemented!("global decl should not be resolved eagerly"),
         }
     }
 

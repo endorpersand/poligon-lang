@@ -902,7 +902,8 @@ impl TraverseRt for Located<ast::Stmt> {
             ast::Stmt::Expr(e) => e.traverse_rt(ctx),
             ast::Stmt::ClassDecl(_) => Err(FeatureErr::CompilerOnly("classes").at_range(range))?,
             ast::Stmt::Import(_) => Err(ResolveErr::CompilerOnly("importing").at_range(range))?,
-            ast::Stmt::ImportIntrinsic => Err(ResolveErr::CompilerOnly("importing").at_range(range))?,
+            ast::Stmt::ImportIntrinsic => Err(ResolveErr::CompilerOnly("intrinsics").at_range(range))?,
+            ast::Stmt::IGlobal(_, _) => Err(ResolveErr::CompilerOnly("intrinsics").at_range(range))?,
         }
     }
 }

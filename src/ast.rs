@@ -185,7 +185,10 @@ pub enum Stmt {
     Import(StaticPath),
 
     /// `import intrinsic`. Enables intrinsic functionality.
-    ImportIntrinsic
+    ImportIntrinsic,
+
+    /// A global declaration. This is part of intrinsic functionality.
+    IGlobal(String /* ident */, String /* value */)
 }
 
 impl Stmt {

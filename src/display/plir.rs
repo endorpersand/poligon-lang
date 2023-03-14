@@ -35,6 +35,7 @@ impl Display for HoistedStmt {
             HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
             HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
+            HoistedStmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
         }
     }
 }

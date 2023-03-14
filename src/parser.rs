@@ -95,6 +95,9 @@ pub enum ParseErr {
     /// The parser expected an expression here, but failed to match an expression.
     ExpectedExpr,
 
+    /// The parser expected a str literal here, but got something else.
+    ExpectedStrLiteral,
+
     /// The string provided could not be parsed into a numeric value.
     CannotParseNumeric,
 
@@ -117,7 +120,10 @@ pub enum ParseErr {
     AsgPatErr(PatErr),
 
     /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
-    CannotUseIntrinsic
+    NoIntrinsicIdents,
+
+    /// Parser is not in intrinsic mode and therefore this feature is not allowed
+    NoIntrinsicGlobal
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
@@ -138,13 +144,15 @@ impl GonErr for ParseErr {
             },
             ParseErr::ExpectedIdent      => String::from("expected identifier"),
             ParseErr::ExpectedExpr       => String::from("expected expression"),
+            ParseErr::ExpectedStrLiteral => String::from("expected string literal"),
             ParseErr::CannotParseNumeric => String::from("could not parse numeric"),
             ParseErr::ExpectedBlock      => String::from("expected block"),
             ParseErr::ExpectedType       => String::from("expected type expression"),
             ParseErr::ExpectedPattern    => String::from("expected pattern"),
             ParseErr::ExpectedEntry      => String::from("expected entry"),
             ParseErr::ExpectedParam      => String::from("expected param"),
-            ParseErr::CannotUseIntrinsic => String::from("cannot use intrinsic identifier"),
+            ParseErr::NoIntrinsicIdents  => String::from("cannot use intrinsic identifier"),
+            ParseErr::NoIntrinsicGlobal  => String::from("cannot use intrinsic global"),
             ParseErr::AsgPatErr(e)       => e.message(),
         }
     }
@@ -690,6 +698,7 @@ impl Parser {
             },
             Some(token![class])    => Some(self.expect_class_decl()?).map(ast::Stmt::ClassDecl),
             Some(token![import])   => self.expect_import_decl()?,
+            Some(token![global])   => Some(self.expect_global_decl()?),
             Some(_)                => self.match_expr()?.map(ast::Stmt::Expr),
             None                   => None
         };
@@ -982,6 +991,29 @@ impl Parser {
         }
     }
 
+    /// Expect the next tokens are an intrinsic global value.
+    /// 
+    /// This will error if the program is not in intrinsic mode.
+    pub fn expect_global_decl(&mut self) -> ParseResult<ast::Stmt> {
+        if self.intrinsic_mode {
+            self.expect1(token![global])?;
+            let ident = self.expect_ident()?.0;
+            self.expect1(token![=])?;
+            
+            let literal_tok = self.peek_loc();
+            let ast::Expr::Literal(literal) = self.expect_literal()? else { unreachable!() };
+            let s = match literal {
+                ast::Literal::Char(c) => String::from(c),
+                ast::Literal::Str(s)  => s,
+                _ => Err(ParseErr::ExpectedStrLiteral.at_range(literal_tok))?
+            };
+
+            Ok(ast::Stmt::IGlobal(ident, s))
+        } else {
+            Err(ParseErr::NoIntrinsicGlobal.at_range(self.peek_loc()))
+        }
+    }
+
     /// Check if the next input is an identifier.
     /// 
     /// If the next input is an identifier, this function returns the number of tokens
@@ -1015,7 +1047,7 @@ impl Parser {
                 if self.intrinsic_mode {
                     Ok(Some(Located::new(format!("#{s}"), ident_loc)))
                 } else {
-                    Err(ParseErr::CannotUseIntrinsic.at_range(ident_loc))
+                    Err(ParseErr::NoIntrinsicIdents.at_range(ident_loc))
                 }
             },
             s => unreachable!("has_ident should not return {s:?}")

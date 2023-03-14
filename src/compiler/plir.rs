@@ -78,7 +78,10 @@ mod stmt {
         ExternFunDecl(FunSignature),
 
         /// A struct declaration.
-        ClassDecl(Class)
+        ClassDecl(Class),
+
+        /// An intrinsic global string value declaration.
+        IGlobal(String /* ident */, String /* ident */)
     }
 
     /// A statement that happens as a part of a procedure (e.g. a block).

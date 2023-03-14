@@ -29,7 +29,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::support::LLVMString;
 use inkwell::types::{BasicTypeEnum, PointerType, BasicType, BasicMetadataTypeEnum, FunctionType, VoidType};
-use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue};
+use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue, GlobalValue};
 
 use crate::ast::{op, Literal};
 use crate::err::GonErr;
@@ -168,7 +168,8 @@ pub struct Compiler<'ctx> {
     layouts: HashMap<String, BasicTypeEnum<'ctx>>,
     exit_pointers: Vec<ExitPointers<'ctx>>,
 
-    vars: HashMap<String, PointerValue<'ctx>>
+    vars: HashMap<String, PointerValue<'ctx>>,
+    globals: HashMap<String, GlobalValue<'ctx>>
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -181,7 +182,8 @@ impl<'ctx> Compiler<'ctx> {
             layouts: default_layouts(ctx),
             exit_pointers: vec![],
 
-            vars: HashMap::new()
+            vars: HashMap::new(),
+            globals: HashMap::new()
         }
     }
     
@@ -240,10 +242,9 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn get_ptr(&mut self, ident: &str) -> CompileResult<'ctx, PointerValue<'ctx>> {
-        match self.vars.get(ident) {
-            Some(&ptr) => Ok(ptr),
-            None => Err(CompileErr::UndefinedVar(String::from(ident))),
-        }
+        self.vars.get(ident).copied()
+            .or_else(|| self.globals.get(ident).map(|g| g.as_pointer_value()))
+            .ok_or_else(|| CompileErr::UndefinedVar(String::from(ident)))
     }
 
     fn add_incoming_gv<'a>(&self, phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
@@ -552,6 +553,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 },
                 HoistedStmt::ExternFunDecl(dcl) => { compiler.import(dcl)?; },
                 HoistedStmt::ClassDecl(cls) => cls.write_value(compiler)?,
+                HoistedStmt::IGlobal(id, value) => {
+                    let global = unsafe {
+                        compiler.builder.build_global_string(value, id)
+                    };
+                    compiler.globals.insert(id.to_string(), global);
+                },
             }
         }
         
