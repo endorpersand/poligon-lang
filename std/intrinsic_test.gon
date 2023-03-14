@@ -1,0 +1,7 @@
+import intrinsic;
+extern fun print(s: string);
+
+fun main() {
+    let ptr = #malloc(10);
+    #free(ptr);
+}

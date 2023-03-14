@@ -1,0 +1,7 @@
+extern fun #malloc(arg0: int) -> #ptr;
+extern fun #free(arg0: #ptr) -> void;
+fun main() -> void {
+    let ptr: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(10)));
+    return <void>(<(#ptr) -> void>(#free)(<#ptr>(ptr)));
+}
+extern fun print(s: string) -> void;

@@ -586,7 +586,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         compiler.builder.position_at_end(bb);
 
         let setlocale = compiler.std_import("setlocale")?;
-        let _int = compiler.ctx.i32_type();
+        let _int = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
         compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
         compiler.builder.build_unconditional_branch(fbb);
