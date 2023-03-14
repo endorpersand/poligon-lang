@@ -1431,8 +1431,10 @@ impl CodeGenerator {
                         let mut pty_iter = param_tys.iter();
                         let params = params.into_iter()
                             .map(|expr| {
-                                let Located(param, prange) = self.consume_located_expr(expr, None)?;
-                                if let Some(pty) = pty_iter.next() {
+                                let mpty = pty_iter.next();
+                                let Located(param, prange) = self.consume_located_expr(expr, mpty.cloned())?;
+                                
+                                if let Some(pty) = mpty {
                                     op_impl::apply_special_cast(param, pty, CastType::Call)
                                         .map_err(|e| {
                                             PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)

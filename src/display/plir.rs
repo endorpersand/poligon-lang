@@ -309,7 +309,7 @@ impl Display for ExprType {
                 write!(f, "]")
             },
             ExprType::Cast(e) => write!(f, "castfrom {e}"),
-            ExprType::Deref(d) => write!(f," {d}"),
+            ExprType::Deref(d) => write!(f,"{d}"),
         }
     }
 }
@@ -368,6 +368,6 @@ impl Display for IDeref {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let IDeref { expr, ty: _ } = self;
 
-        write!(f, "*{expr}")
+        write!(f, "*{}", expr.expr)
     }
 }
