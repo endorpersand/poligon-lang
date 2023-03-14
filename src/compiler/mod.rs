@@ -974,12 +974,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
 
         // This should be type checked in PLIR:
         match expr {
-            GonValue::Float(_)  => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Int(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Bool(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Unit      => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Char(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Struct(_) => {
+            GonValue::Float(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Int(_)     => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Bool(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Unit       => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Char(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Default(_) => {
                 todo!()
                 // // TODO: support unicode
                 // let buf = compiler.builder.build_extract_value(s, 0, "buf").unwrap().into_pointer_value();

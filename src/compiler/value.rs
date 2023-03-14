@@ -1,6 +1,6 @@
 mod op_impl;
 
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, StructValue, BasicValue};
+use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 
 use super::{Compiler, CompileResult, CompileErr, layout, params};
 use super::plir;
@@ -53,10 +53,10 @@ pub enum GonValue<'ctx> {
     /// 
     /// Following Rust's rules, `char` is stored as a u32.
     Char(IntValue<'ctx> /* i32 */),
-    /// Any value represented by a struct in LLVM.
+    /// A miscellaneous value with no special tracking.
     /// 
     /// For example, `String`.
-    Struct(StructValue<'ctx>),
+    Default(BasicValueEnum<'ctx>),
     /// `void`. 
     /// 
     /// This can either be represented 
@@ -109,7 +109,7 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.build_call(arr_ext, params![dynarray_ptr, string_ptr, len], "");
 
         let dynarray = self.builder.build_load(_dynarray, dynarray_ptr, "");
-        GonValue::Struct(self.builder.create_struct_value(_str, &[dynarray]).unwrap())
+        GonValue::Default(self.builder.create_struct_value(_str, &[dynarray]).unwrap().into())
     }
 
     /// Cast a GonValue to another type.
@@ -133,10 +133,9 @@ impl<'ctx> Compiler<'ctx> {
                 let to_str = self.std_import("char__to_string")?;
                 let string = self.builder.build_call(to_str, params![c], "cast")
                     .try_as_basic_value()
-                    .unwrap_left()
-                    .into_struct_value();
+                    .unwrap_left();
 
-                Ok(GonValue::Struct(string))
+                Ok(GonValue::Default(string))
             },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
@@ -147,7 +146,6 @@ impl<'ctx> Compiler<'ctx> {
     /// Create a [`GonValue`] from a given LLVM value.
     pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> CompileResult<'ctx, GonValue<'ctx>> {
         use plir::{TypeRef, Type};
-        use inkwell::types::BasicTypeEnum;
         
         let v = v.as_basic_value_enum();
         match t.as_ref() {
@@ -156,13 +154,7 @@ impl<'ctx> Compiler<'ctx> {
             TypeRef::Prim(Type::S_BOOL)  => Ok(GonValue::Bool(v.into_int_value())),
             TypeRef::Prim(Type::S_CHAR)  => Ok(GonValue::Char(v.into_int_value())),
             TypeRef::Prim(Type::S_VOID)  => Ok(GonValue::Unit),
-            _ => {
-                if let BasicTypeEnum::StructType(_) = self.get_layout(t)? {
-                    Ok(GonValue::Struct(v.into_struct_value()))
-                } else {
-                    Err(CompileErr::UnresolvedType(t.clone()))
-                }
-            }
+            _ => Ok(GonValue::Default(v))
         }
     }
 
@@ -171,12 +163,12 @@ impl<'ctx> Compiler<'ctx> {
     /// Depending on context, [`Compiler::returnable_value_of`] may be more suitable.
     pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
         match value {
-            GonValue::Float(f)  => f.into(),
-            GonValue::Int(i)    => i.into(),
-            GonValue::Bool(b)   => b.into(),
-            GonValue::Char(c)   => c.into(),
-            GonValue::Struct(s) => s.into(),
-            GonValue::Unit      => layout!(self, S_VOID).const_zero(),
+            GonValue::Float(f)   => f.into(),
+            GonValue::Int(i)     => i.into(),
+            GonValue::Bool(b)    => b.into(),
+            GonValue::Char(c)    => c.into(),
+            GonValue::Default(s) => s,
+            GonValue::Unit       => layout!(self, S_VOID).const_zero(),
         }
     }
 
@@ -197,21 +189,40 @@ impl<'ctx> Compiler<'ctx> {
     /// This can be used to reconstruct a GonValue from a LLVM representation. 
     /// See [`Compiler::reconstruct`].
     pub fn plir_type_of(&self, value: GonValue<'ctx>) -> plir::Type {
+        use inkwell::types::BasicTypeEnum;
+        use plir::{ty, Type};
+
         match value {
-            GonValue::Float(_)  => plir::ty!(plir::Type::S_FLOAT),
-            GonValue::Int(_)    => plir::ty!(plir::Type::S_INT),
-            GonValue::Bool(_)   => plir::ty!(plir::Type::S_BOOL),
-            GonValue::Char(_)   => plir::ty!(plir::Type::S_CHAR),
-            GonValue::Struct(s) => {
+            GonValue::Float(_)   => ty!(Type::S_FLOAT),
+            GonValue::Int(_)     => ty!(Type::S_INT),
+            GonValue::Bool(_)    => ty!(Type::S_BOOL),
+            GonValue::Char(_)    => ty!(Type::S_CHAR),
+            GonValue::Default(s) => {
                 let st = s.get_type();
-                let name = st.get_name()
-                    .expect("Expected struct to have name")
-                    .to_str()
-                    .expect("Expected struct name to be Rust-compatible");
                 
-                plir::ty!(name)
+                match st {
+                    BasicTypeEnum::ArrayType(t) => unimplemented!("{t} does not have a PLIR representation"),
+                    BasicTypeEnum::FloatType(_) => ty!(Type::S_FLOAT),
+                    BasicTypeEnum::IntType(t)   => match t.get_bit_width() {
+                        1 => ty!(Type::S_BOOL),
+                        8 => ty!("#byte"),
+                        32 => ty!(Type::S_CHAR),
+                        64 => ty!(Type::S_INT),
+                        _ => unimplemented!("{t} does not have a PLIR representation")
+                    },
+                    BasicTypeEnum::PointerType(_) => ty!("#ptr"),
+                    BasicTypeEnum::StructType(t)  => {
+                        let name = t.get_name()
+                            .expect("Expected struct to have name")
+                            .to_str()
+                            .expect("Expected struct name to be Rust-compatible");
+                        ty!(name)
+                    },
+                    BasicTypeEnum::VectorType(t)  => unimplemented!("{t} does not have a PLIR representation")
+                }
+                
             },
-            GonValue::Unit      => plir::ty!(plir::Type::S_VOID),
+            GonValue::Unit => ty!(Type::S_VOID),
         }
     }
 }
