@@ -249,8 +249,13 @@ struct InsertBlock {
     final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<String, plir::Type>,
+    aliases: HashMap<String, String>,
     types: HashMap<String, TypeData>,
     unresolved: HashMap<String, Unresolved>,
+
+    /// If this is not None, then this block is expected to return the provided type.
+    /// This can be used as context for some functions to more effectively assign
+    /// a type.
     expected_ty: Option<plir::Type>
 }
 
@@ -262,6 +267,7 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
+            aliases: HashMap::new(),
             types: HashMap::new(),
             unresolved: HashMap::new(),
             expected_ty
@@ -275,6 +281,7 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
+            aliases: HashMap::new(),
             types: primitives(&[
                 plir::Type::S_INT,
                 plir::Type::S_FLOAT,
@@ -413,6 +420,11 @@ impl InsertBlock {
     /// Declares a variable within this insert block.
     fn declare(&mut self, ident: &str, ty: plir::Type) {
         self.vars.insert(String::from(ident), ty);
+    }
+
+    /// Aliases ident to new_ident for the given block.
+    fn alias(&mut self, ident: &str, new_ident: &str) {
+        self.aliases.insert(String::from(ident), String::from(new_ident));
     }
 }
 
@@ -566,9 +578,9 @@ impl CodeGenerator {
         self.peek_block().declare(ident, ty)
     }
 
-    /// All references to ident will be replaced with the new_ident
+    /// Accesses to ident are mapped to new_ident for the current block.
     fn alias(&mut self, ident: &str, new_ident: &str) {
-        self.aliases.insert(String::from(ident), String::from(new_ident));
+        self.peek_block().alias(ident, new_ident);
     }
 
     /// If there is an unresolved structure present at the identifier, try to resolve it.
@@ -615,9 +627,11 @@ impl CodeGenerator {
             self.blocks.extend(storage);
         }
 
-        // check for intrinsic
+        // HACK: check for intrinsic
         if let Some(intrinsic) = ident.strip_prefix('#') {
             if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
+                // If this is an intrinsic,
+                // register the intrinsic on the top level.
                 self.push_global(plir::FunSignature {
                     ident: intrinsic.to_string(),
                     params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
@@ -839,8 +853,8 @@ impl CodeGenerator {
         let InsertBlock { 
             mut block, last_stmt_loc, 
             exits, final_exit, 
-            vars: _, types: _, unresolved,
-            expected_ty
+            vars: _, aliases: _, types: _, 
+            unresolved, expected_ty
         } = block;
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
