@@ -27,7 +27,7 @@ class #dynarray {
         
         let push_ptr = <#ll_array<#byte>>::#gep(self.buf, self.len);
         self.len = self.len + 1;
-        *self.buf = new_byte;
+        *self.buf = byte;
     }
 
     fun self.pop() -> #byte {
