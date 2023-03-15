@@ -41,9 +41,8 @@ fn main() -> io::Result<()> {
 
             let fun = unwrap_or_exit! { compiler.compile(&plir) };
             
-            let path = change_ext(fp, "ll");
-            let mut f = File::create(path)?;
-            f.write_all(compiler.get_module().print_to_string().to_bytes())?;
+            compiler.to_ll(change_ext(fp, "ll"))?;
+            compiler.to_bc(change_ext(fp, "bc"));
 
             unwrap_or_exit! { unsafe { compiler.jit_run::<()>(fun) } }
             Ok(())

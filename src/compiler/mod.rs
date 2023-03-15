@@ -22,6 +22,7 @@ pub(self) mod internals;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::iter;
+use std::path::Path;
 
 use inkwell::{OptimizationLevel, AddressSpace};
 use inkwell::basic_block::BasicBlock;
@@ -186,12 +187,6 @@ impl<'ctx> Compiler<'ctx> {
             globals: HashMap::new()
         }
     }
-    
-    #[doc(hidden)]
-    /// Obtains the LLVM module being created by the compiler.
-    pub fn get_module(&self) -> &Module<'ctx> {
-        &self.module
-    }
 
     /// Executes a compiled program JIT, and returns the resulting value.
     /// 
@@ -212,6 +207,20 @@ impl<'ctx> Compiler<'ctx> {
             let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
             Ok(jit_fun.call())
         }
+    }
+
+    /// Writes LLVM bytecode for the current module into the provided file path.
+    pub fn to_ll(&self, p: impl AsRef<Path>) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::prelude::*;
+
+        let mut file = File::create(p)?;
+        file.write_all(self.module.print_to_string().to_bytes())
+    }
+
+    /// Writes LLVM bitcode for the current module into the provided file path.
+    pub fn to_bc(&self, p: impl AsRef<Path>) {
+        self.module.write_bitcode_to_path(p.as_ref());
     }
 
     /// Compiles the given item, 
