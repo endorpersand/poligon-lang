@@ -241,9 +241,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(alloca)
     }
 
-    fn get_ptr(&mut self, ident: &str) -> CompileResult<'ctx, PointerValue<'ctx>> {
+    fn get_ptr_opt(&mut self, ident: &str) -> Option<PointerValue<'ctx>> {
         self.vars.get(ident).copied()
-            .or_else(|| self.globals.get(ident).map(|g| g.as_pointer_value()))
+    }
+    fn get_ptr(&mut self, ident: &str) -> CompileResult<'ctx, PointerValue<'ctx>> {
+        self.get_ptr_opt(ident)
             .ok_or_else(|| CompileErr::UndefinedVar(String::from(ident)))
     }
 
@@ -539,7 +541,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         // split the functions from everything else:
         let mut main_fun = None;
         let mut fun_bodies = vec![];
-        
+        let mut globals = vec![];
         let plir::Program(hoisted, proc) = &self;
 
         for stmt in hoisted {
@@ -551,62 +553,75 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                     }
                     fun_bodies.push(dcl);
                 },
-                HoistedStmt::ExternFunDecl(dcl) => { compiler.import(dcl)?; },
-                HoistedStmt::ClassDecl(cls) => cls.write_value(compiler)?,
+                HoistedStmt::ExternFunDecl(dcl) => {
+                    compiler.import(dcl)?;
+                },
+                HoistedStmt::ClassDecl(cls) => {
+                    cls.write_value(compiler)?;
+                },
                 HoistedStmt::IGlobal(id, value) => {
-                    let global = unsafe {
-                        compiler.builder.build_global_string(value, id)
-                    };
-                    compiler.globals.insert(id.to_string(), global);
+                    globals.push((id, value));
                 },
             }
         }
-        
-        // delay function resolution until everything hoisted has been evaluated
-        for bodies in fun_bodies {
-            bodies.write_value(compiler)?;
-        }
 
-        let main = match (main_fun, proc.as_slice()) {
-            (Some(f), []) => Ok(f),
-            (Some(_), _)  => Err(CompileErr::CannotDetermineMain),
+        let (main, mstmts) = match (main_fun, proc.as_slice()) {
+            (Some(f), []) => (f, None),
+            (Some(_), _)  => Err(CompileErr::CannotDetermineMain)?,
             (None, stmts) => {
-                let main = compiler.module.add_function(
+                let main_fn = compiler.module.add_function(
                     "main", 
                     fn_type![() -> compiler.ctx.void_type()],
                     None
                 );
-                
-                let bb = compiler.ctx.append_basic_block(main, "main_body");
-                compiler.builder.position_at_end(bb);
-                for stmt in stmts {
-                    stmt.write_value(compiler)?;
-                }
-                compiler.builder.build_return(None);
-
-                if main.verify(true) {
-                    Ok(main)
-                } else {
-                    Err(CompileErr::InvalidFun)
-                }
+                (main_fn, Some(stmts))
             }
-        }?;
+        };
 
-        let fbb = main.get_first_basic_block().unwrap();
-        let bb = compiler.ctx.prepend_basic_block(fbb, "init");
-        compiler.builder.position_at_end(bb);
+        // main initializer
+        let init_bb = compiler.ctx.append_basic_block(main, "init");
+        compiler.builder.position_at_end(init_bb);
 
         let setlocale = compiler.std_import("setlocale")?;
         let _int = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
         compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
-        compiler.builder.build_unconditional_branch(fbb);
-        
+
+        // load globals before loading fun bodies
+        // globals have to be loaded within a function, so we're doing it in main
+        for (id, value) in globals {
+            let global = unsafe {
+                compiler.builder.build_global_string(value, id)
+            };
+            compiler.globals.insert(id.to_string(), global);
+        }
+
+        // this is delayed until after all types have been resolved
+        // should also be before main is resolved
+        for bodies in fun_bodies {
+            bodies.write_value(compiler)?;
+        }
+
+        // resolve main if it hasn't been resolved yet:
+        if let Some(stmts) = mstmts {
+            let main_bb = compiler.ctx.append_basic_block(main, "main_body");
+            compiler.builder.position_at_end(main_bb);
+            for stmt in stmts {
+                stmt.write_value(compiler)?;
+            }
+            compiler.builder.build_return(None);
+        }
+
+        // connect init to main:
+        compiler.builder.position_at_end(init_bb);
+        compiler.builder.build_unconditional_branch(main.get_basic_blocks()[1]);
+
         if main.verify(true) {
             Ok(main)
         } else {
             Err(CompileErr::InvalidFun)
         }
+
     }
 }
 
@@ -642,10 +657,21 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
         let expr_layout = compiler.get_layout(expr_ty)?;
 
         match expr {
-            plir::ExprType::Ident(_) => self.write_ptr(compiler).and_then(|ptr| {
-                let bv = compiler.builder.build_load(expr_layout, ptr, "");
-                compiler.reconstruct(expr_ty, bv)
-            }),
+            plir::ExprType::Ident(id) => {
+                match compiler.get_ptr_opt(id) {
+                    Some(ptr) => {
+                        let bv = compiler.builder.build_load(expr_layout, ptr, "");
+                        compiler.reconstruct(expr_ty, bv)
+                    },
+                    None => {
+                        // check for global
+                        let &global = compiler.globals.get(id)
+                            .ok_or_else(|| CompileErr::UndefinedVar(id.clone()))?;
+
+                        compiler.reconstruct(expr_ty, global.as_pointer_value())
+                    }
+                }
+            },
             plir::ExprType::Block(block) => {
                 // wrap in block for clarity
                 let fun = compiler.parent_fn();
