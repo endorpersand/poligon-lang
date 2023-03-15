@@ -30,14 +30,11 @@ class #dynarray {
         *push_ptr = byte;
     }
 
-    fun self.pop() -> #byte {
-        if self.len != 0 {
+    fun self.pop() {
+        if self.len > 0 {
             self.len = self.len - 1;
-            
-            let pop_ptr = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
-            *pop_ptr;
         } else {
-            0; // TODO: handle null
+            self.len = 0;
         }
     }
 
@@ -56,8 +53,7 @@ class string {
 }
 
 global _tmpl_print = "%.*s\n\0";
+
 fun print(s: string) {
     #printf(_tmpl_print, s.inner.len, s.inner.buf);
 }
-
-// byte literal
