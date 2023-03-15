@@ -6,7 +6,7 @@ use std::fs;
 use std::iter::Peekable;
 use std::path::Path;
 
-use crate::compiler::{plir, plir_codegen, Compiler};
+use crate::compiler::{plir, plir_codegen, LLVMCodegen};
 use crate::err::{FullGonErr, GonErr};
 use crate::interpreter::runtime::{RtContext, self};
 use crate::interpreter::runtime::value::Value;
@@ -120,10 +120,10 @@ impl Test<'_> {
     }
 
     #[allow(unused)]
-    fn compile_w_ctx<'ctx>(&self, ctx: &'ctx Context) -> TestResult<(Compiler<'ctx>, FunctionValue<'ctx>)> {
+    fn compile_w_ctx<'ctx>(&self, ctx: &'ctx Context) -> TestResult<(LLVMCodegen<'ctx>, FunctionValue<'ctx>)> {
         let plir = self.codegen()?;
     
-        let mut compiler = Compiler::from_ctx(ctx);
+        let mut compiler = LLVMCodegen::from_ctx(ctx);
     
         match compiler.compile(&plir) {
             Ok(f) => Ok((compiler, f)),
@@ -146,9 +146,9 @@ impl Test<'_> {
     }
 }
 
-pub fn with_compiler<T>(mut f: impl FnMut(&mut Compiler) -> T) -> T {
+pub fn with_compiler<T>(mut f: impl FnMut(&mut LLVMCodegen) -> T) -> T {
     let ctx = Context::create();
-    let mut compiler = Compiler::from_ctx(&ctx);
+    let mut compiler = LLVMCodegen::from_ctx(&ctx);
     f(&mut compiler)
 }
 

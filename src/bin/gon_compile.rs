@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::{io, fs};
 
 use inkwell::context::Context;
-use poligon_lang::compiler::{plir_codegen, Compiler};
+use poligon_lang::compiler::{plir_codegen, LLVMCodegen};
 use poligon_lang::{lexer, parser};
 use poligon_lang::err::FullGonErr;
 
@@ -37,7 +37,7 @@ fn main() -> io::Result<()> {
             f.write_all(plir.to_string().as_bytes())?;
 
             let ctx = Context::create();
-            let mut compiler = Compiler::from_ctx(&ctx);
+            let mut compiler = LLVMCodegen::from_ctx(&ctx);
 
             let fun = unwrap_or_exit! { compiler.compile(&plir) };
             

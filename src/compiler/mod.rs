@@ -19,5 +19,5 @@ mod llvm;
 pub(self) mod internals;
 pub mod llvm_codegen;
 
-pub use plir_codegen::{CodeGenerator, PLIRErr, PLIRResult};
-pub use llvm_codegen::{Compiler, CompileErr, CompileResult};
+pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
+pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};

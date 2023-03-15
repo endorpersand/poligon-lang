@@ -5,7 +5,7 @@ use inkwell::builder::Builder;
 use inkwell::types::{StructType, BasicType};
 use inkwell::values::{BasicValueEnum, StructValue, BasicValue, PointerValue, IntValue};
 
-use super::{CompileResult, CompileErr};
+use super::{LLVMResult, LLVMErr};
 
 
 pub(crate) struct Builder2<'ctx>(Builder<'ctx>);
@@ -34,12 +34,12 @@ impl<'ctx> Builder2<'ctx> {
         &self, 
         ty: StructType<'ctx>,
         values: &[BasicValueEnum<'ctx>]
-    ) -> CompileResult<'ctx, StructValue<'ctx>> {
+    ) -> LLVMResult<'ctx, StructValue<'ctx>> {
         let mut result = ty.const_zero();
         
         for (i, &fval) in values.iter().enumerate() {
             result = self.build_insert_value(result, fval, i as u32, "")
-                .ok_or_else(|| CompileErr::StructIndexOOB(i))?
+                .ok_or_else(|| LLVMErr::StructIndexOOB(i))?
                 .try_into()
                 .unwrap();
         }

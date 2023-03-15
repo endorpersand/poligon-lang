@@ -131,7 +131,7 @@ impl<T> ResultIntoInner for Result<T, T> {
     }
 }
 
-impl super::CodeGenerator {
+impl super::PLIRCodegen {
     /// Checks if this unary operator exists as a method.
     fn find_unary(&mut self, op: op::Unary, left: TypeRef) -> PLIRResult<Option<Expr>> {
         let method_name = match op {

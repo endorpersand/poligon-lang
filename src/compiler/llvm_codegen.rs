@@ -138,7 +138,7 @@ impl<'ctx> ExitPointers<'ctx> {
 }
 
 /// This struct converts from PLIR to LLVM.
-pub struct Compiler<'ctx> {
+pub struct LLVMCodegen<'ctx> {
     pub(super) ctx: &'ctx Context,
     pub(super) builder: Builder2<'ctx>,
     pub(super) module: Module<'ctx>,
@@ -149,7 +149,7 @@ pub struct Compiler<'ctx> {
     pub(super) globals: HashMap<String, GlobalValue<'ctx>>
 }
 
-impl<'ctx> Compiler<'ctx> {
+impl<'ctx> LLVMCodegen<'ctx> {
     /// Create a new Compiler, using a [`Context`] from inkwell.
     pub fn from_ctx(ctx: &'ctx Context) -> Self {
         Self {
@@ -171,13 +171,13 @@ impl<'ctx> Compiler<'ctx> {
     /// Any calls to this function should ensure that the value returned in Poligon
     /// would align to the provided type in Rust.
     #[allow(unused)]
-    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, T> {
+    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
         let fn_name = fun.get_name()
             .to_str()
             .unwrap();
 
         let jit = self.module.create_jit_execution_engine(OptimizationLevel::Default)
-            .map_err(CompileErr::LLVMErr)?;
+            .map_err(LLVMErr::LLVMErr)?;
 
         unsafe {
             let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
@@ -218,7 +218,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Create an alloca instruction and also store the value in the allocated pointer
-    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>>
+    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>>
     {
         let alloca = self.builder.build_alloca(self.get_layout(&self.plir_type_of(val))?, ident);
         self.vars.insert(String::from(ident), alloca);
@@ -229,9 +229,9 @@ impl<'ctx> Compiler<'ctx> {
     fn get_ptr_opt(&mut self, ident: &str) -> Option<PointerValue<'ctx>> {
         self.vars.get(ident).copied()
     }
-    fn get_ptr(&mut self, ident: &str) -> CompileResult<'ctx, PointerValue<'ctx>> {
+    fn get_ptr(&mut self, ident: &str) -> LLVMResult<'ctx, PointerValue<'ctx>> {
         self.get_ptr_opt(ident)
-            .ok_or_else(|| CompileErr::UndefinedVar(String::from(ident)))
+            .ok_or_else(|| LLVMErr::UndefinedVar(String::from(ident)))
     }
 
     fn add_incoming_gv<'a>(&self, phi: PhiValue<'ctx>, incoming: &'a [(GonValue<'ctx>, BasicBlock<'ctx>)]) {
@@ -262,7 +262,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// This returns the GonValue of the block and the block branched to
     /// (for `break`, `continue`, and `exit` statements).
-    pub fn write_block(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>) -> CompileResult<'ctx, (GonValue<'ctx>, Option<BasicBlock<'ctx>>)> {
+    pub fn write_block(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>) -> LLVMResult<'ctx, (GonValue<'ctx>, Option<BasicBlock<'ctx>>)> {
         use plir::ProcStmt;
 
         self.exit_pointers.push(exits);
@@ -309,7 +309,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Create a function value from the function's PLIR signature.
-    fn define_fun(&self, sig: &plir::FunSignature) -> CompileResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
+    fn define_fun(&self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { ident, params, ret, varargs } = sig;
 
         let arg_tys: Vec<_> = params.iter()
@@ -329,7 +329,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Import a function using the provided PLIR function signature.
-    fn import(&mut self, sig: &plir::FunSignature) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+    fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
         let (_, _fun_ty) = self.define_fun(sig)?;
         self.std_import(&sig.ident)
@@ -341,12 +341,12 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Get the LLVM layout of a given PLIR type.
-    pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
+    pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, BasicTypeEnum<'ctx>> {
         if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
             Ok(self.get_layout(t)?.array_type(0).into())
         } else {
             self.get_layout_by_name(&ty.ident())
-                .ok_or_else(|| CompileErr::UnresolvedType(ty.clone()))
+                .ok_or_else(|| LLVMErr::UnresolvedType(ty.clone()))
         }
     }
     /// Get the LLVM layout using the layout's identifier.
@@ -356,7 +356,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Get the BasicTypeEnum for this PLIR type (or void if is void).
     /// 
     /// This is useful for function types returning.
-    fn get_layout_or_void(&self, ty: &plir::Type) -> CompileResult<'ctx, ReturnableType<'ctx>> {
+    fn get_layout_or_void(&self, ty: &plir::Type) -> LLVMResult<'ctx, ReturnableType<'ctx>> {
         use plir::{TypeRef, Type};
 
         if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
@@ -371,7 +371,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Otherwise, return `Err(BasicTypeEnum)` to say the conversion to pointer failed.
     /// 
     /// This should not be used, instead use [`Compiler::get_ref_layout`].
-    fn try_get_ref_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, Result<PointerType<'ctx>, BasicTypeEnum<'ctx>>> {
+    fn try_get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, Result<PointerType<'ctx>, BasicTypeEnum<'ctx>>> {
         use plir::{TypeRef, Type};
         
         self.get_layout(ty).map(|layout| {
@@ -385,12 +385,12 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
     /// If a type is copy-by-reference, this type is LLVM `ptr`, otherwise it is its normal value.
-    fn get_ref_layout(&self, ty: &plir::Type) -> CompileResult<'ctx, BasicTypeEnum<'ctx>> {
+    fn get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, BasicTypeEnum<'ctx>> {
         self.try_get_ref_layout(ty)
             .map(|l| l.map_or_else(std::convert::identity, Into::into))
     }
     /// Similar to [`Expr::write_ir`], except writing in a pointer if this value is copy-by-reference.
-    fn write_ref_value(&mut self, e: &plir::Expr) -> CompileResult<'ctx, BasicValueEnum<'ctx>> {
+    fn write_ref_value(&mut self, e: &plir::Expr) -> LLVMResult<'ctx, BasicValueEnum<'ctx>> {
         if self.try_get_ref_layout(&e.ty)?.is_ok() {
             e.write_ptr(self).map(Into::into)
         } else {
@@ -416,7 +416,7 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
 
 /// Errors that occur during compilation to LLVM.
 #[derive(Debug)]
-pub enum CompileErr<'ctx> {
+pub enum LLVMErr<'ctx> {
     /// Variable was not declared.
     UndefinedVar(String),
     /// Function was not declared.
@@ -445,51 +445,51 @@ pub enum CompileErr<'ctx> {
     Generic(&'static str, String)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
-pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
+pub type LLVMResult<'ctx, T> = Result<T, LLVMErr<'ctx>>;
 
-impl<'ctx> GonErr for CompileErr<'ctx> {
+impl<'ctx> GonErr for LLVMErr<'ctx> {
     fn err_name(&self) -> &'static str {
         match self {
-            | CompileErr::UndefinedVar(_)
-            | CompileErr::UndefinedFun(_)
-            | CompileErr::CannotImport(_)
+            | LLVMErr::UndefinedVar(_)
+            | LLVMErr::UndefinedFun(_)
+            | LLVMErr::CannotImport(_)
             => "name error",
 
-            | CompileErr::InvalidFun
-            | CompileErr::CannotDetermineMain
+            | LLVMErr::InvalidFun
+            | LLVMErr::CannotDetermineMain
             => "syntax error",
 
-            CompileErr::UnresolvedType(_)
-            | CompileErr::CannotUnary(_, _)
-            | CompileErr::CannotBinary(_, _, _)
-            | CompileErr::CannotCmp(_, _, _)
-            | CompileErr::CannotCast(_, _)
-            | CompileErr::StructIndexOOB(_)
+            LLVMErr::UnresolvedType(_)
+            | LLVMErr::CannotUnary(_, _)
+            | LLVMErr::CannotBinary(_, _, _)
+            | LLVMErr::CannotCmp(_, _, _)
+            | LLVMErr::CannotCast(_, _)
+            | LLVMErr::StructIndexOOB(_)
             => "llvm type error",
             
-            | CompileErr::LLVMErr(_) 
+            | LLVMErr::LLVMErr(_) 
             => "llvm error",
 
-            | CompileErr::Generic(t, _)
+            | LLVMErr::Generic(t, _)
             => t,
         }
     }
 
     fn message(&self) -> String {
         match self {
-            CompileErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
-            CompileErr::UndefinedFun(name) => format!("could not find function '{name}'"),
-            CompileErr::CannotImport(name) => format!("cannot import '{name}'"),
-            CompileErr::InvalidFun => String::from("could not create function"),
-            CompileErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
-            CompileErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
-            CompileErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
-            CompileErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
-            CompileErr::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
-            CompileErr::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
-            CompileErr::CannotDetermineMain => String::from("could not determine entry point"),
-            CompileErr::LLVMErr(e) => format!("{e}"),
-            CompileErr::Generic(_, t) => t.clone(),
+            LLVMErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
+            LLVMErr::UndefinedFun(name) => format!("could not find function '{name}'"),
+            LLVMErr::CannotImport(name) => format!("cannot import '{name}'"),
+            LLVMErr::InvalidFun => String::from("could not create function"),
+            LLVMErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
+            LLVMErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
+            LLVMErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
+            LLVMErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
+            LLVMErr::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
+            LLVMErr::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
+            LLVMErr::CannotDetermineMain => String::from("could not determine entry point"),
+            LLVMErr::LLVMErr(e) => format!("{e}"),
+            LLVMErr::Generic(_, t) => t.clone(),
         }
     }
 }
@@ -501,15 +501,15 @@ pub trait TraverseIR<'ctx> {
     type Return;
 
     /// This function describes how the value is written into LLVM.
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return;
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return;
 }
 // TODO: pub
 trait TraverseIRPtr<'ctx> {
-    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>>;
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>>;
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
 
     /// To create a program from a script, we must determine the given `main` endpoint.
     /// 
@@ -520,7 +520,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// -  If there are any functions named main, that function is the program.
     /// -  Otherwise, all unhoisted statements are collected into a function (main).
     /// - If there is both a function named main and unhoisted statements present, this will error.
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         use plir::HoistedStmt;
 
         // split the functions from everything else:
@@ -552,7 +552,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 
         let (main, mstmts) = match (main_fun, proc.as_slice()) {
             (Some(f), []) => (f, None),
-            (Some(_), _)  => Err(CompileErr::CannotDetermineMain)?,
+            (Some(_), _)  => Err(LLVMErr::CannotDetermineMain)?,
             (None, stmts) => {
                 let main_fn = compiler.module.add_function(
                     "main", 
@@ -604,16 +604,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         if main.verify(true) {
             Ok(main)
         } else {
-            Err(CompileErr::InvalidFun)
+            Err(LLVMErr::InvalidFun)
         }
 
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         use plir::ProcStmt;
 
         match self {
@@ -635,9 +635,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Expr {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
         let expr_layout = compiler.get_layout(expr_ty)?;
 
@@ -651,7 +651,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     None => {
                         // check for global
                         let &global = compiler.globals.get(id)
-                            .ok_or_else(|| CompileErr::UndefinedVar(id.clone()))?;
+                            .ok_or_else(|| LLVMErr::UndefinedVar(id.clone()))?;
 
                         compiler.reconstruct(expr_ty, global.as_pointer_value())
                     }
@@ -865,7 +865,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 };
 
                 let fun = compiler.module.get_function(&fun_ident)
-                    .ok_or_else(|| CompileErr::UndefinedFun(fun_ident.into_owned()))?;
+                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.into_owned()))?;
 
                 let fun_ret = match &funct.ty {
                     plir::Type::Fun(plir::FunType{ ret, .. }) => &**ret,
@@ -916,7 +916,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
-    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
         match &self.expr {
             plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
             plir::ExprType::Path(p) => p.write_ptr(compiler),
@@ -929,9 +929,9 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
     }
 }
 impl<'ctx> TraverseIR<'ctx> for Option<plir::Expr> {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         match self {
             Some(e) => e.write_value(compiler),
             None => Ok(GonValue::Unit),
@@ -940,9 +940,9 @@ impl<'ctx> TraverseIR<'ctx> for Option<plir::Expr> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for Literal {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let value = match *self {
             Literal::Int(i)     => compiler.new_int(i),
             Literal::Float(f)   => compiler.new_float(f),
@@ -956,9 +956,9 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Path {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         match self {
             plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
@@ -975,7 +975,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
-    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
         match self {
             plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
@@ -1007,9 +1007,9 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Index {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let Self { expr, index } = self;
 
         let expr = expr.write_value(compiler)?;
@@ -1017,11 +1017,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
 
         // This should be type checked in PLIR:
         match expr {
-            GonValue::Float(_)   => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Int(_)     => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Bool(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Unit       => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Char(_)    => Err(CompileErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Float(_)   => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Int(_)     => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Bool(_)    => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Unit       => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
+            GonValue::Char(_)    => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
             GonValue::Default(_) => {
                 todo!()
                 // // TODO: support unicode
@@ -1076,9 +1076,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
-    type Return = CompileResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let ptr = self.write_ptr(compiler)?;
         let layout = compiler.get_layout(&self.ty)?;
 
@@ -1087,7 +1087,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
-    fn write_ptr(&self, compiler: &mut Compiler<'ctx>) -> CompileResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
         // expr should always be a ptr
         self.expr.write_value(compiler)
             .map(|gv| {
@@ -1097,17 +1097,17 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
-    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         compiler.define_fun(self).map(|(fv, _)| fv)
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
-    type Return = CompileResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
 
         let fun = compiler.module.get_function(&sig.ident)
@@ -1137,15 +1137,15 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
             println!("{}", compiler.module.print_to_string().to_string());
             // SAFETY: Not used after.
             unsafe { fun.delete() }
-            Err(CompileErr::InvalidFun)
+            Err(LLVMErr::InvalidFun)
         }
     }
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Class {
-    type Return = CompileResult<'ctx, ()>;
+    type Return = LLVMResult<'ctx, ()>;
 
-    fn write_value(&self, compiler: &mut Compiler<'ctx>) -> Self::Return {
+    fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::Class { ident, fields } = self;
 
         let fields: Vec<_> = fields.values()

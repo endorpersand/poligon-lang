@@ -1,6 +1,6 @@
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 
-use super::{Compiler, CompileResult, CompileErr, layout, params};
+use super::{LLVMCodegen, LLVMResult, LLVMErr, layout, params};
 use super::plir;
 
 /// Apply a function to a basic value enum 
@@ -63,7 +63,7 @@ pub enum GonValue<'ctx> {
     Unit,
 }
 
-impl<'ctx> Compiler<'ctx> {
+impl<'ctx> LLVMCodegen<'ctx> {
     /// Create a new int value using an int from Rust.
     pub fn new_int(&self, v: isize) -> GonValue<'ctx> {
         GonValue::Int(layout!(self, S_INT).into_int_type().const_int(v as u64, true))
@@ -117,7 +117,7 @@ impl<'ctx> Compiler<'ctx> {
     /// - char to string
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> CompileResult<'ctx, GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> LLVMResult<'ctx, GonValue<'ctx>> {
         use plir::{Type, TypeRef};
 
         match (v, ty.as_ref()) {
@@ -137,12 +137,12 @@ impl<'ctx> Compiler<'ctx> {
             },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
-            _ => Err(CompileErr::CannotCast(self.plir_type_of(v), ty.clone()))
+            _ => Err(LLVMErr::CannotCast(self.plir_type_of(v), ty.clone()))
         }
     }
 
     /// Create a [`GonValue`] from a given LLVM value.
-    pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> CompileResult<'ctx, GonValue<'ctx>> {
+    pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> LLVMResult<'ctx, GonValue<'ctx>> {
         use plir::{TypeRef, Type};
         
         let v = v.as_basic_value_enum();

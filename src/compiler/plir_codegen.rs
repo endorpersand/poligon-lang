@@ -24,7 +24,7 @@ use super::plir::{self, Located};
 
 /// Produce the PLIR tree from the AST tree.
 pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
-    let mut cg = CodeGenerator::new();
+    let mut cg = PLIRCodegen::new();
     cg.consume_program(t)?;
     cg.unwrap()
 }
@@ -552,14 +552,14 @@ impl Globals {
 }
 
 /// This struct does the actual conversion from AST to PLIR.
-pub struct CodeGenerator {
+pub struct PLIRCodegen {
     program: InsertBlock,
     globals: Globals,
     blocks: Vec<InsertBlock>,
     var_id: usize
 }
 
-impl CodeGenerator {
+impl PLIRCodegen {
     /// Creates a new instance of the CodeGenerator.
     pub fn new() -> Self {
         Self { 
@@ -1698,7 +1698,7 @@ impl CodeGenerator {
     }
 }
 
-impl Default for CodeGenerator {
+impl Default for PLIRCodegen {
     fn default() -> Self {
         Self::new()
     }

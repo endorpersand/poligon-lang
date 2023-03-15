@@ -4,7 +4,7 @@ use std::io::{BufReader, BufRead};
 use std::path::Path;
 
 use inkwell::context::Context;
-use poligon_lang::compiler::{plir_codegen, Compiler};
+use poligon_lang::compiler::{plir_codegen, LLVMCodegen};
 use poligon_lang::interpreter::runtime::IoHook;
 use poligon_lang::{Interpreter, lexer, parser};
 
@@ -15,7 +15,7 @@ fn compile_and_run(fp: impl AsRef<Path>) {
     let plir   = plir_codegen::codegen(parsed).unwrap();
 
     let ctx = Context::create();
-    let mut compiler = Compiler::from_ctx(&ctx);
+    let mut compiler = LLVMCodegen::from_ctx(&ctx);
     
     let main = compiler.compile(&plir).unwrap();
     unsafe { compiler.jit_run::<()>(main).unwrap(); }

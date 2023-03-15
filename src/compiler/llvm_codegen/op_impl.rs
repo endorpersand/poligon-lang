@@ -3,35 +3,35 @@ use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum as BV, PointerValue, VectorValue, StructValue, ArrayValue};
 
 use crate::compiler::plir;
-use crate::compiler::{Compiler, CompileResult, CompileErr};
+use crate::compiler::{LLVMCodegen, LLVMResult, LLVMErr};
 use crate::ast::op;
 
 use super::{GonValue, apply_bv, apply_bt};
 
 pub trait AsBV<'ctx> {
-    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>>;
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>>;
 }
 pub trait AsBVInfallible<'ctx> {
-    fn into_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx>;
+    fn into_bvi(self, c: &LLVMCodegen<'ctx>) -> BV<'ctx>;
 }
 
 impl<'ctx, V: AsBVInfallible<'ctx>> AsBV<'ctx> for V {
-    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>> {
         Ok(self.into_bvi(c))
     }
 }
 impl<'ctx> AsBV<'ctx> for &plir::Expr {
-    fn into_bv(self, c: &mut Compiler<'ctx>) -> CompileResult<'ctx, BV<'ctx>> {
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>> {
         c.compile(self).and_then(|gv| gv.into_bv(c))
     }
 }
 impl<'ctx> AsBVInfallible<'ctx> for GonValue<'ctx> {
-    fn into_bvi(self, c: &Compiler<'ctx>) -> BV<'ctx> {
+    fn into_bvi(self, c: &LLVMCodegen<'ctx>) -> BV<'ctx> {
         c.basic_value_of(self)
     }
 }
 impl<'ctx> AsBVInfallible<'ctx> for BV<'ctx> {
-    fn into_bvi(self, _: &Compiler<'ctx>) -> BV<'ctx> {
+    fn into_bvi(self, _: &LLVMCodegen<'ctx>) -> BV<'ctx> {
         self
     }
 }
@@ -40,44 +40,44 @@ pub trait Unary<'ctx> {
     type Output;
 
     /// Create an instruction computing the unary operation on a given value.
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output;
+    fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output;
 }
 pub trait Binary<'ctx, Rhs=Self> {
     type Output;
 
     /// Create an instruction computing the binary operation on two values.
-    fn apply_binary(self, op: op::Binary, right: Rhs, c: &mut Compiler<'ctx>) -> Self::Output;
+    fn apply_binary(self, op: op::Binary, right: Rhs, c: &mut LLVMCodegen<'ctx>) -> Self::Output;
 }
 pub trait Cmp<'ctx, Rhs=Self> {
     type Output;
 
     /// Create an instruction comparing two values.
-    fn apply_cmp(self, op: op::Cmp, right: Rhs, c: &mut Compiler<'ctx>) -> Self::Output;
+    fn apply_cmp(self, op: op::Cmp, right: Rhs, c: &mut LLVMCodegen<'ctx>) -> Self::Output;
 }
 pub trait Truth<'ctx> {
     /// Calculate the boolean value (the truth value) of some given value.
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> /* bool */;
+    fn truth(self, c: &LLVMCodegen<'ctx>) -> IntValue<'ctx> /* bool */;
 }
 trait TruthBool<'ctx> {
     fn truth_bool(self) -> bool;
 }
 impl <'ctx, T: TruthBool<'ctx>> Truth<'ctx> for T {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+    fn truth(self, c: &LLVMCodegen<'ctx>) -> IntValue<'ctx>  {
         c.ctx.bool_type().const_int(self.truth_bool() as _, false)
     }
 }
 
-fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotUnary(op, left.into().get_type()))
+fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
+    Err(LLVMErr::CannotUnary(op, left.into().get_type()))
 }
-fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotBinary(op, left.into().get_type(), right.into().get_type()))
+fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
+    Err(LLVMErr::CannotBinary(op, left.into().get_type(), right.into().get_type()))
 }
-fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> CompileResult<'ctx, T> {
-    Err(CompileErr::CannotCmp(op, left.into().get_type(), right.into().get_type()))
+fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
+    Err(LLVMErr::CannotCmp(op, left.into().get_type(), right.into().get_type()))
 }
 
-impl<'ctx> Compiler<'ctx> {
+impl<'ctx> LLVMCodegen<'ctx> {
     /// Create an instruction computing the unary operation on a given value.
     pub(crate) fn apply_unary<T: AsBV<'ctx>>(
         &mut self, 
@@ -114,9 +114,9 @@ impl<'ctx> Compiler<'ctx> {
 }
 
 impl<'ctx> Unary<'ctx> for BV<'ctx> {
-    type Output = CompileResult<'ctx, BV<'ctx>>;
+    type Output = LLVMResult<'ctx, BV<'ctx>>;
 
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Unary::LogNot => Ok(c.builder.build_not(self.truth(c), "l_not").into()),
             _ => match self {
@@ -131,9 +131,9 @@ impl<'ctx> Unary<'ctx> for BV<'ctx> {
     }
 }
 impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
-    type Output = CompileResult<'ctx, BV<'ctx>>;
+    type Output = LLVMResult<'ctx, BV<'ctx>>;
 
-    fn apply_binary(self, op: op::Binary, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_binary(self, op: op::Binary, right: T, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Binary::LogAnd => {
                 let bb = c.get_insert_block();
@@ -208,9 +208,9 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
     }
 }
 impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
-    type Output = CompileResult<'ctx, IntValue<'ctx>>;
+    type Output = LLVMResult<'ctx, IntValue<'ctx>>;
 
-    fn apply_cmp(self, op: op::Cmp, right: T, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_cmp(self, op: op::Cmp, right: T, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         let rhs = right.into_bv(c)?;
 
         macro_rules! cast_rhs {
@@ -233,15 +233,15 @@ impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
     }
 }
 impl<'ctx> Truth<'ctx> for BV<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx>  {
+    fn truth(self, c: &LLVMCodegen<'ctx>) -> IntValue<'ctx>  {
         apply_bv!(let bv = self => bv.truth(c))
     }
 }
 
 impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
-    type Output = CompileResult<'ctx, Self>;
+    type Output = LLVMResult<'ctx, Self>;
 
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Unary::Plus   => Ok(self),
             op::Unary::Minus  => Ok(c.builder.build_float_neg(self, "f_neg")),
@@ -254,7 +254,7 @@ impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
 impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
     type Output = IntValue<'ctx>;
 
-    fn apply_unary(self, op: op::Unary, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Unary::Plus   => self,
             op::Unary::Minus  => c.builder.build_int_neg(self, "i_neg"),
@@ -265,9 +265,9 @@ impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
 }
 
 impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
-    type Output = CompileResult<'ctx, Self>;
+    type Output = LLVMResult<'ctx, Self>;
 
-    fn apply_binary(self, op: op::Binary, right: FloatValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_binary(self, op: op::Binary, right: FloatValue<'ctx>, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Binary::Add => Ok(c.builder.build_float_add(self, right, "f_add")),
             op::Binary::Sub => Ok(c.builder.build_float_sub(self, right, "f_sub")),
@@ -288,7 +288,7 @@ impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
 impl<'ctx> Binary<'ctx> for IntValue<'ctx> {
     type Output = IntValue<'ctx>;
 
-    fn apply_binary(self, op: op::Binary, right: IntValue<'ctx>, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_binary(self, op: op::Binary, right: IntValue<'ctx>, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         // TODO: _add vs _nsw_add vs _nuw_add
         match op {
             op::Binary::Add => c.builder.build_int_add(self, right, "i_add"),
@@ -315,9 +315,9 @@ impl<'ctx> Binary<'ctx> for IntValue<'ctx> {
 }
 
 impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
-    type Output = CompileResult<'ctx, Self>;
+    type Output = LLVMResult<'ctx, Self>;
 
-    fn apply_binary(self, op: op::Binary, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_binary(self, op: op::Binary, right: Self, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
             op::Binary::Add    => {
                 let ty1  = self.get_type();
@@ -371,7 +371,7 @@ impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
 impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
     type Output = IntValue<'ctx> /* bool */;
 
-    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         // todo: investigate OXX and UXX
         let (pred, name) = match op {
             op::Cmp::Lt => (FloatPredicate::OLT, "f_lt"),
@@ -389,7 +389,7 @@ impl<'ctx> Cmp<'ctx> for FloatValue<'ctx> {
 impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
     type Output = IntValue<'ctx>;
 
-    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         let (pred, name) = match op {
             op::Cmp::Lt => (IntPredicate::SLT, "i_lt"),
             op::Cmp::Gt => (IntPredicate::SGT, "i_gt"),
@@ -406,21 +406,21 @@ impl<'ctx> Cmp<'ctx> for IntValue<'ctx> {
 impl<'ctx> Cmp<'ctx> for PointerValue<'ctx> {
     type Output = IntValue<'ctx>;
 
-    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut Compiler<'ctx>) -> Self::Output {
+    fn apply_cmp(self, op: op::Cmp, right: Self, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         let diff = c.builder.build_ptr_diff(c.ctx.i8_type(), self, right, "");
         diff.apply_cmp(op, diff.get_type().const_zero(), c)
     }
 }
 
 impl<'ctx> Truth<'ctx> for FloatValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
+    fn truth(self, c: &LLVMCodegen<'ctx>) -> IntValue<'ctx> {
         let zero = self.get_type().const_zero();
         c.builder.build_float_compare(FloatPredicate::ONE, self, zero, "truth")
     }
 }
 
 impl<'ctx> Truth<'ctx> for IntValue<'ctx> {
-    fn truth(self, c: &Compiler<'ctx>) -> IntValue<'ctx> {
+    fn truth(self, c: &LLVMCodegen<'ctx>) -> IntValue<'ctx> {
         let ty = self.get_type();
 
         // special exception for bools:

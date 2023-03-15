@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 
 use crate::compiler::llvm::Builder2;
 use crate::compiler::llvm::types::{FnTypeS, IntTypeS, PtrTypeS, VoidTypeS, RetTypeS, Concretize};
-use crate::compiler::{Compiler, CompileResult, CompileErr, plir};
+use crate::compiler::{LLVMCodegen, LLVMResult, LLVMErr, plir};
 
 use super::llvm_codegen::{layout, params, fn_type};
 
@@ -116,7 +116,7 @@ macro_rules! std_map {
             }
         }
 
-        fn init_body(&self, name: &str, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+        fn init_body(&self, name: &str, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
             match name {
                 $($l => self.$i(builder, fun)),+,
                 s => panic!("non-intrinsic {s} was imported, but does not have a defined body")
@@ -125,8 +125,8 @@ macro_rules! std_map {
     }
 }
 
-impl<'ctx> Compiler<'ctx> {
-    fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+impl<'ctx> LLVMCodegen<'ctx> {
+    fn std_print(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         let _ptr = self.ptr_type(Default::default());
         let _str = layout!(self, S_STR);
         let _dynarray = layout!(self, "#dynarray");
@@ -148,7 +148,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_new(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn dynarray_new(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         let _i64 = self.ctx.i64_type();
         let _dynarray = layout!(self, "#dynarray")
             .into_struct_type();
@@ -173,7 +173,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_resize(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn dynarray_resize(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         use inkwell::IntPredicate::UGT;
 
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
@@ -225,7 +225,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_push(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn dynarray_push(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         let _dynarray = layout!(self, "#dynarray");
         let _int = layout!(self, S_INT).into_int_type();
         let _i8 = self.ctx.i8_type();
@@ -254,7 +254,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_pop(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn dynarray_pop(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         use inkwell::IntPredicate::EQ;
         
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
@@ -285,7 +285,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn dynarray_extend(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn dynarray_extend(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _int = layout!(self, S_INT).into_int_type();
         let _ptr = self.ptr_type(Default::default());
@@ -320,7 +320,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn x_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>, fmt: &str, tmpl_name: &str) -> CompileResult<'ctx, ()> {
+    fn x_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>, fmt: &str, tmpl_name: &str) -> LLVMResult<'ctx, ()> {
         let _int = layout!(self, S_INT).into_int_type();
         let _ptr = self.ptr_type(Default::default());
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
@@ -349,13 +349,13 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn int_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn int_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         self.x_to_string(builder, fun, "%d\0", "_tmpl_int_to_string")
     }
-    fn float_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn float_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         self.x_to_string(builder, fun, "%#f\0", "_tmpl_float_to_string")
     }
-    fn char_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> CompileResult<'ctx, ()> {
+    fn char_to_string(&self, builder: Builder2<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, ()> {
         self.x_to_string(builder, fun, "%lc\0", "_tmpl_char_to_string")
     }
 
@@ -387,14 +387,14 @@ impl<'ctx> Compiler<'ctx> {
     /// Internal functions are currently defined in [`compiler::value::internals`].
     /// The type signature and identifier need to match exactly, or else defined internals may fail 
     /// or a segmentation fault may occur.
-    pub(crate) fn std_import(&self, s: &str) -> CompileResult<'ctx, FunctionValue<'ctx>> {
+    pub(crate) fn std_import(&self, s: &str) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         let intrinsic = C_INTRINSICS_LLVM.get(s)
             .map(|f| f.as_concrete(self));
         let fun = match self.module.get_function(s) {
             Some(fun) => fun,
             None => {
                 let ty = intrinsic.or_else(|| self.lookup(s))
-                    .ok_or_else(|| CompileErr::CannotImport(String::from(s)))?;
+                    .ok_or_else(|| LLVMErr::CannotImport(String::from(s)))?;
 
                 self.module.add_function(s, ty, None)
             }

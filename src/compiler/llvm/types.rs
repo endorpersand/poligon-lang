@@ -1,10 +1,10 @@
 use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum};
 
-use crate::compiler::Compiler;
+use crate::compiler::LLVMCodegen;
 
 pub(in crate::compiler) trait Concretize<'ctx> {
     type Type;
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type;
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,7 +20,7 @@ pub enum IntTypeS {
 impl<'ctx> Concretize<'ctx> for IntTypeS {
     type Type = IntType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         match self {
             IntTypeS::Bool => compiler.ctx.bool_type(),
             IntTypeS::I8   => compiler.ctx.i8_type(),
@@ -35,7 +35,7 @@ pub struct FloatTypeS;
 impl<'ctx> Concretize<'ctx> for FloatTypeS {
     type Type = FloatType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         compiler.ctx.f64_type()
     }
 }
@@ -45,7 +45,7 @@ pub struct PtrTypeS;
 impl<'ctx> Concretize<'ctx> for PtrTypeS {
     type Type = PointerType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         compiler.ptr_type(Default::default())
     }
 }
@@ -55,7 +55,7 @@ pub struct StructTypeS(String);
 impl<'ctx> Concretize<'ctx> for StructTypeS {
     type Type = StructType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         compiler.ctx.get_struct_type(&self.0)
             .unwrap_or_else(|| panic!("expected struct with name {}", self.0))
     }
@@ -66,7 +66,7 @@ pub struct VoidTypeS;
 impl<'ctx> Concretize<'ctx> for VoidTypeS {
     type Type = VoidType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         compiler.ctx.void_type()
     }
 }
@@ -89,7 +89,7 @@ impl FnTypeS {
 impl<'ctx> Concretize<'ctx> for FnTypeS {
     type Type = FunctionType<'ctx>;
 
-    fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
         let params: Vec<_> = self.params.iter()
             .map(|t| t.as_concrete(compiler))
             .map(Into::into)
@@ -118,7 +118,7 @@ macro_rules! enum_s {
         impl<'ctx> Concretize<'ctx> for $name {
             type Type = $into<'ctx>;
         
-            fn as_concrete(&self, compiler: &Compiler<'ctx>) -> Self::Type {
+            fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
                 match self {
                     $(
                         Self::$t(t) => t.as_concrete(compiler).into(),
