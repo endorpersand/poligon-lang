@@ -6,7 +6,7 @@ use std::fs;
 use std::iter::Peekable;
 use std::path::Path;
 
-use crate::compiler::{plir, codegen, Compiler};
+use crate::compiler::{plir, plir_codegen, Compiler};
 use crate::err::{FullGonErr, GonErr};
 use crate::interpreter::runtime::{RtContext, self};
 use crate::interpreter::runtime::value::Value;
@@ -115,7 +115,7 @@ impl Test<'_> {
     pub fn codegen(&self) -> TestResult<plir::Program> {
         let ast = self.parse()?;
 
-        let r = codegen::codegen(ast);
+        let r = plir_codegen::codegen(ast);
         self.wrap_test_result(r)
     }
 

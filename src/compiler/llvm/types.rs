@@ -1,6 +1,6 @@
-use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType};
+use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum};
 
-use crate::compiler::{Compiler, ReturnableType};
+use crate::compiler::Compiler;
 
 pub(in crate::compiler) trait Concretize<'ctx> {
     type Type;
@@ -144,3 +144,26 @@ enum_s!(BasicTypeEnumS => BasicTypeEnum: IntTypeS, FloatTypeS, PtrTypeS, StructT
 btes_to_rtes!(IntTypeS, FloatTypeS, PtrTypeS, StructTypeS);
 
 enum_s!(RetTypeS => ReturnableType: BasicTypeEnumS, VoidTypeS);
+
+pub enum ReturnableType<'ctx> {
+    Basic(BasicTypeEnum<'ctx>),
+    Void(VoidType<'ctx>)
+}
+impl<'ctx> ReturnableType<'ctx> {
+    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+        match self {
+            ReturnableType::Basic(t) => t.fn_type(param_types, is_var_args),
+            ReturnableType::Void(t)  => t.fn_type(param_types, is_var_args),
+        }
+    }
+}
+impl<'ctx> From<BasicTypeEnum<'ctx>> for ReturnableType<'ctx> {
+    fn from(value: BasicTypeEnum<'ctx>) -> Self {
+        ReturnableType::Basic(value)
+    }
+}
+impl<'ctx> From<VoidType<'ctx>> for ReturnableType<'ctx> {
+    fn from(value: VoidType<'ctx>) -> Self {
+        ReturnableType::Void(value)
+    }
+}

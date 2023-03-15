@@ -8,7 +8,9 @@ use lazy_static::lazy_static;
 
 use crate::compiler::llvm::Builder2;
 use crate::compiler::llvm::types::{FnTypeS, IntTypeS, PtrTypeS, VoidTypeS, RetTypeS, Concretize};
-use crate::compiler::{Compiler, CompileResult, layout, params, CompileErr, fn_type, plir};
+use crate::compiler::{Compiler, CompileResult, CompileErr, plir};
+
+use super::llvm_codegen::{layout, params, fn_type};
 
 macro_rules! map {
     () => { HashMap::new() };

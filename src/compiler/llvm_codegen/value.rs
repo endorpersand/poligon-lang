@@ -1,5 +1,3 @@
-mod op_impl;
-
 use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
 
 use super::{Compiler, CompileResult, CompileErr, layout, params};

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use indexmap::IndexMap;
 
 use crate::ast;
-use crate::compiler::codegen::OpErr;
+use crate::compiler::plir_codegen::OpErr;
 
 use super::{Split, Located};
 
@@ -43,10 +43,10 @@ impl FunType {
 }
 
 impl TryFrom<Type> for FunType {
-    type Error = crate::compiler::codegen::PLIRErr;
+    type Error = crate::compiler::plir_codegen::PLIRErr;
 
     fn try_from(value: Type) -> Result<Self, Self::Error> {
-        use crate::compiler::codegen::PLIRErr;
+        use crate::compiler::plir_codegen::PLIRErr;
 
         match value {
             Type::Fun(f) => Ok(f),

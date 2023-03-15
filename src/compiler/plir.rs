@@ -194,7 +194,7 @@ mod stmt {
 
 pub use stmt::*;
 
-use super::codegen::{PLIRErr, PLIRResult};
+use super::plir_codegen::{PLIRErr, PLIRResult};
 
 /// A variable declaration.
 /// 

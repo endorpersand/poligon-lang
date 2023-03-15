@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::{io, fs};
 
 use inkwell::context::Context;
-use poligon_lang::compiler::{codegen, Compiler};
+use poligon_lang::compiler::{plir_codegen, Compiler};
 use poligon_lang::{lexer, parser};
 use poligon_lang::err::FullGonErr;
 
@@ -30,7 +30,7 @@ fn main() -> io::Result<()> {
 
             let tokens = unwrap_or_exit! { lexer::tokenize(&code) };
             let ast    = unwrap_or_exit! { parser::parse(tokens)  };
-            let plir   = unwrap_or_exit! { codegen::codegen(ast)  };
+            let plir   = unwrap_or_exit! { plir_codegen::codegen(ast)  };
 
             let path = change_ext(fp, "plir.gon");
             let mut f = File::create(path)?;

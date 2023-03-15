@@ -4,7 +4,7 @@ use std::io::{BufReader, BufRead};
 use std::path::Path;
 
 use inkwell::context::Context;
-use poligon_lang::compiler::{codegen, Compiler};
+use poligon_lang::compiler::{plir_codegen, Compiler};
 use poligon_lang::interpreter::runtime::IoHook;
 use poligon_lang::{Interpreter, lexer, parser};
 
@@ -12,7 +12,7 @@ fn compile_and_run(fp: impl AsRef<Path>) {
     let code   = fs::read_to_string(fp).unwrap();
     let lexed  = lexer::tokenize(&code).unwrap();
     let parsed = parser::parse(lexed).unwrap();
-    let plir   = codegen::codegen(parsed).unwrap();
+    let plir   = plir_codegen::codegen(parsed).unwrap();
 
     let ctx = Context::create();
     let mut compiler = Compiler::from_ctx(&ctx);
