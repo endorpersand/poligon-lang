@@ -25,16 +25,16 @@ class #dynarray {
     fun self.push(byte: #byte) {
         self.resize(self.len + 1);
         
-        let push_ptr = <#ll_array<#byte>>::#gep(self.buf, self.len);
+        let push_ptr = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
         self.len = self.len + 1;
-        *self.buf = byte;
+        *push_ptr = byte;
     }
 
     fun self.pop() -> #byte {
         if self.len != 0 {
             self.len = self.len - 1;
             
-            let pop_ptr = <#ll_array<#byte>>::#gep(self.buf, self.len);
+            let pop_ptr = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
             *pop_ptr;
         } else {
             0; // TODO: handle null
@@ -44,7 +44,7 @@ class #dynarray {
     fun self.extend(add_buf: #ptr, add_len: int) {
         self.resize(self.len + add_len);
 
-        let shift_buf = <#ll_array<#byte>>::#gep(self.buf, self.len);
+        let shift_buf = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
         #memcpy(shift_buf, add_buf, add_len);
 
         self.len = self.len + add_len;
