@@ -187,7 +187,7 @@ define_keywords! {
     Fit:      "fit",   // fit X to Y {}
     To:       "to", 
     // Fits:     "fits",    // class X fits Y {}, shape X fits Y {}
-    Extend:   "extend", // extend class X {}
+    // Extend:   "extend", // extend class X {}
     Match:    "match",   // match x {}
     // Unit:     "unit",    // units and measures (nominal primitives)
     // Measure:  "measure", // units and measures (nominal primitives)
@@ -267,7 +267,7 @@ macro_rules! token {
     (fit)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Fit)      };
     (to)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::To)       };
     // (fits)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Fits)     };
-    (extend)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extend)  };
+    // (extend)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extend)  };
     (match)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Match)    };
     // (unit)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Unit)     };
     // (measure)  => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Measure)  };
