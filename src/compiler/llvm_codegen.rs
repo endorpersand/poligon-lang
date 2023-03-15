@@ -563,14 +563,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             }
         };
 
-        // main initializer
-        let init_bb = compiler.ctx.append_basic_block(main, "init");
-        compiler.builder.position_at_end(init_bb);
-
-        let setlocale = compiler.std_import("setlocale")?;
-        let _int = compiler.ctx.i64_type();
-        let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
-        compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
+        let global_bb = compiler.ctx.append_basic_block(main, "globals");
+        compiler.builder.position_at_end(global_bb);
 
         // load globals before loading fun bodies
         // globals have to be loaded within a function, so we're doing it in main
@@ -581,8 +575,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             compiler.globals.insert(id.to_string(), global);
         }
 
-        // this is delayed until after all types have been resolved
-        // should also be before main is resolved
+        // SAFETY: this basic block was just created
+        // and therefore cannot have been referenced.
+        unsafe { global_bb.delete().unwrap(); }
+
+        // this is delayed until after all types are resolved
         for bodies in fun_bodies {
             bodies.write_value(compiler)?;
         }
@@ -597,9 +594,17 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             compiler.builder.build_return(None);
         }
 
-        // connect init to main:
+        // main initializer
+        let main_bb = main.get_first_basic_block().unwrap();
+        let init_bb = compiler.ctx.prepend_basic_block(main_bb, "init");
         compiler.builder.position_at_end(init_bb);
-        compiler.builder.build_unconditional_branch(main.get_basic_blocks()[1]);
+
+        let setlocale = compiler.std_import("setlocale")?;
+        let _int = compiler.ctx.i64_type();
+        let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
+        compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
+
+        compiler.builder.build_unconditional_branch(main_bb);
 
         if main.verify(true) {
             Ok(main)
