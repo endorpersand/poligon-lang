@@ -767,7 +767,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     let cmp_val = compiler.truth(cmp_val);
                         
                     // create blocks and branch
-                    let then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
+                    let mut then_bb = compiler.ctx.prepend_basic_block(merge_bb, "then");
                     let else_bb = compiler.ctx.prepend_basic_block(merge_bb, "else");
             
                     compiler.builder.build_conditional_branch(cmp_val, then_bb, else_bb);
@@ -778,13 +778,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     let (result, out_bb) = compiler.write_block(block, ExitPointers::bare(merge_bb))?;
                     // add block to phi if branches to merge
                     if out_bb == Some(merge_bb) {
+                        then_bb = compiler.get_insert_block();
                         incoming.push((result, then_bb));
                     }
                     prev_else.replace(else_bb);
                 }
 
                 // handle last
-                let else_bb = prev_else.unwrap();
+                let mut else_bb = prev_else.unwrap();
 
                 // build else block
                 compiler.builder.position_at_end(else_bb);
@@ -797,6 +798,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     },
                 };
                 if out_bb == Some(merge_bb) {
+                    else_bb = compiler.get_insert_block();
                     incoming.push((result, else_bb));
                 }
 
