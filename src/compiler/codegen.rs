@@ -9,7 +9,7 @@
 mod op_impl;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -522,13 +522,41 @@ enum TypeStructure {
     Class(plir::Class)
 }
 
+#[derive(Default)]
+struct Globals {
+    stmts: Vec<plir::HoistedStmt>,
+    names: HashSet<String>
+}
+impl Globals {
+    fn push(&mut self, stmt: impl Into<plir::HoistedStmt>) {
+        use plir::HoistedStmt;
+
+        let stmt = stmt.into();
+        let name = match &stmt {
+            HoistedStmt::ClassDecl(c) => &c.ident,
+            HoistedStmt::FunDecl(d) => &d.sig.ident,
+            HoistedStmt::ExternFunDecl(d) => &d.ident,
+            HoistedStmt::IGlobal(i, _) => i,
+        }.to_owned();
+
+        // skip extern if already resolved
+        if let HoistedStmt::ExternFunDecl(_) = stmt {
+            if self.names.contains(&name) {
+                return;
+            }
+        }
+
+        self.stmts.push(stmt);
+        self.names.insert(name);
+    }
+}
+
 /// This struct does the actual conversion from AST to PLIR.
 pub struct CodeGenerator {
     program: InsertBlock,
-    globals: Vec<plir::HoistedStmt>,
+    globals: Globals,
     blocks: Vec<InsertBlock>,
-    var_id: usize,
-    aliases: HashMap<String, String>
+    var_id: usize
 }
 
 impl CodeGenerator {
@@ -536,10 +564,9 @@ impl CodeGenerator {
     pub fn new() -> Self {
         Self { 
             program: InsertBlock::top(), 
-            globals: vec![],
+            globals: Default::default(),
             blocks: vec![],
-            var_id: 0,
-            aliases: HashMap::new()
+            var_id: 0
         }
     }
 
@@ -553,7 +580,7 @@ impl CodeGenerator {
         debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
 
         match exits.pop() {
-            None => Ok(plir::Program(self.globals, block)),
+            None => Ok(plir::Program(self.globals.stmts, block)),
             Some(Located(exit, range)) => match exit {
                 BlockExit::Break     => Err(PLIRErr::CannotBreak.at_range(range)),
                 BlockExit::Continue  => Err(PLIRErr::CannotContinue.at_range(range)),
@@ -631,7 +658,9 @@ impl CodeGenerator {
         if let Some(intrinsic) = ident.strip_prefix('#') {
             if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
                 // If this is an intrinsic,
-                // register the intrinsic on the top level.
+                // register the intrinsic on the top level
+                // if it hasn't been registered
+
                 self.push_global(plir::FunSignature {
                     ident: intrinsic.to_string(),
                     params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
@@ -677,6 +706,13 @@ impl CodeGenerator {
     /// Identifier needs to be resolved beforehand, via [`CodeGenerator::resolve_ident`].
     fn get_var_type_opt(&mut self, ident: &str) -> Option<&plir::Type> {
         self.find_scoped(|ib| ib.vars.get(ident))
+    }
+
+    fn dealias<'a>(&'a self, ident: &'a str) -> &'a str {
+        match self.find_scoped(|ib| ib.aliases.get(ident)) {
+            Some(t) => t,
+            None => ident,
+        }
     }
 
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
@@ -1209,10 +1245,7 @@ impl CodeGenerator {
         match expr {
             ast::Expr::Ident(ident) => {
                 let ty = self.get_var_type(&ident, range)?.clone();
-
-                let ref_ident = self.aliases.get(&ident)
-                    .cloned()
-                    .unwrap_or(ident);
+                let ref_ident = self.dealias(&ident).to_owned();
 
                 Ok(plir::Expr::new(
                     ty,
