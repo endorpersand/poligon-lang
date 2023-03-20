@@ -15,7 +15,7 @@ fn compile_and_run(fp: impl AsRef<Path>) {
     let plir   = plir_codegen::codegen(parsed).unwrap();
 
     let ctx = Context::create();
-    let mut compiler = LLVMCodegen::from_ctx(&ctx);
+    let mut compiler = LLVMCodegen::new(&ctx);
     
     let main = compiler.compile(&plir).unwrap();
     unsafe { compiler.jit_run::<()>(main).unwrap(); }
