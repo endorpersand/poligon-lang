@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{ReasgType, MutType};
@@ -21,6 +22,13 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
         write!(f, "{b}")
     }
 }
+fn wrap_ident(ident: &str) -> Cow<str> {
+    if ident.chars().all(|t| t.is_alphanumeric() || t == '_') {
+        Cow::from(ident)
+    } else {
+        Cow::from(format!("{ident:?}"))
+    }
+}
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -35,7 +43,7 @@ impl Display for HoistedStmt {
             HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
             HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
-            HoistedStmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
+            HoistedStmt::IGlobal(id, val) => write!(f, "global {} = {val:?}", wrap_ident(id)),
         }
     }
 }
@@ -60,7 +68,7 @@ impl Display for ProcStmt {
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ident, fields: field_map } = self;
-        write!(f, "class {ident} {{ ")?;
+        write!(f, "class {} {{ ", wrap_ident(ident))?;
 
         let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;
@@ -96,7 +104,7 @@ impl Display for Decl {
             MutType::Immut => {},
         };
 
-        write!(f, "{ident}: {ty} = ")?;
+        write!(f, "{}: {ty} = ", wrap_ident(ident))?;
         match val {
             Expr { expr: ExprType::Block(b), .. } => fmt_typed_block(f, b, ty == &b.0),
             e => write!(f, "{e}"),
@@ -107,7 +115,7 @@ impl Display for Decl {
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FunSignature { ident, params, ret, varargs } = self;
-        write!(f, "fun {ident}(")?;
+        write!(f, "fun {}(", wrap_ident(ident))?;
 
         let mut pd: Vec<_> = params.iter()
             .map(|t| t as _)
@@ -142,7 +150,7 @@ impl Display for Param {
             MutType::Immut => {},
         }
 
-        write!(f, "{ident}: {ty}")
+        write!(f, "{}: {ty}", wrap_ident(ident))
     }
 }
 
