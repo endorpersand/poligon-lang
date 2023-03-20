@@ -34,6 +34,8 @@ use crate::parser::{self, ParseErr};
 
 use self::plir_codegen::DeclaredTypes;
 
+use lazy_static::lazy_static;
+
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
 pub enum CompileErr<'ctx> {
@@ -97,16 +99,41 @@ pub struct Compiler<'ctx> {
     module: Module<'ctx>
 }
 
+lazy_static! {
+    static ref STD_PATH: &'static Path = "std".as_ref();
+}
 impl<'ctx> Compiler<'ctx> {
-    /// Create a new compiler.
-    pub fn new(ctx: &'ctx Context, filename: &str) -> Self {
+    /// Create a new compiler. 
+    /// 
+    /// This includes the Poligon std library.
+    pub fn new(ctx: &'ctx Context, filename: &str) -> CompileResult<'ctx, Self> {
+        let mut compiler = Self::no_std(ctx, filename);
+
+        let paths: Vec<_> = fs::read_dir(*STD_PATH)?
+            .flat_map(|me| me.map(|e| {
+                let path = e.path();
+
+                (path.extension() == Some("bc".as_ref()))
+                    .then_some(path)
+            }).transpose())
+            .collect::<Result<_, _>>()?;
+
+        for bc_file in paths {
+            let dfile = bc_file.with_extension(".d.plir.gon");
+            compiler.load_bc(dfile, bc_file)?;
+        }
+
+        Ok(compiler)
+    }
+
+    /// Creates a new compiler without the Poligon std library.
+    pub fn no_std(ctx: &'ctx Context, filename: &str) -> Self {
         Self {
             declared_types: Default::default(),
             llvm_codegen: LLVMCodegen::new(ctx),
             module: ctx.create_module(filename)
         }
     }
-
     fn get_plir_from_str(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
         let lexed = lexer::tokenize(code)?;
         let ast   = parser::parse(lexed)?;
