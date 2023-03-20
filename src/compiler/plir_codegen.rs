@@ -543,7 +543,7 @@ impl DeclaredTypes {
         }
         for (ident, val_ty) in &self.values {
             if let plir::Type::Fun(f) = val_ty {
-                writeln!(file, "{}", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident)))?
+                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident)))?
             }
             // TODO: don't ignore other types of decls
         }

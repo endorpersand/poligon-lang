@@ -64,7 +64,7 @@ impl Display for Class {
 
         let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;
-        writeln!(f, " }}")
+        write!(f, " }}")
     }
 }
 impl Display for FieldDecl {

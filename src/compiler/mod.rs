@@ -141,7 +141,7 @@ impl<'ctx> Compiler<'ctx> {
             .collect::<Result<_, _>>()?;
 
         for bc_file in paths {
-            let dfile = bc_file.with_extension(".d.plir.gon");
+            let dfile = bc_file.with_extension("d.plir.gon");
             compiler.load_bc(dfile, bc_file)?;
         }
 
@@ -214,9 +214,9 @@ impl<'ctx> Compiler<'ctx> {
         match write_to {
             GonSaveTo::SameLoc(path) => {
                 let mut llvm_path = path.to_owned();
-                llvm_path.set_extension(".bc");
+                llvm_path.set_extension("bc");
 
-                let plir_path = llvm_path.with_extension(".d.plir.gon");
+                let plir_path = llvm_path.with_extension("d.plir.gon");
 
                 self.declared_types.to_file(plir_path)?;
                 llvm_codegen::module_to_bc(&self.module, llvm_path);
