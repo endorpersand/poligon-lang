@@ -123,7 +123,7 @@ impl Test<'_> {
     fn compile_w_ctx<'ctx>(&self, ctx: &'ctx Context) -> TestResult<(LLVMCodegen<'ctx>, FunctionValue<'ctx>)> {
         let plir = self.codegen()?;
     
-        let mut compiler = LLVMCodegen::from_ctx(ctx);
+        let mut compiler = LLVMCodegen::new(ctx);
     
         match compiler.compile(&plir) {
             Ok(f) => Ok((compiler, f)),
@@ -148,7 +148,7 @@ impl Test<'_> {
 
 pub fn with_compiler<T>(mut f: impl FnMut(&mut LLVMCodegen) -> T) -> T {
     let ctx = Context::create();
-    let mut compiler = LLVMCodegen::from_ctx(&ctx);
+    let mut compiler = LLVMCodegen::new(&ctx);
     f(&mut compiler)
 }
 

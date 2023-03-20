@@ -9,7 +9,8 @@
 mod op_impl;
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -522,32 +523,69 @@ enum TypeStructure {
     Class(plir::Class)
 }
 
+/// A struct which holds the types declared by PLIR code generation.
+#[derive(Default, Clone)]
+pub struct DeclaredTypes {
+    types: HashMap<String, plir::Class>,
+    values: HashMap<String, plir::Type>
+}
+
+impl DeclaredTypes {
+    /// Writes the declared types into a file.
+    pub fn to_file(&self, p: impl AsRef<Path>) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::prelude::*;
+
+        let mut file = File::create(p)?;
+
+        for class in self.types.values() {
+            writeln!(file, "{class}")?;
+        }
+        for (ident, val_ty) in &self.values {
+            if let plir::Type::Fun(f) = val_ty {
+                writeln!(file, "{}", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident)))?
+            }
+            // TODO: don't ignore other types of decls
+        }
+
+        Ok(())
+    }
+}
+impl std::ops::AddAssign for DeclaredTypes {
+    fn add_assign(&mut self, rhs: Self) {
+        self.types.extend(rhs.types);
+        self.values.extend(rhs.values);
+    }
+}
+
 #[derive(Default)]
 struct Globals {
     stmts: Vec<plir::HoistedStmt>,
-    names: HashSet<String>
+    declared: DeclaredTypes
 }
 impl Globals {
     fn push(&mut self, stmt: impl Into<plir::HoistedStmt>) {
         use plir::HoistedStmt;
 
-        let stmt = stmt.into();
-        let name = match &stmt {
-            HoistedStmt::ClassDecl(c) => &c.ident,
-            HoistedStmt::FunDecl(d) => &d.sig.ident,
-            HoistedStmt::ExternFunDecl(d) => &d.ident,
-            HoistedStmt::IGlobal(i, _) => i,
-        }.to_owned();
-
-        // skip extern if already resolved
-        if let HoistedStmt::ExternFunDecl(_) = stmt {
-            if self.names.contains(&name) {
-                return;
+        let stmt: HoistedStmt = stmt.into();
+        let name = stmt.get_ident();
+        match &stmt {
+            HoistedStmt::FunDecl(f) => {
+                self.declared.values.insert(name.to_owned(), plir::Type::Fun(f.sig.ty()));
+            },
+            HoistedStmt::ExternFunDecl(f) => {
+                if self.declared.values.contains_key(name) { return; }
+                self.declared.values.insert(name.to_owned(), plir::Type::Fun(f.ty()));
+            },
+            HoistedStmt::ClassDecl(c) => {
+                self.declared.types.insert(name.to_owned(), c.clone());
+            },
+            HoistedStmt::IGlobal(_, _) => {
+                self.declared.values.insert(name.to_owned(), plir::ty!("#ptr"));
             }
         }
 
         self.stmts.push(stmt);
-        self.names.insert(name);
     }
 }
 
@@ -560,11 +598,19 @@ pub struct PLIRCodegen {
 }
 
 impl PLIRCodegen {
-    /// Creates a new instance of the CodeGenerator.
+    /// Creates a new instance of the PLIRCodegen.
     pub fn new() -> Self {
+        Self::new_with_declared_types(Default::default())
+    }
+
+    /// Creates a new instance of the PLIRCodegen with the given types already declared.
+    pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
         Self { 
             program: InsertBlock::top(), 
-            globals: Default::default(),
+            globals: Globals {
+                stmts: vec![],
+                declared
+            },
             blocks: vec![],
             var_id: 0
         }
@@ -588,6 +634,11 @@ impl PLIRCodegen {
                 BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn.at_range(range)),
             }
         }
+    }
+
+    /// Gets all the types declared by this code generation.
+    pub fn declared_types(&self) -> DeclaredTypes {
+        self.globals.declared.clone()
     }
 
     fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::Type>) {

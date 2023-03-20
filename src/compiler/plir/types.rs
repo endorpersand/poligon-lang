@@ -40,6 +40,26 @@ impl FunType {
     pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
         FunType {params, ret: Box::new(ret), varargs }
     }
+
+    /// Constructs a function signature (with parameter names lost) out of a given function type.
+    pub fn fun_signature(&self, ident: &str) -> super::FunSignature {
+        let params = self.params.iter()
+            .enumerate()
+            .map(|(i, t)| super::Param {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: format!("arg{i}"),
+                ty: t.clone(),
+            })
+            .collect();
+
+        super::FunSignature {
+            ident: ident.to_string(),
+            params,
+            varargs: self.varargs,
+            ret: (*self.ret).clone(),
+        }
+    }
 }
 
 impl TryFrom<Type> for FunType {

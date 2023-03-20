@@ -37,7 +37,7 @@ fn main() -> io::Result<()> {
             f.write_all(plir.to_string().as_bytes())?;
 
             let ctx = Context::create();
-            let mut compiler = LLVMCodegen::from_ctx(&ctx);
+            let mut compiler = LLVMCodegen::new(&ctx);
 
             let fun = unwrap_or_exit! { compiler.compile(&plir) };
             

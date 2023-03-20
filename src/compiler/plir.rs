@@ -138,6 +138,16 @@ mod stmt {
                 | ClassDecl(_)
             )
         }
+
+        /// Gets the identifier associated with this hoisted statement.
+        pub fn get_ident(&self) -> &str {
+            match self {
+                HoistedStmt::FunDecl(f) => &f.sig.ident,
+                HoistedStmt::ExternFunDecl(f) => &f.ident,
+                HoistedStmt::ClassDecl(c) => &c.ident,
+                HoistedStmt::IGlobal(name, _) => name,
+            }
+        }
     }
 
     impl ProcStmt {
@@ -280,6 +290,21 @@ pub struct FunSignature {
     pub varargs: bool,
     /// The function's return type
     pub ret: Type
+}
+
+impl FunSignature {
+    /// Gets the type associated with this function signature.
+    pub fn ty(&self) -> FunType {
+        let params = self.params.iter()
+            .map(|p| p.ty.clone())
+            .collect();
+        
+        FunType { 
+            params, 
+            ret: Box::new(self.ret.clone()), 
+            varargs: self.varargs 
+        }
+    }
 }
 
 /// A complete function declaration with a function body.
