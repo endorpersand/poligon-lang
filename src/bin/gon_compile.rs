@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use std::{io, fs};
 
 use inkwell::context::Context;
-use poligon_lang::compiler::{plir_codegen, LLVMCodegen};
-use poligon_lang::{lexer, parser};
+use poligon_lang::compiler::{Compiler, GonSaveTo};
 use poligon_lang::err::FullGonErr;
 
 fn main() -> io::Result<()> {
@@ -28,23 +27,18 @@ fn main() -> io::Result<()> {
                 }
             }
 
-            let tokens = unwrap_or_exit! { lexer::tokenize(&code) };
-            let ast    = unwrap_or_exit! { parser::parse(tokens)  };
-            let plir   = unwrap_or_exit! { plir_codegen::codegen(ast)  };
-
+            let ctx = Context::create();
+            let mut compiler = unwrap_or_exit! { Compiler::new(&ctx, fp) };
+            
+            let plir = unwrap_or_exit! { compiler.load_gon(&code) };
             let path = change_ext(fp, "plir.gon");
             let mut f = File::create(path)?;
             f.write_all(plir.to_string().as_bytes())?;
 
-            let ctx = Context::create();
-            let mut compiler = LLVMCodegen::new(&ctx);
+            unwrap_or_exit! { compiler.write_files(GonSaveTo::SameLoc(fp.as_ref())) };
+            unwrap_or_exit! { compiler.to_ll(change_ext(fp, "ll")) };
 
-            let fun = unwrap_or_exit! { compiler.compile(&plir) };
-            
-            compiler.to_ll(change_ext(fp, "ll"))?;
-            compiler.to_bc(change_ext(fp, "bc"));
-
-            unwrap_or_exit! { unsafe { compiler.jit_run::<()>(fun) } }
+            unwrap_or_exit! { unsafe { compiler.jit_run::<()>() } }
             Ok(())
         },
         None => panic!("Missing file"),

@@ -151,6 +151,27 @@ pub(crate) fn module_to_bc(module: &Module, p: impl AsRef<Path>) {
     module.write_bitcode_to_path(p.as_ref());
 }
 
+/// Executes a compiled program JIT, and returns the resulting value.
+/// 
+/// # Safety
+/// Currently, any type can be returned from this function. 
+/// Any calls to this function should ensure that the value returned in Poligon
+/// would align to the provided type in Rust.
+#[allow(unused)]
+pub(crate) unsafe fn module_jit_run<'ctx, T>(module: &Module<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
+    let fn_name = fun.get_name()
+        .to_str()
+        .unwrap();
+
+    let jit = module.create_jit_execution_engine(OptimizationLevel::Default)
+        .map_err(LLVMErr::LLVMErr)?;
+
+    unsafe {
+        let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
+        Ok(jit_fun.call())
+    }
+}
+
 /// This struct converts from PLIR to LLVM.
 pub struct LLVMCodegen<'ctx> {
     pub(super) ctx: &'ctx Context,
@@ -185,18 +206,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Any calls to this function should ensure that the value returned in Poligon
     /// would align to the provided type in Rust.
     #[allow(unused)]
-    pub unsafe fn jit_run<T>(&mut self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
-        let fn_name = fun.get_name()
-            .to_str()
-            .unwrap();
-
-        let jit = self.module.create_jit_execution_engine(OptimizationLevel::Default)
-            .map_err(LLVMErr::LLVMErr)?;
-
-        unsafe {
-            let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
-            Ok(jit_fun.call())
-        }
+    pub unsafe fn jit_run<T>(&self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
+        module_jit_run(&self.module, fun)
     }
 
     /// Writes LLVM bytecode for the current module into the provided file path.

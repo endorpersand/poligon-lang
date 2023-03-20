@@ -28,7 +28,7 @@ use inkwell::module::Module;
 pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
 pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
-use crate::err::FullGonErr;
+use crate::err::{FullGonErr, GonErr};
 use crate::lexer::{LexErr, self};
 use crate::parser::{self, ParseErr};
 
@@ -75,6 +75,28 @@ compile_err_impl_from! { LLVMErr: LLVMErr<'ctx> }
 
 /// A [`Result`] type for operations during the full compilation process.
 pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
+
+impl<'ctx> GonErr for CompileErr<'ctx> {
+    fn err_name(&self) -> &'static str {
+        match self {
+            CompileErr::LexErr(e)   => e.err.err_name(),
+            CompileErr::ParseErr(e) => e.err.err_name(),
+            CompileErr::IoErr(_)    => "io error",
+            CompileErr::PLIRErr(e)  => e.err.err_name(),
+            CompileErr::LLVMErr(e)  => e.err_name(),
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            CompileErr::LexErr(e)   => e.short_msg(),
+            CompileErr::ParseErr(e) => e.short_msg(),
+            CompileErr::IoErr(e)    => e.to_string(),
+            CompileErr::PLIRErr(e)  => e.short_msg(),
+            CompileErr::LLVMErr(e)  => e.message(),
+        }
+    }
+}
 
 /// Indicates the files where [`Compiler::write_files`] should save its results to.
 pub enum GonSaveTo<'p> {
@@ -134,6 +156,7 @@ impl<'ctx> Compiler<'ctx> {
             module: ctx.create_module(filename)
         }
     }
+
     fn get_plir_from_str(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
         let lexed = lexer::tokenize(code)?;
         let ast   = parser::parse(lexed)?;
@@ -158,7 +181,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// In loading the file, type data is preserved in the compiler and the LLVM module
     /// that holds this Poligon file is linked to the module being created.
-    pub fn load_gon(&mut self, p: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+    pub fn load_gon(&mut self, p: impl AsRef<Path>) -> CompileResult<'ctx, plir::Program> {
         let path = p.as_ref();
         let filename = path.to_string_lossy();
         let code = fs::read_to_string(path)?;
@@ -168,7 +191,9 @@ impl<'ctx> Compiler<'ctx> {
         self.llvm_codegen.compile(&plir)?;
 
         let module = self.llvm_codegen.pop_module();
-        self.update_values(dtypes, module)
+        self.update_values(dtypes, module)?;
+
+        Ok(plir)
     }
 
     /// Loads bitcode and type data.
@@ -203,5 +228,25 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         Ok(())
+    }
+
+    /// Writes the module as LLVM bytecode to disk.
+    pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+        llvm_codegen::module_to_ll(&self.module, dest)
+            .map_err(Into::into)
+    }
+
+    /// Executes the current module JIT, and returns the resulting value.
+    /// 
+    /// # Safety
+    /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
+    /// 
+    /// Any calls to this function should ensure that the value returned in Poligon
+    /// would align to the provided type in Rust.
+    pub unsafe fn jit_run<T>(&self) -> CompileResult<'ctx, T> {
+        let main = self.module.get_function("main").expect("Expected main function");
+
+        llvm_codegen::module_jit_run(&self.module, main)
+            .map_err(Into::into)
     }
 }
