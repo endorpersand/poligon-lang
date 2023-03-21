@@ -53,6 +53,15 @@ pub trait GonErr {
     }
 }
 
+impl<E: GonErr> GonErr for &E {
+    fn err_name(&self) -> &'static str {
+        (*self).err_name()
+    }
+
+    fn message(&self) -> String {
+        (*self).message()
+    }
+}
 impl<E: GonErr> From<E> for FullGonErr<E> {
     fn from(err: E) -> Self {
         err.at_unknown()

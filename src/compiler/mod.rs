@@ -19,6 +19,7 @@ mod llvm;
 pub(self) mod internals;
 pub mod llvm_codegen;
 
+use std::fmt::Display;
 use std::fs;
 use std::io::Error as IoErr;
 use std::path::Path;
@@ -29,8 +30,8 @@ pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
 pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
 use crate::err::{FullGonErr, GonErr};
-use crate::lexer::{LexErr, self};
-use crate::parser::{self, ParseErr, Parser};
+use crate::lexer;
+use crate::parser::{self, Parser};
 
 use self::plir_codegen::DeclaredTypes;
 
@@ -40,13 +41,9 @@ use lazy_static::lazy_static;
 #[derive(Debug)]
 pub enum CompileErr<'ctx> {
     #[allow(missing_docs)]
-    LexErr(FullGonErr<LexErr>),
-    #[allow(missing_docs)]
-    ParseErr(FullGonErr<ParseErr>),
-    #[allow(missing_docs)]
     IoErr(IoErr),
     #[allow(missing_docs)]
-    PLIRErr(FullGonErr<PLIRErr>),
+    Computed(String),
     #[allow(missing_docs)]
     LLVMErr(LLVMErr<'ctx>)
 }
@@ -67,36 +64,25 @@ macro_rules! compile_err_impl_from {
         }
     };
 }
-compile_err_impl_from! { LexErr: FullGonErr<LexErr> }
-compile_err_impl_from! { ParseErr: FullGonErr<ParseErr> }
+
 compile_err_impl_from! { IoErr: IoErr }
-compile_err_impl_from! { PLIRErr: FullGonErr<PLIRErr> }
 compile_err_impl_from! { LLVMErr: LLVMErr<'ctx> }
 
-/// A [`Result`] type for operations during the full compilation process.
-pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
+fn cast_e<'ctx, T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResult<'ctx, T> {
+    r.map_err(|e| CompileErr::Computed(e.full_msg(code)))
+}
 
-impl<'ctx> GonErr for CompileErr<'ctx> {
-    fn err_name(&self) -> &'static str {
+impl<'ctx> Display for CompileErr<'ctx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompileErr::LexErr(e)   => e.err.err_name(),
-            CompileErr::ParseErr(e) => e.err.err_name(),
-            CompileErr::IoErr(_)    => "io error",
-            CompileErr::PLIRErr(e)  => e.err.err_name(),
-            CompileErr::LLVMErr(e)  => e.err_name(),
-        }
-    }
-
-    fn message(&self) -> String {
-        match self {
-            CompileErr::LexErr(e)   => e.short_msg(),
-            CompileErr::ParseErr(e) => e.short_msg(),
-            CompileErr::IoErr(e)    => e.to_string(),
-            CompileErr::PLIRErr(e)  => e.short_msg(),
-            CompileErr::LLVMErr(e)  => e.message(),
+            CompileErr::IoErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
+            CompileErr::Computed(e) => write!(f, "{e}"),
+            CompileErr::LLVMErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
         }
     }
 }
+/// A [`Result`] type for operations during the full compilation process.
+pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
 
 /// Indicates the files where [`Compiler::write_files`] should save its results to.
 pub enum GonSaveTo<'p> {
@@ -158,25 +144,25 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn get_plir_from_gon(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
-        let lexed = lexer::tokenize(code)?;
-        let ast   = parser::parse(lexed)?;
+        let lexed = cast_e(lexer::tokenize(code), code)?;
+        let ast   = cast_e(parser::parse(lexed), code)?;
 
         let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
-        cg.consume_program(ast)?;
+        cast_e(cg.consume_program(ast), code)?;
         
         let dt = cg.declared_types();
-        let plir = cg.unwrap()?;
+        let plir = cast_e(cg.unwrap(), code)?;
         
         Ok((plir, dt))
     }
 
     fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
-        let lexed = lexer::tokenize(code)?;
+        let lexed = cast_e(lexer::tokenize(code), code)?;
         let parser = Parser::new(lexed, false);
-        let ast = parser.unwrap_d_program()?;
+        let ast = cast_e(parser.unwrap_d_program(), code)?;
 
         let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
-        cg.consume_program(ast)?;
+        cast_e(cg.consume_program(ast), code)?;
         
         let dt = cg.declared_types();
         Ok(dt)

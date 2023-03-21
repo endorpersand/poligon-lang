@@ -1,10 +1,9 @@
 use std::path::PathBuf;
-use std::{io, fs};
+use std::io;
 
 use clap::Parser;
 use inkwell::context::Context;
 use poligon_lang::compiler::{Compiler, GonSaveTo};
-use poligon_lang::err::FullGonErr;
 
 #[derive(Parser)]
 struct Cli {
@@ -19,16 +18,14 @@ struct Cli {
 
 fn main() -> io::Result<()> {
     let args = Cli::parse();
-    
     let fp = args.file;
-    let code = fs::read_to_string(&fp)?;
 
     macro_rules! unwrap_or_exit {
         ($r:expr) => {
             match $r {
                 Ok(t) => t,
-                Err(fe) => {
-                    eprintln!("{}", FullGonErr::from(fe).full_msg(&code));
+                Err(cerr) => {
+                    eprintln!("{cerr}");
                     std::process::exit(1);
                 }
             }
