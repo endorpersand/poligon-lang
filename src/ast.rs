@@ -644,11 +644,13 @@ impl GonErr for PatErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
+}
 
-    fn message(&self) -> String {
+impl std::fmt::Display for PatErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PatErr::InvalidAssignTarget => String::from("invalid assign target"),
-            PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
+            PatErr::InvalidAssignTarget  => write!(f, "invalid assign target"),
+            PatErr::CannotSpreadMultiple => write!(f, "cannot use spread pattern more than once"),
         }
     }
 }

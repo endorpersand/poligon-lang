@@ -566,26 +566,27 @@ impl<'ctx> GonErr for LLVMErr<'ctx> {
             => t,
         }
     }
+}
 
-    fn message(&self) -> String {
+impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LLVMErr::UndefinedVar(name) => format!("could not find variable '{name}'"),
-            LLVMErr::UndefinedFun(name) => format!("could not find function '{name}'"),
-            LLVMErr::CannotImport(name) => format!("cannot import '{name}'"),
-            LLVMErr::InvalidFun => String::from("could not create function"),
-            LLVMErr::UnresolvedType(t) => format!("missing type layout '{t}'"),
-            LLVMErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
-            LLVMErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
-            LLVMErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
-            LLVMErr::CannotCast(t1, t2) => format!("cannot perform type cast from '{t1}' to {t2}"),
-            LLVMErr::StructIndexOOB(i) => format!("cannot index struct, does not have field {i}"),
-            LLVMErr::CannotDetermineMain => String::from("could not determine entry point"),
-            LLVMErr::LLVMErr(e) => format!("{e}"),
-            LLVMErr::Generic(_, t) => t.clone(),
+            LLVMErr::UndefinedVar(name)       => write!(f, "could not find variable '{name}'"),
+            LLVMErr::UndefinedFun(name)       => write!(f, "could not find function '{name}'"),
+            LLVMErr::CannotImport(name)       => write!(f, "cannot import '{name}'"),
+            LLVMErr::InvalidFun               => write!(f, "could not create function"),
+            LLVMErr::UnresolvedType(t)        => write!(f, "missing type layout '{t}'"),
+            LLVMErr::CannotUnary(op, t1)      => write!(f, "cannot apply '{op}' to {t1}"),
+            LLVMErr::CannotBinary(op, t1, t2) => write!(f, "cannot apply '{op}' to {t1} and {t2}"),
+            LLVMErr::CannotCmp(op, t1, t2)    => write!(f, "cannot compare '{op}' between {t1} and {t2}"),
+            LLVMErr::CannotCast(t1, t2)       => write!(f, "cannot perform type cast from '{t1}' to {t2}"),
+            LLVMErr::StructIndexOOB(i)        => write!(f, "cannot index struct, does not have field {i}"),
+            LLVMErr::CannotDetermineMain      => write!(f, "could not determine entry point"),
+            LLVMErr::LLVMErr(e)               => write!(f, "{e}"),
+            LLVMErr::Generic(_, t)            => write!(f, "{t}"),
         }
     }
 }
-
 /// This trait is implemented for values that can be traversed in order to 
 /// create an LLVM representation or write values into the compiler.
 pub trait TraverseIR<'ctx> {

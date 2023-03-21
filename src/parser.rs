@@ -129,31 +129,37 @@ impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
+}
 
-    fn message(&self) -> String {
+impl std::fmt::Display for ParseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseErr::ExpectedTokens(tokens) => if tokens.len() == 1 {
-                format!("expected '{}'", tokens[0])
-            } else {
-                let tstr = tokens.iter()
-                    .map(ToString::to_string)
-                    .map(|s| format!("'{}'", s))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("expected one of {}", tstr)
+            ParseErr::ExpectedTokens(tokens) => match tokens.len() {
+                0 => write!(f, "expected eof"),
+                1 => write!(f, "expected '{}'", tokens[0]),
+                _ => {
+                    let (first, rest) = tokens.split_first().unwrap();
+                    write!(f, "expected one of '{first}'")?;
+
+                    for t in rest {
+                        write!(f, ", '{t}'")?;
+                    }
+
+                    Ok(())
+                }
             },
-            ParseErr::ExpectedIdent      => String::from("expected identifier"),
-            ParseErr::ExpectedExpr       => String::from("expected expression"),
-            ParseErr::ExpectedStrLiteral => String::from("expected string literal"),
-            ParseErr::CannotParseNumeric => String::from("could not parse numeric"),
-            ParseErr::ExpectedBlock      => String::from("expected block"),
-            ParseErr::ExpectedType       => String::from("expected type expression"),
-            ParseErr::ExpectedPattern    => String::from("expected pattern"),
-            ParseErr::ExpectedEntry      => String::from("expected entry"),
-            ParseErr::ExpectedParam      => String::from("expected param"),
-            ParseErr::NoIntrinsicIdents  => String::from("cannot use intrinsic identifier"),
-            ParseErr::NoIntrinsicGlobal  => String::from("cannot use intrinsic global"),
-            ParseErr::AsgPatErr(e)       => e.message(),
+            ParseErr::ExpectedIdent      => write!(f, "expected identifier"),
+            ParseErr::ExpectedExpr       => write!(f, "expected expression"),
+            ParseErr::ExpectedStrLiteral => write!(f, "expected string literal"),
+            ParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
+            ParseErr::ExpectedBlock      => write!(f, "expected block"),
+            ParseErr::ExpectedType       => write!(f, "expected type expression"),
+            ParseErr::ExpectedPattern    => write!(f, "expected pattern"),
+            ParseErr::ExpectedEntry      => write!(f, "expected entry"),
+            ParseErr::ExpectedParam      => write!(f, "expected param"),
+            ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
+            ParseErr::NoIntrinsicGlobal  => write!(f, "cannot use intrinsic global"),
+            ParseErr::AsgPatErr(e)       => e.fmt(f),
         }
     }
 }

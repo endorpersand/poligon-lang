@@ -327,11 +327,12 @@ pub mod err {
                         ),*
                     }
                 }
-            
-                fn message(&self) -> String {
+            }
+            impl std::fmt::Display for RuntimeErr {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     match self {
                         $(
-                            Self::$e(e) => e.message()
+                            Self::$e(e) => e.fmt(f)
                         ),*
                     }
                 }
@@ -382,20 +383,22 @@ pub mod err {
         fn err_name(&self) -> &'static str {
             "type error"
         }
-
-        fn message(&self) -> String {
+    }
+    
+    impl std::fmt::Display for TypeErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                TypeErr::CannotCmp(op, t1, t2) => format!("cannot compare '{op}' between {t1} and {t2}"),
-                TypeErr::CannotUnary(op, t1) => format!("cannot apply '{op}' to {t1}"),
-                TypeErr::CannotBinary(op, t1, t2) => format!("cannot apply '{op}' to {t1} and {t2}"),
-                TypeErr::CannotRange(t1, t2) => format!("cannot create range {t1}..{t2}"),
-                TypeErr::NotIterable(t1) => format!("{t1} is not iterable"),
-                TypeErr::NotUnpackable(t1) => format!("{t1} cannot be assigned to this pattern"),
-                TypeErr::ExpectedType(t1) => format!("expected {t1}"),
-                TypeErr::CannotIndex(t1) => format!("cannot index {t1}"),
-                TypeErr::CannotSetIndex(t1) => format!("cannot assign to elements of {t1}"),
-                TypeErr::CannotIndexWith(t1, t2) => format!("cannot index {t1} with {t2}"),
-                TypeErr::CannotCall(t1) => format!("{t1} is not callable"),
+                TypeErr::CannotCmp(op, t1, t2)    => write!(f, "cannot compare '{op}' between {t1} and {t2}"),
+                TypeErr::CannotUnary(op, t1)      => write!(f, "cannot apply '{op}' to {t1}"),
+                TypeErr::CannotBinary(op, t1, t2) => write!(f, "cannot apply '{op}' to {t1} and {t2}"),
+                TypeErr::CannotRange(t1, t2)      => write!(f, "cannot create range {t1}..{t2}"),
+                TypeErr::NotIterable(t1)          => write!(f, "{t1} is not iterable"),
+                TypeErr::NotUnpackable(t1)        => write!(f, "{t1} cannot be assigned to this pattern"),
+                TypeErr::ExpectedType(t1)         => write!(f, "expected {t1}"),
+                TypeErr::CannotIndex(t1)          => write!(f, "cannot index {t1}"),
+                TypeErr::CannotSetIndex(t1)       => write!(f, "cannot assign to elements of {t1}"),
+                TypeErr::CannotIndexWith(t1, t2)  => write!(f, "cannot index {t1} with {t2}"),
+                TypeErr::CannotCall(t1)           => write!(f, "{t1} is not callable"),
             }
         }
     }
@@ -429,16 +432,18 @@ pub mod err {
         fn err_name(&self) -> &'static str {
             "value error"
         }
-
-        fn message(&self) -> String {
+    }
+    
+    impl std::fmt::Display for ValueErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                ValueErr::DivisionByZero => String::from("division by zero"),
-                ValueErr::RangeIsInfinite => String::from("range produced is infinite length"),
-                ValueErr::IndexOutOfBounds => String::from("index out of bounds"),
-                ValueErr::WrongArity(n) => format!("expected {n} parameters in function call"),
-                ValueErr::UnpackTooLittle(ex, got) => format!("unpack failed, expected {ex} elements, but got {got}"),
-                ValueErr::UnpackTooLittleS(exa, got) => format!("unpack failed, expected at least {exa} elements, but got {got}"),
-                ValueErr::UnpackTooMany(ex) => format!("unpack failed, only expected {ex} elements"),
+                ValueErr::DivisionByZero => write!(f, "division by zero"),
+                ValueErr::RangeIsInfinite => write!(f, "range produced is infinite length"),
+                ValueErr::IndexOutOfBounds => write!(f, "index out of bounds"),
+                ValueErr::WrongArity(n) => write!(f, "expected {n} parameters in function call"),
+                ValueErr::UnpackTooLittle(ex, got) => write!(f, "unpack failed, expected {ex} elements, but got {got}"),
+                ValueErr::UnpackTooLittleS(exa, got) => write!(f, "unpack failed, expected at least {exa} elements, but got {got}"),
+                ValueErr::UnpackTooMany(ex) => write!(f, "unpack failed, only expected {ex} elements"),
             }
         }
     }
@@ -461,12 +466,14 @@ pub mod err {
         fn err_name(&self) -> &'static str {
             "name error"
         }
-
-        fn message(&self) -> String {
+    }
+    
+    impl std::fmt::Display for NameErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                NameErr::UndefinedVar(name) => format!("could not find variable \'{name}\'"),
-                NameErr::AlreadyDeclared(name) => format!("cannot redeclare \'{name}\'"),
-                NameErr::NotDeclared(name) => format!("undeclared variable \'{name}\'"),
+                NameErr::UndefinedVar(name) => write!(f, "could not find variable \'{name}\'"),
+                NameErr::AlreadyDeclared(name) => write!(f, "cannot redeclare \'{name}\'"),
+                NameErr::NotDeclared(name) => write!(f, "undeclared variable \'{name}\'"),
             }
         }
     }
@@ -485,11 +492,13 @@ pub mod err {
         fn err_name(&self) -> &'static str {
             "feature error"
         }
-
-        fn message(&self) -> String {
+    }
+    
+    impl std::fmt::Display for FeatureErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                FeatureErr::Incomplete(s) => format!("not yet implemented - {s}"),
-                FeatureErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
+                FeatureErr::Incomplete(s) => write!(f, "not yet implemented - {s}"),
+                FeatureErr::CompilerOnly(s) => write!(f, "compiler-only feature - {s}"),
             }
         }
     }
@@ -497,10 +506,6 @@ pub mod err {
     impl GonErr for IoErr {
         fn err_name(&self) -> &'static str {
             "io error"
-        }
-
-        fn message(&self) -> String {
-            self.to_string()
         }
     }
 }

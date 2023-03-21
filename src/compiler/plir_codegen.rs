@@ -119,27 +119,30 @@ impl GonErr for PLIRErr {
         }
     }
 
-    fn message(&self) -> String {
+}
+
+impl std::fmt::Display for PLIRErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PLIRErr::CannotBreak => String::from("cannot 'break' here"),
-            PLIRErr::CannotContinue => String::from("cannot 'continue' here"),
-            PLIRErr::CannotReturn => String::from("cannot 'return' here"),
-            PLIRErr::ExpectedType(e, f) => format!("expected type '{e}', but got '{f}'"),
-            PLIRErr::CannotResolveType => String::from("cannot determine type"),
-            PLIRErr::UndefinedVar(name) => format!("could not find identifier '{name}'"),
-            PLIRErr::UndefinedType(name) => format!("could not find type '{name}'"),
-            PLIRErr::UndefinedAttr(t, name) => format!("could not find attribute '{name}' on '{t}'"),
-            PLIRErr::CannotAccessOnMethod => String::from("cannot access on method"),
-            PLIRErr::CannotAssignToMethod => String::from("cannot assign to method"),
-            PLIRErr::CannotCall(t) => format!("cannot call value of type '{t}'"),
-            PLIRErr::WrongArity(e, g) => format!("wrong number of parameters - expected {e}, got {g}"),
-            PLIRErr::WrongTypeArity(e, g) => format!("wrong number of type parameters - expected {e}, got {g}"),
-            PLIRErr::CannotSpread => String::from("cannot spread here"),
-            PLIRErr::CannotInitialize(t) => format!("cannot use initializer syntax on type '{t}'"),
-            PLIRErr::UninitializedField(t, f) => format!("uninitialized field '{f}' on type '{t}'"),
-            PLIRErr::UnexpectedField(t, f) => format!("field '{f}' is not present on type '{t}'"),
-            PLIRErr::CannotDeref => String::from("only pointers can be dereferenced"),
-            PLIRErr::OpErr(e) => e.message(),
+            PLIRErr::CannotBreak                  => write!(f, "cannot 'break' here"),
+            PLIRErr::CannotContinue               => write!(f, "cannot 'continue' here"),
+            PLIRErr::CannotReturn                 => write!(f, "cannot 'return' here"),
+            PLIRErr::ExpectedType(e, g)           => write!(f, "expected type '{e}', but got '{g}'"),
+            PLIRErr::CannotResolveType            => write!(f, "cannot determine type"),
+            PLIRErr::UndefinedVar(name)           => write!(f, "could not find identifier '{name}'"),
+            PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
+            PLIRErr::UndefinedAttr(t, name)       => write!(f, "could not find attribute '{name}' on '{t}'"),
+            PLIRErr::CannotAccessOnMethod         => write!(f, "cannot access on method"),
+            PLIRErr::CannotAssignToMethod         => write!(f, "cannot assign to method"),
+            PLIRErr::CannotCall(t)                => write!(f, "cannot call value of type '{t}'"),
+            PLIRErr::WrongArity(e, g)             => write!(f, "wrong number of parameters - expected {e}, got {g}"),
+            PLIRErr::WrongTypeArity(e, g)         => write!(f, "wrong number of type parameters - expected {e}, got {g}"),
+            PLIRErr::CannotSpread                 => write!(f, "cannot spread here"),
+            PLIRErr::CannotInitialize(t)          => write!(f, "cannot use initializer syntax on type '{t}'"),
+            PLIRErr::UninitializedField(t, field) => write!(f, "uninitialized field '{field}' on type '{t}'"),
+            PLIRErr::UnexpectedField(t, field)    => write!(f, "field '{field}' is not present on type '{t}'"),
+            PLIRErr::CannotDeref                  => write!(f, "only pointers can be dereferenced"),
+            PLIRErr::OpErr(e)                     => e.fmt(f),
         }
     }
 }

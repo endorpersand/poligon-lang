@@ -100,23 +100,25 @@ impl GonErr for LexErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
+}
 
-    fn message(&self) -> String {
+impl std::fmt::Display for LexErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexErr::UnknownChar(c)      => format!("invalid character {}", wrapq(*c)),
-            LexErr::UnclosedQuote       => String::from("quote was never terminated"),
-            LexErr::ExpectedChar(c)     => format!("expected character {}", wrapq(*c)),
-            LexErr::EmptyChar           => String::from("char literal cannot be empty"),
-            LexErr::UnknownOp(op)       => format!("operator \"{}\" does not exist", op),
-            LexErr::MismatchedDelimiter => String::from("mismatched delimiter"),
-            LexErr::UnclosedDelimiter   => String::from("delimiter was never terminated"),
-            LexErr::UnmatchedDelimiter  => String::from("delimiter was never opened"),
-            LexErr::DelimiterClosedSemi => String::from("unexpected ';'"),
-            LexErr::UnclosedComment     => String::from("comment was never terminated"),
-            LexErr::NotFullyLexed       => String::from("input not fully read"),
-            LexErr::InvalidX            => String::from("invalid \\xXX escape"),
-            LexErr::InvalidU            => String::from("invalid \\u{XXXX} escape"),
-            LexErr::InvalidChar(c)      => format!("invalid char {:x}", c)
+            LexErr::UnknownChar(c)      => write!(f, "invalid character {}", wrapq(*c)),
+            LexErr::UnclosedQuote       => write!(f, "quote was never terminated"),
+            LexErr::ExpectedChar(c)     => write!(f, "expected character {}", wrapq(*c)),
+            LexErr::EmptyChar           => write!(f, "char literal cannot be empty"),
+            LexErr::UnknownOp(op)       => write!(f, "operator \"{op}\" does not exist"),
+            LexErr::MismatchedDelimiter => write!(f, "mismatched delimiter"),
+            LexErr::UnclosedDelimiter   => write!(f, "delimiter was never terminated"),
+            LexErr::UnmatchedDelimiter  => write!(f, "delimiter was never opened"),
+            LexErr::DelimiterClosedSemi => write!(f, "unexpected ';'"),
+            LexErr::UnclosedComment     => write!(f, "comment was never terminated"),
+            LexErr::NotFullyLexed       => write!(f, "input not fully read"),
+            LexErr::InvalidX            => write!(f, "invalid \\xXX escape"),
+            LexErr::InvalidU            => write!(f, "invalid \\u{{XXXX}} escape"),
+            LexErr::InvalidChar(c)      => write!(f, "invalid char {:x}", c)
         }
     }
 }

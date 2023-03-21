@@ -75,15 +75,16 @@ impl GonErr for ResolveErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
-
-    fn message(&self) -> String {
+}
+impl std::fmt::Display for ResolveErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ResolveErr::CannotReturn => String::from("cannot 'return' here"),
-            ResolveErr::CannotBreak => String::from("cannot 'break' here"),
-            ResolveErr::CannotContinue => String::from("cannot 'continue' here"),
-            ResolveErr::CannotSpread => String::from("cannot spread here"),
-            ResolveErr::CannotSpreadNone => String::from("cannot empty spread here"),
-            ResolveErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
+            ResolveErr::CannotReturn     => write!(f, "cannot 'return' here"),
+            ResolveErr::CannotBreak      => write!(f, "cannot 'break' here"),
+            ResolveErr::CannotContinue   => write!(f, "cannot 'continue' here"),
+            ResolveErr::CannotSpread     => write!(f, "cannot spread here"),
+            ResolveErr::CannotSpreadNone => write!(f, "cannot empty spread here"),
+            ResolveErr::CompilerOnly(s)  => write!(f, "compiler-only feature - {s}"),
         }
     }
 }

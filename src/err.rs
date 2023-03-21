@@ -11,18 +11,17 @@
 //! [`LexErr`]: crate::lexer::LexErr
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
 /// Errors that can be printed by the Poligon interpreter.
 /// 
-/// This trait requires that the struct provides the name of the error type and the message of the error.
-/// 
-/// This trait provides functionality to designate *where* an error occurred.
-pub trait GonErr {
+/// This trait requires that the struct provides the name of the error type and the message of the error (in Display).
+/// Implementing these enables functionality to designate *where* an error occurred and to produce 
+/// a formatted error message.
+pub trait GonErr: Display {
     /// The name of the error type (e.g. `syntax error`, `runtime error`)
     fn err_name(&self) -> &'static str;
-    /// The description of why the error occurred (e.g. `division by zero`)
-    fn message(&self) -> String;
 
     /// Designate that this error occurred at a specific position
     fn at(self, p: Cursor) -> FullGonErr<Self> 
@@ -56,10 +55,6 @@ pub trait GonErr {
 impl<E: GonErr> GonErr for &E {
     fn err_name(&self) -> &'static str {
         (*self).err_name()
-    }
-
-    fn message(&self) -> String {
-        (*self).message()
     }
 }
 impl<E: GonErr> From<E> for FullGonErr<E> {
@@ -239,9 +234,9 @@ impl<E: GonErr> FullGonErr<E> {
         };
 
         if !line_fmt.is_empty() {
-            format!("{} :: {}: {}", line_fmt, self.err.err_name(), self.err.message())
+            format!("{} :: {}: {}", line_fmt, self.err.err_name(), self.err)
         } else {
-            format!("{}: {}", self.err.err_name(), self.err.message())
+            format!("{}: {}", self.err.err_name(), self.err)
         }
     }
 
