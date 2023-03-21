@@ -19,7 +19,7 @@ mod llvm;
 pub(self) mod internals;
 pub mod llvm_codegen;
 
-use std::{fs};
+use std::fs;
 use std::io::Error as IoErr;
 use std::path::Path;
 
@@ -30,7 +30,7 @@ pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
 use crate::err::{FullGonErr, GonErr};
 use crate::lexer::{LexErr, self};
-use crate::parser::{self, ParseErr};
+use crate::parser::{self, ParseErr, Parser};
 
 use self::plir_codegen::DeclaredTypes;
 
@@ -157,7 +157,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn get_plir_from_str(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
+    fn get_plir_from_gon(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
         let lexed = lexer::tokenize(code)?;
         let ast   = parser::parse(lexed)?;
 
@@ -170,8 +170,25 @@ impl<'ctx> Compiler<'ctx> {
         Ok((plir, dt))
     }
 
+    fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
+        let lexed = lexer::tokenize(code)?;
+        let parser = Parser::new(lexed, false);
+        let ast = parser.unwrap_d_program()?;
+
+        let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
+        cg.consume_program(ast)?;
+        
+        let dt = cg.declared_types();
+        Ok(dt)
+    }
+
     fn update_values(&mut self, dtypes: DeclaredTypes, new_module: Module<'ctx>) -> CompileResult<'ctx, ()> {
         self.declared_types += dtypes;
+
+        if let Some(f) = self.module.get_function("main") {
+            unsafe { f.delete() };
+        }
+
         self.module.link_in_module(new_module)
             .map_err(LLVMErr::LLVMErr)
             .map_err(Into::into)
@@ -180,18 +197,34 @@ impl<'ctx> Compiler<'ctx> {
     /// Load a Poligon file.
     /// 
     /// In loading the file, type data is preserved in the compiler and the LLVM module
-    /// that holds this Poligon file is linked to the module being created.
+    /// that holds this Poligon file is linked to the compiler's module.
     pub fn load_gon(&mut self, p: impl AsRef<Path>) -> CompileResult<'ctx, plir::Program> {
+        self.load_gon_and_save_plir(p, None::<&Path>)
+    }
+
+    /// Load a Poligon file and optionally saves PLIR to a specified reference.
+    /// 
+    /// In loading the file, type data is preserved in the compiler and the LLVM module
+    /// that holds this Poligon file is linked to the compiler's module.
+    pub fn load_gon_and_save_plir(&mut self, p: impl AsRef<Path>, msave: Option<impl AsRef<Path>>) -> CompileResult<'ctx, plir::Program> {
+        use fs::File;
+        use std::io::prelude::*;
+
         let path = p.as_ref();
         let filename = path.to_string_lossy();
         let code = fs::read_to_string(path)?;
-        let (plir, dtypes) = self.get_plir_from_str(&code)?;
+        let (plir, dtypes) = self.get_plir_from_gon(&code)?;
 
+        if let Some(save) = msave {
+            let mut f = File::create(save.as_ref())?;
+            f.write_all(plir.to_string().as_bytes())?;
+        }
         self.llvm_codegen.set_filename(&filename);
         self.llvm_codegen.compile(&plir)?;
 
         let module = self.llvm_codegen.pop_module();
         self.update_values(dtypes, module)?;
+        self.llvm_codegen.load_declared_types(&self.declared_types)?;
 
         Ok(plir)
     }
@@ -201,11 +234,12 @@ impl<'ctx> Compiler<'ctx> {
     /// In loading these files, type data and the bitcode are linked in the compiler.
     pub fn load_bc(&mut self, dfile: impl AsRef<Path>, bc_file: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
         let code = fs::read_to_string(dfile)?;
-        let (_, dtypes) = self.get_plir_from_str(&code)?;
-
+        
+        let dtypes = self.get_declared_types_from_d(&code)?;
         let module = Module::parse_bitcode_from_path(bc_file, self.llvm_codegen.ctx)
             .map_err(LLVMErr::LLVMErr)?;
-        
+    
+        self.llvm_codegen.load_declared_types(&dtypes)?;
         self.update_values(dtypes, module)
     }
 

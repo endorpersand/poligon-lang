@@ -35,56 +35,16 @@ use crate::err::GonErr;
 pub use self::value::*;
 use self::value::apply_bv;
 
-fn default_layouts(ctx: &Context) -> HashMap<String, BasicTypeEnum> {
-    macro_rules! map {
-        ($($k:expr => $v:expr),*$(,)?) => {{
-            let mut m = HashMap::new();
-            $(
-                m.insert(String::from($k), $v.into());
-            )*
-            m
-        }}
-    }
-
-    use plir::Type;
-
-    map! {
-        Type::S_INT   => ctx.i64_type(),
-        Type::S_FLOAT => ctx.f64_type(),
-        Type::S_BOOL  => ctx.bool_type(),
-        Type::S_CHAR  => ctx.i32_type(),
-        "#dynarray" => {
-            let st = ctx.opaque_struct_type("#dynarray");
-            st.set_body(&[
-                ctx.i8_type().ptr_type(Default::default()).into(), // buffer
-                ctx.i64_type().into(), // length (in bytes)
-                ctx.i64_type().into() // capacity (in bytes)
-            ], false);
-            st
-        },
-        Type::S_STR => {
-            let st = ctx.opaque_struct_type(Type::S_STR);
-            st.set_body(&[
-                ctx.get_struct_type("#dynarray").unwrap().into()
-            ], false);
-            st
-        },
-        "#ptr" => ctx.i8_type().ptr_type(Default::default()),
-        "#byte" => ctx.i8_type(),
-        Type::S_VOID  => ctx.struct_type(&[], false)
-    }
-}
-
 /// Computes a const layout.
 /// The layouts are defined in [`default_layouts`].
 /// 
 /// If an unimplemented layout is accessed, this panics.
 macro_rules! layout {
     ($compiler:expr, $i:ident) => {
-        $compiler.get_layout_by_name($crate::compiler::plir::Type::$i).unwrap()
+        $compiler.get_layout(&plir::ty!($crate::compiler::plir::Type::$i)).unwrap()
     };
     ($compiler:expr, $i:literal) => {
-        $compiler.get_layout_by_name($i).unwrap()
+        $compiler.get_layout(&plir::ty!($i)).unwrap()
     };
 }
 pub(in crate::compiler) use layout;
@@ -137,6 +97,75 @@ impl<'ctx> ExitPointers<'ctx> {
     }
 }
 
+pub(super) struct TypeLayouts<V> {
+    alias: HashMap<String, plir::Type>,
+    layouts: HashMap<plir::Type, V>
+}
+impl<V> TypeLayouts<V> {
+    fn new() -> Self {
+        TypeLayouts { alias: HashMap::new(), layouts: HashMap::new() }
+    }
+
+    fn get_by_type(&self, ty: &plir::Type) -> Option<&V> {
+        self.layouts.get(ty)
+    }
+    
+    #[allow(unused)]
+    fn get_by_ident(&self, id: &str) -> Option<&V> {
+        self.alias.get(id)
+            .and_then(|ty| self.get_by_type(ty))
+    }
+
+    fn insert(&mut self, ty: plir::Type, id: String, v: V) {
+        self.alias.insert(id, ty.clone());
+        self.layouts.insert(ty, v);
+    }
+
+    fn lookup_type(&self, id: &str) -> Option<&plir::Type> {
+        self.alias.get(id)
+    }
+}
+
+impl<'ctx> TypeLayouts<BasicTypeEnum<'ctx>> {
+    fn with_builtins(ctx: &'ctx Context) -> Self {
+        use plir::Type;
+        
+        let mut layouts = Self::new();
+
+        for (id, layout) in [
+            (Type::S_INT,   ctx.i64_type().into()),
+            (Type::S_FLOAT, ctx.f64_type().into()),
+            (Type::S_BOOL,  ctx.bool_type().into()),
+            (Type::S_CHAR,  ctx.i32_type().into()),
+            ("#ptr",        ctx.i8_type().ptr_type(Default::default()).into()),
+            ("#byte",       ctx.i8_type().into()),
+            (Type::S_VOID,  ctx.struct_type(&[], false).into()),
+        ] {
+            layouts.insert(plir::ty!(id), id.to_string(), layout);
+        }
+
+        layouts
+    }
+
+    #[allow(unused)]
+    fn lookup_name<'a>(&'a self, ty: &'a plir::Type) -> Option<Cow<'a, str>> {
+        let layout = self.layouts.get(ty)?;
+        
+        let name = if let BasicTypeEnum::StructType(st) = layout {
+            let name_ref = st.get_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+
+            Cow::from(name_ref)
+        } else {
+            ty.ident()
+        };
+
+        self.alias.contains_key(&*name).then_some(name)
+    }
+}
+
 /// Writes LLVM bytecode for the provided module into the provided file path.
 pub(crate) fn module_to_ll(module: &Module, p: impl AsRef<Path>) -> std::io::Result<()> {
     use std::fs::File;
@@ -177,7 +206,7 @@ pub struct LLVMCodegen<'ctx> {
     pub(super) ctx: &'ctx Context,
     pub(super) builder: Builder2<'ctx>,
     pub(super) module: Module<'ctx>,
-    pub(super) layouts: HashMap<String, BasicTypeEnum<'ctx>>,
+    pub(super) layouts: TypeLayouts<BasicTypeEnum<'ctx>>,
     pub(super) exit_pointers: Vec<ExitPointers<'ctx>>,
 
     pub(super) vars: HashMap<String, PointerValue<'ctx>>,
@@ -191,7 +220,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
             ctx,
             builder: Builder2::new(ctx.create_builder()),
             module: ctx.create_module("eval"),
-            layouts: default_layouts(ctx),
+            layouts: TypeLayouts::with_builtins(ctx),
             exit_pointers: vec![],
 
             vars: HashMap::new(),
@@ -231,13 +260,30 @@ impl<'ctx> LLVMCodegen<'ctx> {
     pub fn pop_module(&mut self) -> Module<'ctx> {
         // clear everything:
         self.builder.clear_insertion_position();
-        self.layouts.clear();
+        self.layouts = TypeLayouts::with_builtins(self.ctx);
         self.exit_pointers.clear();
         self.vars.clear();
         self.globals.clear();
 
         // clear module:
         std::mem::replace(&mut self.module, self.ctx.create_module("eval"))
+    }
+
+    /// Registers extern funs and classes into the current module.
+    pub fn load_declared_types(&mut self, dtypes: &super::DeclaredTypes) -> LLVMResult<'ctx, ()> {
+        for class in dtypes.types.values() {
+            self.compile(class)?;
+        }
+        
+        for (ident, ty) in &dtypes.values {
+            if let plir::Type::Fun(f) = ty {
+                let sig = f.fun_signature(ident);
+                self.compile(&sig)?;
+            }
+            // TODO: allow other types
+        }
+
+        Ok(())
     }
 
     /// Sets the filename of the current module.
@@ -351,20 +397,27 @@ impl<'ctx> LLVMCodegen<'ctx> {
     fn define_fun(&self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { ident, params, ret, varargs } = sig;
 
-        let arg_tys: Vec<_> = params.iter()
-            .map(|p| self.get_ref_layout(&p.ty).map(Into::into))
-            .collect::<Result<_, _>>()?;
+        let fun = match self.module.get_function(ident) {
+            Some(f) => f,
+            None => {
+                let arg_tys: Vec<_> = params.iter()
+                    .map(|p| self.get_ref_layout(&p.ty).map(Into::into))
+                    .collect::<Result<_, _>>()?;
+        
+                let fun_ty = self.get_layout_or_void(ret)?
+                    .fn_type(&arg_tys, *varargs);
+                let fun = self.module.add_function(ident, fun_ty, None);
+        
+                // set arguments names
+                for (param, arg) in iter::zip(params, fun.get_param_iter()) {
+                    apply_bv!(let v = arg => v.set_name(&param.ident));
+                }
 
-        let fun_ty = self.get_layout_or_void(ret)?
-            .fn_type(&arg_tys, *varargs);
-        let fun = self.module.add_function(ident, fun_ty, None);
+                fun
+            }
+        };
 
-        // set arguments names
-        for (param, arg) in iter::zip(params, fun.get_param_iter()) {
-            apply_bv!(let v = arg => v.set_name(&param.ident));
-        }
-
-        Ok((fun, fun_ty))
+        Ok((fun, fun.get_type()))
     }
 
     /// Import a function using the provided PLIR function signature.
@@ -375,8 +428,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Define a type for the compiler to track.
-    fn define_type(&mut self, ty: &str, layout: impl BasicType<'ctx>) {
-        self.layouts.insert(ty.to_string(), layout.as_basic_type_enum());
+    fn define_type(&mut self, ty: plir::Type, id: &str, layout: impl BasicType<'ctx>) {
+        self.layouts.insert(ty, id.to_string(), layout.as_basic_type_enum());
     }
 
     /// Get the LLVM layout of a given PLIR type.
@@ -384,14 +437,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
         if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
             Ok(self.get_layout(t)?.array_type(0).into())
         } else {
-            self.get_layout_by_name(&ty.ident())
+            self.layouts.get_by_type(ty)
+                .copied()
                 .ok_or_else(|| LLVMErr::UnresolvedType(ty.clone()))
         }
     }
-    /// Get the LLVM layout using the layout's identifier.
-    pub(in crate::compiler) fn get_layout_by_name(&self, ident: &str) -> Option<BasicTypeEnum<'ctx>> {
-        self.layouts.get(ident).copied()
-    }
+    
     /// Get the BasicTypeEnum for this PLIR type (or void if is void).
     /// 
     /// This is useful for function types returning.
@@ -405,32 +456,34 @@ impl<'ctx> LLVMCodegen<'ctx> {
         }
     }
 
-    /// If this PLIR type is a copy-by-reference type, return `Ok(PointerType)` 
-    /// to indicate this is holding a pointer.
-    /// Otherwise, return `Err(BasicTypeEnum)` to say the conversion to pointer failed.
-    /// 
-    /// This should not be used, instead use [`Compiler::get_ref_layout`].
-    fn try_get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, Result<PointerType<'ctx>, BasicTypeEnum<'ctx>>> {
-        use plir::{TypeRef, Type};
+    /// Determines whether this type is copy-by-reference through functions.
+    /// Errors if type does not have an LLVM representation.
+    fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, bool> {
+        use plir::{Type, TypeRef};
+
+        let layout = self.get_layout(ty)?;
         
-        self.get_layout(ty).map(|layout| {
-            match (ty.as_ref(), layout) {
-                (TypeRef::Prim(Type::S_VOID), _) => Err(layout),
-                (_, BasicTypeEnum::StructType(_)) => Ok(self.ptr_type(Default::default())),
-                _ => Err(layout)
-            }
-        })
+        let cond = match (ty.as_ref(), layout) {
+            (TypeRef::Prim(Type::S_VOID), _) => false,
+            (_, BasicTypeEnum::StructType(_)) => true,
+            _ => false
+        };
+        Ok(cond)
     }
 
     /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
     /// If a type is copy-by-reference, this type is LLVM `ptr`, otherwise it is its normal value.
     fn get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, BasicTypeEnum<'ctx>> {
-        self.try_get_ref_layout(ty)
-            .map(|l| l.map_or_else(std::convert::identity, Into::into))
+        if self.is_ref_layout(ty)? {
+            Ok(self.ptr_type(Default::default()).into())
+        } else {
+            self.get_layout(ty)
+        }
     }
+
     /// Similar to [`Expr::write_ir`], except writing in a pointer if this value is copy-by-reference.
     fn write_ref_value(&mut self, e: &plir::Expr) -> LLVMResult<'ctx, BasicValueEnum<'ctx>> {
-        if self.try_get_ref_layout(&e.ty)?.is_ok() {
+        if self.is_ref_layout(&e.ty)? {
             e.write_ptr(self).map(Into::into)
         } else {
             e.write_value(self).map(|gv| self.basic_value_of(gv))
@@ -601,7 +654,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 (main_fn, Some(stmts))
             }
         };
-
+        
         let global_bb = compiler.ctx.append_basic_block(main, "globals");
         compiler.builder.position_at_end(global_bb);
 
@@ -1162,7 +1215,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 
         // store params
         for (param, val) in iter::zip(&sig.params, fun.get_param_iter()) {
-            if let BasicValueEnum::PointerValue(ptr) = val {
+            if compiler.is_ref_layout(&param.ty)? {
+                let BasicValueEnum::PointerValue(ptr) = val else {
+                    panic!("ref value should have had a ptr parameter but it had {val}")
+                };
                 compiler.vars.insert(param.ident.clone(), ptr);
             } else {
                 let gv = compiler.reconstruct(&param.ty, val)?;
@@ -1198,7 +1254,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
         
         let struct_ty = compiler.ctx.opaque_struct_type(ident);
         struct_ty.set_body(&fields, false);
-        compiler.define_type(ident, struct_ty);
+
+        let struct_name = struct_ty.get_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        compiler.define_type(plir::ty!(ident), struct_name, struct_ty);
 
         Ok(())
     }

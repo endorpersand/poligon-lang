@@ -288,7 +288,7 @@ impl InsertBlock {
                 plir::Type::S_FLOAT,
                 plir::Type::S_BOOL,
                 plir::Type::S_CHAR,
-                plir::Type::S_STR,
+                plir::Type::S_VOID,
                 "#ptr",
                 "#byte"
             ]),
@@ -526,8 +526,8 @@ enum TypeStructure {
 /// A struct which holds the types declared by PLIR code generation.
 #[derive(Default, Clone)]
 pub struct DeclaredTypes {
-    types: HashMap<String, plir::Class>,
-    values: HashMap<String, plir::Type>
+    pub(super) types: IndexMap<String, plir::Class>,
+    pub(super) values: IndexMap<String, plir::Type>
 }
 
 impl DeclaredTypes {
@@ -605,8 +605,16 @@ impl PLIRCodegen {
 
     /// Creates a new instance of the PLIRCodegen with the given types already declared.
     pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
+        let mut top = InsertBlock::top();
+        for (ident, cls) in &declared.types {
+            top.types.insert(ident.clone(), TypeData::structural(cls.clone()));
+        }
+        for (ident, ty) in &declared.values {
+            top.declare(ident, ty.clone());
+        }
+
         Self { 
-            program: InsertBlock::top(), 
+            program: top, 
             globals: Globals {
                 stmts: vec![],
                 declared
@@ -1172,7 +1180,7 @@ impl PLIRCodegen {
 
     /// Consume a function signature and convert it into a PLIR function signature.
     fn consume_fun_sig(&mut self, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
-        let ast::FunSignature { ident, params, ret } = sig;
+        let ast::FunSignature { ident, params, varargs, ret } = sig;
         
         let params: Vec<_> = params.into_iter()
             .map(|p| -> PLIRResult<_> {
@@ -1198,10 +1206,10 @@ impl PLIRCodegen {
 
         // declare function before parsing block
         self.declare(&ident, 
-            plir::Type::fun_type(param_tys, ret.clone(), false)
+            plir::Type::fun_type(param_tys, ret.clone(), varargs)
         );
 
-        Ok(plir::FunSignature { ident, params, ret, varargs: false })
+        Ok(plir::FunSignature { ident, params, ret, varargs })
     }
     /// Consume a function declaration statement into the current insert block.
     /// 
@@ -1276,7 +1284,7 @@ impl PLIRCodegen {
             };
             let metref = format!("{}::{method_name}", &cls.ident);
 
-            let sig = ast::FunSignature { ident: metref.clone(), params, ret };
+            let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
             let decl = ast::FunDecl { sig, block };
 
             ib.insert_unresolved(Unresolved::Fun(decl));
@@ -1316,6 +1324,10 @@ impl PLIRCodegen {
                     ast::Literal::Str(_)   => plir::ty!(plir::Type::S_STR),
                     ast::Literal::Bool(_)  => plir::ty!(plir::Type::S_BOOL)
                 };
+
+                // check type exists (for string, this may not happen if std isn't loaded)
+                self.get_class(&ty, range)?;
+                //
 
                 Ok(plir::Expr::new(
                     ty, plir::ExprType::Literal(literal)

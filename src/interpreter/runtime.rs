@@ -919,8 +919,13 @@ impl TraverseRt for ast::Decl {
 
 impl TraverseRt for ast::FunDecl {
     fn traverse_rt(&self, ctx: &mut RtContext) -> RtTraversal<Value> {
-        let ast::FunDecl { sig: ast::FunSignature { ident, params, ret }, block } = self;
+        let ast::FunDecl { sig: ast::FunSignature { ident, params, varargs, ret }, block } = self;
         
+        if *varargs {
+            let &pt = block.1.start();
+            return Err(FeatureErr::Incomplete("varargs").at(pt))?
+        }
+
         let mut param_types = vec![];
         let mut param_names = vec![];
 

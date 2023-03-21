@@ -88,8 +88,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
         let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _str = layout!(self, S_STR).into_struct_type();
 
-        let arr_new = self.std_import("#dynarray::new").unwrap();
-        let arr_ext = self.std_import("#dynarray::extend").unwrap();
+        let arr_new = self.module.get_function("#dynarray::new").unwrap();
+        let arr_ext = self.module.get_function("#dynarray::extend").unwrap();
 
         let string = self.ctx.const_string(s.as_bytes(), false);
         let len = _int.const_int(string.get_type().len() as _, false);
@@ -214,7 +214,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
                             .expect("Expected struct to have name")
                             .to_str()
                             .expect("Expected struct name to be Rust-compatible");
-                        ty!(name)
+                        
+                        self.layouts.lookup_type(name)
+                            .expect("LLVM type {name} does not have an associated PLIR type")
+                            .clone()
                     },
                     BasicTypeEnum::VectorType(t)  => unimplemented!("{t} does not have a PLIR representation")
                 }

@@ -315,6 +315,8 @@ pub struct FunSignature {
     pub ident: String,
     /// The function's parameters
     pub params: Vec<Param>,
+    /// Whether the function is varargs
+    pub varargs: bool,
     /// The function's return type (or `void` if unspecified)
     pub ret: Option<Located<Type>>,
 }

@@ -66,6 +66,7 @@ impl<'ctx> Builder2<'ctx> {
 
     /// [`Builder::build_select`] with implicit type coercion.
     /// Unlike `build_select`, this can only use boolean parameters.
+    #[allow(unused)]
     pub fn build_typed_select1<BV: BasicValue<'ctx> + TryFrom<BasicValueEnum<'ctx>>>(
         &self,
         condition: IntValue<'ctx>,
