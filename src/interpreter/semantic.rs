@@ -360,7 +360,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
             ast::Expr::While { condition, block } => {
                 condition.traverse_rs(map)?;
                 map.typed_scope(BlockType::Loop, |map| {
-                    block.0.traverse_rs(map)
+                    block.stmts().traverse_rs(map)
                 })
             },
             ast::Expr::For { ident, iterator, block } => {
@@ -368,7 +368,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
 
                 map.typed_scope(BlockType::Loop, |map| {
                     map.declare(ident);
-                    block.0.traverse_rs(map)
+                    block.stmts().traverse_rs(map)
                 })
             },
             ast::Expr::Call { funct, params } => {
@@ -409,7 +409,7 @@ impl TraverseResolve for ast::FunDecl {
                 map.declare(&p.ident);
             }
     
-            self.block.0.traverse_rs(map)
+            self.block.stmts().traverse_rs(map)
         })
     }
 }
