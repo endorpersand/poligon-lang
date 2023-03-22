@@ -38,7 +38,7 @@ pub mod llvm_codegen;
 use std::fmt::Display;
 use std::fs;
 use std::io::Error as IoErr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -144,6 +144,17 @@ pub struct Compiler<'ctx> {
 
 lazy_static! {
     static ref STD_PATH: &'static Path = "std".as_ref();
+    static ref STD_FILES: Vec<(PathBuf, PathBuf)> = {
+        fs::read_dir(*STD_PATH).unwrap()
+            .filter_map(|me| {
+                let path = me.ok()?.path();
+
+                (path.extension() == Some("bc".as_ref()))
+                    .then_some(path)
+            })
+            .map(|bc| (bc.with_extension("d.plir.gon"), bc))
+            .collect()
+    };
 }
 impl<'ctx> Compiler<'ctx> {
     /// Create a new compiler. 
@@ -152,17 +163,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn new(ctx: &'ctx Context, filename: &str) -> CompileResult<'ctx, Self> {
         let mut compiler = Self::no_std(ctx, filename);
 
-        let paths: Vec<_> = fs::read_dir(*STD_PATH)?
-            .flat_map(|me| me.map(|e| {
-                let path = e.path();
-
-                (path.extension() == Some("bc".as_ref()))
-                    .then_some(path)
-            }).transpose())
-            .collect::<Result<_, _>>()?;
-
-        for bc_file in paths {
-            let dfile = bc_file.with_extension("d.plir.gon");
+        for (dfile, bc_file) in &*STD_FILES {
             compiler.load_bc(dfile, bc_file)?;
         }
 
