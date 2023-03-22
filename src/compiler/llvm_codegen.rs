@@ -1,17 +1,11 @@
-//! The compiler, which takes an AST tree and reads it into LLVM code 
-//! which can be compiled into an executable.
+//! Converts the PLIR tree into LLVM bitcode.
 //! 
-//! The compiler has two steps: converting into PLIR, then compiling into LLVM
-//! 
-//! # PLIR
-//! PLIR, the intermediate language, simplifies the main language in order to make
-//! it simpler to compiler to LLVM.
-//! 
-//! PLIR can be generated from AST via the [`codegen::codegen`] function,
-//! or using the [`codegen::CodeGenerator`] struct.
-//! 
-//! # LLVM
-//! The PLIR is then compiled to LLVM via the [`Compiler`] struct.
+//! This is done with the [`LLVMCodegen`] struct. The process
+//! for using the codegen function:
+//! 1. Obtain a PLIR syntax tree.
+//! 2. Use [`LLVMCodegen::compile`] on the `plir::Program`.
+//! 3. Obtain the module created by the program with [`LLVMCodegen::pop_module`].
+//! 4. Repeat for all the programs you want to code generate.
 
 mod value;
 mod op_impl;
@@ -74,7 +68,7 @@ use super::plir;
 
 
 /// Pointers to indicate where each exit statement type should send program flow.
-/// Used in [`Compiler::write_block`].
+/// Used in [`LLVMCodegen::write_block`].
 #[derive(Default, Clone, Copy)]
 pub struct ExitPointers<'ctx> {
     exit: Option<BasicBlock<'ctx>>,

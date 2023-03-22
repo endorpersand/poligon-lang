@@ -1,17 +1,33 @@
-//! The compiler, which takes an AST tree and reads it into LLVM code 
-//! which can be compiled into an executable.
+//! This module holds the compiler, which takes Poligon files and compiles them into executables.
 //! 
-//! The compiler has two steps: converting into PLIR, then compiling into LLVM
+//! The compiler has 3 steps:
+//! 1. PLIR code generation
+//! 2. LLVM code generation
+//! 3. Linking and compilation
+//! 
+//! The [`Compiler`] struct can do all 3, but each module
+//! holds methods to activate each part independently.
 //! 
 //! # PLIR
-//! PLIR, the intermediate language, simplifies the main language in order to make
-//! it simpler to compiler to LLVM.
+//! PLIR, the Poligon Language Intermediate Representation, 
+//! simplifies the main language and adds extra restrictions
+//! in order to make it simpler to compiler to LLVM.
 //! 
-//! PLIR can be generated from AST via the [`codegen::codegen`] function,
-//! or using the [`codegen::CodeGenerator`] struct.
+//! PLIR can be generated from AST via the [`plir_codegen::plir_codegen`] function, 
+//! or the [`PLIRCodegen`] struct.
 //! 
 //! # LLVM
-//! The PLIR is then compiled to LLVM via the [`Compiler`] struct.
+//! LLVM is a low-level backend for languages and is the backing for `clang`.
+//! LLVM holds many tools to compile LLVM into executables.
+//! 
+//! LLVM can be codegenerated with the [`LLVMCodegen`] struct.
+//! 
+//! # Linking & compilation
+//! The full compilation process is completed by the [`Compiler`] struct.
+//! The final step enables functions to be imported across Poligon executables
+//! (NOTE: currently, only the standard library is supported).
+//! 
+//! See the [`Compiler`] struct for usage.
 
 pub mod plir_codegen;
 pub mod plir;
@@ -101,6 +117,25 @@ pub enum GonSaveTo<'p> {
 }
 
 /// A compiler, which keeps track of multiple files being compiled.
+/// 
+/// # Usage
+/// ```no_run
+/// use std::path::Path;
+/// use inkwell::context::Context;
+/// use poligon_lang::compiler::{Compiler, GonSaveTo};
+/// 
+/// let path: &Path = "script.gon".as_ref();
+/// 
+/// let ctx = Context::create();
+/// // loads compiler with std
+/// let mut compiler = Compiler::new(&ctx, "script.gon").unwrap();
+/// compiler.load_gon(path).unwrap();
+/// 
+/// compiler.write_files(GonSaveTo::DiffLoc {
+///     plir: "script.d.plir.gon".as_ref(), // this saves type information for script
+///     llvm: "script.bc".as_ref(), // this is bitcode which can be executed by `lli` or `llc`
+/// }).unwrap();
+/// ```
 pub struct Compiler<'ctx> {
     declared_types: DeclaredTypes,
     llvm_codegen: LLVMCodegen<'ctx>,

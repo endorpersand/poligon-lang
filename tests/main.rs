@@ -12,7 +12,7 @@ fn compile_and_run(fp: impl AsRef<Path>) {
     let code   = fs::read_to_string(fp).unwrap();
     let lexed  = lexer::tokenize(&code).unwrap();
     let parsed = parser::parse(lexed).unwrap();
-    let plir   = plir_codegen::codegen(parsed).unwrap();
+    let plir   = plir_codegen::plir_codegen(parsed).unwrap();
 
     let ctx = Context::create();
     let mut compiler = LLVMCodegen::new(&ctx);

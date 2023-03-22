@@ -1,10 +1,17 @@
 //! Converts the AST tree into an intermediate language 
 //! (Poligon Language Intermediate Representation).
 //! 
-//! This makes it simpler to later convert into LLVM.
+//! This reduces the complexity of the language to
+//! makes it easier to later convert into LLVM.
 //! 
-//! The main function that performs the conversion is [`codegen`], 
-//! which utilizes the [`CodeGenerator`] struct.
+//! As well as reducing the complexity of the language, this
+//! module plays the role of static resolution 
+//! (similar to the interpreter's [`crate::interpreter::semantic`]).
+//! It does type resolution, variable resolution, break/continue/return checks, 
+//! and simply verifies AST code is correct.
+//! 
+//! The main function that performs the conversion is [`plir_codegen`], 
+//! which utilizes the [`PLIRCodegen`] struct.
 
 mod op_impl;
 
@@ -24,7 +31,7 @@ pub(crate) use self::op_impl::{CastType, OpErr};
 use super::plir::{self, Located};
 
 /// Produce the PLIR tree from the AST tree.
-pub fn codegen(t: ast::Program) -> PLIRResult<plir::Program> {
+pub fn plir_codegen(t: ast::Program) -> PLIRResult<plir::Program> {
     let mut cg = PLIRCodegen::new();
     cg.consume_program(t)?;
     cg.unwrap()
@@ -593,6 +600,40 @@ impl Globals {
 }
 
 /// This struct does the actual conversion from AST to PLIR.
+/// 
+/// # Usage
+/// To create a method similar to [`plir_codegen`], one can do so:
+/// 
+/// ```no_run
+/// use poligon_lang::ast;
+/// use poligon_lang::compiler::{plir, PLIRCodegen, PLIRResult};
+/// 
+/// # // Don't tell 'em, this is very literally how it's implemented
+/// fn plir_codegen(program: ast::Program) -> PLIRResult<plir::Program> {
+///     let mut cg = PLIRCodegen::new();
+///     cg.consume_program(program)?;
+///     cg.unwrap()
+/// }
+/// ```
+/// 
+/// It is expected that the struct is dropped after every use.
+/// 
+/// We can also access the declared types from a previous code generation instance
+/// and load them into a new code generator:
+/// 
+/// ```no_run
+/// use poligon_lang::ast;
+/// use poligon_lang::compiler::{plir, PLIRCodegen, PLIRResult};
+/// 
+/// # fn main() -> PLIRResult<()> {
+/// let mut cg = PLIRCodegen::new();
+/// /// -- DO SOME THINGS WITH cg -- ///
+/// let declared_types = cg.declared_types();
+/// 
+/// let mut cg2 = PLIRCodegen::new_with_declared_types(declared_types);
+/// // functions and classes from cg are accessible in cg2
+/// #}
+/// ```
 pub struct PLIRCodegen {
     program: InsertBlock,
     globals: Globals,
@@ -746,7 +787,7 @@ impl PLIRCodegen {
         }
     }
 
-    /// [`CodeGenerator::resolve_ident`], but using a type parameter
+    /// [`PLIRCodegen::resolve_ident`], but using a type parameter
     fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
         self.resolve_ident(&ty.ident()).map(|_| ())
     }
@@ -765,7 +806,7 @@ impl PLIRCodegen {
             .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)).at_range(range))
     }
 
-    /// Identifier needs to be resolved beforehand, via [`CodeGenerator::resolve_ident`].
+    /// Identifier needs to be resolved beforehand, via [`PLIRCodegen::resolve_ident`].
     fn get_var_type_opt(&mut self, ident: &str) -> Option<&plir::Type> {
         self.find_scoped(|ib| ib.vars.get(ident))
     }
@@ -837,7 +878,9 @@ impl PLIRCodegen {
         self.globals.push(global.into())
     }
 
-    /// Convert a program into PLIR, and attach it to the CodeGenerator.
+    /// Consumes an AST program into PLIR and attaches it to the [`PLIRCodegen`].
+    /// 
+    /// It can be accessed again with [`PLIRCodegen::unwrap`].
     pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
         self.consume_stmts(prog.0)
     }

@@ -115,7 +115,7 @@ impl Test<'_> {
     pub fn codegen(&self) -> TestResult<plir::Program> {
         let ast = self.parse()?;
 
-        let r = plir_codegen::codegen(ast);
+        let r = plir_codegen::plir_codegen(ast);
         self.wrap_test_result(r)
     }
 

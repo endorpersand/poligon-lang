@@ -38,7 +38,7 @@ pub(crate) use apply_bt;
 /// An LLVM representation of the a possible value in Poligon.
 /// 
 /// This enum holds all the information to keep track of a type in Poligon,
-/// and can be converted to an LLVM value via [`Compiler::basic_value_of`].
+/// and can be converted to an LLVM value via [`LLVMCodegen::basic_value_of`].
 #[derive(Clone, Copy, Debug)]
 pub enum GonValue<'ctx> {
     /// A `float`.
@@ -158,7 +158,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Obtain the basic LLVM value represented by this [`GonValue`].
     /// 
-    /// Depending on context, [`Compiler::returnable_value_of`] may be more suitable.
+    /// Depending on context, [`LLVMCodegen::returnable_value_of`] may be more suitable.
     pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
         match value {
             GonValue::Float(f)   => f.into(),
@@ -172,7 +172,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Obtain the LLVM value used for return statements for this [`GonValue`].
     /// 
-    /// This should be used instead of [`Compiler::basic_value_of`]
+    /// This should be used instead of [`LLVMCodegen::basic_value_of`]
     /// when being inserted into a `return` statement or 
     /// other similar statements where an `Option\<&dyn BasicValue\>` is accepted.
     pub fn returnable_value_of(&self, value: GonValue<'ctx>) -> Option<BasicValueEnum<'ctx>> {
@@ -185,7 +185,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// The PLIR type for this value.
     /// 
     /// This can be used to reconstruct a GonValue from a LLVM representation. 
-    /// See [`Compiler::reconstruct`].
+    /// See [`LLVMCodegen::reconstruct`].
     pub fn plir_type_of(&self, value: GonValue<'ctx>) -> plir::Type {
         use inkwell::types::BasicTypeEnum;
         use plir::{ty, Type};

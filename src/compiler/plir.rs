@@ -1,11 +1,11 @@
 //! The components of the PLIR (Poligon Intermediate Representation) tree, 
 //! which is derived from the [AST].
 //! 
-//! The AST is compiled to the PLIR AST via the [`codegen`][`crate::compiler::codegen`] module,
-//! which is then compiled to LLVM via the [`compiler`][`crate::compiler`] module.
+//! The AST is compiled to the PLIR AST via the [`plir_codegen`][`crate::compiler::plir_codegen`] module,
+//! which is then compiled to LLVM via the [`llvm_codegen`][`crate::compiler::llvm_codegen`] module.
 //! 
-//! Many of the structs here are similar (or identical) to those in [AST], 
-//! usually with extra type checking.
+//! Many of the structs here are similar (or identical) to those in the [AST], 
+//! usually just requiring extra type checking.
 //! 
 //! [AST]: crate::ast
 

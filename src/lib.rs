@@ -33,10 +33,11 @@
 //! See the [`compiler`] module for more info.
 //! 
 //! This module provides:
-//! - [`CodeGenerator`][`compiler::codegen::CodeGenerator`]: A struct that processes a syntax tree ([`ast`])
+//! - [`PLIRCodegen`][`compiler::plir_codegen::PLIRCodegen`]: The first code generation step, which reduces a Poligon syntax tree into an intermediate PLIR syntax tree.
+//! - [`LLVMCodegen`][`compiler::llvm_codegen::LLVMCodegen`]: The second code generation step, which reduces a PLIR syntax tree into LLVM bitcode.
 //! into a reduced syntax tree ([`plir`]).
-//! - [`Compiler`][`compiler::Compiler`]: A struct that converts a PLIR tree into LLVM code.
-//! - [`plir`]: The reduced PLIR tree
+//! - [`Compiler`][`compiler::Compiler`]: A struct that combines the code generation steps to compile files and makes executables out of them
+//! - [`plir`]: The components of the intermediate PLIR syntax tree.
 //! 
 //! [`plir`]: compiler::plir
 
