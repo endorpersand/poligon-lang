@@ -1,0 +1,59 @@
+import intrinsic;
+
+class #dynarray {
+    buf: #ptr,
+    len: int,
+    cap: int
+
+    fun ::new(cap: int) -> #dynarray {
+        let buf = #malloc(cap);
+        #dynarray #{
+            buf, len: 0, cap
+        };
+    }
+
+    fun self.resize(new_cap: int) {
+        if self.cap < new_cap {
+            let old_buf = self.buf;
+            let new_buf = #malloc(new_cap);
+            #memcpy(new_buf, old_buf, self.len);
+            #free(old_buf);
+            self.cap = new_cap;
+        }
+    }
+
+    fun self.push(byte: #byte) {
+        self.resize(self.len + 1);
+        
+        let push_ptr = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
+        self.len = self.len + 1;
+        *push_ptr = byte;
+    }
+
+    fun self.pop() {
+        if self.len > 0 {
+            self.len = self.len - 1;
+        } else {
+            self.len = 0;
+        }
+    }
+
+    fun self.extend(add_buf: #ptr, add_len: int) {
+        self.resize(self.len + add_len);
+
+        let shift_buf = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
+        #memcpy(shift_buf, add_buf, add_len);
+
+        self.len = self.len + add_len;
+    }
+}
+
+class string {
+    inner: #dynarray
+}
+
+global _tmpl_print = "%.*s\n\0";
+
+fun print(s: string) {
+    #printf(_tmpl_print, s.inner.len, s.inner.buf);
+}

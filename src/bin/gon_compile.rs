@@ -1,60 +1,54 @@
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::{io, fs};
+use std::path::PathBuf;
+use std::io;
 
+use clap::Parser;
 use inkwell::context::Context;
-use poligon_lang::compiler::{codegen, Compiler};
-use poligon_lang::{lexer, parser};
-use poligon_lang::err::FullGonErr;
+use poligon_lang::compiler::{Compiler, GonSaveTo};
 
-fn main() -> io::Result<()> {
-    let args: Vec<_> = std::env::args().collect();
-    let mfp = args.get(1);
-    
-    match mfp {
-        Some(fp) => {
-            let code = fs::read_to_string(fp)?;
+#[derive(Parser)]
+struct Cli {
+    /// When enabled, the Poligon standard library is not packaged when compiling
+    /// the Poligon file.
+    #[arg(long)]
+    no_std: bool,
 
-            macro_rules! unwrap_or_exit {
-                ($r:expr) => {
-                    match $r {
-                        Ok(t) => t,
-                        Err(fe) => {
-                            eprintln!("{}", FullGonErr::from(fe).full_msg(&code));
-                            std::process::exit(1);
-                        }
-                    }
-                }
-            }
-
-            let tokens = unwrap_or_exit! { lexer::tokenize(&code) };
-            let ast    = unwrap_or_exit! { parser::parse(tokens)  };
-            let plir   = unwrap_or_exit! { codegen::codegen(ast)  };
-
-            let path = change_ext(fp, "plir.gon");
-            let mut f = File::create(path)?;
-            f.write_all(plir.to_string().as_bytes())?;
-
-            let ctx = Context::create();
-            let mut compiler = Compiler::from_ctx(&ctx);
-
-            let fun = unwrap_or_exit! { compiler.compile(&plir) };
-            
-            let path = change_ext(fp, "ll");
-            let mut f = File::create(path)?;
-            f.write_all(compiler.get_module().print_to_string().to_bytes())?;
-
-            unwrap_or_exit! { unsafe { compiler.jit_run::<()>(fun) } }
-            Ok(())
-        },
-        None => panic!("Missing file"),
-    }
+    /// The file to compile
+    file: PathBuf
 }
 
-fn change_ext(p: impl AsRef<Path>, ext: &str) -> PathBuf {
-    let mut path = p.as_ref().to_owned();
-    path.set_extension(ext);
+fn main() -> io::Result<()> {
+    let args = Cli::parse();
+    let fp = args.file;
 
-    path
+    macro_rules! unwrap_or_exit {
+        ($r:expr) => {
+            match $r {
+                Ok(t) => t,
+                Err(cerr) => {
+                    eprintln!("{cerr}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
+    let ctx = Context::create();
+    let name = fp.file_name()
+        .expect("Valid file name")
+        .to_str()
+        .expect("UTF-8");
+    let mut compiler = if args.no_std {
+        Compiler::no_std(&ctx, name)
+    } else {
+        unwrap_or_exit! { Compiler::new(&ctx, name) }
+    };
+    
+    unwrap_or_exit! { compiler.load_gon_and_save_plir(&fp, Some(fp.with_extension("plir.gon"))) };
+
+    unwrap_or_exit! { compiler.write_files(GonSaveTo::SameLoc(fp.as_ref())) };
+    unwrap_or_exit! { compiler.to_ll(fp.with_extension("ll")) };
+
+    unwrap_or_exit! { unsafe { compiler.jit_run::<()>() } }
+    
+    Ok(())
 }

@@ -75,15 +75,16 @@ impl GonErr for ResolveErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
-
-    fn message(&self) -> String {
+}
+impl std::fmt::Display for ResolveErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ResolveErr::CannotReturn => String::from("cannot 'return' here"),
-            ResolveErr::CannotBreak => String::from("cannot 'break' here"),
-            ResolveErr::CannotContinue => String::from("cannot 'continue' here"),
-            ResolveErr::CannotSpread => String::from("cannot spread here"),
-            ResolveErr::CannotSpreadNone => String::from("cannot empty spread here"),
-            ResolveErr::CompilerOnly(s) => format!("compiler-only feature - {s}"),
+            ResolveErr::CannotReturn     => write!(f, "cannot 'return' here"),
+            ResolveErr::CannotBreak      => write!(f, "cannot 'break' here"),
+            ResolveErr::CannotContinue   => write!(f, "cannot 'continue' here"),
+            ResolveErr::CannotSpread     => write!(f, "cannot spread here"),
+            ResolveErr::CannotSpreadNone => write!(f, "cannot empty spread here"),
+            ResolveErr::CompilerOnly(s)  => write!(f, "compiler-only feature - {s}"),
         }
     }
 }
@@ -294,6 +295,9 @@ impl TraverseResolve for Located<ast::Stmt> {
             ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e)   => e.traverse_rs(map),
             ast::Stmt::ClassDecl(_) => Err(ResolveErr::CompilerOnly("classes").at_range(range))?,
+            ast::Stmt::Import(_) => Err(ResolveErr::CompilerOnly("importing").at_range(range))?,
+            ast::Stmt::ImportIntrinsic => Err(ResolveErr::CompilerOnly("intrinsics").at_range(range))?,
+            ast::Stmt::IGlobal(_, _) => Err(ResolveErr::CompilerOnly("intrinsics").at_range(range))?,
         }
     }
 }
@@ -328,7 +332,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
                 map.with_sub(SubType::Pattern, |map| lhs.traverse_rs(map, self))
             },
             ast::Expr::Path(p) => p.obj.traverse_rs(map),
-            ast::Expr::StaticPath(_, _) => Ok(()),
+            ast::Expr::StaticPath(_) => Ok(()),
             ast::Expr::UnaryOps { ops: _, expr } => expr.traverse_rs(map),
             ast::Expr::BinaryOp { op: _, left, right } => {
                 left.traverse_rs(map)?;
@@ -387,6 +391,7 @@ impl TraverseResolve for ast::Located<ast::Expr> {
                     None => Ok(()),
                 },
             },
+            ast::Expr::Deref(d) => d.traverse_rs(map),
         }
     }
 }
@@ -418,6 +423,12 @@ impl TraverseResolve for ast::Index {
     fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
         self.expr.traverse_rs(map)?;
         self.index.traverse_rs(map)
+    }
+}
+
+impl TraverseResolve for ast::IDeref {
+    fn traverse_rs(&self, map: &mut ResolveState) -> ResolveResult<()> {
+        self.0.traverse_rs(map)
     }
 }
 
@@ -455,6 +466,7 @@ impl TRsDependent for ast::AsgUnit {
             },
             ast::AsgUnit::Path(p) => p.obj.traverse_rs(map),
             ast::AsgUnit::Index(idx) => idx.traverse_rs(map),
+            ast::AsgUnit::Deref(d) => d.traverse_rs(map),
         }
     }
 }

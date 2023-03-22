@@ -35,6 +35,9 @@ impl Display for Stmt {
             Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             Stmt::Expr(e) => write!(f, "{e}"),
             Stmt::ClassDecl(s) => write!(f, "{s}"),
+            Stmt::Import(sp) => write!(f, "import {sp}"),
+            Stmt::ImportIntrinsic => write!(f, "import intrinsic"),
+            Stmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
         }
     }
 }
@@ -92,10 +95,16 @@ impl Display for DeclUnit {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, params, ret } = self;
+        let FunSignature { ident, params, varargs, ret } = self;
 
         write!(f, "fun {ident}(")?;
-        fmt_list(f, params)?;
+        
+        let mut pd: Vec<_> = params.iter()
+        .map(|t| t as _)
+        .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
         write!(f, ") ")?;
 
         if let Some(retty) = ret {
@@ -237,7 +246,7 @@ impl Display for Expr {
             },
             Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
             Expr::Path(p) => write!(f, "{p}"),
-            Expr::StaticPath(t, a) => write!(f, "{t}::{a}"),
+            Expr::StaticPath(sp) => write!(f, "{sp}"),
             Expr::UnaryOps { ops, expr } => {
                 for op in ops {
                     write!(f, "{op}")?;
@@ -298,6 +307,7 @@ impl Display for Expr {
                     None => Ok(()),
                 }
             },
+            Expr::Deref(d) => write!(f, "{d}"),
         }
     }
 }
@@ -326,6 +336,7 @@ impl Display for AsgUnit {
             AsgUnit::Ident(ident) => write!(f, "{ident}"),
             AsgUnit::Path(p) => write!(f, "{p}"),
             AsgUnit::Index(idx) => write!(f, "{idx}"),
+            AsgUnit::Deref(d) => write!(f, "{d}"),
         }
     }
 }
@@ -343,11 +354,23 @@ impl Display for Path {
     }
 }
 
+impl Display for StaticPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}::{}", self.ty, self.attr)
+    }
+}
+
 impl Display for Index {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Index { expr, index } = self;
 
         write!(f, "{expr}[{index}]")
+    }
+}
+
+impl Display for IDeref {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "*{}", self.0)
     }
 }
 

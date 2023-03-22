@@ -1,11 +1,11 @@
 //! The components of the PLIR (Poligon Intermediate Representation) tree, 
 //! which is derived from the [AST].
 //! 
-//! The AST is compiled to the PLIR AST via the [`codegen`][`crate::compiler::codegen`] module,
-//! which is then compiled to LLVM via the [`compiler`][`crate::compiler`] module.
+//! The AST is compiled to the PLIR AST via the [`plir_codegen`][`crate::compiler::plir_codegen`] module,
+//! which is then compiled to LLVM via the [`llvm_codegen`][`crate::compiler::llvm_codegen`] module.
 //! 
-//! Many of the structs here are similar (or identical) to those in [AST], 
-//! usually with extra type checking.
+//! Many of the structs here are similar (or identical) to those in the [AST], 
+//! usually just requiring extra type checking.
 //! 
 //! [AST]: crate::ast
 
@@ -78,7 +78,10 @@ mod stmt {
         ExternFunDecl(FunSignature),
 
         /// A struct declaration.
-        ClassDecl(Class)
+        ClassDecl(Class),
+
+        /// An intrinsic global string value declaration.
+        IGlobal(String /* ident */, String /* ident */)
     }
 
     /// A statement that happens as a part of a procedure (e.g. a block).
@@ -134,6 +137,16 @@ mod stmt {
                 | FunDecl(_)
                 | ClassDecl(_)
             )
+        }
+
+        /// Gets the identifier associated with this hoisted statement.
+        pub fn get_ident(&self) -> &str {
+            match self {
+                HoistedStmt::FunDecl(f) => &f.sig.ident,
+                HoistedStmt::ExternFunDecl(f) => &f.ident,
+                HoistedStmt::ClassDecl(c) => &c.ident,
+                HoistedStmt::IGlobal(name, _) => name,
+            }
         }
     }
 
@@ -191,7 +204,7 @@ mod stmt {
 
 pub use stmt::*;
 
-use super::codegen::{PLIRErr, PLIRResult};
+use super::plir_codegen::{PLIRErr, PLIRResult};
 
 /// A variable declaration.
 /// 
@@ -269,12 +282,29 @@ pub struct Param {
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
-        /// The function's identifier
+    /// The function's identifier
     pub ident: String,
-        /// The function's parameters
+    /// The function's parameters
     pub params: Vec<Param>,
-        /// The function's return type
+    /// Whether the function is varargs
+    pub varargs: bool,
+    /// The function's return type
     pub ret: Type
+}
+
+impl FunSignature {
+    /// Gets the type associated with this function signature.
+    pub fn ty(&self) -> FunType {
+        let params = self.params.iter()
+            .map(|p| p.ty.clone())
+            .collect();
+        
+        FunType { 
+            params, 
+            ret: Box::new(self.ret.clone()), 
+            varargs: self.varargs 
+        }
+    }
 }
 
 /// A complete function declaration with a function body.
@@ -333,7 +363,7 @@ impl Expr {
         };
 
         Ok(Expr::new(
-            (*ft.1).clone(), 
+            (*ft.ret).clone(), 
             ExprType::Call {funct: Box::new(fun), params }
         ))
     }
@@ -474,7 +504,15 @@ pub enum ExprType {
     /// Change the type of this expression to a new type.
     /// 
     /// This enables int to float casts and char to string casts.
-    Cast(Box<Expr>)
+    Cast(Box<Expr>),
+    
+    /// Dereferencing intrinsic pointers.
+    /// 
+    /// See [`IDeref`] for examples.
+    Deref(IDeref),
+
+    /// Get element pointer (intrinsic)
+    GEP(Type, Box<Expr>, Vec<Expr>),
 }
 
 /// A path.
@@ -579,6 +617,22 @@ pub struct Index {
     pub index: Box<Expr>
 }
 
+/// Dereferencing of an intrinsic pointer.
+/// 
+/// This struct corresponds to [`ast::IDeref`].
+/// # Example
+/// ```text
+/// <int>*(<#ptr> ptr)
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct IDeref {
+    /// Value being dereferenced
+    pub expr: Box<Expr>,
+
+    /// Type to dereference to
+    pub ty: Type
+}
+
 /// A literal index used for splitting patterns.
 // TODO: can this be combined with Index?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -599,4 +653,5 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
     #[allow(missing_docs)] Index(Index),
+    #[allow(missing_docs)] Deref(IDeref),
 }

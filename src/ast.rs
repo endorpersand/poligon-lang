@@ -188,7 +188,16 @@ pub enum Stmt {
     Expr(Located<Expr>),
 
     /// A struct declaration.
-    ClassDecl(Class)
+    ClassDecl(Class),
+
+    /// An import declaration.
+    Import(StaticPath),
+
+    /// `import intrinsic`. Enables intrinsic functionality.
+    ImportIntrinsic,
+
+    /// A global declaration. This is part of intrinsic functionality.
+    IGlobal(String /* ident */, String /* value */)
 }
 
 impl Stmt {
@@ -315,6 +324,8 @@ pub struct FunSignature {
     pub ident: String,
     /// The function's parameters
     pub params: Vec<Param>,
+    /// Whether the function is varargs
+    pub varargs: bool,
     /// The function's return type (or `void` if unspecified)
     pub ret: Option<Located<Type>>,
 }
@@ -386,7 +397,7 @@ pub enum Expr {
     /// A static path.
     /// 
     /// This does a static access on a type (e.g. `Type::attr`).
-    StaticPath(Located<Type>, String),
+    StaticPath(StaticPath),
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 
@@ -465,7 +476,12 @@ pub enum Expr {
     /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
-    Spread(Option<LocatedBox<Expr>>)
+    Spread(Option<LocatedBox<Expr>>),
+
+    /// Dereferencing intrinsic pointers.
+    /// 
+    /// See [`IDeref`] for examples.
+    Deref(IDeref)
 }
 
 /// A primitive literal.
@@ -522,6 +538,27 @@ pub struct Path {
     pub attrs: Vec<String>
 }
 
+/// A path, which accesses attributes from an expression.
+/// 
+/// # Syntax
+/// ```text
+/// path = expr ("." ident)+;
+/// ```
+/// 
+/// # Examples
+/// ```text
+/// a.b
+/// a.b.c.d.e
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct StaticPath {
+    /// The type to access an attribute of
+    pub ty: Located<Type>,
+
+    /// The attribute to access
+    pub attr: String
+}
+
 /// Value indexing.
 /// 
 /// # Syntax
@@ -542,6 +579,15 @@ pub struct Index {
     pub index: LocatedBox<Expr>
 }
 
+/// Dereferencing of an intrinsic pointer.
+/// 
+/// # Example
+/// ```text
+/// *ptr
+/// ```
+#[derive(Debug, PartialEq)]
+pub struct IDeref(pub LocatedBox<Expr>);
+
 /// A unit to assign to.
 /// 
 /// See [`Expr::Assign`].
@@ -550,6 +596,7 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
     #[allow(missing_docs)] Index(Index),
+    #[allow(missing_docs)] Deref(IDeref),
 }
 
 /// A unit to declare to.
@@ -606,11 +653,13 @@ impl GonErr for PatErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
+}
 
-    fn message(&self) -> String {
+impl std::fmt::Display for PatErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PatErr::InvalidAssignTarget => String::from("invalid assign target"),
-            PatErr::CannotSpreadMultiple => String::from("cannot use spread pattern more than once"),
+            PatErr::InvalidAssignTarget  => write!(f, "invalid assign target"),
+            PatErr::CannotSpreadMultiple => write!(f, "cannot use spread pattern more than once"),
         }
     }
 }
@@ -624,6 +673,7 @@ impl TryFrom<Located<Expr>> for Located<AsgUnit> {
             Expr::Ident(ident) => Ok(Located(AsgUnit::Ident(ident), range)),
             Expr::Path(attrs)  => Ok(Located(AsgUnit::Path(attrs), range)),
             Expr::Index(idx)   => Ok(Located(AsgUnit::Index(idx), range)),
+            Expr::Deref(deref) => Ok(Located(AsgUnit::Deref(deref), range)),
             _ => Err(PatErr::InvalidAssignTarget.at_range(range))
         }
     }

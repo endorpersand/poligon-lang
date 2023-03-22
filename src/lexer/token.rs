@@ -186,12 +186,12 @@ define_keywords! {
     Class:    "class", // class X {}
     Fit:      "fit",   // fit X to Y {}
     To:       "to", 
-    Fits:     "fits",    // class X fits Y {}
-    Extends:  "extends", // shape X extends Y {}
+    // Fits:     "fits",    // class X fits Y {}, shape X fits Y {}
+    // Extend:   "extend", // extend class X {}
     Match:    "match",   // match x {}
-    Unit:     "unit",    // units and measures (nominal primitives)
-    Measure:  "measure", // units and measures (nominal primitives)
-    Of:       "of",      // units and measures (nominal primitives)
+    // Unit:     "unit",    // units and measures (nominal primitives)
+    // Measure:  "measure", // units and measures (nominal primitives)
+    // Of:       "of",      // units and measures (nominal primitives)
     Return:   "return",
     Break:    "break",
     Continue: "continue",
@@ -199,7 +199,9 @@ define_keywords! {
     In:       "in",      // for x in y
     True:     "true",
     False:    "false",
-    Extern:   "extern"
+    Extern:   "extern",
+    Import:   "import",
+    Global:   "global"
 }
 
 define_operators_and_delimiters! {
@@ -264,12 +266,12 @@ macro_rules! token {
     (class)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Class)    };
     (fit)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Fit)      };
     (to)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::To)       };
-    (fits)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Fits)     };
-    (extends)  => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extends)  };
+    // (fits)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Fits)     };
+    // (extend)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extend)  };
     (match)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Match)    };
-    (unit)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Unit)     };
-    (measure)  => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Measure)  };
-    (of)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Of)       };
+    // (unit)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Unit)     };
+    // (measure)  => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Measure)  };
+    // (of)       => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Of)       };
     (return)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Return)   };
     (break)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Break)    };
     (continue) => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Continue) };
@@ -278,7 +280,8 @@ macro_rules! token {
     (true)     => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::True)     };
     (false)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::False)    };
     (extern)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Extern)   };
-    
+    (import)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Import)   };
+    (global)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Global)   };
     (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
     (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
     (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };

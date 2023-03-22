@@ -1,0 +1,12 @@
+class "#dynarray" { #ptr, int, int }
+class string { #dynarray }
+extern fun malloc(arg0: int) -> #ptr;
+extern fun memcpy(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
+extern fun free(arg0: #ptr) -> void;
+extern fun "#dynarray::resize"(arg0: #dynarray, arg1: int) -> void;
+extern fun "#dynarray::push"(arg0: #dynarray, arg1: #byte) -> void;
+extern fun "#dynarray::pop"(arg0: #dynarray) -> void;
+extern fun "#dynarray::extend"(arg0: #dynarray, arg1: #ptr, arg2: int) -> void;
+extern fun printf(arg0: #ptr, ..) -> int;
+extern fun print(arg0: string) -> void;
+extern fun "#dynarray::new"(arg0: int) -> #dynarray;

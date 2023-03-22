@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{ReasgType, MutType};
@@ -21,6 +22,13 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
         write!(f, "{b}")
     }
 }
+fn wrap_ident(ident: &str) -> Cow<str> {
+    if ident.chars().all(|t| t.is_alphanumeric() || t == '_') {
+        Cow::from(ident)
+    } else {
+        Cow::from(format!("{ident:?}"))
+    }
+}
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -35,6 +43,7 @@ impl Display for HoistedStmt {
             HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
             HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
+            HoistedStmt::IGlobal(id, val) => write!(f, "global {} = {val:?}", wrap_ident(id)),
         }
     }
 }
@@ -59,11 +68,11 @@ impl Display for ProcStmt {
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ident, fields: field_map } = self;
-        write!(f, "class {ident} {{ ")?;
+        write!(f, "class {} {{ ", wrap_ident(ident))?;
 
         let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;
-        writeln!(f, " }}")
+        write!(f, " }}")
     }
 }
 impl Display for FieldDecl {
@@ -95,7 +104,7 @@ impl Display for Decl {
             MutType::Immut => {},
         };
 
-        write!(f, "{ident}: {ty} = ")?;
+        write!(f, "{}: {ty} = ", wrap_ident(ident))?;
         match val {
             Expr { expr: ExprType::Block(b), .. } => fmt_typed_block(f, b, ty == &b.0),
             e => write!(f, "{e}"),
@@ -105,9 +114,15 @@ impl Display for Decl {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, params, ret } = self;
-        write!(f, "fun {ident}(")?;
-        fmt_list(f, params)?;
+        let FunSignature { ident, params, ret, varargs } = self;
+        write!(f, "fun {}(", wrap_ident(ident))?;
+
+        let mut pd: Vec<_> = params.iter()
+            .map(|t| t as _)
+            .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
         write!(f, ") -> {ret}")
     }
 }
@@ -135,7 +150,7 @@ impl Display for Param {
             MutType::Immut => {},
         }
 
-        write!(f, "{ident}: {ty}")
+        write!(f, "{}: {ty}", wrap_ident(ident))
     }
 }
 
@@ -162,9 +177,15 @@ impl Display for TypeRef<'_> {
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
-            TypeRef::Fun(params, ret) => {
+            TypeRef::Fun(params, ret, varargs) => {
                 write!(f, "(")?;
-                fmt_list(f, params)?;
+
+                let mut pd: Vec<_> = params.iter()
+                    .map(|t| t as _)
+                    .collect();
+                if *varargs { pd.push(&".." as _); }
+                fmt_dyn_list(f, &pd)?;
+
                 write!(f, ") -> {ret}")
             },
         }
@@ -173,9 +194,15 @@ impl Display for TypeRef<'_> {
 
 impl Display for FunType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunType(params, ret) = self;
+        let FunType { params, ret, varargs } = self;
         write!(f, "(")?;
-        fmt_list(f, params)?;
+
+        let mut pd: Vec<_> = params.iter()
+            .map(|t| t as _)
+            .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
         write!(f, ") -> {ret}")
     }
 }
@@ -297,6 +324,17 @@ impl Display for ExprType {
                 write!(f, "]")
             },
             ExprType::Cast(e) => write!(f, "castfrom {e}"),
+            ExprType::Deref(d) => write!(f,"{d}"),
+            ExprType::GEP(ty, ptr, rest) => {
+                write!(f, "<{ty}>::#gep(")?;
+                write!(f, "{ptr}")?;
+                
+                if !rest.is_empty() {
+                    write!(f, ", ")?;
+                    fmt_list(f, rest)?;
+                }
+                write!(f, ")")
+            },
         }
     }
 }
@@ -316,6 +354,7 @@ impl Display for AsgUnit {
             AsgUnit::Ident(ident) => write!(f, "{ident}"),
             AsgUnit::Path(p) => write!(f, "{p}"),
             AsgUnit::Index(idx) => write!(f, "{idx}"),
+            AsgUnit::Deref(d) => write!(f, "{d}"),
         }
     }
 }
@@ -347,5 +386,13 @@ impl Display for Index {
         let Index { expr, index } = self;
 
         write!(f, "{expr}[{index}]")
+    }
+}
+
+impl Display for IDeref {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let IDeref { expr, ty: _ } = self;
+
+        write!(f, "*{}", expr.expr)
     }
 }

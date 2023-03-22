@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use indexmap::IndexMap;
 
 use crate::ast;
-use crate::compiler::codegen::OpErr;
+use crate::compiler::plir_codegen::OpErr;
 
 use super::{Split, Located};
 
@@ -24,13 +24,49 @@ pub enum Type {
 
 /// A function type expression.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct FunType(pub Vec<Type>, pub Box<Type>);
+pub struct FunType {
+    /// The parameter types of this function type
+    pub params: Vec<Type>, 
+
+    /// The return type
+    pub ret: Box<Type>,
+
+    /// Whether this type has varargs at the end of its parameters
+    pub varargs: bool
+}
+
+impl FunType {
+    /// Constructs a new function type.
+    pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
+        FunType {params, ret: Box::new(ret), varargs }
+    }
+
+    /// Constructs a function signature (with parameter names lost) out of a given function type.
+    pub fn fun_signature(&self, ident: &str) -> super::FunSignature {
+        let params = self.params.iter()
+            .enumerate()
+            .map(|(i, t)| super::Param {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: format!("arg{i}"),
+                ty: t.clone(),
+            })
+            .collect();
+
+        super::FunSignature {
+            ident: ident.to_string(),
+            params,
+            varargs: self.varargs,
+            ret: (*self.ret).clone(),
+        }
+    }
+}
 
 impl TryFrom<Type> for FunType {
-    type Error = crate::compiler::codegen::PLIRErr;
+    type Error = crate::compiler::plir_codegen::PLIRErr;
 
     fn try_from(value: Type) -> Result<Self, Self::Error> {
-        use crate::compiler::codegen::PLIRErr;
+        use crate::compiler::plir_codegen::PLIRErr;
 
         match value {
             Type::Fun(f) => Ok(f),
@@ -44,7 +80,7 @@ pub(crate) enum TypeRef<'a> {
     Prim(&'a str),
     Generic(&'a str, &'a [Type]),
     Tuple(&'a [Type]),
-    Fun(&'a [Type], &'a Type)
+    Fun(&'a [Type], &'a Type, bool)
 }
 impl TypeRef<'_> {
     #[allow(unused)]
@@ -53,7 +89,7 @@ impl TypeRef<'_> {
             TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
             TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
             TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys)),
-            TypeRef::Fun(params, ret) => Type::fun_type(Vec::from(params), ret.clone()),
+            TypeRef::Fun(params, ret, var_args) => Type::fun_type(Vec::from(params), ret.clone(), var_args),
         }
     }
 }
@@ -85,8 +121,8 @@ impl Type {
         }
     }
 
-    pub(crate) fn fun_type(params: Vec<Type>, ret: Type) -> Self {
-        Type::Fun(FunType(params, Box::new(ret)))
+    pub(crate) fn fun_type(params: Vec<Type>, ret: Type, var_args: bool) -> Self {
+        Type::Fun(FunType::new(params, ret, var_args))
     }
 
     /// Test if this type is `never`.
@@ -181,13 +217,19 @@ impl Type {
         match self.as_ref() {
             TypeRef::Prim(ident) => Cow::from(ident),
             TypeRef::Generic(ident, params) => {
-                Cow::from(format!("{ident}::({})", param_tuple(params)))
+                Cow::from(format!("{ident}<{}>", param_tuple(params)))
             },
             TypeRef::Tuple(params) => {
-                Cow::from(format!("#tuple::({})", param_tuple(params)))
+                Cow::from(format!("#tuple<{}>", param_tuple(params)))
             },
-            TypeRef::Fun(params, ret) => {
-                Cow::from(format!("#fun::({}; {})", param_tuple(params), ret.ident()))
+            TypeRef::Fun(params, ret, varargs) => {
+                let va_filler = match (params.is_empty(), varargs) {
+                    (true, true) => "..",
+                    (false, true) => ", ..",
+                    (_, false) => ""
+                };
+
+                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(params), va_filler, ret.ident()))
             },
         }
     }
@@ -210,14 +252,14 @@ impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
 
 impl FunType {
     pub(crate) fn as_ref(&self) -> TypeRef {
-        TypeRef::Fun(&self.0, &self.1)
+        TypeRef::Fun(&self.params, &self.ret, self.varargs)
     }
 
     /// Removes the first parameter of the function.
     /// 
     /// This is useful for removing the referent in method types.
     pub fn pop_front(&mut self) {
-        self.0.remove(0);
+        self.params.remove(0);
     }
 }
 

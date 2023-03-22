@@ -33,6 +33,18 @@ fn fmt_list<D: Display>(f: &mut Formatter<'_>, elems: &[D]) -> std::fmt::Result 
     }
 }
 
+fn fmt_dyn_list(f: &mut Formatter<'_>, elems: &[&dyn Display]) -> std::fmt::Result {
+    if let Some((tail, head)) = elems.split_last() {
+        for el in head {
+            write!(f, "{el}, ")?;
+        }
+
+        write!(f, "{tail}")
+    } else {
+        Ok(())
+    }
+}
+
 fn fmt_mapped_list<T, D: Display, F>(f: &mut Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
     where F: Fn(&T) -> D
 {

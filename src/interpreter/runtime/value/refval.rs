@@ -33,10 +33,12 @@ impl GonErr for RvErr {
         "concurrency error"
     }
 
-    fn message(&self) -> String {
+}
+impl std::fmt::Display for RvErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RvErr::BorrowMutConcur => String::from("cannot perform mutation while reference is held"),
-            RvErr::BorrowMutImmutable => String::from("cannot perform mutation while reference is immutably held"),
+            RvErr::BorrowMutConcur    => write!(f, "cannot perform mutation while reference is held"),
+            RvErr::BorrowMutImmutable => write!(f, "cannot perform mutation while reference is immutably held"),
         }
     }
 }
