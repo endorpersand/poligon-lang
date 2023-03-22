@@ -623,17 +623,14 @@ impl Globals {
 /// 
 /// ```no_run
 /// use poligon_lang::ast;
-/// use poligon_lang::compiler::{plir, PLIRCodegen, PLIRResult};
+/// use poligon_lang::compiler::{plir, PLIRCodegen};
 /// 
-/// # fn main() -> PLIRResult<()> {
 /// let mut cg = PLIRCodegen::new();
 /// /// -- DO SOME THINGS WITH cg -- ///
 /// let declared_types = cg.declared_types();
 /// 
 /// let mut cg2 = PLIRCodegen::new_with_declared_types(declared_types);
 /// // functions and classes from cg are accessible in cg2
-/// #}
-/// ```
 pub struct PLIRCodegen {
     program: InsertBlock,
     globals: Globals,
@@ -1815,6 +1812,11 @@ impl Default for PLIRCodegen {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use crate::compiler::{PLIRCodegen, STD_FILES};
+    use crate::lexer;
+    use crate::parser::Parser;
     use crate::test_utils::prelude::*;
 
     load_tests!("codegen", 
@@ -1824,15 +1826,30 @@ mod tests {
     );
 
     fn cg_test(test: Test) -> TestResult<()> {
-        let cg = test.codegen();
-        println!("=== {} {} ===",  test.header.name, if cg.is_ok() { "PASS" } else { "FAIL" });
+        let mut cg = PLIRCodegen::new();
+        for (dfile, _) in &*STD_FILES {
+            let dcode = test.wrap_test_result(fs::read_to_string(dfile))?;
+            let lexed = test.wrap_test_result(lexer::tokenize(&dcode))?;
+            
+            let ast_result = Parser::new(lexed, false)
+                .unwrap_d_program();
+            let ast = test.wrap_test_result(ast_result)?;
+            
+            test.wrap_test_result(cg.consume_program(ast))?;
+        }
 
-        match &cg {
+        let ast = test.parse()?;
+        test.wrap_test_result(cg.consume_program(ast))?;
+        let cg_result = test.wrap_test_result(cg.unwrap());
+
+        println!("=== {} {} ===",  test.header.name, if cg_result.is_ok() { "PASS" } else { "FAIL" });
+
+        match &cg_result {
             Ok(t)  => println!("{t}"),
             Err(e) => println!("{e:?}\n"),
         }
         
-        cg.map(|_| ())
+        cg_result.map(|_| ())
     }
 
     #[test]
