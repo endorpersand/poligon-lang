@@ -134,6 +134,15 @@ pub struct Program(pub Vec<Located<Stmt>>);
 #[derive(Debug, PartialEq)]
 pub struct Block(pub Vec<Located<Stmt>>);
 
+impl Block {
+    /// Gets the statements of this block.
+    /// 
+    /// This helps prevent `Located<Block>.0` from resolving as `Block`.
+    pub fn stmts(&self) -> &[Located<Stmt>] {
+        &self.0
+    }
+}
+
 /// A statement.
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
