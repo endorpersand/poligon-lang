@@ -693,12 +693,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 
         compiler.builder.build_unconditional_branch(main_bb);
 
-        if main.verify(true) {
-            Ok(main)
-        } else {
-            Err(LLVMErr::InvalidFun)
+        match compiler.module.verify() {
+            Ok(_)  => Ok(main),
+            Err(s) => Err(LLVMErr::LLVMErr(s)),
         }
-
     }
 }
 

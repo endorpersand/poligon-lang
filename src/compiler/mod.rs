@@ -212,6 +212,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.module.link_in_module(new_module)
+            .and_then(|_| self.module.verify())
             .map_err(LLVMErr::LLVMErr)
             .map_err(Into::into)
     }
