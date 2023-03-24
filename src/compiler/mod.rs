@@ -118,6 +118,19 @@ pub enum GonSaveTo<'p> {
 
 /// A compiler, which keeps track of multiple files being compiled.
 /// 
+/// To construct a compiler struct, one can use:
+/// - [`Compiler::new`]: Initializes the compiler struct with the standard library linked
+/// - [`Compiler::no_std`]: Initializes the compiler struct without the standard library linked
+///     - This is useful for constructing builtin functions that should not rely on the standard library.
+/// 
+/// Files can be loaded into the compiler. When loaded, the compiler links the code into the
+/// module it is building.
+/// - [`Compiler::load_gon`]: Load a Poligon file.
+/// - [`Compiler::load_bc`]: Load both a declarations PLIR file (`.d.plir.gon`) and an LLVM bitcode file (`.bc`).
+/// 
+/// Finally, the module created can be extracted using [`Compiler::write_files`] or ran with
+/// [`Compiler::jit_run`].
+/// 
 /// # Usage
 /// ```no_run
 /// use std::path::Path;

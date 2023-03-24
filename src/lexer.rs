@@ -382,7 +382,7 @@ impl ReplMode {
     }
 }
 
-/// The struct does the full lexing process.
+/// The struct that performs the full lexing process.
 /// 
 /// # Example
 /// ```
