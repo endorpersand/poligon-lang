@@ -1637,7 +1637,7 @@ impl PLIRCodegen {
             },
             ast::Expr::Call { funct, params } => {
                 let funct = match *funct {
-                    // HACK: GEP
+                    // HACK: GEP, alloca
                     Located(ast::Expr::StaticPath(sp), path_range) if sp.attr == "#gep" => {
                         let tyrange = sp.ty.1.clone();
                         let ty = self.consume_type(sp.ty)?;
@@ -1686,6 +1686,12 @@ impl PLIRCodegen {
                             Err(PLIRErr::UndefinedAttr(ty, String::from("gep")).at_range(path_range))?
                         };
                     },
+                    Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#alloca" => {
+                        return Ok(plir::Expr::new(
+                            plir::ty!("#ptr"),
+                            plir::ExprType::Alloca(self.consume_type(sp.ty)?)
+                        ))
+                    }
                     e => self.consume_located_expr(e, None)?
                 };
 

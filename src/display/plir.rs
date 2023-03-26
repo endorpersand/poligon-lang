@@ -335,6 +335,7 @@ impl Display for ExprType {
                 }
                 write!(f, ")")
             },
+            ExprType::Alloca(ty) => write!(f, "<{ty}>::#alloca()"),
         }
     }
 }

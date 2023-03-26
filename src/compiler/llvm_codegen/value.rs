@@ -120,7 +120,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 Ok(GonValue::Float(fv))
             },
             (GonValue::Char(c), TypeRef::Prim(Type::S_STR)) => {
-                let to_str = self.std_import("char__to_string")?;
+                let to_str = self.module.get_function("char__to_string")
+                    .ok_or_else(|| LLVMErr::CannotCast(self.plir_type_of(v), ty.clone()))?;
                 let string = self.builder.build_call(to_str, params![c], "cast")
                     .try_as_basic_value()
                     .unwrap_left();

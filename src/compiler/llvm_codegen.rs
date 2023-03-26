@@ -418,7 +418,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
         let (_, _fun_ty) = self.define_fun(sig)?;
-        self.std_import(&sig.ident)
+        self.import_libc(&sig.ident)
     }
 
     /// Define a type for the compiler to track.
@@ -686,7 +686,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         let init_bb = compiler.ctx.prepend_basic_block(main_bb, "init");
         compiler.builder.position_at_end(init_bb);
 
-        let setlocale = compiler.std_import("setlocale")?;
+        let setlocale = compiler.import_libc("setlocale")?;
         let _int = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
         compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
@@ -1002,6 +1002,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
                 compiler.reconstruct(expr_ty, gep_ptr)
             },
+            plir::ExprType::Alloca(ty) => {
+                let layout = compiler.get_layout(ty)?;
+                let ptr = compiler.builder.build_alloca(layout, "");
+                compiler.reconstruct(expr_ty, ptr)
+            }
         }
     }
 }

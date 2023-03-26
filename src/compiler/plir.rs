@@ -513,6 +513,9 @@ pub enum ExprType {
 
     /// Get element pointer (intrinsic)
     GEP(Type, Box<Expr>, Vec<Expr>),
+
+    /// Allocate stack pointer (intrinsic)
+    Alloca(Type)
 }
 
 /// A path.
