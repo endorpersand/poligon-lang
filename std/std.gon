@@ -50,6 +50,28 @@ class #dynarray {
 
 class string {
     inner: #dynarray
+    fun ::new(contents: #ptr, len: int) -> string {
+        let inner = #dynarray::new(len);
+        inner.extend(contents, len);
+
+        string #{ inner };
+    }
+    
+    fun self.len() -> int {
+        self.inner.len;
+    }
+
+    fun self.add_string(other: string) -> string {
+        let new_len = self.len() + other.len();
+        let result_inner = #dynarray::new(new_len);
+
+        result_inner.extend(self.inner.buf, self.len());
+        result_inner.extend(other.inner.buf, other.len());
+
+        string #{
+            inner: result_inner
+        };
+    }
 }
 
 global _tmpl_print = "%.*s\n\0";

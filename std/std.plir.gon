@@ -1,7 +1,25 @@
 global _tmpl_print = "%.*s\n\0";
 class "#dynarray" { #ptr, int, int }
-extern fun malloc(arg0: int) -> #ptr;
+class string { #dynarray }
+extern fun printf(arg0: #ptr, ..) -> int;
+fun print(s: string) -> void {
+    return <void>(castfrom <int>(<(#ptr, ..) -> int>(printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
+}
+fun "string::new"(contents: #ptr, len: int) -> string {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(#dynarray::new)(<int>(len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
+    return string #{<#dynarray>(inner)};
+}
 extern fun memcpy(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
+fun "#dynarray::extend"(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
+    <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
+    let shift_buf: #ptr = <#ptr>(<#ll_array<#byte>>::#gep(<#ptr>(<#dynarray>(self).0), <int>(0), <int>(<#dynarray>(self).1)));
+    <#ptr>(<(#ptr, #ptr, int) -> #ptr>(memcpy)(<#ptr>(shift_buf), <#ptr>(add_buf), <int>(add_len)));
+    return <void>{
+        exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
+    };
+}
+extern fun malloc(arg0: int) -> #ptr;
 extern fun free(arg0: #ptr) -> void;
 fun "#dynarray::resize"(self: #dynarray, new_cap: int) -> void {
     return <void>(if <bool>(<int>(<#dynarray>(self).2) < <int>(new_cap)) <void>{
@@ -13,6 +31,16 @@ fun "#dynarray::resize"(self: #dynarray, new_cap: int) -> void {
             exit <void>(castfrom <int>(<#dynarray>(self).2 = <int>(new_cap)));
         };
     });
+}
+fun "string::len"(self: string) -> int {
+    return <int>(<#dynarray>(<string>(self).0).1);
+}
+fun "string::add_string"(self: string, other: string) -> string {
+    let new_len: int = <int>(<int>(<() -> int>(<string>(self).len)()) + <int>(<() -> int>(<string>(other).len)()));
+    let result_inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(#dynarray::new)(<int>(new_len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(<() -> int>(<string>(self).len)())));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
+    return string #{<#dynarray>(result_inner)};
 }
 fun "#dynarray::push"(self: #dynarray, byte: #byte) -> void {
     <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(1))));
@@ -34,19 +62,6 @@ fun "#dynarray::pop"(self: #dynarray) -> void {
             exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(0)));
         };
     });
-}
-fun "#dynarray::extend"(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
-    <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
-    let shift_buf: #ptr = <#ptr>(<#ll_array<#byte>>::#gep(<#ptr>(<#dynarray>(self).0), <int>(0), <int>(<#dynarray>(self).1)));
-    <#ptr>(<(#ptr, #ptr, int) -> #ptr>(memcpy)(<#ptr>(shift_buf), <#ptr>(add_buf), <int>(add_len)));
-    return <void>{
-        exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
-    };
-}
-class string { #dynarray }
-extern fun printf(arg0: #ptr, ..) -> int;
-fun print(s: string) -> void {
-    return <void>(castfrom <int>(<(#ptr, ..) -> int>(printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
 }
 fun "#dynarray::new"(cap: int) -> #dynarray {
     let buf: #ptr = <#ptr>(<(int) -> #ptr>(malloc)(<int>(cap)));

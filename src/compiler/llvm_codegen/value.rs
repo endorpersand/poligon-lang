@@ -83,31 +83,23 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
         // todo: support \0
-        let _ptr = self.ptr_type(Default::default());
         let _int = layout!(self, S_INT).into_int_type();
-        let _dynarray = layout!(self, "#dynarray").into_struct_type();
         let _str = layout!(self, S_STR).into_struct_type();
 
-        let arr_new = self.module.get_function("#dynarray::new").unwrap();
-        let arr_ext = self.module.get_function("#dynarray::extend").unwrap();
+        let str_new = self.module.get_function("string::new").unwrap();
 
-        let string = self.ctx.const_string(s.as_bytes(), false);
-        let len = _int.const_int(string.get_type().len() as _, false);
+        // get ptr to content:
+        let content_arr = self.ctx.const_string(s.as_bytes(), false);
+        let content = self.builder.build_alloca(content_arr.get_type(), "");
+        self.builder.build_store(content, content_arr);
+        // get len:
+        let len = _int.const_int(content_arr.get_type().len() as _, false);
 
-        let dynarray_ptr = self.builder.build_alloca(_dynarray, "");
-        let dynarray = self.builder.build_call(arr_new, params![len], "dynarray_new")
+        let string = self.builder.build_call(str_new, params![content, len], "string_literal")
             .try_as_basic_value()
-            .unwrap_left()
-            .into_struct_value();
-        self.builder.build_store(dynarray_ptr, dynarray);
+            .unwrap_left();
         
-        let string_ptr = self.builder.build_alloca(string.get_type(), "");
-        self.builder.build_store(string_ptr, string);
-
-        self.builder.build_call(arr_ext, params![dynarray_ptr, string_ptr, len], "");
-
-        let dynarray = self.builder.build_load(_dynarray, dynarray_ptr, "");
-        GonValue::Default(self.builder.create_struct_value(_str, &[dynarray]).unwrap().into())
+        GonValue::Default(string)
     }
 
     /// Cast a GonValue to another type.
