@@ -1,19 +1,20 @@
 class "#dynarray" { #ptr, int, int }
 class string { #dynarray }
 extern fun asprintf(arg0: #ptr, arg1: #ptr, ..) -> int;
-extern fun float__to_string(arg0: float) -> string;
-extern fun malloc(arg0: int) -> #ptr;
-extern fun "#dynarray::new"(arg0: int) -> #dynarray;
-extern fun "#dynarray::pop"(arg0: #dynarray) -> void;
-extern fun "#dynarray::push"(arg0: #dynarray, arg1: #byte) -> void;
-extern fun memcpy(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
-extern fun free(arg0: #ptr) -> void;
-extern fun "#dynarray::resize"(arg0: #dynarray, arg1: int) -> void;
-extern fun "#dynarray::extend"(arg0: #dynarray, arg1: #ptr, arg2: int) -> void;
+extern fun "char::to_string"(arg0: char) -> string;
 extern fun "string::add_string"(arg0: string, arg1: string) -> string;
-extern fun char__to_string(arg0: char) -> string;
+extern fun "#dynarray::pop"(arg0: #dynarray) -> void;
+extern fun "string::to_string"(arg0: string) -> string;
+extern fun "int::to_string"(arg0: int) -> string;
+extern fun memcpy(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
+extern fun "#dynarray::extend"(arg0: #dynarray, arg1: #ptr, arg2: int) -> void;
+extern fun "string::new"(arg0: #ptr, arg1: int) -> string;
+extern fun "float::to_string"(arg0: float) -> string;
+extern fun "string::len"(arg0: string) -> int;
 extern fun printf(arg0: #ptr, ..) -> int;
 extern fun print(arg0: string) -> void;
-extern fun "string::new"(arg0: #ptr, arg1: int) -> string;
-extern fun int__to_string(arg0: int) -> string;
-extern fun "string::len"(arg0: string) -> int;
+extern fun malloc(arg0: int) -> #ptr;
+extern fun "#dynarray::new"(arg0: int) -> #dynarray;
+extern fun free(arg0: #ptr) -> void;
+extern fun "#dynarray::resize"(arg0: #dynarray, arg1: int) -> void;
+extern fun "#dynarray::push"(arg0: #dynarray, arg1: #byte) -> void;

@@ -428,6 +428,37 @@ impl InsertBlock {
         self.types.insert(cls.ident.clone(), TypeData::structural(cls.clone()));
     }
 
+    fn insert_unresolved_method(&mut self, cls_ident: &str, method: ast::MethodDecl) {
+        let ast::MethodDecl {
+            sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
+            block 
+        } = method;
+
+        if !is_static {
+            let this = referent.unwrap_or_else(|| String::from("#unused"));
+            params.insert(0, ast::Param { 
+                rt: Default::default(), 
+                mt: Default::default(), 
+                ident: this, 
+                // since this is synthesized, there's no real cursor,
+                // so just assign an arbitary one
+                ty: Some(Located::new(ast::Type(cls_ident.to_string(), vec![]), (0, 0) ..= (0, 0)))
+            });
+        } else {
+            // TODO, use this ident
+        };
+        let metref = format!("{}::{method_name}", cls_ident);
+
+        let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
+        let decl = ast::FunDecl { sig, block };
+
+        self.insert_unresolved(Unresolved::Fun(decl));
+
+        if let Some(c) = self.types.get_mut(cls_ident) {
+            c.insert_method(method_name, metref);
+        }
+    }
+
     /// Declares a variable within this insert block.
     fn declare(&mut self, ident: &str, ty: plir::Type) {
         self.vars.insert(String::from(ident), ty);
@@ -918,6 +949,13 @@ impl PLIRCodegen {
                 ast::Stmt::IGlobal(id, s) => {
                     self.program.declare(&id, plir::ty!("#ptr"));
                     self.push_global(plir::HoistedStmt::IGlobal(id, s));
+                },
+                ast::Stmt::FitClassDecl(ty, methods) => {
+                    // FIXME: there's a few bugs that'll occur if ty is not primitive
+                    let block = self.peek_block();
+                    for m in methods {
+                        block.insert_unresolved_method(&ty, m);
+                    }
                 }
                 _ => eager_stmts.push(stmt),
             }
@@ -993,6 +1031,7 @@ impl PLIRCodegen {
             ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
             ast::Stmt::ImportIntrinsic => Ok(self.peek_block().is_open()), // no-op
             ast::Stmt::IGlobal(_, _) => unimplemented!("global decl should not be resolved eagerly"),
+            ast::Stmt::FitClassDecl(_, _) => unimplemented!("fit class decl should not be resolved eagerly"),
         }
     }
 
@@ -1318,37 +1357,10 @@ impl PLIRCodegen {
         let cls = plir::Class { ident, fields };
         
         let ib = self.peek_block();
+        
         ib.insert_class(&cls);
-
         for method in methods {
-            let ast::MethodDecl {
-                sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
-                block 
-            } = method;
-
-            if !is_static {
-                let this = referent.unwrap_or_else(|| String::from("#unused"));
-                params.insert(0, ast::Param { 
-                    rt: Default::default(), 
-                    mt: Default::default(), 
-                    ident: this, 
-                    // since this is synthesized, there's no real cursor,
-                    // so just assign an arbitary one
-                    ty: Some(Located::new(ast::Type(cls.ident.clone(), vec![]), (0, 0) ..= (0, 0)))
-                });
-            } else {
-                // TODO, use this ident
-            };
-            let metref = format!("{}::{method_name}", &cls.ident);
-
-            let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
-            let decl = ast::FunDecl { sig, block };
-
-            ib.insert_unresolved(Unresolved::Fun(decl));
-
-            if let Some(c) = ib.types.get_mut(&cls.ident) {
-                c.insert_method(method_name, metref);
-            }
+            ib.insert_unresolved_method(&cls.ident, method);
         }
 
         self.push_global(cls);

@@ -72,6 +72,10 @@ class string {
             inner: result_inner
         };
     }
+
+    fun self.to_string() -> string {
+        self;
+    }
 }
 
 global _tmpl_print = "%.*s\n\0";
@@ -84,33 +88,41 @@ global _tmpl_int_to_string = "%d\0";
 global _tmpl_float_to_string = "%#f\0";
 global _tmpl_char_to_string = "%lc\0";
 
-fun int__to_string(val: int) -> string {
-    let buf_ptr = #ptr::#alloca();
-    let len = #asprintf(buf_ptr, _tmpl_int_to_string, val);
-    let buf: #ptr = *buf_ptr;
-    let cap = len + 1;
+fit class int {
+    fun self.to_string() -> string {
+        let buf_ptr = #ptr::#alloca();
+        let len = #asprintf(buf_ptr, _tmpl_int_to_string, self);
+        let buf: #ptr = *buf_ptr;
+        let cap = len + 1;
 
-    string #{
-        inner: #dynarray #{ buf, len, cap }
-    };
+        string #{
+            inner: #dynarray #{ buf, len, cap }
+        };
+    }
 }
-fun float__to_string(val: float) -> string {
-    let buf_ptr = #ptr::#alloca();
-    let len = #asprintf(buf_ptr, _tmpl_float_to_string, val);
-    let buf: #ptr = *buf_ptr;
-    let cap = len + 1;
 
-    string #{
-        inner: #dynarray #{ buf, len, cap }
-    };
+fit class float {
+    fun self.to_string() -> string {
+        let buf_ptr = #ptr::#alloca();
+        let len = #asprintf(buf_ptr, _tmpl_float_to_string, self);
+        let buf: #ptr = *buf_ptr;
+        let cap = len + 1;
+
+        string #{
+            inner: #dynarray #{ buf, len, cap }
+        };
+    }
 }
-fun char__to_string(val: char) -> string {
-    let buf_ptr = #ptr::#alloca();
-    let len = #asprintf(buf_ptr, _tmpl_char_to_string, val);
-    let buf: #ptr = *buf_ptr;
-    let cap = len + 1;
 
-    string #{
-        inner: #dynarray #{ buf, len, cap }
-    };
+fit class char {
+    fun self.to_string() -> string {
+        let buf_ptr = #ptr::#alloca();
+        let len = #asprintf(buf_ptr, _tmpl_char_to_string, self);
+        let buf: #ptr = *buf_ptr;
+        let cap = len + 1;
+
+        string #{
+            inner: #dynarray #{ buf, len, cap }
+        };
+    }
 }

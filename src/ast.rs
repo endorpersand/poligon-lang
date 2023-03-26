@@ -197,7 +197,10 @@ pub enum Stmt {
     ImportIntrinsic,
 
     /// A global declaration. This is part of intrinsic functionality.
-    IGlobal(String /* ident */, String /* value */)
+    IGlobal(String /* ident */, String /* value */),
+
+    /// An intrinsic `fit class` declaration. This is part of intrinsic functionality.
+    FitClassDecl(String /* ident */, Vec<MethodDecl> /* methods */)
 }
 
 impl Stmt {
@@ -206,6 +209,7 @@ impl Stmt {
         matches!(self, 
             | Stmt::FunDecl(_)
             | Stmt::ClassDecl(_)
+            | Stmt::FitClassDecl(_, _)
             | Stmt::Expr(Located(Expr::Block(_), _))
             | Stmt::Expr(Located(Expr::If { .. }, _))
             | Stmt::Expr(Located(Expr::While { .. }, _))

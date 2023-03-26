@@ -122,8 +122,8 @@ pub enum ParseErr {
     /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
     NoIntrinsicIdents,
 
-    /// Parser is not in intrinsic mode and therefore this feature is not allowed
-    NoIntrinsicGlobal
+    /// Parser is not in intrinsic mode and therefore this statement cannot be defined
+    NoIntrinsicStmts
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
@@ -158,7 +158,7 @@ impl std::fmt::Display for ParseErr {
             ParseErr::ExpectedEntry      => write!(f, "expected entry"),
             ParseErr::ExpectedParam      => write!(f, "expected param"),
             ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
-            ParseErr::NoIntrinsicGlobal  => write!(f, "cannot use intrinsic global"),
+            ParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
             ParseErr::AsgPatErr(e)       => e.fmt(f),
         }
     }
@@ -703,6 +703,7 @@ impl Parser {
                 Some(self.expect_fun_sig()?).map(ast::Stmt::ExternFunDecl)
             },
             Some(token![class])    => Some(self.expect_class_decl()?).map(ast::Stmt::ClassDecl),
+            Some(token![fit])      => Some(self.expect_fit_class_decl()?),
             Some(token![import])   => self.expect_import_decl()?,
             Some(token![global])   => Some(self.expect_global_decl()?),
             Some(_)                => self.match_expr()?.map(ast::Stmt::Expr),
@@ -1016,7 +1017,28 @@ impl Parser {
 
             Ok(ast::Stmt::IGlobal(ident, s))
         } else {
-            Err(ParseErr::NoIntrinsicGlobal.at_range(self.peek_loc()))
+            Err(ParseErr::NoIntrinsicStmts.at_range(self.peek_loc()))
+        }
+    }
+
+    /// Expect the next tokens are an intrinsic fit class statement.
+    /// 
+    /// This will error if the program is not in intrinsic mode.
+    pub fn expect_fit_class_decl(&mut self) -> ParseResult<ast::Stmt> {
+        if self.intrinsic_mode {
+            self.expect1(token![fit])?;
+            self.expect1(token![class])?;
+            let ident = self.expect_ident()?.0;
+            self.expect1(token!["{"])?;
+                let mut methods = vec![];
+                while let Some(m) = self.match_method_decl()? {
+                    methods.push(m);
+                }
+            self.expect1(token!["}"])?;
+
+            Ok(ast::Stmt::FitClassDecl(ident, methods))
+        } else {
+            Err(ParseErr::NoIntrinsicStmts.at_range(self.peek_loc()))
         }
     }
 

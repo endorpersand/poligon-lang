@@ -10,16 +10,16 @@ source_filename = "std.gon"
 @_tmpl_char_to_string = private unnamed_addr constant [4 x i8] c"%lc\00", align 1
 @locale = private unnamed_addr constant [12 x i8] c"en_US.UTF-8\00", align 1
 
-define %string @float__to_string(double %val) {
+define %string @"char::to_string"(i32 %self) {
 body:
-  %val1 = alloca double, align 8
-  store double %val, ptr %val1, align 8
+  %self1 = alloca i32, align 4
+  store i32 %self, ptr %self1, align 4
   %0 = alloca ptr, align 8
   %buf_ptr = alloca ptr, align 8
   store ptr %0, ptr %buf_ptr, align 8
   %1 = load ptr, ptr %buf_ptr, align 8
-  %2 = load double, ptr %val1, align 8
-  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_float_to_string, double %2)
+  %2 = load i32, ptr %self1, align 4
+  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_char_to_string, i32 %2)
   %len = alloca i64, align 8
   store i64 %call, ptr %len, align 4
   %3 = load ptr, ptr %buf_ptr, align 8
@@ -42,6 +42,37 @@ body:
 
 declare i64 @asprintf(ptr, ptr, ...)
 
+define %string @"string::add_string"(ptr %self, ptr %other) {
+body:
+  %call = call i64 @"string::len"(ptr %self)
+  %call1 = call i64 @"string::len"(ptr %other)
+  %i_add = add i64 %call, %call1
+  %new_len = alloca i64, align 8
+  store i64 %i_add, ptr %new_len, align 4
+  %0 = load i64, ptr %new_len, align 4
+  %call2 = call %"#dynarray" @"#dynarray::new"(i64 %0)
+  %result_inner = alloca %"#dynarray", align 8
+  store %"#dynarray" %call2, ptr %result_inner, align 8
+  %path_access = getelementptr inbounds %string, ptr %self, i32 0, i32 0, i32 0
+  %path_load = load ptr, ptr %path_access, align 8
+  %call3 = call i64 @"string::len"(ptr %self)
+  call void @"#dynarray::extend"(ptr %result_inner, ptr %path_load, i64 %call3)
+  %path_access4 = getelementptr inbounds %string, ptr %other, i32 0, i32 0, i32 0
+  %path_load5 = load ptr, ptr %path_access4, align 8
+  %call6 = call i64 @"string::len"(ptr %other)
+  call void @"#dynarray::extend"(ptr %result_inner, ptr %path_load5, i64 %call6)
+  %1 = load %"#dynarray", ptr %result_inner, align 8
+  %2 = insertvalue %string zeroinitializer, %"#dynarray" %1, 0
+  ret %string %2
+}
+
+define i64 @"string::len"(ptr %self) {
+body:
+  %path_access = getelementptr inbounds %string, ptr %self, i32 0, i32 0, i32 1
+  %path_load = load i64, ptr %path_access, align 4
+  ret i64 %path_load
+}
+
 define %"#dynarray" @"#dynarray::new"(i64 %cap) {
 body:
   %cap1 = alloca i64, align 8
@@ -58,84 +89,40 @@ body:
   ret %"#dynarray" %5
 }
 
-declare ptr @malloc(i64)
-
-define void @"#dynarray::pop"(ptr %self) {
+define void @"#dynarray::extend"(ptr %self, ptr %add_buf, i64 %add_len) {
 body:
+  %add_buf1 = alloca ptr, align 8
+  store ptr %add_buf, ptr %add_buf1, align 8
+  %add_len2 = alloca i64, align 8
+  store i64 %add_len, ptr %add_len2, align 4
   %path_access = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
   %path_load = load i64, ptr %path_access, align 4
-  %i_gt = icmp sgt i64 %path_load, 0
-  br label %post_cmp
-
-then:                                             ; preds = %post_cmp
-  br label %block
-
-else:                                             ; preds = %post_cmp
-  br label %block4
-
-merge:                                            ; preds = %post_block5, %post_block
-  %if_result = phi {} [ zeroinitializer, %post_block ], [ zeroinitializer, %post_block5 ]
-  ret void
-
-post_cmp:                                         ; preds = %body
-  %cmp_result = phi i1 [ %i_gt, %body ]
-  br i1 %cmp_result, label %then, label %else
-
-block:                                            ; preds = %then
-  %path_access1 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load2 = load i64, ptr %path_access1, align 4
-  %i_sub = sub i64 %path_load2, 1
-  %path_access3 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  store i64 %i_sub, ptr %path_access3, align 4
-  br label %post_block
-
-post_block:                                       ; preds = %block
-  br label %merge
-
-block4:                                           ; preds = %else
-  %path_access6 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  store i64 0, ptr %path_access6, align 4
-  br label %post_block5
-
-post_block5:                                      ; preds = %block4
-  br label %merge
-}
-
-define void @"#dynarray::push"(ptr %self, i8 %byte) {
-body:
-  %byte1 = alloca i8, align 1
-  store i8 %byte, ptr %byte1, align 1
-  %path_access = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load = load i64, ptr %path_access, align 4
-  %i_add = add i64 %path_load, 1
+  %0 = load i64, ptr %add_len2, align 4
+  %i_add = add i64 %path_load, %0
   call void @"#dynarray::resize"(ptr %self, i64 %i_add)
-  %path_access2 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load3 = load i64, ptr %path_access2, align 4
-  %path_access4 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 0
-  %path_load5 = load ptr, ptr %path_access4, align 8
-  %gep = getelementptr [0 x i8], ptr %path_load5, i64 0, i64 %path_load3
-  %push_ptr = alloca ptr, align 8
-  store ptr %gep, ptr %push_ptr, align 8
+  %path_access3 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load4 = load i64, ptr %path_access3, align 4
+  %path_access5 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 0
+  %path_load6 = load ptr, ptr %path_access5, align 8
+  %gep = getelementptr [0 x i8], ptr %path_load6, i64 0, i64 %path_load4
+  %shift_buf = alloca ptr, align 8
+  store ptr %gep, ptr %shift_buf, align 8
+  %1 = load ptr, ptr %shift_buf, align 8
+  %2 = load ptr, ptr %add_buf1, align 8
+  %3 = load i64, ptr %add_len2, align 4
+  %call = call ptr @memcpy(ptr %1, ptr %2, i64 %3)
   br label %block
 
 block:                                            ; preds = %body
-  %path_access6 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load7 = load i64, ptr %path_access6, align 4
-  %i_add8 = add i64 %path_load7, 1
-  %path_access9 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  store i64 %i_add8, ptr %path_access9, align 4
+  %path_access7 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load8 = load i64, ptr %path_access7, align 4
+  %4 = load i64, ptr %add_len2, align 4
+  %i_add9 = add i64 %path_load8, %4
+  %path_access10 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  store i64 %i_add9, ptr %path_access10, align 4
   br label %post_block
 
 post_block:                                       ; preds = %block
-  br label %block10
-
-block10:                                          ; preds = %post_block
-  %0 = load i8, ptr %byte1, align 1
-  %1 = load ptr, ptr %push_ptr, align 8
-  store i8 %0, ptr %1, align 1
-  br label %post_block11
-
-post_block11:                                     ; preds = %block10
   ret void
 }
 
@@ -190,86 +177,115 @@ post_block:                                       ; preds = %block
 
 declare ptr @memcpy(ptr, ptr, i64)
 
+declare ptr @malloc(i64)
+
 declare void @free(ptr)
 
-define void @"#dynarray::extend"(ptr %self, ptr %add_buf, i64 %add_len) {
+define void @"#dynarray::pop"(ptr %self) {
 body:
-  %add_buf1 = alloca ptr, align 8
-  store ptr %add_buf, ptr %add_buf1, align 8
-  %add_len2 = alloca i64, align 8
-  store i64 %add_len, ptr %add_len2, align 4
   %path_access = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
   %path_load = load i64, ptr %path_access, align 4
-  %0 = load i64, ptr %add_len2, align 4
-  %i_add = add i64 %path_load, %0
-  call void @"#dynarray::resize"(ptr %self, i64 %i_add)
-  %path_access3 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load4 = load i64, ptr %path_access3, align 4
-  %path_access5 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 0
-  %path_load6 = load ptr, ptr %path_access5, align 8
-  %gep = getelementptr [0 x i8], ptr %path_load6, i64 0, i64 %path_load4
-  %shift_buf = alloca ptr, align 8
-  store ptr %gep, ptr %shift_buf, align 8
-  %1 = load ptr, ptr %shift_buf, align 8
-  %2 = load ptr, ptr %add_buf1, align 8
-  %3 = load i64, ptr %add_len2, align 4
-  %call = call ptr @memcpy(ptr %1, ptr %2, i64 %3)
+  %i_gt = icmp sgt i64 %path_load, 0
+  br label %post_cmp
+
+then:                                             ; preds = %post_cmp
   br label %block
 
-block:                                            ; preds = %body
-  %path_access7 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  %path_load8 = load i64, ptr %path_access7, align 4
-  %4 = load i64, ptr %add_len2, align 4
-  %i_add9 = add i64 %path_load8, %4
-  %path_access10 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
-  store i64 %i_add9, ptr %path_access10, align 4
+else:                                             ; preds = %post_cmp
+  br label %block4
+
+merge:                                            ; preds = %post_block5, %post_block
+  %if_result = phi {} [ zeroinitializer, %post_block ], [ zeroinitializer, %post_block5 ]
+  ret void
+
+post_cmp:                                         ; preds = %body
+  %cmp_result = phi i1 [ %i_gt, %body ]
+  br i1 %cmp_result, label %then, label %else
+
+block:                                            ; preds = %then
+  %path_access1 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load2 = load i64, ptr %path_access1, align 4
+  %i_sub = sub i64 %path_load2, 1
+  %path_access3 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  store i64 %i_sub, ptr %path_access3, align 4
   br label %post_block
 
 post_block:                                       ; preds = %block
-  ret void
+  br label %merge
+
+block4:                                           ; preds = %else
+  %path_access6 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  store i64 0, ptr %path_access6, align 4
+  br label %post_block5
+
+post_block5:                                      ; preds = %block4
+  br label %merge
 }
 
-define %string @"string::add_string"(ptr %self, ptr %other) {
+define %string @"string::to_string"(ptr %self) {
 body:
-  %call = call i64 @"string::len"(ptr %self)
-  %call1 = call i64 @"string::len"(ptr %other)
-  %i_add = add i64 %call, %call1
-  %new_len = alloca i64, align 8
-  store i64 %i_add, ptr %new_len, align 4
-  %0 = load i64, ptr %new_len, align 4
-  %call2 = call %"#dynarray" @"#dynarray::new"(i64 %0)
-  %result_inner = alloca %"#dynarray", align 8
-  store %"#dynarray" %call2, ptr %result_inner, align 8
-  %path_access = getelementptr inbounds %string, ptr %self, i32 0, i32 0, i32 0
-  %path_load = load ptr, ptr %path_access, align 8
-  %call3 = call i64 @"string::len"(ptr %self)
-  call void @"#dynarray::extend"(ptr %result_inner, ptr %path_load, i64 %call3)
-  %path_access4 = getelementptr inbounds %string, ptr %other, i32 0, i32 0, i32 0
-  %path_load5 = load ptr, ptr %path_access4, align 8
-  %call6 = call i64 @"string::len"(ptr %other)
-  call void @"#dynarray::extend"(ptr %result_inner, ptr %path_load5, i64 %call6)
-  %1 = load %"#dynarray", ptr %result_inner, align 8
-  %2 = insertvalue %string zeroinitializer, %"#dynarray" %1, 0
-  ret %string %2
+  %0 = load %string, ptr %self, align 8
+  ret %string %0
 }
 
-define i64 @"string::len"(ptr %self) {
+define %string @"int::to_string"(i64 %self) {
 body:
-  %path_access = getelementptr inbounds %string, ptr %self, i32 0, i32 0, i32 1
-  %path_load = load i64, ptr %path_access, align 4
-  ret i64 %path_load
-}
-
-define %string @char__to_string(i32 %val) {
-body:
-  %val1 = alloca i32, align 4
-  store i32 %val, ptr %val1, align 4
+  %self1 = alloca i64, align 8
+  store i64 %self, ptr %self1, align 4
   %0 = alloca ptr, align 8
   %buf_ptr = alloca ptr, align 8
   store ptr %0, ptr %buf_ptr, align 8
   %1 = load ptr, ptr %buf_ptr, align 8
-  %2 = load i32, ptr %val1, align 4
-  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_char_to_string, i32 %2)
+  %2 = load i64, ptr %self1, align 4
+  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_int_to_string, i64 %2)
+  %len = alloca i64, align 8
+  store i64 %call, ptr %len, align 4
+  %3 = load ptr, ptr %buf_ptr, align 8
+  %deref = load ptr, ptr %3, align 8
+  %buf = alloca ptr, align 8
+  store ptr %deref, ptr %buf, align 8
+  %4 = load i64, ptr %len, align 4
+  %i_add = add i64 %4, 1
+  %cap = alloca i64, align 8
+  store i64 %i_add, ptr %cap, align 4
+  %5 = load ptr, ptr %buf, align 8
+  %6 = load i64, ptr %len, align 4
+  %7 = load i64, ptr %cap, align 4
+  %8 = insertvalue %"#dynarray" zeroinitializer, ptr %5, 0
+  %9 = insertvalue %"#dynarray" %8, i64 %6, 1
+  %10 = insertvalue %"#dynarray" %9, i64 %7, 2
+  %11 = insertvalue %string zeroinitializer, %"#dynarray" %10, 0
+  ret %string %11
+}
+
+define %string @"string::new"(ptr %contents, i64 %len) {
+body:
+  %contents1 = alloca ptr, align 8
+  store ptr %contents, ptr %contents1, align 8
+  %len2 = alloca i64, align 8
+  store i64 %len, ptr %len2, align 4
+  %0 = load i64, ptr %len2, align 4
+  %call = call %"#dynarray" @"#dynarray::new"(i64 %0)
+  %inner = alloca %"#dynarray", align 8
+  store %"#dynarray" %call, ptr %inner, align 8
+  %1 = load ptr, ptr %contents1, align 8
+  %2 = load i64, ptr %len2, align 4
+  call void @"#dynarray::extend"(ptr %inner, ptr %1, i64 %2)
+  %3 = load %"#dynarray", ptr %inner, align 8
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
+}
+
+define %string @"float::to_string"(double %self) {
+body:
+  %self1 = alloca double, align 8
+  store double %self, ptr %self1, align 8
+  %0 = alloca ptr, align 8
+  %buf_ptr = alloca ptr, align 8
+  store ptr %0, ptr %buf_ptr, align 8
+  %1 = load ptr, ptr %buf_ptr, align 8
+  %2 = load double, ptr %self1, align 8
+  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_float_to_string, double %2)
   %len = alloca i64, align 8
   store i64 %call, ptr %len, align 4
   %3 = load ptr, ptr %buf_ptr, align 8
@@ -302,52 +318,42 @@ body:
 
 declare i64 @printf(ptr, ...)
 
-define %string @"string::new"(ptr %contents, i64 %len) {
+define void @"#dynarray::push"(ptr %self, i8 %byte) {
 body:
-  %contents1 = alloca ptr, align 8
-  store ptr %contents, ptr %contents1, align 8
-  %len2 = alloca i64, align 8
-  store i64 %len, ptr %len2, align 4
-  %0 = load i64, ptr %len2, align 4
-  %call = call %"#dynarray" @"#dynarray::new"(i64 %0)
-  %inner = alloca %"#dynarray", align 8
-  store %"#dynarray" %call, ptr %inner, align 8
-  %1 = load ptr, ptr %contents1, align 8
-  %2 = load i64, ptr %len2, align 4
-  call void @"#dynarray::extend"(ptr %inner, ptr %1, i64 %2)
-  %3 = load %"#dynarray", ptr %inner, align 8
-  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
-  ret %string %4
-}
+  %byte1 = alloca i8, align 1
+  store i8 %byte, ptr %byte1, align 1
+  %path_access = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load = load i64, ptr %path_access, align 4
+  %i_add = add i64 %path_load, 1
+  call void @"#dynarray::resize"(ptr %self, i64 %i_add)
+  %path_access2 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load3 = load i64, ptr %path_access2, align 4
+  %path_access4 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 0
+  %path_load5 = load ptr, ptr %path_access4, align 8
+  %gep = getelementptr [0 x i8], ptr %path_load5, i64 0, i64 %path_load3
+  %push_ptr = alloca ptr, align 8
+  store ptr %gep, ptr %push_ptr, align 8
+  br label %block
 
-define %string @int__to_string(i64 %val) {
-body:
-  %val1 = alloca i64, align 8
-  store i64 %val, ptr %val1, align 4
-  %0 = alloca ptr, align 8
-  %buf_ptr = alloca ptr, align 8
-  store ptr %0, ptr %buf_ptr, align 8
-  %1 = load ptr, ptr %buf_ptr, align 8
-  %2 = load i64, ptr %val1, align 4
-  %call = call i64 (ptr, ptr, ...) @asprintf(ptr %1, ptr @_tmpl_int_to_string, i64 %2)
-  %len = alloca i64, align 8
-  store i64 %call, ptr %len, align 4
-  %3 = load ptr, ptr %buf_ptr, align 8
-  %deref = load ptr, ptr %3, align 8
-  %buf = alloca ptr, align 8
-  store ptr %deref, ptr %buf, align 8
-  %4 = load i64, ptr %len, align 4
-  %i_add = add i64 %4, 1
-  %cap = alloca i64, align 8
-  store i64 %i_add, ptr %cap, align 4
-  %5 = load ptr, ptr %buf, align 8
-  %6 = load i64, ptr %len, align 4
-  %7 = load i64, ptr %cap, align 4
-  %8 = insertvalue %"#dynarray" zeroinitializer, ptr %5, 0
-  %9 = insertvalue %"#dynarray" %8, i64 %6, 1
-  %10 = insertvalue %"#dynarray" %9, i64 %7, 2
-  %11 = insertvalue %string zeroinitializer, %"#dynarray" %10, 0
-  ret %string %11
+block:                                            ; preds = %body
+  %path_access6 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  %path_load7 = load i64, ptr %path_access6, align 4
+  %i_add8 = add i64 %path_load7, 1
+  %path_access9 = getelementptr inbounds %"#dynarray", ptr %self, i32 0, i32 1
+  store i64 %i_add8, ptr %path_access9, align 4
+  br label %post_block
+
+post_block:                                       ; preds = %block
+  br label %block10
+
+block10:                                          ; preds = %post_block
+  %0 = load i8, ptr %byte1, align 1
+  %1 = load ptr, ptr %push_ptr, align 8
+  store i8 %0, ptr %1, align 1
+  br label %post_block11
+
+post_block11:                                     ; preds = %block10
+  ret void
 }
 
 define void @main() {

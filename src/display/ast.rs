@@ -38,6 +38,13 @@ impl Display for Stmt {
             Stmt::Import(sp) => write!(f, "import {sp}"),
             Stmt::ImportIntrinsic => write!(f, "import intrinsic"),
             Stmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
+            Stmt::FitClassDecl(ty, methods) => {
+                write!(f, "fit class {ty} {{")?;
+                for method in methods {
+                    writeln!(f,"{method}")?;
+                }
+                write!(f, "}}")
+            },
         }
     }
 }

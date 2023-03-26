@@ -313,12 +313,21 @@ impl super::PLIRCodegen {
         let (lcast, rcast) = match op {
             op::Binary::Add => {
                 let types = &[
-                    ty!(Type::S_STR),
-                    // list cast ?
                     ty!(Type::S_INT),
                     ty!(Type::S_FLOAT)
                 ];
-                self.cast_chain2((left, right), types)?.into_inner()
+                match self.cast_chain2((left, right), types)? {
+                    Ok(exprs) => exprs,
+                    Err((l, r)) => match (l.ty.as_ref(), r.ty.as_ref()) {
+                        (TypeRef::Prim(Type::S_STR | Type::S_CHAR), _) => {
+                            self.apply_cast2((l, r), &ty!(Type::S_STR))?.into_inner()
+                        },
+                        (_, TypeRef::Prim(Type::S_STR | Type::S_CHAR)) => {
+                            self.apply_cast2((l, r), &ty!(Type::S_STR))?.into_inner()
+                        },
+                        _ => (l, r)
+                    },
+                }
             },
             op::Binary::Sub => {
                 self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
