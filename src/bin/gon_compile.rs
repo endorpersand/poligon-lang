@@ -48,7 +48,7 @@ fn main() -> io::Result<()> {
     let code = fs::read_to_string(&fp)?;
     let (plir, dtypes) = unwrap_or_exit! { compiler.generate_plir(&code) };
     
-    compiler.set_filename(fp.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("eval"));
+    compiler.set_filename(name);
     // print PLIR
     let mut file = File::create(fp.with_extension("plir.gon"))?;
     file.write_all(plir.to_string().as_bytes())?;

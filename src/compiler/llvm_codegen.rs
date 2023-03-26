@@ -1260,34 +1260,39 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
 
 #[cfg(test)]
 mod tests {
+    use inkwell::context::Context;
+
+    use crate::compiler::Compiler;
     use crate::test_utils::prelude::*;
 
     fn test_compile(t: Test) -> TestResult<()> {
         println!("=== compile {} ===", t.header.name);
-        let plir = t.codegen()?;
+        let ctx = Context::create();
+        let mut compiler = Compiler::new(&ctx, "eval")
+            .map_err(|e| t.wrap_compile_err(e))?;
 
-        println!("{plir}");
-        with_compiler(|c| {
-            match c.compile(&plir) {
-                Ok(_) => {
-                    c.module.print_to_stderr();
-                    Ok(())
-                },
-                Err(e) => Err(t.wrap_err(e)),
-            }
-        })
+        match compiler.load_gon_str(t.source(), None) {
+            Ok(_) => {
+                compiler.module.print_to_stderr();
+                Ok(())
+            },
+            Err(e) => {
+                Err(t.wrap_compile_err(e))
+            },
+        }
     }
 
     fn test_run(t: Test) -> TestResult<()> {
         println!("=== run {} ===", t.header.name);
-        let plir = t.codegen()?;
+        let ctx = Context::create();
+        let mut compiler = Compiler::new(&ctx, "eval")
+            .map_err(|e| t.wrap_compile_err(e))?;
 
-        println!("{plir}");
-        with_compiler(|c| {
-            c.compile(&plir)
-                .and_then(|f| unsafe { c.jit_run::<()>(f) })
-                .map_err(|e| t.wrap_err(e))
-        })
+        compiler.load_gon_str(t.source(), None)
+            .map_err(|e| t.wrap_compile_err(e))?;
+
+        unsafe { compiler.jit_run() }
+            .map_err(|e| t.wrap_compile_err(e))
     }
 
     load_tests!("compiler",

@@ -1,7 +1,5 @@
 //! TEST early_return
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun main() {
     let a = 1;
     return;
@@ -12,16 +10,12 @@ fun main() {
 
 //! TEST return_void
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun main() {
     return print("this should be valid!");
 }
 
 //! TEST never_decl
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun test() -> bool {
     let d = { return false; };
     true;
@@ -37,8 +31,6 @@ fun main() {
 
 //! TEST never_block
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun test() -> bool {
     {
         return false;
@@ -55,8 +47,6 @@ fun main() {
 
 //! TEST never_if
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun test(a: bool) -> bool {
     let bl = if a {
         return true;
@@ -76,8 +66,6 @@ fun main() {
 
 //! TEST never_while
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun test_rt(a: bool) -> bool {
     while true {
         return false;
@@ -112,8 +100,6 @@ fun main() {
 
 //! TEST while_ret_break
 //! IGNORE compiler
-extern fun print(s: string);
-
 fun test(a: bool) -> bool {
     while true {
         if a {

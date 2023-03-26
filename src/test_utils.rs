@@ -15,7 +15,7 @@ use crate::lexer::token::{FullToken, Token};
 use inkwell::context::Context;
 
 pub mod prelude {
-    pub use super::{TestLoader, Test, TestResult, IoExtract, with_compiler};
+    pub use super::{TestLoader, Test, TestResult, IoExtract};
 
     macro_rules! load_tests {
         ($f:literal) => {
@@ -82,13 +82,34 @@ pub struct Test<'t> {
 }
 
 impl Test<'_> {
+    pub fn source(&self) -> &str {
+        match self.tokens.first().zip(self.tokens.last()) {
+            Some((first, last)) => {
+                let &(sl, sc) = first.loc.start();
+                let &(el, ec) = last.loc.end();
+
+                let schar = self.code.split('\n')
+                    .take(sl)
+                    .map(|line| line.len() + 1)
+                    .sum::<usize>() + sc;
+                
+                let echar = self.code.split('\n')
+                    .take(el)
+                    .map(|line| line.len() + 1)
+                    .sum::<usize>() + ec;
+                &self.code[schar ..= echar]
+            }
+            None => panic!("Test has no tokens.")
+        }
+    }
+
     pub fn wrap_err<E: GonErr>(&self, e: impl Into<FullGonErr<E>>) -> TestErr {
         TestErr::TestFailed(
             self.header.name.to_string(),
             e.into().full_msg(self.code)
         )
     }
-    pub fn wrap_compile_err<T>(&self, e: CompileErr<'_>) -> TestErr {
+    pub fn wrap_compile_err(&self, e: CompileErr<'_>) -> TestErr {
         match e {
             CompileErr::IoErr(e) => TestErr::IoErr(e),
             CompileErr::Computed(e) => TestErr::TestFailed(self.header.name.to_string(), e),
@@ -153,12 +174,6 @@ impl Test<'_> {
         compiler.jit_run(f)
             .map_err(|e| self.wrap_err(e))
     }
-}
-
-pub fn with_compiler<T>(mut f: impl FnMut(&mut LLVMCodegen) -> T) -> T {
-    let ctx = Context::create();
-    let mut compiler = LLVMCodegen::new(&ctx);
-    f(&mut compiler)
 }
 
 pub struct TestLoader {

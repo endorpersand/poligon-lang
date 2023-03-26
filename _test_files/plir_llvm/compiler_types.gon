@@ -1,6 +1,5 @@
 //! TEST class_chain
-extern fun print(s: string);
-extern fun printd(d: int);
+extern fun int__to_string(d: int) -> string;
 
 class A {
     age: int
@@ -34,7 +33,7 @@ fun get_size(e: E) -> int {
 }
 
 //! TEST initializer
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 class A {
     age: int,
@@ -43,12 +42,12 @@ class A {
 
 fun main() {
     let a = A #{ age: 14, size: 14 };
-    printd(a.age);
-    printd(a.size);
+    print(int__to_string(a.age));
+    print(int__to_string(a.size));
 }
 
 //! TEST method_access
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 class A {
     age: int,
@@ -64,11 +63,11 @@ class A {
 fun main() {
     let a = A #{ age: 14 };
     a.set_age(15);
-    printd(a.age);
+    print(int__to_string(a.age));
 }
 
 //! TEST class_operator_overloading
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 class Vector2 {
     x: int, y: int
@@ -106,20 +105,20 @@ fun main() {
     let v2 = Vector2::new(15, 10);
     
     let vr = v1 + v2;
-    printd(vr.x);
-    printd(vr.y);
+    print(int__to_string(vr.x));
+    print(int__to_string(vr.y));
 
     let v1 = Vector3::new(10, 10, 0);
     let v2 = Vector3::new(15, 10, 0);
     
     let vr = v1 + v2;
-    printd(vr.x);
-    printd(vr.y);
-    printd(vr.z);
+    print(int__to_string(vr.x));
+    print(int__to_string(vr.y));
+    print(int__to_string(vr.z));
 }
 
 //! TEST class_operator_overloading_fail
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 class Vector2 {
     x: int, y: int
@@ -157,8 +156,8 @@ fun main() {
     let v2 = Vector3::new(15, 10, 17);
     
     let vr = v1 + v2;
-    printd(vr.x);
-    printd(vr.y);
+    print(int__to_string(vr.x));
+    print(int__to_string(vr.y));
 }
 
 //! TEST decl_cast_check
@@ -200,7 +199,7 @@ fun str2chr(s: string) -> char { s; }
 fun void2int() -> int {}
 
 //! TEST type_res
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 class A {}
 
@@ -223,8 +222,8 @@ fun main() {
         age: 10
     };
 
-    printd(b.age);
-    printd(b.sq_age());
+    print(int__to_string(b.age));
+    print(int__to_string(b.sq_age()));
 }
 
 //! TEST type_res_fail_1
@@ -243,14 +242,12 @@ fun main() {
 
 //! TEST type_res_fail_4
 // A is not defined
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 fun consume_a(a: A) {
-    printd(a.age);
+    print(int__to_string(a.age));
 }
 
 //! TEST fun_call
-extern fun print(s: string);
-
 fun main() {
     print_concat3("Hello", ", ", "World!");
     sum3(0, 1, 2);
@@ -262,8 +259,6 @@ fun sum3(a: float, b: float, c: float) -> float {
     a + b + c;
 }
 //! TEST fun_call_fail_1
-extern fun print(s: string);
-
 fun main() {
     print_concat3("Hello");
 }
@@ -271,8 +266,6 @@ fun print_concat3(a: string, b: string, c: string) {
     print(a);
 }
 //! TEST fun_call_fail_2
-extern fun print(s: string);
-
 fun main() {
     print_concat3("Hello, ", "World!", "How", "are", "you?");
 }
@@ -280,8 +273,6 @@ fun print_concat3(a: string, b: string, c: string) {
     print(a);
 }
 //! TEST fun_call_fail_3
-extern fun print(s: string);
-
 fun main() {
     print_concat3(0, 1, 2);
 }

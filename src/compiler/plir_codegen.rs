@@ -1812,11 +1812,9 @@ impl Default for PLIRCodegen {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use inkwell::context::Context;
 
-    use crate::compiler::{PLIRCodegen, STD_FILES};
-    use crate::lexer;
-    use crate::parser::Parser;
+    use crate::compiler::Compiler;
     use crate::test_utils::prelude::*;
 
     load_tests!("codegen", 
@@ -1826,35 +1824,20 @@ mod tests {
     );
 
     fn cg_test(test: Test) -> TestResult<()> {
-        let mut cg = PLIRCodegen::new();
-        for (dfile, _) in &*STD_FILES {
-            let dcode = fs::read_to_string(dfile)
-                .map_err(|e| test.wrap_err(e))?;
-            let lexed = lexer::tokenize(&dcode)
-                .map_err(|e| test.wrap_err(e))?;
-            
-            let ast = Parser::new(lexed, false)
-                .unwrap_d_program()
-                .map_err(|e| test.wrap_err(e))?;
-            
-            cg.consume_program(ast)
-                .map_err(|e| test.wrap_err(e))?;
-        }
+        let ctx = Context::create();
+        let mut compiler = Compiler::new(&ctx, "eval")
+            .map_err(|e| test.wrap_compile_err(e))?;
+        let compile_result = compiler.generate_plir(test.source())
+            .map_err(|e| test.wrap_compile_err(e));
 
-        let ast = test.parse()?;
-        cg.consume_program(ast)
-            .map_err(|e| test.wrap_err(e))?;
-        let cg_result = cg.unwrap()
-            .map_err(|e| test.wrap_err(e));
+        println!("=== {} {} ===",  test.header.name, if compile_result.is_ok() { "PASS" } else { "FAIL" });
 
-        println!("=== {} {} ===",  test.header.name, if cg_result.is_ok() { "PASS" } else { "FAIL" });
-
-        match &cg_result {
-            Ok(t)  => println!("{t}"),
+        match &compile_result {
+            Ok((plir, _))  => println!("{plir}"),
             Err(e) => println!("{e:?}\n"),
         }
         
-        cg_result.map(|_| ())
+        compile_result.map(|_| ())
     }
 
     #[test]

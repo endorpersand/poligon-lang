@@ -1,16 +1,16 @@
 //! TEST basic_if
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 fun test1v(a: bool) {
     if a {
-        printd(2);
+        print(int__to_string(2));
     }
 }
 
 fun test2v(a: bool) {
     if a {
-        printd(2);
+        print(int__to_string(2));
     } else {
-        printd(3);
+        print(int__to_string(3));
     }
 }
 fun test2(a: bool) -> int {
@@ -61,33 +61,34 @@ fun test13(a: bool) -> int {
 fun main() {
     test1v(true);
     test2v(false);
-    printd(test2(false));
-    printd(test3(true, true));
-    printd(test13(false));
+    print(int__to_string(test2(false)));
+    print(int__to_string(test3(true, true)));
+    print(int__to_string(test13(false)));
 }
 
 //! TEST basic_while
-extern fun printd(s: int);
-extern fun print(s: string);
+extern fun int__to_string(s: int) -> string;
+
 let i = 0;
 while i < 10 {
-    printd(i);
+    print(int__to_string(i));
     print("");
     i = i + 1;
 }
 
 //! TEST basic_access
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
+
 let a = 14;
 
-printd(a);
+print(int__to_string(a));
 {
-    printd(a);
+    print(int__to_string(a));
     {
         let a = 15;
-        printd(a);
+        print(int__to_string(a));
     }
-    printd(a);
+    print(int__to_string(a));
 }
 
 
@@ -103,7 +104,6 @@ a = 4;
 ((1 + (2 + 3) * 4) - 5) * 7 / 7;
 
 //! TEST basic_logic_cmp
-extern fun print(s: string);
 fun print_bool(b: bool) {
     print(if b { "true"; } else { "false"; });
 }
@@ -148,7 +148,6 @@ let a = {
 };
 
 //! TEST basic_extern
-extern fun print(s: string);
 print("hello!");
 
 //! TEST fun_recursion_inf
@@ -157,7 +156,7 @@ fun b1() { b2(); }
 fun b2() { b1(); }
 
 //! TEST recursive_fib
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 fun fib(n: int) -> int {
     if n < 2 { return n; }
@@ -165,11 +164,11 @@ fun fib(n: int) -> int {
 }
 
 fun main() {
-    printd(fib(20));
+    print(int__to_string(fib(20)));
 }
 
 //! TEST hoist_block
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 fun compute(n: int) -> int {
     return double(n) + 1;
@@ -179,11 +178,11 @@ fun compute(n: int) -> int {
 
 fun main() {
     let calc = compute(10);
-    printd(calc);
+    print(int__to_string(calc));
 }
 
 //! TEST hoist_block_fail
-extern fun printd(s: int);
+extern fun int__to_string(s: int) -> string;
 
 fun compute(n: int) -> int {
     return double(n) + 1;
@@ -194,5 +193,5 @@ fun compute(n: int) -> int {
 fun main() {
     let dbl = double(10);
     let calc = compute(dbl);
-    printd(calc);
+    print(int__to_string(calc));
 }

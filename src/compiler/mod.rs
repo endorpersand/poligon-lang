@@ -146,7 +146,7 @@ pub enum GonSaveTo<'p> {
 /// let mut compiler = Compiler::new(&ctx, "script.gon").unwrap();
 /// compiler.load_gon_file(path).unwrap();
 /// 
-/// compiler.write_files(GonSaveTo::DiffLoc {
+/// compiler.write_to_disk(GonSaveTo::DiffLoc {
 ///     plir: "script.d.plir.gon".as_ref(), // this saves type information for script
 ///     llvm: "script.bc".as_ref(), // this is bitcode which can be executed by `lli` or `llc`
 /// }).unwrap();
