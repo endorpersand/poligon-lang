@@ -1828,19 +1828,24 @@ mod tests {
     fn cg_test(test: Test) -> TestResult<()> {
         let mut cg = PLIRCodegen::new();
         for (dfile, _) in &*STD_FILES {
-            let dcode = test.wrap_test_result(fs::read_to_string(dfile))?;
-            let lexed = test.wrap_test_result(lexer::tokenize(&dcode))?;
+            let dcode = fs::read_to_string(dfile)
+                .map_err(|e| test.wrap_err(e))?;
+            let lexed = lexer::tokenize(&dcode)
+                .map_err(|e| test.wrap_err(e))?;
             
-            let ast_result = Parser::new(lexed, false)
-                .unwrap_d_program();
-            let ast = test.wrap_test_result(ast_result)?;
+            let ast = Parser::new(lexed, false)
+                .unwrap_d_program()
+                .map_err(|e| test.wrap_err(e))?;
             
-            test.wrap_test_result(cg.consume_program(ast))?;
+            cg.consume_program(ast)
+                .map_err(|e| test.wrap_err(e))?;
         }
 
         let ast = test.parse()?;
-        test.wrap_test_result(cg.consume_program(ast))?;
-        let cg_result = test.wrap_test_result(cg.unwrap());
+        cg.consume_program(ast)
+            .map_err(|e| test.wrap_err(e))?;
+        let cg_result = cg.unwrap()
+            .map_err(|e| test.wrap_err(e));
 
         println!("=== {} {} ===",  test.header.name, if cg_result.is_ok() { "PASS" } else { "FAIL" });
 

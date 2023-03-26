@@ -1273,7 +1273,7 @@ mod tests {
                     c.module.print_to_stderr();
                     Ok(())
                 },
-                Err(e) => t.wrap_test_result(Err(e)),
+                Err(e) => Err(t.wrap_err(e)),
             }
         })
     }
@@ -1284,10 +1284,9 @@ mod tests {
 
         println!("{plir}");
         with_compiler(|c| {
-            let result = c.compile(&plir)
-                .and_then(|f| unsafe { c.jit_run::<()>(f) });
-            
-            t.wrap_test_result(result)
+            c.compile(&plir)
+                .and_then(|f| unsafe { c.jit_run::<()>(f) })
+                .map_err(|e| t.wrap_err(e))
         })
     }
 

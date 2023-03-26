@@ -6,7 +6,7 @@ use std::fs;
 use std::iter::Peekable;
 use std::path::Path;
 
-use crate::compiler::{plir, plir_codegen, LLVMCodegen};
+use crate::compiler::{plir, plir_codegen, LLVMCodegen, CompileErr};
 use crate::err::{FullGonErr, GonErr};
 use crate::interpreter::runtime::{RtContext, self};
 use crate::interpreter::runtime::value::Value;
@@ -82,14 +82,23 @@ pub struct Test<'t> {
 }
 
 impl Test<'_> {
-    pub fn wrap_test_result<T, E: GonErr>(&self, r: Result<T, impl Into<FullGonErr<E>>>) -> TestResult<T> {
-        r.map_err(|e| e.into().full_msg(self.code))
-         .map_err(|e| TestErr::TestFailed(self.header.name.to_string(), e))
+    pub fn wrap_err<E: GonErr>(&self, e: impl Into<FullGonErr<E>>) -> TestErr {
+        TestErr::TestFailed(
+            self.header.name.to_string(),
+            e.into().full_msg(self.code)
+        )
+    }
+    pub fn wrap_compile_err<T>(&self, e: CompileErr<'_>) -> TestErr {
+        match e {
+            CompileErr::IoErr(e) => TestErr::IoErr(e),
+            CompileErr::Computed(e) => TestErr::TestFailed(self.header.name.to_string(), e),
+            CompileErr::LLVMErr(e) => self.wrap_err(e),
+        }
     }
 
     pub fn parse(&self) -> TestResult<ast::Program> {
-        let r = parser::parse(self.tokens.clone());
-        self.wrap_test_result(r)
+        parser::parse(self.tokens.clone())
+            .map_err(|e| self.wrap_err(e))
     }
 
     fn running(&self, loader_id: &str) -> bool {
@@ -100,23 +109,23 @@ impl Test<'_> {
     pub fn interpret(&self) -> TestResult<Value> {
         let mut ctx = RtContext::new();
 
-        let r = self.parse()?.run_with_ctx(&mut ctx);
-        self.wrap_test_result(r)
+        self.parse()?.run_with_ctx(&mut ctx)
+            .map_err(|e| self.wrap_err(e))
     }
 
     #[allow(unused)]
     pub fn interpret_with_io(&self, hook: runtime::IoHook) -> TestResult<Value> {
         let mut ctx = RtContext::new_with_io(hook);
 
-        let r = self.parse()?.run_with_ctx(&mut ctx);
-        self.wrap_test_result(r)
+        self.parse()?.run_with_ctx(&mut ctx)
+            .map_err(|e| self.wrap_err(e))
     }
 
     pub fn codegen(&self) -> TestResult<plir::Program> {
         let ast = self.parse()?;
 
-        let r = plir_codegen::plir_codegen(ast);
-        self.wrap_test_result(r)
+        plir_codegen::plir_codegen(ast)
+            .map_err(|e| self.wrap_err(e))
     }
 
     #[allow(unused)]
@@ -127,7 +136,7 @@ impl Test<'_> {
     
         match compiler.compile(&plir) {
             Ok(f) => Ok((compiler, f)),
-            Err(e) => self.wrap_test_result(Err(e)),
+            Err(e) => Err(self.wrap_err(e)),
         }
     }
 
@@ -141,8 +150,8 @@ impl Test<'_> {
         let ctx = Context::create();
         let (mut compiler, f) = self.compile_w_ctx(&ctx)?;
         
-        let r = compiler.jit_run(f);
-        self.wrap_test_result(r)
+        compiler.jit_run(f)
+            .map_err(|e| self.wrap_err(e))
     }
 }
 
