@@ -101,7 +101,7 @@ impl<'ctx> Display for CompileErr<'ctx> {
 /// A [`Result`] type for operations during the full compilation process.
 pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
 
-/// Indicates the files where [`Compiler::write_files`] should save its results to.
+/// Indicates the files where [`Compiler::write_to_disk`] should save its results to.
 pub enum GonSaveTo<'p> {
     /// Save the files to the same position in the file system as the provided path, 
     /// using the same name (but different extension) as the provided path.
@@ -126,10 +126,11 @@ pub enum GonSaveTo<'p> {
 /// 
 /// Files can be loaded into the compiler. When loaded, the compiler links the code into the
 /// module it is building.
-/// - [`Compiler::load_gon`]: Load a Poligon file.
+/// - [`Compiler::load_gon_file`]: Load a Poligon file.
+/// - [`Compiler::load_gon_str`]: Load a string which holds Poligon code.
 /// - [`Compiler::load_bc`]: Load both a declarations PLIR file (`.d.plir.gon`) and an LLVM bitcode file (`.bc`).
 /// 
-/// Finally, the module created can be extracted using [`Compiler::write_files`] or ran with
+/// Finally, the module created can be extracted using [`Compiler::write_to_disk`] or ran with
 /// [`Compiler::jit_run`].
 /// 
 /// # Usage
@@ -143,7 +144,7 @@ pub enum GonSaveTo<'p> {
 /// let ctx = Context::create();
 /// // loads compiler with std
 /// let mut compiler = Compiler::new(&ctx, "script.gon").unwrap();
-/// compiler.load_gon(path).unwrap();
+/// compiler.load_gon_file(path).unwrap();
 /// 
 /// compiler.write_files(GonSaveTo::DiffLoc {
 ///     plir: "script.d.plir.gon".as_ref(), // this saves type information for script
