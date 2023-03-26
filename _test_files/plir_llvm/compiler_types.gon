@@ -1,6 +1,4 @@
 //! TEST class_chain
-extern fun int__to_string(d: int) -> string;
-
 class A {
     age: int
 }
@@ -33,8 +31,6 @@ fun get_size(e: E) -> int {
 }
 
 //! TEST initializer
-extern fun int__to_string(s: int) -> string;
-
 class A {
     age: int,
     size: int
@@ -42,13 +38,11 @@ class A {
 
 fun main() {
     let a = A #{ age: 14, size: 14 };
-    print(int__to_string(a.age));
-    print(int__to_string(a.size));
+    print(a.age);
+    print(a.size);
 }
 
 //! TEST method_access
-extern fun int__to_string(s: int) -> string;
-
 class A {
     age: int,
 
@@ -63,12 +57,10 @@ class A {
 fun main() {
     let a = A #{ age: 14 };
     a.set_age(15);
-    print(int__to_string(a.age));
+    print(a.age);
 }
 
 //! TEST class_operator_overloading
-extern fun int__to_string(s: int) -> string;
-
 class Vector2 {
     x: int, y: int
     
@@ -105,21 +97,19 @@ fun main() {
     let v2 = Vector2::new(15, 10);
     
     let vr = v1 + v2;
-    print(int__to_string(vr.x));
-    print(int__to_string(vr.y));
+    print(vr.x);
+    print(vr.y);
 
     let v1 = Vector3::new(10, 10, 0);
     let v2 = Vector3::new(15, 10, 0);
     
     let vr = v1 + v2;
-    print(int__to_string(vr.x));
-    print(int__to_string(vr.y));
-    print(int__to_string(vr.z));
+    print(vr.x);
+    print(vr.y);
+    print(vr.z);
 }
 
 //! TEST class_operator_overloading_fail
-extern fun int__to_string(s: int) -> string;
-
 class Vector2 {
     x: int, y: int
     
@@ -156,8 +146,8 @@ fun main() {
     let v2 = Vector3::new(15, 10, 17);
     
     let vr = v1 + v2;
-    print(int__to_string(vr.x));
-    print(int__to_string(vr.y));
+    print(vr.x);
+    print(vr.y);
 }
 
 //! TEST decl_cast_check
@@ -199,8 +189,6 @@ fun str2chr(s: string) -> char { s; }
 fun void2int() -> int {}
 
 //! TEST type_res
-extern fun int__to_string(s: int) -> string;
-
 class A {}
 
 fun consume_a(a: A) {}
@@ -222,8 +210,8 @@ fun main() {
         age: 10
     };
 
-    print(int__to_string(b.age));
-    print(int__to_string(b.sq_age()));
+    print(b.age);
+    print(b.sq_age());
 }
 
 //! TEST type_res_fail_1
@@ -242,9 +230,8 @@ fun main() {
 
 //! TEST type_res_fail_4
 // A is not defined
-extern fun int__to_string(s: int) -> string;
 fun consume_a(a: A) {
-    print(int__to_string(a.age));
+    print(a.age);
 }
 
 //! TEST fun_call

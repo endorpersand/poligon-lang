@@ -1,16 +1,15 @@
 //! TEST basic_if
-extern fun int__to_string(s: int) -> string;
 fun test1v(a: bool) {
     if a {
-        print(int__to_string(2));
+        print(2);
     }
 }
 
 fun test2v(a: bool) {
     if a {
-        print(int__to_string(2));
+        print(2);
     } else {
-        print(int__to_string(3));
+        print(3);
     }
 }
 fun test2(a: bool) -> int {
@@ -61,34 +60,30 @@ fun test13(a: bool) -> int {
 fun main() {
     test1v(true);
     test2v(false);
-    print(int__to_string(test2(false)));
-    print(int__to_string(test3(true, true)));
-    print(int__to_string(test13(false)));
+    print(test2(false));
+    print(test3(true, true));
+    print(test13(false));
 }
 
 //! TEST basic_while
-extern fun int__to_string(s: int) -> string;
-
 let i = 0;
 while i < 10 {
-    print(int__to_string(i));
+    print(i);
     print("");
     i = i + 1;
 }
 
 //! TEST basic_access
-extern fun int__to_string(s: int) -> string;
-
 let a = 14;
 
-print(int__to_string(a));
+print(a);
 {
-    print(int__to_string(a));
+    print(a);
     {
         let a = 15;
-        print(int__to_string(a));
+        print(a);
     }
-    print(int__to_string(a));
+    print(a);
 }
 
 
@@ -156,20 +151,16 @@ fun b1() { b2(); }
 fun b2() { b1(); }
 
 //! TEST recursive_fib
-extern fun int__to_string(s: int) -> string;
-
 fun fib(n: int) -> int {
     if n < 2 { return n; }
     return fib(n - 1) + fib(n - 2); 
 }
 
 fun main() {
-    print(int__to_string(fib(20)));
+    print(fib(20));
 }
 
 //! TEST hoist_block
-extern fun int__to_string(s: int) -> string;
-
 fun compute(n: int) -> int {
     return double(n) + 1;
     
@@ -178,12 +169,10 @@ fun compute(n: int) -> int {
 
 fun main() {
     let calc = compute(10);
-    print(int__to_string(calc));
+    print(calc);
 }
 
 //! TEST hoist_block_fail
-extern fun int__to_string(s: int) -> string;
-
 fun compute(n: int) -> int {
     return double(n) + 1;
     
@@ -193,5 +182,5 @@ fun compute(n: int) -> int {
 fun main() {
     let dbl = double(10);
     let calc = compute(dbl);
-    print(int__to_string(calc));
+    print(calc);
 }

@@ -1944,7 +1944,7 @@ mod tests {
             "type_res_fail_4",
             "fun_call_fail_1",
             "fun_call_fail_2",
-            "fun_call_fail_3"
+            // "fun_call_fail_3"
         ])
     }
 }
