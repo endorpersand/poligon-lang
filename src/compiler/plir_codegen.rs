@@ -646,12 +646,25 @@ impl PLIRCodegen {
 
     /// Creates a new instance of the PLIRCodegen with the given types already declared.
     pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
+        use plir::Type;
+
         let mut top = InsertBlock::top();
         for (ident, cls) in &declared.types {
             top.types.insert(ident.clone(), TypeData::structural(cls.clone()));
         }
-        for (ident, ty) in &declared.values {
-            top.declare(ident, ty.clone());
+        for (ident, value_ty) in &declared.values {
+            top.declare(ident, value_ty.clone());
+
+            // register methods
+            // methods are of the form ty::ident(arg0: ty, ..)
+            if let (Some((cls, met)), Type::Fun(fty)) = (ident.split_once("::"), value_ty) {
+                // FIXME: better method check
+                if let Some((Type::Prim(t1), cls_data)) = fty.params.get(0).zip(top.types.get_mut(cls)) {
+                    if t1 == cls {
+                        cls_data.insert_method(met.to_string(), ident.to_string());
+                    }
+                }
+            }
         }
 
         Self { 
