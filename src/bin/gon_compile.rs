@@ -1,5 +1,7 @@
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
-use std::io;
+use std::{io, fs};
 
 use clap::Parser;
 use inkwell::context::Context;
@@ -43,9 +45,17 @@ fn main() -> io::Result<()> {
         unwrap_or_exit! { Compiler::new(&ctx, name) }
     };
     
-    unwrap_or_exit! { compiler.load_gon_and_save_plir(&fp, Some(fp.with_extension("plir.gon"))) };
+    let code = fs::read_to_string(&fp)?;
+    let (plir, dtypes) = unwrap_or_exit! { compiler.generate_plir(&code) };
+    
+    compiler.set_filename(fp.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("eval"));
+    // print PLIR
+    let mut file = File::create(fp.with_extension("plir.gon"))?;
+    file.write_all(plir.to_string().as_bytes())?;
 
-    unwrap_or_exit! { compiler.write_files(GonSaveTo::SameLoc(fp.as_ref())) };
+    unwrap_or_exit! { compiler.load_plir(&plir, dtypes) };
+
+    unwrap_or_exit! { compiler.write_to_disk(GonSaveTo::SameLoc(fp.as_ref())) };
     unwrap_or_exit! { compiler.to_ll(fp.with_extension("ll")) };
 
     unwrap_or_exit! { unsafe { compiler.jit_run::<()>() } }
