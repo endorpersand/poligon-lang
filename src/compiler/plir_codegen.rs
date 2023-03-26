@@ -1054,13 +1054,16 @@ impl PLIRCodegen {
                     };
 
                     match me.take() {
-                        Some(e) => match op_impl::apply_special_cast(e, &exp_ty, CastType::FunDecl) {
-                            Ok(e) => {
-                                // cast was successful so apply it
-                                me.replace(e);
-                                *exit_ty = exp_ty;
-                            },
-                            Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
+                        Some(e) => {
+                            let le = Located::new(e, exit_range.clone());
+                            match self.apply_special_cast(le, &exp_ty, CastType::FunDecl)? {
+                                Ok(e) => {
+                                    // cast was successful so apply it
+                                    me.replace(e.0);
+                                    *exit_ty = exp_ty;
+                                },
+                                Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
+                            }
                         },
                         // exit_ty is void, and we already checked that exp_ty is not void
                         None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
@@ -1208,17 +1211,15 @@ impl PLIRCodegen {
                     None => None,
                 }))
             }),
-            |this, unit, e, extra| {
+            |this, unit, le, extra| {
                 let Located(ast::DeclUnit(ident, mt), _) = unit;
-                let Located(e, erange) = e;
-
                 let (rt, ty) = extra;
 
-                let ty = ty.unwrap_or_else(|| e.ty.clone());
+                let ty = ty.unwrap_or_else(|| le.0.ty.clone());
                 // Type check decl, casting if possible
-                let e = match op_impl::apply_special_cast(e, &ty, CastType::Decl) {
-                    Ok(e) => e,
-                    Err(e) => return Err(PLIRErr::ExpectedType(ty, e.ty).at_range(erange)),
+                let e = match this.apply_special_cast(le, &ty, CastType::Decl)? {
+                    Ok(le) => le.0,
+                    Err(le) => return Err(PLIRErr::ExpectedType(ty, le.0.ty).at_range(le.1)),
                 };
 
                 this.declare(&ident, ty.clone());
@@ -1482,10 +1483,11 @@ impl PLIRCodegen {
                                     .at_range(tyrange.clone())
                             })?;
                         
-                        let Located(field_expr, expr_range) = self.consume_located_expr(ast_expr, Some(field_ty.clone()))?;
+                        let lfield_expr = self.consume_located_expr(ast_expr, Some(field_ty.clone()))?;
                         
-                        op_impl::apply_special_cast(field_expr, &field_ty, CastType::Decl)
-                            .map_err(|e| PLIRErr::ExpectedType(field_ty, e.ty).at_range(expr_range))
+                        self.apply_special_cast(lfield_expr, &field_ty, CastType::Decl)?
+                            .map(|le| le.0)
+                            .map_err(|le| PLIRErr::ExpectedType(field_ty, le.0.ty).at_range(le.1))
                     })
                     .collect::<PLIRResult<_>>()?;
                 
@@ -1552,14 +1554,15 @@ impl PLIRCodegen {
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
-                let e = self.consume_expr(*expr, None)?;
+                let le = self.consume_located_expr(*expr, None)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(e, |expr, op| self.apply_unary(expr, op, range.clone()))
+                    .try_fold(le, |expr, op| self.apply_unary(expr, op, range.clone()))
+                    .map(|le| le.0)
             },
             ast::Expr::BinaryOp { op, left, right } => {
-                let left = self.consume_expr(*left, None)?;
-                let right = self.consume_expr(*right, None)?;
+                let left = self.consume_located_expr(*left, None)?;
+                let right = self.consume_located_expr(*right, None)?;
                 self.apply_binary(op, left, right, range)
             },
             ast::Expr::Comparison { left, rights } => {
@@ -1656,24 +1659,24 @@ impl PLIRCodegen {
                                 .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
                                 .and_then(|e| self.consume_located_expr(e, Some(_ptr.clone())))
                                 .and_then(|le| {
-                                    let Located(e, erange) = le;
-
-                                    op_impl::apply_special_cast(e, &_ptr, CastType::Call)
-                                    .map_err(|e| {
-                                        PLIRErr::ExpectedType(_ptr.clone(), e.ty).at_range(erange)
+                                    self.apply_special_cast(le, &_ptr, CastType::Call)?
+                                    .map(|le| le.0)
+                                    .map_err(|le| {
+                                        PLIRErr::ExpectedType(_ptr.clone(), le.0.ty).at_range(le.1)
                                     })
                                 })
                                 .map(Box::new)?;
 
                             let params = piter.map(|expr| {
                                 let _int = plir::ty!(plir::Type::S_INT);
-                                let Located(param, prange) = self.consume_located_expr(
+                                let lparam = self.consume_located_expr(
                                     expr, Some(_int.clone())
                                 )?;
                                 
-                                op_impl::apply_special_cast(param, &_int, CastType::Call)
-                                    .map_err(|e| {
-                                        PLIRErr::ExpectedType(_int.clone(), e.ty).at_range(prange)
+                                self.apply_special_cast(lparam, &_int, CastType::Call)?
+                                    .map(|le| le.0)
+                                    .map_err(|le| {
+                                        PLIRErr::ExpectedType(_int.clone(), le.0.ty).at_range(le.1)
                                     })
                             })
                             .collect::<Result<_, _>>()?;
@@ -1712,16 +1715,16 @@ impl PLIRCodegen {
                         let params = params.into_iter()
                             .map(|expr| {
                                 let mpty = pty_iter.next();
-                                let Located(param, prange) = self.consume_located_expr(expr, mpty.cloned())?;
+                                let lparam = self.consume_located_expr(expr, mpty.cloned())?;
                                 
                                 if let Some(pty) = mpty {
-                                    op_impl::apply_special_cast(param, pty, CastType::Call)
-                                        .map_err(|e| {
-                                            PLIRErr::ExpectedType(pty.clone(), e.ty).at_range(prange)
+                                    self.apply_special_cast(lparam, pty, CastType::Call)?
+                                        .map_err(|le| {
+                                            PLIRErr::ExpectedType(pty.clone(), le.0.ty).at_range(le.1)
                                         })
                                 } else {
-                                    Ok(param)
-                                }
+                                    Ok(lparam)
+                                }.map(|lp| lp.0)
                             })
                             .collect::<Result<_, _>>()?;
                         
@@ -1754,8 +1757,9 @@ impl PLIRCodegen {
         self.consume_expr(expr, ctx_type).map(Box::new)
     }
     fn consume_expr_truth(&mut self, expr: Located<ast::Expr>) -> PLIRResult<plir::Expr> {
-        self.consume_expr(expr, None)
-            .map(|e| op_impl::apply_cast(e, &plir::ty!(plir::Type::S_BOOL)).unwrap())
+        self.consume_located_expr(expr, None)
+            .and_then(|le| self.apply_cast(le, &plir::ty!(plir::Type::S_BOOL)))
+            .map(|mle| mle.unwrap().0)
     }
 
     fn consume_path(&mut self, p: Located<ast::Path>) -> PLIRResult<plir::Path> {
@@ -1806,9 +1810,9 @@ impl PLIRCodegen {
         let Located(ast::Index { expr, index }, expr_range) = idx;
 
         let expr = self.consume_located_expr(*expr, None)?;
-        let index = self.consume_expr(*index, None)?;
+        let index = self.consume_located_expr(*index, None)?;
         
-        op_impl::apply_index(expr, index, expr_range)
+        self.apply_index(expr, index, expr_range)
     }
 
     fn consume_deref(&mut self, d: Located<ast::IDeref>, ty: plir::Type) -> PLIRResult<plir::IDeref> {

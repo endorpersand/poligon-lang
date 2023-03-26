@@ -52,71 +52,87 @@ impl std::fmt::Display for OpErr {
         }
     }
 }
+
+type HomoResult<T> = Result<T, T>;
+struct Cast<'a> {
+    src: Located<Expr>,
+    dest: &'a Type,
+    ct: CastType
+}
+impl<'a> Cast<'a> {
+    fn can_cast(&self, cg: &mut super::PLIRCodegen) -> PLIRResult<bool> {
+        use CastType::*;
+        use TypeRef::*;
+
+        let result = match (self.src.ty.as_ref(), self.dest.as_ref(), self.ct) {
+            (l, r, _) if l == r => true,
+            (Prim(Type::S_INT),  Prim(Type::S_FLOAT), Any | Decl | FunDecl | Call) => true,
+            (_, Prim(Type::S_STR), Any | Decl | FunDecl | Call) => {
+                // Load src class
+                let cls = cg.get_class(&self.src.ty, self.src.1.clone())?;
+                // Check if it has to_string method (with correct signature)
+                if let Some(met_ident) = cls.get_method("to_string") {
+                    let met_ident = met_ident.to_string();
+                    
+                    cg.resolve_ident(&met_ident)?;
+                    cg.get_var_type_opt(&met_ident)
+                        .filter(|&t| match t.as_ref() {
+                            Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
+                            _ => false
+                        })
+                        .is_some()
+                } else {
+                    false
+                }
+            },
+            (_, Prim(Type::S_BOOL), Any) => true,
+            (_, Prim(Type::S_VOID), Any | FunDecl) => true,
+            _ => false
+        };
+
+        Ok(result)
+    }
+
+    fn apply_cast(self, cg: &mut super::PLIRCodegen) -> PLIRResult<HomoResult<Located<Expr>>> {
+        fn basic_cast(src: Located<Expr>, dest: &Type) -> Located<Expr> {
+            src.map(|e| Expr {
+                ty: dest.clone(), expr: ExprType::Cast(Box::new(e))
+            })
+        }
+
+        let result = if self.can_cast(cg)? {
+            // all casts are basic casts except str casts
+            let result = match (self.src.ty.as_ref(), self.dest.as_ref()) {
+                (l, r) if l == r => self.src,
+                (_, TypeRef::Prim(s)) if s == Type::S_STR => {
+                    let Located(src, src_range) = self.src;
+                    let to_string = cg.get_class(&src.ty, src_range.clone())?
+                        .get_method("to_string")
+                        .unwrap()
+                        .to_string();
+                    
+                    let fn_type = cg.get_var_type(&to_string, src_range.clone())?
+                        .clone();
+                    
+                    Located::new(Expr::call(
+                        Located::new(Expr::new(fn_type, ExprType::Ident(to_string)), src_range.clone()), 
+                        vec![src]
+                    )?, src_range)
+                },
+                _ => basic_cast(self.src, self.dest)
+            };
+
+            Ok(result)
+        } else {
+            Err(self.src)
+        };
+
+        Ok(result)
+    }
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CastType {
-    All, Decl, FunDecl, Call
-}
-/// Try to cast the expression to the given type, erroring if the cast fails.
-pub fn apply_cast(e: Expr, ty: &Type) -> Result<Expr, Expr> {
-    apply_special_cast(e, ty, CastType::All)
-}
-
-fn accept_cast(left: TypeRef, right: TypeRef, ct: CastType) -> bool {
-    use CastType::*;
-    use TypeRef::*;
-
-    match (left, right) {
-        (Prim(Type::S_INT),  Prim(Type::S_FLOAT)) => matches!(ct, All | Decl | FunDecl | Call),
-        (Prim(Type::S_CHAR), Prim(Type::S_STR))   => matches!(ct, All | Decl | FunDecl | Call),
-        (_, Prim(Type::S_BOOL)) => matches!(ct, All),
-        (_, Prim(Type::S_VOID)) => matches!(ct, All | FunDecl),
-        _ => false
-    }
-}
-
-pub fn apply_special_cast(e: Expr, ty: &Type, ct: CastType) -> Result<Expr, Expr> {
-    let left = e.ty.as_ref();
-    let right = ty.as_ref();
-
-    if left == right { return Ok(e); }
-
-    match accept_cast(left, right, ct) {
-        true => Ok(Expr {
-            ty: ty.clone(), expr: ExprType::Cast(Box::new(e))
-        }),
-        false => Err(e),
-    }
-}
-
-fn uncast(e: Expr) -> Expr {
-    if let Expr {expr: ExprType::Cast(inner), ..} = e {
-        *inner
-    } else {
-        e
-    }
-}
-
-/// Try the function on each of the function until an Ok result is obtained.
-fn chain<T>(e: T, tys: &[Type], mut f: impl FnMut(T, &Type) -> Result<T, T>) -> Result<T, T> {
-    let mut uncast = e;
-    for ty in tys {
-        match f(uncast, ty) {
-            Ok(t) => return Ok(t),
-            Err(e) => uncast = e,
-        }
-    }
-
-    Err(uncast)
-}
-
-fn apply_cast2((left, right): (Expr, Expr), t: &Type) -> Result<(Expr, Expr), (Expr, Expr)> {
-    match apply_cast(left, t) {
-        Ok(l) => match apply_cast(right, t) {
-            Ok(r) => Ok((l, r)),
-            Err(r) => Err((uncast(l), uncast(r))),
-        }
-        Err(l) => Err((uncast(l), right)),
-    }
+    Any, Decl, FunDecl, Call
 }
 
 trait ResultIntoInner {
@@ -124,7 +140,7 @@ trait ResultIntoInner {
     fn into_inner(self) -> Self::Inner;
 }
 
-impl<T> ResultIntoInner for Result<T, T> {
+impl<T> ResultIntoInner for HomoResult<T> {
     type Inner = T;
 
     fn into_inner(self) -> Self::Inner {
@@ -136,8 +152,62 @@ impl<T> ResultIntoInner for Result<T, T> {
 }
 
 impl super::PLIRCodegen {
+    /// Try to cast the expression to the given type, returning the expression if it fails.
+    pub(super) fn apply_cast(&mut self, src: Located<Expr>, dest: &Type) -> PLIRResult<HomoResult<Located<Expr>>> {
+        self.apply_special_cast(src, dest, CastType::Any)
+    }
+    pub(super) fn apply_special_cast(&mut self, src: Located<Expr>, dest: &Type, ct: CastType) -> PLIRResult<HomoResult<Located<Expr>>> {
+        Cast { src, dest, ct }.apply_cast(self)
+    }
+    fn apply_cast2(&mut self, (left, right): (Located<Expr>, Located<Expr>), dest: &Type) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+        let cast1 = Cast { src: left, dest, ct: CastType::Any };
+        let cast2 = Cast { src: right, dest, ct: CastType::Any };
+
+        let result = if cast1.can_cast(self)? && cast2.can_cast(self)? {
+            Ok(cast1.apply_cast(self)?.ok().zip(cast2.apply_cast(self)?.ok()).unwrap())
+        } else {
+            Err((cast1.src, cast2.src))
+        };
+
+        Ok(result)
+    }
+
+    /// Try casting the expression to one of the given types until successful.
+    fn cast_chain(&mut self, src: Located<Expr>, tys: &[Type]) -> PLIRResult<HomoResult<Located<Expr>>> {
+        let mut cast = Cast { src, dest: &ty!(Type::S_NEVER), ct: CastType::Any };
+        for dest in tys {
+            cast.dest = dest;
+
+            if cast.can_cast(self)? {
+                return cast.apply_cast(self);
+            }
+        }
+        
+        Ok(Err(cast.src))
+    }
+
+    /// Try casting the expression to one of the given types until successful.
+    fn cast_chain2(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: &[Type]) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+        let mut cast1 = Cast { src: left,  dest: &ty!(Type::S_NEVER), ct: CastType::Any };
+        let mut cast2 = Cast { src: right, dest: &ty!(Type::S_NEVER), ct: CastType::Any };
+
+        for dest in tys {
+            cast1.dest = dest;
+            cast2.dest = dest;
+
+            if cast1.can_cast(self)? && cast2.can_cast(self)? {
+                let dest1 = cast1.apply_cast(self)?.unwrap();
+                let dest2 = cast2.apply_cast(self)?.unwrap();
+
+                return Ok(Ok((dest1, dest2)))
+            }
+        }
+        
+        Ok(Err((cast1.src, cast2.src)))
+    }
+
     /// Checks if this unary operator exists as a method.
-    fn find_unary(&mut self, op: op::Unary, left: TypeRef) -> PLIRResult<Option<Expr>> {
+    fn find_unary_method(&mut self, op: op::Unary, left: TypeRef) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Unary::Plus   => "plus",
             op::Unary::Minus  => "minus",
@@ -155,20 +225,20 @@ impl super::PLIRCodegen {
         Ok(e)
     }
     
-    pub(super) fn apply_unary(&mut self, e: Expr, op: op::Unary, unary_range: CursorRange) -> PLIRResult<Expr> {
+    pub(super) fn apply_unary(&mut self, e: Located<Expr>, op: op::Unary, unary_range: CursorRange) -> PLIRResult<Located<Expr>> {
         // Check for any valid casts that can be applied here:
         let cast = match op {
             op::Unary::Plus => {
-                chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
+                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
             op::Unary::Minus => {
-                chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast).into_inner()
+                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
             op::Unary::LogNot => {
-                apply_cast(e, &ty!(Type::S_BOOL)).into_inner()
+                self.apply_cast(e, &ty!(Type::S_BOOL))?.into_inner()
             },
             op::Unary::BitNot => e,
-        };
+        }.0;
     
         // Type check and compute resulting expr type:
         let ty = {
@@ -180,12 +250,13 @@ impl super::PLIRCodegen {
                 (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
                 (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
                 (op, tyref) => {
-                    let fun = self.find_unary(op, tyref)?
+                    let fun = self.find_unary_method(op, tyref)?
                         .ok_or_else(|| {
                             OpErr::CannotUnary(op, ty).at_range(unary_range.clone())
                         })?;
                     
-                    return Expr::call(Located::new(fun, unary_range), vec![cast]);
+                    return Expr::call(Located::new(fun, unary_range.clone()), vec![cast])
+                        .map(|e| Located::new(e, unary_range));
                 }
             }
         };
@@ -201,11 +272,11 @@ impl super::PLIRCodegen {
                 expr: Box::new(Expr { ty: cast.ty, expr: e }) 
             }
         };
-        Ok(Expr { ty, expr })
+        Ok(Located::new(Expr { ty, expr }, unary_range))
     }
 
     /// Checks if this unary operator exists as a method.
-    fn find_binary(&mut self, op: op::Binary, left: TypeRef, right: TypeRef) -> PLIRResult<Option<Expr>> {
+    fn find_binary_method(&mut self, op: op::Binary, left: TypeRef, right: TypeRef) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Binary::Add => "add",
             op::Binary::Sub => "sub",
@@ -234,8 +305,8 @@ impl super::PLIRCodegen {
     pub(super) fn apply_binary(
         &mut self, 
         op: op::Binary, 
-        left: Expr, 
-        right: Expr, 
+        left: Located<Expr>, 
+        right: Located<Expr>, 
         expr_range: CursorRange
     ) -> PLIRResult<Expr> {
         // Check for any valid casts that can be applied here:
@@ -247,19 +318,19 @@ impl super::PLIRCodegen {
                     ty!(Type::S_INT),
                     ty!(Type::S_FLOAT)
                 ];
-                chain((left, right), types, apply_cast2).into_inner()
+                self.cast_chain2((left, right), types)?.into_inner()
             },
             op::Binary::Sub => {
-                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
             op::Binary::Mul => {
-                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
             op::Binary::Div => {
-                apply_cast2((left, right), &ty!(Type::S_FLOAT)).into_inner()
+                self.apply_cast2((left, right), &ty!(Type::S_FLOAT))?.into_inner()
             },
             op::Binary::Mod => {
-                chain((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], apply_cast2).into_inner()
+                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
             op::Binary::Shl    => (left, right),
             op::Binary::Shr    => (left, right),
@@ -281,8 +352,6 @@ impl super::PLIRCodegen {
                 (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
                 (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => ty!(Type::S_FLOAT),
                 (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-                // collections:
-                (op::Binary::Add, l @ (TypeRef::Prim(Type::S_STR) | TypeRef::Generic(Type::S_LIST, _)), r) if l == r => left,
                 // bitwise operators:
                 (op::Binary::Shl, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
                 (op::Binary::Shr, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
@@ -293,64 +362,62 @@ impl super::PLIRCodegen {
                 (op::Binary::LogAnd, l, r) if l == r => left,
                 (op::Binary::LogOr, l, r) if l == r => left,
                 (op, leftref, rightref) => {
-                    let fun = self.find_binary(op, leftref, rightref)?
+                    let fun = self.find_binary_method(op, leftref, rightref)?
                         .ok_or_else(|| {
                             OpErr::CannotBinary(op, left, right.clone())
                                 .at_range(expr_range.clone())
                         })?;
 
-                    return Expr::call(Located::new(fun, expr_range), vec![lcast, rcast]);
+                    return Expr::call(Located::new(fun, expr_range), vec![lcast.0, rcast.0]);
                 }
             }
         };
     
         // Construct expression:
-        Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast), right: Box::new(rcast) }})
+        Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast.0), right: Box::new(rcast.0) }})
+    }
+
+    pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
+        // Check for any valid casts that can be applied here:
+        let lcast = self.apply_cast(left, &ty!(Type::S_STR))?.into_inner();
+    
+        let icast = match lcast.ty.as_ref() {
+            | TypeRef::Prim(Type::S_STR)
+            | TypeRef::Generic(Type::S_LIST, _)
+            | TypeRef::Tuple(_)
+            => self.apply_cast(index, &ty!(Type::S_INT))?.into_inner(),
+            
+            TypeRef::Generic(Type::S_DICT, [k, _]) => self.apply_cast(index, k)?.into_inner(),
+            
+            _ => return Err(OpErr::CannotIndex(lcast.0.ty).at_range(lcast.1).into())
+        }.0;
+    
+        // Type check and compute resulting expr type:
+        let ty = {
+            let left = lcast.ty.clone();
+            let index = &icast.ty;
+            match (left.as_ref(), index.as_ref()) {
+                (TypeRef::Prim(Type::S_STR), TypeRef::Prim(Type::S_INT)) => ty!(Type::S_CHAR),
+                (TypeRef::Generic(Type::S_LIST, [t]), TypeRef::Prim(Type::S_INT)) => t.clone(),
+                (TypeRef::Generic(Type::S_DICT, [k, v]), idx) if idx == k => v.clone(),
+                (TypeRef::Tuple(tys), TypeRef::Prim(Type::S_INT)) => {
+                    let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
+                        let err = OpErr::TupleIndexNonLiteral(left).at_range(expr_range);
+                        return Err(err.into());
+                    };
+                    let Ok(idx) = usize::try_from(lit) else {
+                        let err = OpErr::TupleIndexOOB(left, lit).at_range(expr_range);
+                        return Err(err.into());
+                    };
+    
+                    tys.get(idx).cloned().ok_or_else(|| OpErr::TupleIndexOOB(left, lit).at_range(expr_range))?
+                },
+                _ => Err(OpErr::CannotIndexWith(left, index.clone()).at_range(expr_range))?
+            }
+        };
+    
+        // Construct expression:
+        Ok((ty, Index { expr: Box::new(lcast.0), index: Box::new(icast) }))
     }
 }
 
-
-pub fn apply_index(left: Located<Expr>, index: Expr, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
-    let Located(left, lrange) = left;
-
-    // Check for any valid casts that can be applied here:
-    let lcast = apply_cast(left, &ty!(Type::S_STR)).into_inner();
-
-    let icast = match lcast.ty.as_ref() {
-        | TypeRef::Prim(Type::S_STR)
-        | TypeRef::Generic(Type::S_LIST, _)
-        | TypeRef::Tuple(_)
-        => apply_cast(index, &ty!(Type::S_INT)).into_inner(),
-        
-        TypeRef::Generic(Type::S_DICT, [k, _]) => apply_cast(index, k).into_inner(),
-        
-        _ => return Err(OpErr::CannotIndex(lcast.ty).at_range(lrange).into())
-    };
-
-    // Type check and compute resulting expr type:
-    let ty = {
-        let left = lcast.ty.clone();
-        let index = &icast.ty;
-        match (left.as_ref(), index.as_ref()) {
-            (TypeRef::Prim(Type::S_STR), TypeRef::Prim(Type::S_INT)) => ty!(Type::S_CHAR),
-            (TypeRef::Generic(Type::S_LIST, [t]), TypeRef::Prim(Type::S_INT)) => t.clone(),
-            (TypeRef::Generic(Type::S_DICT, [k, v]), idx) if idx == k => v.clone(),
-            (TypeRef::Tuple(tys), TypeRef::Prim(Type::S_INT)) => {
-                let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
-                    let err = OpErr::TupleIndexNonLiteral(left).at_range(expr_range);
-                    return Err(err.into());
-                };
-                let Ok(idx) = usize::try_from(lit) else {
-                    let err = OpErr::TupleIndexOOB(left, lit).at_range(expr_range);
-                    return Err(err.into());
-                };
-
-                tys.get(idx).cloned().ok_or_else(|| OpErr::TupleIndexOOB(left, lit).at_range(expr_range))?
-            },
-            _ => Err(OpErr::CannotIndexWith(left, index.clone()).at_range(expr_range))?
-        }
-    };
-
-    // Construct expression:
-    Ok((ty, Index { expr: Box::new(lcast), index: Box::new(icast) }))
-}
