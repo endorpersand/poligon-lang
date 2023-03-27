@@ -279,7 +279,11 @@ macro_rules! ty {
 
     (($($p:expr),*) -> $r:expr) => {
         $crate::compiler::plir::Type::Fun(
-            $crate::compiler::plir::FunType(vec![$($p),*], Box::new($r))
+            $crate::compiler::plir::FunType {
+                params: vec![$($p),*], 
+                ret: Box::new($r),
+                varargs: false
+            }
         )
     };
 }

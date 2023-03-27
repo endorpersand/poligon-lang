@@ -542,6 +542,8 @@ pub enum LLVMErr<'ctx> {
     CannotCast(plir::Type, plir::Type),
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
+    /// Endpoint for LLVM (main function) had invalid parameters.
+    InvalidMain,
     /// An error occurred within LLVM.
     LLVMErr(LLVMString),
     /// Index out of bounds access on struct occurred
@@ -562,6 +564,7 @@ impl<'ctx> GonErr for LLVMErr<'ctx> {
 
             | LLVMErr::InvalidFun
             | LLVMErr::CannotDetermineMain
+            | LLVMErr::InvalidMain
             => "syntax error",
 
             LLVMErr::UnresolvedType(_)
@@ -595,6 +598,7 @@ impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
             LLVMErr::CannotCast(t1, t2)       => write!(f, "cannot perform type cast from '{t1}' to {t2}"),
             LLVMErr::StructIndexOOB(i)        => write!(f, "cannot index struct, does not have field {i}"),
             LLVMErr::CannotDetermineMain      => write!(f, "could not determine entry point"),
+            LLVMErr::InvalidMain              => write!(f, "expected main to be of type {}", plir::ty!(() -> plir::ty!(plir::Type::S_VOID))),
             LLVMErr::LLVMErr(e)               => write!(f, "{e}"),
             LLVMErr::Generic(_, t)            => write!(f, "{t}"),
         }
@@ -629,6 +633,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         use plir::HoistedStmt;
 
+        let _i8 = compiler.ctx.i8_type();
         // split the functions from everything else:
         let mut main_fun = None;
         let mut fun_bodies = vec![];
@@ -662,7 +667,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             (None, stmts) => {
                 let main_fn = compiler.module.add_function(
                     "main", 
-                    fn_type![() -> compiler.ctx.void_type()],
+                    fn_type![() -> _i8],
                     None
                 );
                 (main_fn, Some(stmts))
@@ -697,7 +702,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             for stmt in stmts {
                 stmt.write_value(compiler)?;
             }
-            compiler.builder.build_return(None);
+            compiler.builder.build_return(Some(&_i8.const_zero()));
         }
 
         // main initializer
