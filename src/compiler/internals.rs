@@ -110,10 +110,10 @@ c_intrinsics! {
         fun_type![(INT_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
         fn_type_s![(*INT_L, *PTR_L) -> *PTR_L]
     },
-    abs: { // (int) -> int
+    abs: { // (int, bool) -> int
         "llvm.abs.i64",
-        fun_type![(INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L) -> *INT_L]
+        fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
     },
     fabs: { // (float) -> float
         "llvm.fabs.f64",
@@ -138,13 +138,13 @@ c_intrinsics! {
         fun_type![(INT_P.clone(), INT_P.clone()) -> INT_P.clone()],
         fn_type_s![(*INT_L, *INT_L) -> *INT_L]
     },
-    fmax: { // (float, float) -> float
-        "llvm.fmax.f64",
+    maxnum: { // (float, float) -> float
+        "llvm.maxnum.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
         fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
-    fmin: { // (float, float) -> float
-        "llvm.fmin.f64",
+    minnum: { // (float, float) -> float
+        "llvm.minnum.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
         fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
@@ -206,7 +206,7 @@ c_intrinsics! {
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
         fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
-    powi: { // (float int) -> float
+    powi: { // (float, int) -> float
         "llvm.powi.f64.i64",
         fun_type![(FLOAT_P.clone(), INT_P.clone()) -> FLOAT_P.clone()],
         fn_type_s![(*FLOAT_L, *INT_L) -> *FLOAT_L]
@@ -243,8 +243,8 @@ c_intrinsics! {
     },
     atan2: { // (float, float) -> float
         "atan2",
-        fun_type![(FLOAT_P.clone(), INT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *INT_L) -> *FLOAT_L]
+        fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
+        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
     sinh: { // (float) -> float
         "sinh",
@@ -342,20 +342,12 @@ c_intrinsics! {
     nexttoward: { // (float, float) -> float
         "nexttoward",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *INT_L) -> *FLOAT_L]
+        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
     copysign: { // (float, float) -> float
         "llvm.copysign.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *INT_L) -> *FLOAT_L]
-    },
-    // fpclassify: {
-
-    // },
-    isfinite: { // (float) -> bool
-        "isfinite",
-        fun_type![(FLOAT_P.clone()) -> BOOL_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *BOOL_L]
+        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
     },
     isinf: { // (float) -> bool
         "isinf",
@@ -367,14 +359,14 @@ c_intrinsics! {
         fun_type![(FLOAT_P.clone()) -> BOOL_P.clone()],
         fn_type_s![(*FLOAT_L) -> *BOOL_L]
     },
-    isnormal: { // (float) -> bool
-        "isnormal",
-        fun_type![(FLOAT_P.clone()) -> BOOL_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *BOOL_L]
-    },
     // signbit: {
 
     // }
+    ctpop: { // (int) -> int
+        "llvm.ctpop.i64",
+        fun_type![(INT_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*INT_L) -> *INT_L]
+    },
     bitreverse: { // (int) -> int
         "llvm.bitreverse.i64",
         fun_type![(INT_P.clone()) -> INT_P.clone()],

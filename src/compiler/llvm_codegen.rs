@@ -424,7 +424,6 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Import a function using the provided PLIR function signature.
     fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
-        let (_, _fun_ty) = self.define_fun(sig)?;
         let intrinsic = self.import_intrinsic(&sig.ident)?;
 
         let llvm_name = intrinsic.get_name()
