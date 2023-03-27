@@ -204,7 +204,8 @@ pub struct LLVMCodegen<'ctx> {
     pub(super) exit_pointers: Vec<ExitPointers<'ctx>>,
 
     pub(super) vars: HashMap<String, PointerValue<'ctx>>,
-    pub(super) globals: HashMap<String, GlobalValue<'ctx>>
+    pub(super) globals: HashMap<String, GlobalValue<'ctx>>,
+    pub(super) fn_aliases: HashMap<String, String>
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -218,7 +219,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
             exit_pointers: vec![],
 
             vars: HashMap::new(),
-            globals: HashMap::new()
+            globals: HashMap::new(),
+            fn_aliases: HashMap::new()
         }
     }
 
@@ -388,10 +390,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Create a function value from the function's PLIR signature.
-    fn define_fun(&self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
+    fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { ident, params, ret, varargs } = sig;
 
-        let fun = match self.module.get_function(ident) {
+        let fun = match self.get_fn_by_plir_ident(ident) {
             Some(f) => f,
             None => {
                 let arg_tys: Vec<_> = params.iter()
@@ -401,7 +403,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let fun_ty = self.get_layout_or_void(ret)?
                     .fn_type(&arg_tys, *varargs);
                 let fun = self.module.add_function(ident, fun_ty, None);
-        
+                let fun_name = fun.get_name()
+                    .to_str()
+                    .expect("Expected UTF-8 function name")
+                    .to_string();
+                self.fn_aliases.insert(ident.clone(), fun_name);
+
                 // set arguments names
                 for (param, arg) in iter::zip(params, fun.get_param_iter()) {
                     apply_bv!(let v = arg => v.set_name(&param.ident));
@@ -418,7 +425,20 @@ impl<'ctx> LLVMCodegen<'ctx> {
     fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
         let (_, _fun_ty) = self.define_fun(sig)?;
-        self.import_libc(&sig.ident)
+        let intrinsic = self.import_intrinsic(&sig.ident)?;
+
+        let llvm_name = intrinsic.get_name()
+            .to_str()
+            .expect("expected UTF-8 fn name")
+            .to_string();
+        self.fn_aliases.insert(sig.ident.clone(), llvm_name);
+        Ok(intrinsic)
+    }
+
+    fn get_fn_by_plir_ident(&self, plir_ident: &str) -> Option<FunctionValue<'ctx>> {
+        let llvm_ident = self.fn_aliases.get(plir_ident)
+            .map_or(plir_ident, |t| t);
+        self.module.get_function(llvm_ident)
     }
 
     /// Define a type for the compiler to track.
@@ -686,7 +706,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         let init_bb = compiler.ctx.prepend_basic_block(main_bb, "init");
         compiler.builder.position_at_end(init_bb);
 
-        let setlocale = compiler.import_libc("setlocale")?;
+        let setlocale = compiler.import_intrinsic("#setlocale")?;
         let _int = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
         compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
@@ -954,7 +974,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     e => todo!("arbitrary expr calls: {e:?}")
                 };
 
-                let fun = compiler.module.get_function(&fun_ident)
+                let fun = compiler.get_fn_by_plir_ident(&fun_ident)
                     .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.into_owned()))?;
 
                 let fun_ret = match &funct.ty {
@@ -1205,7 +1225,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
 
-        let fun = compiler.module.get_function(&sig.ident)
+        let fun = compiler.get_fn_by_plir_ident(&sig.ident)
             .unwrap_or_else(|| panic!("function {} should be declared", sig.ident));
 
         let bb = compiler.ctx.append_basic_block(fun, "body");

@@ -260,6 +260,7 @@ struct InsertBlock {
     final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<String, plir::Type>,
+    // TODO: use aliases
     aliases: HashMap<String, String>,
     types: HashMap<String, TypeData>,
     unresolved: HashMap<String, Unresolved>,
@@ -462,11 +463,6 @@ impl InsertBlock {
     /// Declares a variable within this insert block.
     fn declare(&mut self, ident: &str, ty: plir::Type) {
         self.vars.insert(String::from(ident), ty);
-    }
-
-    /// Aliases ident to new_ident for the given block.
-    fn alias(&mut self, ident: &str, new_ident: &str) {
-        self.aliases.insert(String::from(ident), String::from(new_ident));
     }
 }
 
@@ -749,11 +745,6 @@ impl PLIRCodegen {
         self.peek_block().declare(ident, ty)
     }
 
-    /// Accesses to ident are mapped to new_ident for the current block.
-    fn alias(&mut self, ident: &str, new_ident: &str) {
-        self.peek_block().alias(ident, new_ident);
-    }
-
     /// If there is an unresolved structure present at the identifier, try to resolve it.
     fn resolve_ident<'a>(&mut self, ident: &'a str) -> PLIRResult<&'a str> {
         use std::collections::hash_map::Entry;
@@ -798,34 +789,26 @@ impl PLIRCodegen {
             self.blocks.extend(storage);
         }
 
-        // HACK: check for intrinsic
-        if let Some(intrinsic) = ident.strip_prefix('#') {
-            if let Some(t) = C_INTRINSICS_PLIR.get(intrinsic) {
-                // If this is an intrinsic,
-                // register the intrinsic on the top level
-                // if it hasn't been registered
+        if let Some(t) = C_INTRINSICS_PLIR.get(ident) {
+            // If this is an intrinsic,
+            // register the intrinsic on the top level
+            // if it hasn't been registered
 
-                self.push_global(plir::FunSignature {
-                    ident: intrinsic.to_string(),
-                    params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
-                        rt: Default::default(),
-                        mt: Default::default(),
-                        ident: format!("arg{i}"),
-                        ty: t.clone(),
-                    }).collect(),
-                    varargs: t.varargs,
-                    ret: (*t.ret).clone(),
-                });
-                self.declare(intrinsic, plir::Type::Fun(t.clone()));
-                self.alias(ident, intrinsic);
-                
-                Ok(intrinsic)
-            } else {
-                Ok(ident)
-            }
-        } else {
-            Ok(ident)
+            self.push_global(plir::FunSignature {
+                ident: ident.to_string(),
+                params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
+                    rt: Default::default(),
+                    mt: Default::default(),
+                    ident: format!("arg{i}"),
+                    ty: t.clone(),
+                }).collect(),
+                varargs: t.varargs,
+                ret: (*t.ret).clone(),
+            });
+            self.declare(ident, plir::Type::Fun(t.clone()));
         }
+
+        Ok(ident)
     }
 
     /// [`PLIRCodegen::resolve_ident`], but using a type parameter
