@@ -41,8 +41,10 @@ use std::fs;
 use std::io::Error as IoErr;
 use std::path::{Path, PathBuf};
 
+use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 use inkwell::module::Module;
+use inkwell::passes::{PassManagerBuilder, PassManager};
 pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
 pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
@@ -153,8 +155,10 @@ pub enum GonSaveTo<'p> {
 /// ```
 pub struct Compiler<'ctx> {
     declared_types: DeclaredTypes,
+    ctx: &'ctx Context,
     llvm_codegen: LLVMCodegen<'ctx>,
-    module: Module<'ctx>
+    module: Module<'ctx>,
+    opt: OptimizationLevel
 }
 
 lazy_static! {
@@ -189,8 +193,10 @@ impl<'ctx> Compiler<'ctx> {
     pub fn no_std(ctx: &'ctx Context, filename: &str) -> Self {
         Self {
             declared_types: Default::default(),
+            ctx,
             llvm_codegen: LLVMCodegen::new(ctx),
-            module: ctx.create_module(filename)
+            module: ctx.create_module(filename),
+            opt: Default::default()
         }
     }
 
@@ -219,6 +225,16 @@ impl<'ctx> Compiler<'ctx> {
             .map_err(Into::into)
     }
 
+    /// Sets the module's filename
+    pub fn set_filename(&mut self, filename: &str) {
+        self.llvm_codegen.set_filename(filename)
+    }
+
+    /// Sets the compiler's optimization for modules
+    pub fn set_optimization(&mut self, opt: OptimizationLevel) {
+        self.opt = opt;
+    }
+
     /// Load a Poligon file into the compiler.
     /// 
     /// In loading the file, type data is preserved in the compiler and the LLVM module
@@ -240,11 +256,6 @@ impl<'ctx> Compiler<'ctx> {
         let (plir, dtypes) = self.generate_plir(code)?;
         self.set_filename(filename.unwrap_or("eval"));
         self.load_plir(&plir, dtypes)
-    }
-
-    /// Sets the module's filename
-    pub fn set_filename(&mut self, filename: &str) {
-        self.llvm_codegen.set_filename(filename)
     }
 
     /// Generates PLIR from Poligon code.
@@ -274,6 +285,7 @@ impl<'ctx> Compiler<'ctx> {
         self.llvm_codegen.compile(plir)?;
 
         let module = self.llvm_codegen.pop_module();
+
         self.update_values(dtypes, module)?;
         self.llvm_codegen.load_declared_types(&self.declared_types)?;
 
@@ -287,15 +299,25 @@ impl<'ctx> Compiler<'ctx> {
         let code = fs::read_to_string(dfile)?;
         
         let dtypes = self.get_declared_types_from_d(&code)?;
-        let module = Module::parse_bitcode_from_path(bc_file, self.llvm_codegen.ctx)
+        let module = Module::parse_bitcode_from_path(bc_file, self.ctx)
             .map_err(LLVMErr::LLVMErr)?;
     
         self.llvm_codegen.load_declared_types(&dtypes)?;
         self.update_values(dtypes, module)
     }
 
+    fn optimize_module(&self) {
+        let pm_builder = PassManagerBuilder::create();
+        pm_builder.set_optimization_level(self.opt);
+
+        let pm = PassManager::create(());
+        pm_builder.populate_module_pass_manager(&pm);
+
+        pm.run_on(&self.module);
+    }
     /// Writes the type data and module to disk.
     pub fn write_to_disk(&self, write_to: GonSaveTo) -> CompileResult<'ctx, ()> {
+        self.optimize_module();
         match write_to {
             GonSaveTo::SameLoc(path) => {
                 let mut llvm_path = path.to_owned();
@@ -317,6 +339,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Writes the module as LLVM bytecode to disk.
     pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+        self.optimize_module();
         llvm_codegen::module_to_ll(&self.module, dest)
             .map_err(Into::into)
     }
@@ -329,6 +352,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Any calls to this function should ensure that the value returned in Poligon
     /// would align to the provided type in Rust.
     pub unsafe fn jit_run<T>(&self) -> CompileResult<'ctx, T> {
+        self.optimize_module();
         let main = self.module.get_function("main").expect("Expected main function");
 
         llvm_codegen::module_jit_run(&self.module, main)

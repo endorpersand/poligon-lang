@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::{io, fs};
 
 use clap::Parser;
+use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 use poligon_lang::compiler::{Compiler, GonSaveTo};
 
@@ -13,6 +14,19 @@ struct Cli {
     /// the Poligon file.
     #[arg(long)]
     no_std: bool,
+
+    /// Does not optimize LLVM.
+    #[arg(long = "O0", group="optimization")]
+    opt_none: bool,
+    /// Optimizes LLVM, but less than O2.
+    #[arg(long = "O1", group="optimization")]
+    opt_less: bool,
+    /// Optimizes LLVM a moderate amount.
+    #[arg(long = "O2", group="optimization")]
+    opt_default: bool,
+    /// Optimizes LLVM aggressively.
+    #[arg(long = "O3", group="optimization")]
+    opt_aggressive: bool,
 
     /// The file to compile
     file: PathBuf
@@ -35,6 +49,15 @@ fn main() -> io::Result<()> {
     }
 
     let ctx = Context::create();
+
+    let optimization = match (args.opt_none, args.opt_less, args.opt_default, args.opt_aggressive) {
+        (true, _, _, _) => OptimizationLevel::None,
+        (_, true, _, _) => OptimizationLevel::Less,
+        (_, _, true, _) => OptimizationLevel::Default,
+        (_, _, _, true) => OptimizationLevel::Aggressive,
+        _ => OptimizationLevel::Default
+    };
+
     let name = fp.file_name()
         .expect("Valid file name")
         .to_str()
@@ -44,6 +67,7 @@ fn main() -> io::Result<()> {
     } else {
         unwrap_or_exit! { Compiler::new(&ctx, name) }
     };
+    compiler.set_optimization(optimization);
     
     let code = fs::read_to_string(&fp)?;
     let (plir, dtypes) = unwrap_or_exit! { compiler.generate_plir(&code) };
