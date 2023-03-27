@@ -6,13 +6,12 @@ use std::fs;
 use std::iter::Peekable;
 use std::path::Path;
 
-use crate::compiler::{plir, plir_codegen, LLVMCodegen, CompileErr};
+use crate::compiler::CompileErr;
 use crate::err::{FullGonErr, GonErr};
 use crate::interpreter::runtime::{RtContext, self};
 use crate::interpreter::runtime::value::Value;
 use crate::{lexer, ast, parser};
 use crate::lexer::token::{FullToken, Token};
-use inkwell::context::Context;
 
 pub mod prelude {
     pub use super::{TestLoader, Test, TestResult, IoExtract};
@@ -37,8 +36,6 @@ pub mod prelude {
     }
     pub(crate) use load_tests;
 }
-
-use inkwell::values::FunctionValue;
 
 pub enum TestErr {
     MissingTestHeader,
@@ -134,44 +131,10 @@ impl Test<'_> {
             .map_err(|e| self.wrap_err(e))
     }
 
-    #[allow(unused)]
     pub fn interpret_with_io(&self, hook: runtime::IoHook) -> TestResult<Value> {
         let mut ctx = RtContext::new_with_io(hook);
 
         self.parse()?.run_with_ctx(&mut ctx)
-            .map_err(|e| self.wrap_err(e))
-    }
-
-    pub fn codegen(&self) -> TestResult<plir::Program> {
-        let ast = self.parse()?;
-
-        plir_codegen::plir_codegen(ast)
-            .map_err(|e| self.wrap_err(e))
-    }
-
-    #[allow(unused)]
-    fn compile_w_ctx<'ctx>(&self, ctx: &'ctx Context) -> TestResult<(LLVMCodegen<'ctx>, FunctionValue<'ctx>)> {
-        let plir = self.codegen()?;
-    
-        let mut compiler = LLVMCodegen::new(ctx);
-    
-        match compiler.compile(&plir) {
-            Ok(f) => Ok((compiler, f)),
-            Err(e) => Err(self.wrap_err(e)),
-        }
-    }
-
-    #[allow(unused)]
-    pub fn compile(&self) -> TestResult<()> {
-        self.compile_w_ctx(&Context::create()).map(|_| ())
-    }
-
-    #[allow(unused)]
-    pub unsafe fn jit_run<T>(&self) -> TestResult<T> {
-        let ctx = Context::create();
-        let (mut compiler, f) = self.compile_w_ctx(&ctx)?;
-        
-        compiler.jit_run(f)
             .map_err(|e| self.wrap_err(e))
     }
 }
