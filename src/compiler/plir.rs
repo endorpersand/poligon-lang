@@ -515,7 +515,10 @@ pub enum ExprType {
     GEP(Type, Box<Expr>, Vec<Expr>),
 
     /// Allocate stack pointer (intrinsic)
-    Alloca(Type)
+    Alloca(Type),
+
+    /// Gets the size of the LLVM layout for this type
+    SizeOf(Type),
 }
 
 /// A path.

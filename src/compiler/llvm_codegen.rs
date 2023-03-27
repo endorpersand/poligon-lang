@@ -1031,6 +1031,20 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let ptr = compiler.builder.build_alloca(layout, "");
                 compiler.reconstruct(expr_ty, ptr)
             }
+            plir::ExprType::SizeOf(ty) => {
+                let layout = compiler.get_layout(ty)?;
+                let size = match layout {
+                    BasicTypeEnum::ArrayType(t)   => t.size_of().expect("expected array type size"),
+                    BasicTypeEnum::FloatType(t)   => t.size_of(),
+                    BasicTypeEnum::IntType(t)     => t.size_of(),
+                    BasicTypeEnum::PointerType(t) => t.size_of(),
+                    BasicTypeEnum::StructType(t)  => t.size_of().expect("expected struct type size"),
+                    BasicTypeEnum::VectorType(t)  => t.size_of().expect("expected vector type size"),
+                };
+                let _int = layout!(compiler, S_INT).into_int_type();
+
+                compiler.reconstruct(expr_ty, size)
+            },
         }
     }
 }
