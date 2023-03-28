@@ -356,8 +356,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     ProcStmt::Break => (None, self.get_exit_pointer(|ep| ep.brk)),
                     ProcStmt::Continue => (None, self.get_exit_pointer(|ep| ep.cont)),
                     ProcStmt::Return(me) => {
+                        let ty = match me {
+                            Some(e) => Cow::Borrowed(&e.ty),
+                            None    => Cow::Owned(plir::ty!(plir::Type::S_VOID))
+                        };
                         let value = me.write_value(self)?;
-                        self.build_return(value);
+
+                        self.build_typed_return(&ty, value);
                         (None, None)
                     }
                     _ => unreachable!("block should have ended with exit statement")
@@ -380,12 +385,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Build a function return instruction using a GonValue.
-    pub fn build_return(&self, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
-        self.builder.build_return({
-            Option::<BasicValueEnum>::from(gv)
-                .as_ref()
-                .map(|bv| bv as _)
-        })
+    pub fn build_typed_return(&self, ty: &plir::Type, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
+        match (ty.as_ref(), gv) {
+            (plir::TypeRef::Prim(plir::Type::S_VOID), _) => self.builder.build_return(None),
+            (_, GonValue::Unit)                          => self.builder.build_return(None),
+            (_, GonValue::Basic(t))                      => self.builder.build_return(Some(&t))
+        }
     }
 
     /// Create a function value from the function's PLIR signature.

@@ -115,7 +115,9 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Obtain the basic LLVM value represented by this [`GonValue`].
     /// 
-    /// Depending on context, [`GonValue::into`] may be more suitable.
+    /// For return statements, this function should not be used. 
+    /// Instead, an `Option<BasicValueEnum<'ctx>>` should be created by checking
+    /// the `plir::Type` of the GonValue.
     pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
         match value {
             GonValue::Basic(b) => b,
@@ -129,20 +131,6 @@ impl<'ctx> From<Option<BasicValueEnum<'ctx>>> for GonValue<'ctx> {
         match value {
             Some(t) => GonValue::Basic(t),
             None => GonValue::Unit,
-        }
-    }
-}
-impl<'ctx> From<GonValue<'ctx>> for Option<BasicValueEnum<'ctx>> {
-    /// Converts from a GonValue into a [`BasicValueEnum`] (if it is one) or `None` if it isn't.
-    ///
-    /// This should be used instead of [`LLVMCodegen::basic_value_of`]
-    /// when being inserted into a `return` statement or 
-    /// other similar statements where `void` values or 
-    /// `Option\<&dyn BasicValue\>` are accepted.
-    fn from(value: GonValue<'ctx>) -> Self {
-        match value {
-            GonValue::Basic(b) => Some(b),
-            GonValue::Unit => None,
         }
     }
 }
