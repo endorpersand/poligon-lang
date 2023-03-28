@@ -74,8 +74,7 @@ impl<'a> Cast<'a> {
                 if let Some(met_ident) = cls.get_method("to_string") {
                     let met_ident = met_ident.to_string();
                     
-                    cg.resolve_ident(&met_ident)?;
-                    cg.get_var_type_opt(&met_ident)
+                    cg.get_var_type_opt(&met_ident)?
                         .filter(|&t| match t.as_ref() {
                             Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
                             _ => false
@@ -216,9 +215,8 @@ impl super::PLIRCodegen {
         };
 
         let ident = format!("{left}::{method_name}");
-        self.resolve_ident(&ident)?;
-        
-        let e = self.get_var_type_opt(&ident)
+
+        let e = self.get_var_type_opt(&ident)?
             .cloned()
             .map(|t| Expr::new(t, ExprType::Ident(ident)));
         
@@ -293,9 +291,8 @@ impl super::PLIRCodegen {
         };
 
         let ident = format!("{left}::{method_name}_{right}");
-        self.resolve_ident(&ident)?;
-        
-        let e = self.get_var_type_opt(&ident)
+
+        let e = self.get_var_type_opt(&ident)?
             .cloned()
             .map(|t| Expr::new(t, ExprType::Ident(ident)));
         

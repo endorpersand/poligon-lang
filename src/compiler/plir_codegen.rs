@@ -823,16 +823,25 @@ impl PLIRCodegen {
             .find_map(f)
     }
 
-    fn get_var_type(&mut self, mut ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
-        ident = self.resolve_ident(ident)?;
-
-        self.find_scoped(|ib| ib.vars.get(ident))
-            .ok_or_else(|| PLIRErr::UndefinedVar(String::from(ident)).at_range(range))
+    /// Gets the type of the identifier, raising an UndefinedVar error if not present.
+    /// 
+    /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
+    /// Any errors during function/class resolution will be propagated.
+    fn get_var_type(&mut self, ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
+        self.get_var_type_opt(ident)?
+            .ok_or_else(|| {
+                PLIRErr::UndefinedVar(String::from(ident)).at_range(range)
+            })
     }
 
-    /// Identifier needs to be resolved beforehand, via [`PLIRCodegen::resolve_ident`].
-    fn get_var_type_opt(&mut self, ident: &str) -> Option<&plir::Type> {
-        self.find_scoped(|ib| ib.vars.get(ident))
+    /// Gets the type of the identifier, returning None if not present.
+    /// 
+    /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
+    /// Any errors during function/class resolution will be propagated.
+    fn get_var_type_opt(&mut self, mut ident: &str) -> PLIRResult<Option<&plir::Type>> {
+        ident = self.resolve_ident(ident)?;
+        
+        Ok(self.find_scoped(|ib| ib.vars.get(ident)))
     }
 
     fn dealias<'a>(&'a self, ident: &'a str) -> &'a str {
