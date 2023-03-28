@@ -114,10 +114,6 @@ impl<V> TypeLayouts<V> {
         self.alias.insert(id, ty.clone());
         self.layouts.insert(ty, v);
     }
-
-    fn lookup_type(&self, id: &str) -> Option<&plir::Type> {
-        self.alias.get(id)
-    }
 }
 
 impl<'ctx> TypeLayouts<BasicTypeEnum<'ctx>> {
@@ -298,12 +294,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
             .expect("No insert block found")
     }
 
-    /// Create an alloca instruction and also store the value in the allocated pointer
-    fn alloca_and_store(&mut self, ident: &str, val: GonValue<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>>
+    /// Create an alloca instruction that can store a value of a given [`plir::Type`].
+    fn alloca(&mut self, ty: &plir::Type, ident: &str) -> LLVMResult<'ctx, PointerValue<'ctx>>
     {
-        let alloca = self.builder.build_alloca(self.get_layout(&self.plir_type_of(val))?, ident);
+        let alloca = self.builder.build_alloca(self.get_layout(ty)?, ident);
         self.vars.insert(String::from(ident), alloca);
-        self.builder.build_store(alloca, self.basic_value_of(val));
         Ok(alloca)
     }
 
@@ -386,7 +381,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Build a function return instruction using a GonValue.
     pub fn build_return(&self, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
-        self.builder.build_return(self.returnable_value_of(gv).as_ref().map(|bv| bv as _))
+        self.builder.build_return({
+            Option::<BasicValueEnum>::from(gv)
+                .as_ref()
+                .map(|bv| bv as _)
+        })
     }
 
     /// Create a function value from the function's PLIR signature.
@@ -732,11 +731,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
 
         match self {
             ProcStmt::Decl(d) => {
-                let plir::Decl { ident, val, .. } = d;
-                // TODO: support rt, mt, ty
+                let plir::Decl { ident, val, ty, .. } = d;
+                // TODO: support rt, mt
 
+                let ptr = compiler.alloca(ty, ident)?;
                 let val = val.write_value(compiler)?;
-                compiler.alloca_and_store(ident, val)?;
+                compiler.builder.build_store(ptr, compiler.basic_value_of(val));
                 Ok(GonValue::Unit)
             },
             ProcStmt::Return(_) => unreachable!("return should be resolved at block level"),
@@ -760,14 +760,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 match compiler.get_ptr_opt(id) {
                     Some(ptr) => {
                         let bv = compiler.builder.build_load(expr_layout, ptr, "");
-                        compiler.reconstruct(expr_ty, bv)
+                        Ok(GonValue::Basic(bv))
                     },
                     None => {
                         // check for global
                         let &global = compiler.globals.get(id)
                             .ok_or_else(|| LLVMErr::UndefinedVar(id.clone()))?;
 
-                        compiler.reconstruct(expr_ty, global.as_pointer_value())
+                        Ok(GonValue::Basic(global.as_pointer_value().into()))
                     }
                 }
             },
@@ -799,7 +799,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .collect::<Result<_, _>>()?;
 
                 compiler.builder.create_struct_value(layout, &entries)
-                    .and_then(|bv| compiler.reconstruct(expr_ty, bv))
+                    .map(|bv| GonValue::Basic(bv.into()))
             },
             plir::ExprType::Assign(target, expr) => {
                 let val = expr.write_value(compiler)?;
@@ -821,14 +821,14 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         let first = compiler.apply_unary(&**expr, tail_op)?;
                         head.iter()
                             .try_rfold(first, |e, &(op, _)| compiler.apply_unary(e, op))
-                            .and_then(|bv| compiler.reconstruct(expr_ty, bv))
+                            .map(GonValue::Basic)
                     },
                     None => expr.write_value(compiler),
                 }
             },
             plir::ExprType::BinaryOp { op, left, right } => {
                 compiler.apply_binary(&**left, *op, &**right)
-                    .and_then(|bv| compiler.reconstruct(expr_ty, bv))
+                    .map(GonValue::Basic)
             },
             plir::ExprType::Comparison { left, rights } => {
                 let fun = compiler.parent_fn();
@@ -868,8 +868,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                         let phi = compiler.builder.build_phi(compiler.ctx.bool_type(), "cmp_result");
                         add_incoming(phi, &incoming);
 
-                        let result = phi.as_basic_value().into_int_value();
-                        Ok(GonValue::Bool(result))
+                        Ok(GonValue::Basic(phi.as_basic_value()))
                     },
                     None => Ok(lval),
                 }
@@ -932,7 +931,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let phi = compiler.builder.build_phi(expr_layout, "if_result");
                 compiler.add_incoming_gv(phi, &incoming);
                 
-                compiler.reconstruct(expr_ty, phi.as_basic_value())
+                Ok(GonValue::Basic(phi.as_basic_value()))
             },
             plir::ExprType::While { condition, block } => {
                 let bb = compiler.get_insert_block();
@@ -981,11 +980,6 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let fun = compiler.get_fn_by_plir_ident(&fun_ident)
                     .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.into_owned()))?;
 
-                let fun_ret = match &funct.ty {
-                    plir::Type::Fun(plir::FunType{ ret, .. }) => &**ret,
-                    _ => unreachable!()
-                };
-                
                 for p in params {
                     pvals.push(compiler.write_ref_value(p)?);
                 }
@@ -994,17 +988,16 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .collect();
 
                 let call = compiler.builder.build_call(fun, &pvals, "call");
-                match call.try_as_basic_value().left() {
-                    Some(basic) => compiler.reconstruct(fun_ret, basic),
-                    None => Ok(GonValue::Unit),
-                }
+                Ok(call.try_as_basic_value().left().into())
             },
             plir::ExprType::Index(idx) => idx.write_value(compiler),
             plir::ExprType::Spread(_) => todo!(),
             plir::ExprType::Split(_, _) => todo!(),
             plir::ExprType::Cast(e) => {
+                let src_ty = &e.ty;
+                let dest_ty = &expr_ty;
                 e.write_value(compiler)
-                    .and_then(|val| compiler.cast(val, expr_ty))
+                    .and_then(|val| compiler.cast(val, src_ty, dest_ty))
             },
             plir::ExprType::Deref(d) => d.write_value(compiler),
             plir::ExprType::GEP(ty, ptr_expr, params) => {
@@ -1024,12 +1017,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     compiler.builder.build_gep(layout, ptr, &params, "gep")
                 };
 
-                compiler.reconstruct(expr_ty, gep_ptr)
+                Ok(GonValue::Basic(gep_ptr.into()))
             },
             plir::ExprType::Alloca(ty) => {
                 let layout = compiler.get_layout(ty)?;
                 let ptr = compiler.builder.build_alloca(layout, "");
-                compiler.reconstruct(expr_ty, ptr)
+                Ok(GonValue::Basic(ptr.into()))
             }
             plir::ExprType::SizeOf(ty) => {
                 let layout = compiler.get_layout(ty)?;
@@ -1043,7 +1036,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 };
                 let _int = layout!(compiler, S_INT).into_int_type();
 
-                compiler.reconstruct(expr_ty, size)
+                Ok(GonValue::Basic(size.into()))
             },
         }
     }
@@ -1056,7 +1049,11 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
             plir::ExprType::Deref(d) => d.write_ptr(compiler),
             _ => {
                 self.write_value(compiler)
-                    .and_then(|value| compiler.alloca_and_store("", value))
+                    .and_then(|value| {
+                        let ptr = compiler.alloca(&self.ty, "")?;
+                        compiler.builder.build_store(ptr, compiler.basic_value_of(value));
+                        Ok(ptr)
+                    })
             }
         }
     }
@@ -1098,7 +1095,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
                 if let Some((_, last_ty)) = attrs.last() {
                     let el_ptr = self.write_ptr(compiler)?;
                     let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
-                    compiler.reconstruct(last_ty, el)
+                    
+                    Ok(GonValue::Basic(el))
                 } else {
                     e.write_value(compiler)
                 }
@@ -1145,66 +1143,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let Self { expr, index } = self;
 
-        let expr = expr.write_value(compiler)?;
+        let _expr = expr.write_value(compiler)?;
         let _index = index.write_value(compiler)?;
-
-        // This should be type checked in PLIR:
-        match expr {
-            GonValue::Float(_)   => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Int(_)     => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Bool(_)    => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Unit       => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Char(_)    => Err(LLVMErr::Generic("type error", String::from("index wrong type (unreachable)"))),
-            GonValue::Default(_) => {
-                todo!()
-                // // TODO: support unicode
-                // let buf = compiler.builder.build_extract_value(s, 0, "buf").unwrap().into_pointer_value();
-                // let len = compiler.builder.build_extract_value(s, 1, "len").unwrap().into_int_value();
-
-                // let i8_type = compiler.ctx.i8_type();
-                // let i64_type = compiler.ctx.i64_type();
-                
-                // // this should also be type checked in PLIR:
-                // let idx = compiler.basic_value_of(index).into_int_value();
-
-                // // bounds check
-                // let lower = compiler.raw_cmp(len.get_type().const_zero(), op::Cmp::Le, idx);
-                // let upper = compiler.raw_cmp(idx, op::Cmp::Lt, len);
-                
-                // let bounds = compiler.builder.build_and(lower, upper, "bounds_check");
-                
-                // let bb = compiler.get_insert_block();
-                // let safe = compiler.ctx.insert_basic_block_after(bb, "safe_idx");
-                // let oob = compiler.ctx.insert_basic_block_after(safe, "oob_idx");
-                // let exit = compiler.ctx.insert_basic_block_after(oob, "exit_idx");
-
-                // compiler.builder.build_conditional_branch(bounds, safe, oob);
-                
-                // compiler.builder.position_at_end(safe);
-                // let pos = unsafe {compiler.builder.build_gep(
-                //     i8_type.array_type(0), 
-                //     buf, 
-                //     &[i64_type.const_zero(), idx],
-                //     ""
-                // ) };
-
-                // let val = compiler.builder.build_load(i8_type, pos, "").into_int_value();
-                // let val = compiler.builder.build_int_cast(val, i64_type, "");
-                // compiler.builder.build_unconditional_branch(exit);
-                
-                // compiler.builder.position_at_end(oob);
-                // compiler.builder.branch_and_goto(exit);
-                
-                // let phi = compiler.builder.build_phi(i64_type, "");
-                // phi.add_incoming(&[
-                //     (&val, safe),
-                //     (&i64_type.const_zero(), oob)
-                // ]);
-
-                // // TODO: make char
-                // Ok(GonValue::Int(phi.as_basic_value().into_int_value()))
-            }
-        }
+        todo!()
     }
 }
 
@@ -1216,7 +1157,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
         let layout = compiler.get_layout(&self.ty)?;
 
         let bv = compiler.builder.build_load(layout, ptr, "deref");
-        compiler.reconstruct(&self.ty, bv)
+        Ok(GonValue::Basic(bv))
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
@@ -1257,8 +1198,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
                 };
                 compiler.vars.insert(param.ident.clone(), ptr);
             } else {
-                let gv = compiler.reconstruct(&param.ty, val)?;
-                compiler.alloca_and_store(&param.ident, gv)?;
+                let ptr = compiler.alloca(&param.ty, &param.ident)?;
+                compiler.builder.build_store(ptr, val);
             }
         }
 

@@ -1,4 +1,4 @@
-use inkwell::values::{IntValue, FloatValue, BasicValueEnum, BasicValue};
+use inkwell::values::BasicValueEnum;
 
 use super::{LLVMCodegen, LLVMResult, LLVMErr, layout, params};
 use super::plir;
@@ -41,20 +41,8 @@ pub(crate) use apply_bt;
 /// and can be converted to an LLVM value via [`LLVMCodegen::basic_value_of`].
 #[derive(Clone, Copy, Debug)]
 pub enum GonValue<'ctx> {
-    /// A `float`.
-    Float(FloatValue<'ctx> /* f64 */),
-    /// An `int`.
-    Int(IntValue<'ctx> /* iX */),
-    /// A `bool`.
-    Bool(IntValue<'ctx> /* i1 */),
-    /// A `char`.
-    /// 
-    /// Following Rust's rules, `char` is stored as a u32.
-    Char(IntValue<'ctx> /* i32 */),
-    /// A miscellaneous value with no special tracking.
-    /// 
-    /// For example, `String`.
-    Default(BasicValueEnum<'ctx>),
+    /// A non-unit type (which can be represented as an LLVM basic type)
+    Basic(BasicValueEnum<'ctx>),
     /// `void`. 
     /// 
     /// This can either be represented 
@@ -66,19 +54,19 @@ pub enum GonValue<'ctx> {
 impl<'ctx> LLVMCodegen<'ctx> {
     /// Create a new int value using an int from Rust.
     pub fn new_int(&self, v: isize) -> GonValue<'ctx> {
-        GonValue::Int(layout!(self, S_INT).into_int_type().const_int(v as u64, true))
+        GonValue::Basic(layout!(self, S_INT).into_int_type().const_int(v as u64, true).into())
     }
     /// Create a new bool value using a bool from Rust.
     pub fn new_bool(&self, v: bool) -> GonValue<'ctx> {
-        GonValue::Bool(layout!(self, S_BOOL).into_int_type().const_int(v as u64, true))
+        GonValue::Basic(layout!(self, S_BOOL).into_int_type().const_int(v as u64, true).into())
     }
     /// Create a new float value using a float from Rust.
     pub fn new_float(&self, f: f64) -> GonValue<'ctx> {
-        GonValue::Float(layout!(self, S_FLOAT).into_float_type().const_float(f))
+        GonValue::Basic(layout!(self, S_FLOAT).into_float_type().const_float(f).into())
     }
     /// Create a new char value using a char from Rust.
     pub fn new_char(&self, c: char) -> GonValue<'ctx> {
-        GonValue::Char(layout!(self, S_CHAR).into_int_type().const_int(c as u64, true))
+        GonValue::Basic(layout!(self, S_CHAR).into_int_type().const_int(c as u64, true).into())
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
@@ -99,115 +87,62 @@ impl<'ctx> LLVMCodegen<'ctx> {
             .try_as_basic_value()
             .unwrap_left();
         
-        GonValue::Default(string)
+        GonValue::Basic(string)
     }
 
     /// Cast a GonValue to another type.
     /// 
     /// The only successful casts here: 
     /// - int to float
-    /// - char to string
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&mut self, v: GonValue<'ctx>, ty: &plir::Type) -> LLVMResult<'ctx, GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<'ctx, GonValue<'ctx>> {
         use plir::{Type, TypeRef};
 
-        match (v, ty.as_ref()) {
-            (GonValue::Int(i), TypeRef::Prim(Type::S_FLOAT)) => {
-                let ft = self.get_layout(ty)?.into_float_type();
-                let fv = self.builder.build_signed_int_to_float(i, ft, "cast");
+        match (src.as_ref(), dest.as_ref()) {
+            (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT)) => {
+                let _float = self.get_layout(dest)?.into_float_type();
+                let GonValue::Basic(bv) = v else { unreachable!() };
+                let val = self.builder.build_signed_int_to_float(bv.into_int_value(), _float, "cast");
                 
-                Ok(GonValue::Float(fv))
+                Ok(GonValue::Basic(val.into()))
             },
-            (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Bool(self.truth(v))),
+            (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Basic(self.truth(v).into())),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
-            _ => Err(LLVMErr::CannotCast(self.plir_type_of(v), ty.clone()))
-        }
-    }
-
-    /// Create a [`GonValue`] from a given LLVM value.
-    pub fn reconstruct(&self, t: &plir::Type, v: impl BasicValue<'ctx>) -> LLVMResult<'ctx, GonValue<'ctx>> {
-        use plir::{TypeRef, Type};
-        
-        let v = v.as_basic_value_enum();
-        match t.as_ref() {
-            TypeRef::Prim(Type::S_FLOAT) => Ok(GonValue::Float(v.into_float_value())),
-            TypeRef::Prim(Type::S_INT)   => Ok(GonValue::Int(v.into_int_value())),
-            TypeRef::Prim(Type::S_BOOL)  => Ok(GonValue::Bool(v.into_int_value())),
-            TypeRef::Prim(Type::S_CHAR)  => Ok(GonValue::Char(v.into_int_value())),
-            TypeRef::Prim(Type::S_VOID)  => Ok(GonValue::Unit),
-            _ => Ok(GonValue::Default(v))
+            _ => Err(LLVMErr::CannotCast(src.clone(), dest.clone()))
         }
     }
 
     /// Obtain the basic LLVM value represented by this [`GonValue`].
     /// 
-    /// Depending on context, [`LLVMCodegen::returnable_value_of`] may be more suitable.
+    /// Depending on context, [`GonValue::into`] may be more suitable.
     pub fn basic_value_of(&self, value: GonValue<'ctx>) -> BasicValueEnum<'ctx> {
         match value {
-            GonValue::Float(f)   => f.into(),
-            GonValue::Int(i)     => i.into(),
-            GonValue::Bool(b)    => b.into(),
-            GonValue::Char(c)    => c.into(),
-            GonValue::Default(s) => s,
-            GonValue::Unit       => layout!(self, S_VOID).const_zero(),
+            GonValue::Basic(b) => b,
+            GonValue::Unit     => layout!(self, S_VOID).const_zero()
         }
     }
+}
 
-    /// Obtain the LLVM value used for return statements for this [`GonValue`].
-    /// 
+impl<'ctx> From<Option<BasicValueEnum<'ctx>>> for GonValue<'ctx> {
+    fn from(value: Option<BasicValueEnum<'ctx>>) -> Self {
+        match value {
+            Some(t) => GonValue::Basic(t),
+            None => GonValue::Unit,
+        }
+    }
+}
+impl<'ctx> From<GonValue<'ctx>> for Option<BasicValueEnum<'ctx>> {
+    /// Converts from a GonValue into a [`BasicValueEnum`] (if it is one) or `None` if it isn't.
+    ///
     /// This should be used instead of [`LLVMCodegen::basic_value_of`]
     /// when being inserted into a `return` statement or 
-    /// other similar statements where an `Option\<&dyn BasicValue\>` is accepted.
-    pub fn returnable_value_of(&self, value: GonValue<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+    /// other similar statements where `void` values or 
+    /// `Option\<&dyn BasicValue\>` are accepted.
+    fn from(value: GonValue<'ctx>) -> Self {
         match value {
+            GonValue::Basic(b) => Some(b),
             GonValue::Unit => None,
-            val => Some(self.basic_value_of(val))
-        }
-    }
-
-    /// The PLIR type for this value.
-    /// 
-    /// This can be used to reconstruct a GonValue from a LLVM representation. 
-    /// See [`LLVMCodegen::reconstruct`].
-    pub fn plir_type_of(&self, value: GonValue<'ctx>) -> plir::Type {
-        use inkwell::types::BasicTypeEnum;
-        use plir::{ty, Type};
-
-        match value {
-            GonValue::Float(_)   => ty!(Type::S_FLOAT),
-            GonValue::Int(_)     => ty!(Type::S_INT),
-            GonValue::Bool(_)    => ty!(Type::S_BOOL),
-            GonValue::Char(_)    => ty!(Type::S_CHAR),
-            GonValue::Default(s) => {
-                let st = s.get_type();
-                
-                match st {
-                    BasicTypeEnum::ArrayType(t) => unimplemented!("{t} does not have a PLIR representation"),
-                    BasicTypeEnum::FloatType(_) => ty!(Type::S_FLOAT),
-                    BasicTypeEnum::IntType(t)   => match t.get_bit_width() {
-                        1 => ty!(Type::S_BOOL),
-                        8 => ty!("#byte"),
-                        32 => ty!(Type::S_CHAR),
-                        64 => ty!(Type::S_INT),
-                        _ => unimplemented!("{t} does not have a PLIR representation")
-                    },
-                    BasicTypeEnum::PointerType(_) => ty!("#ptr"),
-                    BasicTypeEnum::StructType(t)  => {
-                        let name = t.get_name()
-                            .expect("Expected struct to have name")
-                            .to_str()
-                            .expect("Expected struct name to be Rust-compatible");
-                        
-                        self.layouts.lookup_type(name)
-                            .expect("LLVM type {name} does not have an associated PLIR type")
-                            .clone()
-                    },
-                    BasicTypeEnum::VectorType(t)  => unimplemented!("{t} does not have a PLIR representation")
-                }
-                
-            },
-            GonValue::Unit => ty!(Type::S_VOID),
         }
     }
 }
