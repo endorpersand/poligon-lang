@@ -206,7 +206,7 @@ impl super::PLIRCodegen {
     }
 
     /// Checks if this unary operator exists as a method.
-    fn find_unary_method(&mut self, op: op::Unary, left: TypeRef) -> PLIRResult<Option<Expr>> {
+    fn find_unary_method(&mut self, op: op::Unary, left: Located<&Type>) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Unary::Plus   => "plus",
             op::Unary::Minus  => "minus",
@@ -214,7 +214,10 @@ impl super::PLIRCodegen {
             op::Unary::BitNot => "bitnot",
         };
 
-        let ident = format!("{left}::{method_name}");
+        let ident = self.get_class(left.0, left.1)?
+            .get_method(method_name)
+            .unwrap()
+            .to_string();
 
         let e = self.get_var_type_opt(&ident)?
             .cloned()
@@ -225,7 +228,7 @@ impl super::PLIRCodegen {
     
     pub(super) fn apply_unary(&mut self, e: Located<Expr>, op: op::Unary, unary_range: CursorRange) -> PLIRResult<Located<Expr>> {
         // Check for any valid casts that can be applied here:
-        let cast = match op {
+        let Located(cast, left_range) = match op {
             op::Unary::Plus => {
                 self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
             },
@@ -236,7 +239,7 @@ impl super::PLIRCodegen {
                 self.apply_cast(e, &ty!(Type::S_BOOL))?.into_inner()
             },
             op::Unary::BitNot => e,
-        }.0;
+        };
     
         // Type check and compute resulting expr type:
         let ty = {
@@ -247,8 +250,8 @@ impl super::PLIRCodegen {
                 (op::Unary::Minus,  TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
                 (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
                 (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
-                (op, tyref) => {
-                    let fun = self.find_unary_method(op, tyref)?
+                (op, _) => {
+                    let fun = self.find_unary_method(op, Located::new(&ty, left_range))?
                         .ok_or_else(|| {
                             OpErr::CannotUnary(op, ty).at_range(unary_range.clone())
                         })?;
@@ -274,7 +277,7 @@ impl super::PLIRCodegen {
     }
 
     /// Checks if this unary operator exists as a method.
-    fn find_binary_method(&mut self, op: op::Binary, left: TypeRef, right: TypeRef) -> PLIRResult<Option<Expr>> {
+    fn find_binary_method(&mut self, op: op::Binary, left: Located<&Type>, right: &Type) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Binary::Add => "add",
             op::Binary::Sub => "sub",
@@ -290,7 +293,10 @@ impl super::PLIRCodegen {
             op::Binary::LogOr  => return Ok(None),
         };
 
-        let ident = format!("{left}::{method_name}_{right}");
+        let ident = self.get_class(left.0, left.1)?
+            .get_method(&format!("{method_name}_{right}"))
+            .unwrap()
+            .to_string();
 
         let e = self.get_var_type_opt(&ident)?
             .cloned()
@@ -367,8 +373,8 @@ impl super::PLIRCodegen {
                 // logical operators:
                 (op::Binary::LogAnd, l, r) if l == r => left,
                 (op::Binary::LogOr, l, r) if l == r => left,
-                (op, leftref, rightref) => {
-                    let fun = self.find_binary_method(op, leftref, rightref)?
+                (op, _, _) => {
+                    let fun = self.find_binary_method(op, Located::new(&left, lcast.1), right)?
                         .ok_or_else(|| {
                             OpErr::CannotBinary(op, left, right.clone())
                                 .at_range(expr_range.clone())
