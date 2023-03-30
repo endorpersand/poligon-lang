@@ -239,12 +239,49 @@ fn primitives(prims: &[&str]) -> HashMap<String, TypeData> {
 }
 
 #[derive(Debug)]
-enum Unresolved {
-    Class(ast::Class),
+enum UnresolvedValue {
     ExternFun(ast::FunSignature),
     Fun(ast::FunDecl),
     FunBlock(plir::FunSignature, Located<Rc<ast::Block>>),
     Import(ast::StaticPath)
+}
+#[derive(Debug)]
+enum UnresolvedType {
+    Class(ast::Class),
+    #[allow(unused)]
+    Import(ast::StaticPath)
+}
+trait Unresolved {
+    fn resolution_ident(&self) -> &str;
+    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self>
+        where Self: Sized;
+}
+
+impl Unresolved for UnresolvedValue {
+    fn resolution_ident(&self) -> &str {
+        match self {
+            UnresolvedValue::ExternFun(fs)   => &fs.ident,
+            UnresolvedValue::Fun(fd)         => &fd.sig.ident,
+            UnresolvedValue::FunBlock(fs, _) => &fs.ident,
+            UnresolvedValue::Import(mp)      => &mp.attr,
+        }
+    }
+
+    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self> {
+        &mut block.unres_values
+    }
+}
+impl Unresolved for UnresolvedType {
+    fn resolution_ident(&self) -> &str {
+        match self {
+            UnresolvedType::Class(cls) => &cls.ident,
+            UnresolvedType::Import(mp) => &mp.attr,
+        }
+    }
+
+    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self> {
+        &mut block.unres_types
+    }
 }
 
 #[derive(Debug)]
@@ -263,7 +300,8 @@ struct InsertBlock {
     // TODO: use aliases
     aliases: HashMap<String, String>,
     types: HashMap<String, TypeData>,
-    unresolved: HashMap<String, Unresolved>,
+    unres_values: HashMap<String, UnresolvedValue>,
+    unres_types: HashMap<String, UnresolvedType>,
 
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
@@ -281,7 +319,8 @@ impl InsertBlock {
             vars: HashMap::new(),
             aliases: HashMap::new(),
             types: HashMap::new(),
-            unresolved: HashMap::new(),
+            unres_values: HashMap::new(),
+            unres_types: HashMap::new(),
             expected_ty
         }
     }
@@ -303,7 +342,8 @@ impl InsertBlock {
                 "#ptr",
                 "#byte"
             ]),
-            unresolved: HashMap::new(),
+            unres_values: HashMap::new(),
+            unres_types: HashMap::new(),
             expected_ty: None
         }
     }
@@ -412,16 +452,9 @@ impl InsertBlock {
     }
 
     /// Insert an unresolved class/function into the insert block.
-    fn insert_unresolved(&mut self, unresolved: Unresolved) {
-        let k = match &unresolved {
-            Unresolved::Class(c)        => &c.ident,
-            Unresolved::ExternFun(fs)   => &fs.ident,
-            Unresolved::Fun(fd)         => &fd.sig.ident,
-            Unresolved::FunBlock(fs, _) => &fs.ident,
-            Unresolved::Import(mp)      => &mp.attr,
-        };
-
-        self.unresolved.insert(k.clone(), unresolved);
+    fn insert_unresolved<U: Unresolved>(&mut self, unresolved: U) {
+        U::block_map(self)
+            .insert(unresolved.resolution_ident().to_string(), unresolved);
     }
 
     /// Insert a class into the insert block's type register.
@@ -453,7 +486,7 @@ impl InsertBlock {
         let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
-        self.insert_unresolved(Unresolved::Fun(decl));
+        self.insert_unresolved(UnresolvedValue::Fun(decl));
 
         if let Some(c) = self.types.get_mut(cls_ident) {
             c.insert_method(method_name, metref);
@@ -711,8 +744,9 @@ impl PLIRCodegen {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, mut exits, unresolved, .. } = self.program;
-        debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
+        let InsertBlock {block, mut exits, unres_values, unres_types, .. } = self.program;
+        debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
+        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
 
         match exits.pop() {
             None => Ok(plir::Program(self.globals.stmts, block)),
@@ -753,36 +787,32 @@ impl PLIRCodegen {
         let mi = self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
             .enumerate()
-            .find_map(|(i, ib)| ib.unresolved.contains_key(ident).then_some(i));
+            .find_map(|(i, ib)| ib.unres_values.contains_key(ident).then_some(i));
 
         if let Some(i) = mi {
             // repivot peek block to point to the unresolved item
             let storage = self.blocks.split_off(self.blocks.len() - i);
 
-            let Entry::Occupied(entry) = self.peek_block().unresolved.entry(ident.to_string()) else {
+            let Entry::Occupied(entry) = self.peek_block().unres_values.entry(ident.to_string()) else {
                 unreachable!()
             };
 
             match entry.get() {
-                Unresolved::Class(_) => {
-                    let Unresolved::Class(cls) = entry.remove() else { unreachable!() };
-                    self.consume_cls(cls)?;
-                },
-                Unresolved::ExternFun(_) => {
-                    let Unresolved::ExternFun(fs) = entry.remove() else { unreachable!() };
+                UnresolvedValue::ExternFun(_) => {
+                    let UnresolvedValue::ExternFun(fs) = entry.remove() else { unreachable!() };
                     
                     let fs = self.consume_fun_sig(fs)?;
                     self.push_global(fs);
                 },
-                Unresolved::Fun(_) => {
-                    let (k, Unresolved::Fun(fd)) = entry.remove_entry() else { unreachable!() };
+                UnresolvedValue::Fun(_) => {
+                    let (k, UnresolvedValue::Fun(fd)) = entry.remove_entry() else { unreachable!() };
                     let ast::FunDecl { sig, block } = fd;
 
                     let sig = self.consume_fun_sig(sig)?;
-                    self.peek_block().unresolved.insert(k, Unresolved::FunBlock(sig, block));
+                    self.peek_block().unres_values.insert(k, UnresolvedValue::FunBlock(sig, block));
                 },
-                Unresolved::FunBlock(_, _) => {},
-                Unresolved::Import(_) => todo!(),
+                UnresolvedValue::FunBlock(_, _) => {},
+                UnresolvedValue::Import(_) => todo!(),
             }
 
             // revert peek block after
@@ -812,8 +842,56 @@ impl PLIRCodegen {
     }
 
     /// [`PLIRCodegen::resolve_ident`], but using a type parameter
-    fn resolve_ty(&mut self, ty: &plir::Type) -> PLIRResult<()> {
-        self.resolve_ident(&ty.ident()).map(|_| ())
+    fn resolve_type(&mut self, ty: &plir::Type) -> PLIRResult<()> {
+        use std::collections::hash_map::Entry;
+
+        let ident = ty.short_ident();
+        // mi is 0 to len
+        let mi = self.blocks.iter().rev()
+            .chain(std::iter::once(&self.program))
+            .enumerate()
+            .find_map(|(i, ib)| ib.unres_types.contains_key(ident).then_some(i));
+
+        if let Some(i) = mi {
+            // repivot peek block to point to the unresolved item
+            let storage = self.blocks.split_off(self.blocks.len() - i);
+
+            let Entry::Occupied(entry) = self.peek_block().unres_types.entry(ident.to_string()) else {
+                unreachable!()
+            };
+
+            match entry.get() {
+                UnresolvedType::Class(_) => {
+                    let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                    self.consume_cls(cls)?;
+                },
+                UnresolvedType::Import(_) => todo!(),
+            }
+
+            // revert peek block after
+            self.blocks.extend(storage);
+        }
+
+        if let Some(t) = C_INTRINSICS_PLIR.get(ident) {
+            // If this is an intrinsic,
+            // register the intrinsic on the top level
+            // if it hasn't been registered
+
+            self.push_global(plir::FunSignature {
+                ident: ident.to_string(),
+                params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
+                    rt: Default::default(),
+                    mt: Default::default(),
+                    ident: format!("arg{i}"),
+                    ty: t.clone(),
+                }).collect(),
+                varargs: t.varargs,
+                ret: (*t.ret).clone(),
+            });
+            self.declare(ident, plir::Type::Fun(t.clone()));
+        }
+
+        Ok(())
     }
 
     /// Find a specific item, starting from the deepest scope and scaling out.
@@ -852,7 +930,7 @@ impl PLIRCodegen {
     }
 
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
-        self.resolve_ty(ty)?;
+        self.resolve_type(ty)?;
 
         match ty.as_ref() {
             plir::TypeRef::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
@@ -927,16 +1005,16 @@ impl PLIRCodegen {
         for stmt in stmts {
             match stmt.0 {
                 ast::Stmt::FunDecl(fd) => {
-                    self.peek_block().insert_unresolved(Unresolved::Fun(fd));
+                    self.peek_block().insert_unresolved(UnresolvedValue::Fun(fd));
                 },
                 ast::Stmt::ExternFunDecl(fs) => {
-                    self.peek_block().insert_unresolved(Unresolved::ExternFun(fs));
+                    self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(fs));
                     }
                 ast::Stmt::ClassDecl(cls) => {
-                    self.peek_block().insert_unresolved(Unresolved::Class(cls));
+                    self.peek_block().insert_unresolved(UnresolvedType::Class(cls));
                 },
                 ast::Stmt::Import(mp) => {
-                    self.peek_block().insert_unresolved(Unresolved::Import(mp));
+                    self.peek_block().insert_unresolved(UnresolvedValue::Import(mp));
                 },
                 ast::Stmt::IGlobal(id, s) => {
                     self.program.declare(&id, plir::ty!("#ptr"));
@@ -961,26 +1039,33 @@ impl PLIRCodegen {
             }
         }
 
-        let mut unresolved = &mut self.peek_block().unresolved;
-        while let Some(ident) = unresolved.keys().next() {
-            match unresolved.remove(&ident.clone()).unwrap() {
-                Unresolved::Class(c) => { self.consume_cls(c)?; },
-                Unresolved::ExternFun(fs) => {
+        let mut unres_values = &mut self.peek_block().unres_values;
+        while let Some(ident) = unres_values.keys().next() {
+            match unres_values.remove(&ident.clone()).unwrap() {
+                UnresolvedValue::ExternFun(fs) => {
                     let fs = self.consume_fun_sig(fs)?;
                     self.push_global(fs);
                 },
-                Unresolved::Fun(fd) => {
+                UnresolvedValue::Fun(fd) => {
                     let ast::FunDecl { sig, block } = fd;
 
                     let sig = self.consume_fun_sig(sig)?;
                     self.consume_fun_block(sig, block)?;
                 },
-                Unresolved::FunBlock(sig, block) => {
+                UnresolvedValue::FunBlock(sig, block) => {
                     self.consume_fun_block(sig, block)?;
                 },
-                Unresolved::Import(_) => todo!(),
+                UnresolvedValue::Import(_) => todo!(),
             }
-            unresolved = &mut self.peek_block().unresolved;
+            unres_values = &mut self.peek_block().unres_values;
+        }
+        let mut unres_types = &mut self.peek_block().unres_types;
+        while let Some(ident) = unres_types.keys().next() {
+            match unres_types.remove(&ident.clone()).unwrap() {
+                UnresolvedType::Class(c) => { self.consume_cls(c)?; },
+                UnresolvedType::Import(_) => todo!(),
+            }
+            unres_types = &mut self.peek_block().unres_types;
         }
 
         Ok(())
@@ -1036,9 +1121,10 @@ impl PLIRCodegen {
             mut block, last_stmt_loc, 
             exits, final_exit, 
             vars: _, aliases: _, types: _, 
-            unresolved, expected_ty
+            unres_values, unres_types, expected_ty
         } = block;
-        debug_assert!(unresolved.is_empty(), "there was an unresolved item in block");
+        debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
+        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
 
         use plir::{ProcStmt, ty};
 

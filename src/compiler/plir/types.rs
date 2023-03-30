@@ -204,7 +204,17 @@ impl Type {
         }
     }
 
-    /// If this type has an identifier, return it.
+    /// Return a short form of this type's identifier.
+    pub fn short_ident(&self) -> &str {
+        match self {
+            Type::Prim(n) => n,
+            Type::Generic(n, _) => n,
+            Type::Tuple(_) => "#tuple",
+            Type::Fun(_) => "#fun",
+        }
+    }
+
+    /// Return this type's full identifier.
     pub fn ident(&self) -> Cow<str> {
         #[inline]
         fn param_tuple(params: &[Type]) -> String {
