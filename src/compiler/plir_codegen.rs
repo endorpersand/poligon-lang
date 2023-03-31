@@ -1413,12 +1413,17 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+    fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
         let Located(ty, range) = ty;
         let ty = plir::Type::from(ty);
 
         // See if class is initialized, and if so, return the plir Type
-        self.get_class(&ty, range).map(|_| ty)
+        self.get_class(&ty, range).map(|cls| (ty, cls))
+    }
+
+    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+        self.consume_type_and_get_cls(ty)
+            .map(|(ty, _)| ty)
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
@@ -1638,9 +1643,12 @@ impl PLIRCodegen {
             },
             ast::Expr::StaticPath(sp) => {
                 let ast::StaticPath { ty, attr } = sp;
-                let ty = self.consume_type(ty)?;
-                let ident = format!("{ty}::{attr}");
-                Ok(plir::Path::Static(ty, attr, self.get_var_type(&ident, range)?.clone()))
+                let (ty, cls) = self.consume_type_and_get_cls(ty)?;
+                
+                let attrref = cls.get_method(&attr)
+                    .ok_or_else(|| PLIRErr::UndefinedAttr(ty.clone(), attr.clone()))?
+                    .to_string();
+                Ok(plir::Path::Static(ty, attr, self.get_var_type(&attrref, range)?.clone()))
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
