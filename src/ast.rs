@@ -311,6 +311,17 @@ pub enum MutType {
     Immut
 }
 
+/// An identifier that supports generic arguments.
+/// 
+/// This is used when a generic object is defined.
+#[derive(Debug, PartialEq, Eq)]
+pub struct GenericIdent {
+    /// The identifier
+    pub ident: String,
+    /// Any type parameters for this identifier
+    pub params: Vec<String>
+}
+
 /// A function header / signature.
 /// 
 /// If a return type is not provided, it is assumed to be `void`.

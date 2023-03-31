@@ -205,6 +205,19 @@ impl Display for Class {
         write!(f, "}}")
     }
 }
+impl Display for GenericIdent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let GenericIdent { ident, params } = self;
+        write!(f, "{ident}")?;
+        
+        if !params.is_empty() {
+            write!(f, "<")?;
+            fmt_list(f, params)?;
+            write!(f, ">")?;
+        }
+        Ok(())
+    }
+}
 impl Display for FieldDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FieldDecl { rt, mt, ident, ty } = self;

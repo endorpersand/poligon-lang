@@ -281,7 +281,7 @@ impl Unresolved for UnresolvedValue {
 impl Unresolved for UnresolvedType {
     fn resolution_ident(&self) -> &str {
         match self {
-            UnresolvedType::Class(cls) => &cls.ident,
+            UnresolvedType::Class(cls) => &cls.ident.ident,
             UnresolvedType::Import(mp) => &mp.attr,
         }
     }
@@ -483,11 +483,26 @@ impl InsertBlock {
         self.types.insert(cls.ident.clone(), TypeData::structural(cls.clone()));
     }
 
-    fn insert_unresolved_method(&mut self, cls_ident: &str, method: ast::MethodDecl) {
+    fn insert_unresolved_method(&mut self, cls: &plir::Type, method: ast::MethodDecl) {
         let ast::MethodDecl {
             sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
             block 
         } = method;
+
+        fn as_ast_ty(t: &plir::Type) -> ast::Type {
+            match t {
+                plir::Type::Prim(n) => ast::Type(n.clone(), vec![]),
+                plir::Type::Generic(n, p) => {
+                    let p = p.iter()
+                        .map(as_ast_ty)
+                        .map(|t| Located::new(t, (0, 0) ..= (0, 0)))
+                        .collect();
+                    ast::Type(n.clone(), p)
+                },
+                plir::Type::Tuple(_) => todo!(),
+                plir::Type::Fun(_) => todo!(),
+            }
+        }
 
         if !is_static {
             let this = referent.unwrap_or_else(|| String::from("#unused"));
@@ -497,19 +512,19 @@ impl InsertBlock {
                 ident: this, 
                 // since this is synthesized, there's no real cursor,
                 // so just assign an arbitary one
-                ty: Some(Located::new(ast::Type(cls_ident.to_string(), vec![]), (0, 0) ..= (0, 0)))
+                ty: Some(Located::new(as_ast_ty(cls), (0, 0) ..= (0, 0)))
             });
         } else {
             // TODO, use this ident
         };
-        let metref = format!("{}::{method_name}", cls_ident);
+        let metref = format!("{cls}::{method_name}");
 
         let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
         self.insert_unresolved(UnresolvedValue::Fun(decl));
 
-        if let Some(c) = self.types.get_mut(cls_ident) {
+        if let Some(c) = self.types.get_mut(&*cls.ident()) {
             c.insert_method(method_name, metref);
         }
     }
@@ -887,7 +902,7 @@ impl PLIRCodegen {
             match entry.get() {
                 UnresolvedType::Class(_) => {
                     let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                    self.consume_cls(cls)?;
+                    self.consume_cls(cls, ty)?;
                 },
                 UnresolvedType::Import(_) => todo!(),
             }
@@ -1048,7 +1063,7 @@ impl PLIRCodegen {
                     // FIXME: there's a few bugs that'll occur if ty is not primitive
                     let block = self.peek_block();
                     for m in methods {
-                        block.insert_unresolved_method(&ty, m);
+                        block.insert_unresolved_method(&plir::ty!(ty.clone()), m);
                     }
                 }
                 _ => eager_stmts.push(stmt),
@@ -1083,10 +1098,11 @@ impl PLIRCodegen {
             }
             unres_values = &mut self.peek_block().unres_values;
         }
+
         let mut unres_types = &mut self.peek_block().unres_types;
         while let Some(ident) = unres_types.keys().next() {
             match unres_types.remove(&ident.clone()).unwrap() {
-                UnresolvedType::Class(c) => { self.consume_cls(c)?; },
+                UnresolvedType::Class(c) => { self.consume_cls(c, todo!("generic class resolute"))?; },
                 UnresolvedType::Import(_) => todo!(),
             }
             unres_types = &mut self.peek_block().unres_types;
@@ -1454,8 +1470,22 @@ impl PLIRCodegen {
             .map(|(ty, _)| ty)
     }
 
-    fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<bool> {
+    fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<bool> {
+        use plir::Type;
+
         let ast::Class { ident, fields, methods } = cls;
+
+        // verify that types are aligned:
+        match (ty, ident.params.len()) {
+            (Type::Prim(_), 0) => Ok(()),
+            (Type::Prim(_), n) => Err(PLIRErr::WrongTypeArity(0, n)),
+            (Type::Generic(_, p), n) if p.len() == n => Ok(()),
+            (Type::Generic(_, p), n) => Err(PLIRErr::WrongTypeArity(p.len(), n)),
+            (Type::Tuple(_), 0) => Ok(()),
+            (Type::Tuple(_), n) => Err(PLIRErr::WrongTypeArity(0, n)),
+            (Type::Fun(_), 0)   => Ok(()),
+            (Type::Fun(_), n)   => Err(PLIRErr::WrongTypeArity(0, n))
+        }?;
 
         let fields = fields.into_iter()
             .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
@@ -1465,13 +1495,13 @@ impl PLIRCodegen {
             })
             .collect::<Result<_, _>>()?;
         
-        let cls = plir::Class { ident, fields };
+        let cls = plir::Class { ident: ty.ident().to_string(), fields };
         
         let ib = self.peek_block();
         
         ib.insert_class(&cls);
         for method in methods {
-            ib.insert_unresolved_method(&cls.ident, method);
+            ib.insert_unresolved_method(ty, method);
         }
 
         self.push_global(cls);

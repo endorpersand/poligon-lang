@@ -895,7 +895,7 @@ impl Parser {
     /// Expect that the next tokens in the input represent a class declaration.
     pub fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
         self.expect1(token![class])?;
-        let ident = self.expect_ident()?.0;
+        let ident = self.expect_generic_ident()?;
 
         self.expect1(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
@@ -1099,6 +1099,25 @@ impl Parser {
     pub fn expect_ident(&mut self) -> ParseResult<Located<String>> {
         self.match_ident()?
             .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))
+    }
+
+    /// Expect that the next token in the input is a generic identifier,
+    /// returning the identifier if successfully matched.
+    pub fn expect_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
+        let ident = self.expect_ident()?.0;
+        
+        if !self.match_langle() {
+           Err(expected_tokens![<])?;
+        }
+        let (params, _) = self.expect_tuple_of(Parser::match_ident)?;
+        if !self.match_rangle() {
+           Err(expected_tokens![>])?;
+        }
+
+        Ok(ast::GenericIdent {
+            ident,
+            params: params.into_iter().map(|t| t.0).collect(),
+        })
     }
     
     /// Match the next tokens in the input if they represent a type expression.
@@ -1744,20 +1763,42 @@ impl Parser {
         Ok(ast::Program(program))
     }
 
-    fn expect_d_ident(&mut self) -> ParseResult<Located<String>> {
+    fn match_d_ident(&mut self) -> ParseResult<Option<Located<String>>> {
         if let Some(Token::Str(_)) = self.peek_token() {
             let tok = self.peek_loc();
             let Some(Token::Str(s)) = self.next_token() else { unreachable!() };
 
-            Ok(Located::new(s, tok))
+            Ok(Some(Located::new(s, tok)))
         } else {
-            self.expect_ident()
+            self.match_ident()
         }
+    }
+    fn expect_d_ident(&mut self) -> ParseResult<Located<String>> {
+        self.match_d_ident()
+            .and_then(|t| t.ok_or_else(|| {
+                ParseErr::ExpectedIdent.at_range(self.peek_loc())
+            }))
+    }
+    fn expect_d_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
+        let ident = self.expect_d_ident()?.0;
+        
+        if !self.match_langle() {
+           Err(expected_tokens![<])?;
+        }
+        let (params, _) = self.expect_tuple_of(Parser::match_d_ident)?;
+        if !self.match_rangle() {
+           Err(expected_tokens![>])?;
+        }
+
+        Ok(ast::GenericIdent {
+            ident,
+            params: params.into_iter().map(|t| t.0).collect(),
+        })
     }
 
     fn expect_d_class_decl(&mut self) -> ParseResult<ast::Class> {
         self.expect1(token![class])?;
-        let ident = self.expect_d_ident()?.0;
+        let ident = self.expect_d_generic_ident()?;
 
         self.expect1(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(Parser::match_type)?;
