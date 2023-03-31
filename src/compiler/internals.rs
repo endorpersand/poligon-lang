@@ -402,6 +402,11 @@ c_intrinsics! {
         fun_type![(PTR_P.clone(), PTR_P.clone()) -> INT_P.clone()],
         fn_type_s![(*PTR_L, *PTR_L) -> *INT_L]
     },
+    fputwc: { // (char, File*) -> int
+        "fputwc",
+        fun_type![(CHAR_P.clone(), PTR_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*CHAR_L, *PTR_L) -> *INT_L]
+    },
     exit: { // (int) -> never
         "exit",
         fun_type![(INT_P.clone()) -> VOID_P.clone()],

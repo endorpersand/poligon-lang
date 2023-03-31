@@ -697,6 +697,7 @@ impl Parser {
             Some(token![return])   => Some(self.expect_return()?),
             Some(token![break])    => Some(self.expect_break()?),
             Some(token![continue]) => Some(self.expect_cont()?),
+            Some(token![throw])    => Some(self.expect_throw()?),
             Some(token![fun])      => Some(self.expect_fun_decl()?).map(ast::Stmt::FunDecl),
             Some(token![extern])   => {
                 self.expect1(token![extern])?;
@@ -845,6 +846,17 @@ impl Parser {
         self.expect1(token![continue])?;
 
         Ok(ast::Stmt::Continue)
+    }
+    /// Expect that the next tokens in the input represent a throw statement.
+    pub fn expect_throw(&mut self) -> ParseResult<ast::Stmt> {
+        self.expect1(token![throw])?;
+        
+        let loc = self.peek_loc();
+        if let Some(Token::Str(msg)) = self.next_token() {
+            Ok(ast::Stmt::Throw(msg))
+        } else {
+            Err(ParseErr::ExpectedStrLiteral.at_range(loc))
+        }
     }
 
     /// Expect that the next tokens in the input represent a function signature.

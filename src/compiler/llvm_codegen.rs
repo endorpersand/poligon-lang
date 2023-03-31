@@ -366,6 +366,9 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         (None, None)
                     }
                     ProcStmt::Throw(msg) => {
+                        let _char = layout!(self, S_CHAR).into_int_type();
+                        let _int  = layout!(self, S_INT).into_int_type();
+
                         let msg_ptr = unsafe {
                             self.builder.build_global_string(msg, "throw_msg")
                                 .as_pointer_value()
@@ -375,14 +378,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
                                 self.builder.build_global_string("w", "_write")}
                             )
                             .as_pointer_value();
-                        let _int = layout!(self, S_INT).into_int_type();
 
-                        let fputs = self.get_fn_by_plir_ident("#fputs")
-                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#fputs")))?;
-                        let fdopen = self.get_fn_by_plir_ident("#fdopen")
-                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#fdopen")))?;
-                        let exit = self.get_fn_by_plir_ident("#exit")
-                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#exit")))?;
+                        let fputs = self.import_intrinsic("#fputs")?;
+                        let fputwc = self.import_intrinsic("#fputwc")?;
+                        let fdopen = self.import_intrinsic("#fdopen")?;
+                        let exit = self.import_intrinsic("#exit")?;
                         
                         let stderr = self.builder.build_call(fdopen, params![_int.const_int(2, false), w_ptr], "stderr")
                             .try_as_basic_value()
@@ -391,6 +391,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                             .into_pointer_value();
                         
                         self.builder.build_call(fputs, params![msg_ptr, stderr], "error_msg");
+                        self.builder.build_call(fputwc, params![_char.const_int('\n' as _, false), stderr], "");
                         self.builder.build_call(exit, params![_int.const_int(1, false)], "");
                         self.builder.build_unreachable();
                         (None, None)
