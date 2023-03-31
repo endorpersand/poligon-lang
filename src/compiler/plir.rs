@@ -115,6 +115,9 @@ mod stmt {
         /// `continue`
         Continue,
 
+        /// `throw`
+        Throw(String),
+
         /// A statement that signals to exit the current block.
         /// 
         /// This statement can exit the block with nothing (`void`), 

@@ -166,7 +166,10 @@ enum BlockExit {
     Continue,
 
     /// This block exited normally.
-    Exit(plir::Type)
+    Exit(plir::Type),
+
+    /// An exception was thrown
+    Throw,
 }
 
 #[derive(PartialEq, Eq)]
@@ -209,24 +212,28 @@ impl BlockBehavior {
                 BlockExit::Break     => Err(PLIRErr::CannotBreak),
                 BlockExit::Continue  => Err(PLIRErr::CannotContinue),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
             },
             BlockBehavior::Loop => match exit {
                 BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
                 BlockExit::Break     => Ok(BlockExitHandle::LoopExit),
                 BlockExit::Continue  => Ok(BlockExitHandle::LoopExit),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
             },
             BlockBehavior::Bare => match exit {
                 BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
                 BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, false)),
                 BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, false)),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
             },
             BlockBehavior::Conditional => match exit {
                 BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, true)),
                 BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, true)),
                 BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, true)),
                 BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
+                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, true)),
             },
         }
     }
@@ -374,6 +381,7 @@ impl InsertBlock {
             Some(ProcStmt::Return(_)) => never_ty(),
             Some(ProcStmt::Break)     => never_ty(),
             Some(ProcStmt::Continue)  => never_ty(),
+            Some(ProcStmt::Throw(_))  => never_ty(),
             Some(ProcStmt::Exit(_))   => never_ty(),
             Some(ProcStmt::Expr(e))   => Cow::Borrowed(&e.ty),
             None => void_ty(),
@@ -446,6 +454,19 @@ impl InsertBlock {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Continue);
             self.final_exit.replace(Located::new(BlockExit::Continue, stmt_range));
+        }
+
+        false
+    }
+
+    /// Push a throw statement into this insert block.
+    /// 
+    /// The return will be false, indicating another statement cannot
+    /// be pushed into the insert block (as a final exit has been set).
+    fn push_throw(&mut self, e: String, stmt_range: CursorRange) -> bool {
+        if self.is_open() {
+            self.block.push(plir::ProcStmt::Throw(e));
+            self.final_exit.replace(Located::new(BlockExit::Throw, stmt_range));
         }
 
         false
@@ -749,14 +770,17 @@ impl PLIRCodegen {
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
 
         match exits.pop() {
-            None => Ok(plir::Program(self.globals.stmts, block)),
+            None => Ok(()),
             Some(Located(exit, range)) => match exit {
                 BlockExit::Break     => Err(PLIRErr::CannotBreak.at_range(range)),
                 BlockExit::Continue  => Err(PLIRErr::CannotContinue.at_range(range)),
                 BlockExit::Return(_) => Err(PLIRErr::CannotReturn.at_range(range)),
                 BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn.at_range(range)),
+                BlockExit::Throw     => Ok(()),
             }
-        }
+        }?;
+
+        Ok(plir::Program(self.globals.stmts, block))
     }
 
     /// Gets all the types declared by this code generation.
@@ -1092,6 +1116,9 @@ impl PLIRCodegen {
             ast::Stmt::Continue => {
                 Ok(self.peek_block().push_cont(range))
             },
+            ast::Stmt::Throw(msg) => {
+                Ok(self.peek_block().push_throw(msg, range))
+            },
             ast::Stmt::Expr(e) => {
                 let ety = if index_til_end == 0 {
                     ctx_type.clone()
@@ -1189,6 +1216,7 @@ impl PLIRCodegen {
                 // what is done here?
                 BlockExit::Break => {},
                 BlockExit::Continue => {},
+                BlockExit::Throw => {},
             }
         }
 

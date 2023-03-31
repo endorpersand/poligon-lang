@@ -365,6 +365,36 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         self.build_typed_return(&ty, value);
                         (None, None)
                     }
+                    ProcStmt::Throw(msg) => {
+                        let msg_ptr = unsafe {
+                            self.builder.build_global_string(msg, "throw_msg")
+                                .as_pointer_value()
+                        };
+                        let w_ptr = self.module.get_global("_write")
+                            .unwrap_or_else(|| unsafe {
+                                self.builder.build_global_string("w", "_write")}
+                            )
+                            .as_pointer_value();
+                        let _int = layout!(self, S_INT).into_int_type();
+
+                        let fputs = self.get_fn_by_plir_ident("#fputs")
+                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#fputs")))?;
+                        let fdopen = self.get_fn_by_plir_ident("#fdopen")
+                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#fdopen")))?;
+                        let exit = self.get_fn_by_plir_ident("#exit")
+                            .ok_or_else(|| LLVMErr::UndefinedFun(String::from("#exit")))?;
+                        
+                        let stderr = self.builder.build_call(fdopen, params![_int.const_int(2, false), w_ptr], "stderr")
+                            .try_as_basic_value()
+                            .left()
+                            .expect("stderr")
+                            .into_pointer_value();
+                        
+                        self.builder.build_call(fputs, params![msg_ptr, stderr], "error_msg");
+                        self.builder.build_call(exit, params![_int.const_int(1, false)], "");
+                        self.builder.build_unreachable();
+                        (None, None)
+                    },
                     _ => unreachable!("block should have ended with exit statement")
                 }
             },
@@ -746,6 +776,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
             },
             ProcStmt::Return(_) => unreachable!("return should be resolved at block level"),
             ProcStmt::Exit(_)   => unreachable!("exit should be resolved at block level"),
+            ProcStmt::Throw(_)  => unreachable!("throw should be resolved at block level"),
             ProcStmt::Break     => unreachable!("break should be resolved at block level"),
             ProcStmt::Continue  => unreachable!("continue should be resolved at block level"),
             ProcStmt::Expr(e) => e.write_value(compiler),

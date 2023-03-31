@@ -387,6 +387,26 @@ c_intrinsics! {
         fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
         fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
     },
+    fopen: { // (char*, char*) -> File*
+        "fopen",
+        fun_type![(PTR_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
+        fn_type_s![(*PTR_L, *PTR_L) -> *PTR_L]
+    },
+    fdopen: { // (char*, char*) -> File*
+        "fdopen",
+        fun_type![(INT_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
+        fn_type_s![(*INT_L, *PTR_L) -> *PTR_L]
+    },
+    fputs: { // (char*, File*) -> int
+        "fputs",
+        fun_type![(PTR_P.clone(), PTR_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*PTR_L, *PTR_L) -> *INT_L]
+    },
+    exit: { // (int) -> never
+        "exit",
+        fun_type![(INT_P.clone()) -> VOID_P.clone()],
+        fn_type_s![(*INT_L) -> *VOID_L]
+    },
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {

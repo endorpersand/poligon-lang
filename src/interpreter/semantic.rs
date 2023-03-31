@@ -291,6 +291,7 @@ impl TraverseResolve for Located<ast::Stmt> {
                 BlockType::Loop => Ok(()),
                 _ => Err(ResolveErr::CannotContinue.at_range(range))?
             },
+            ast::Stmt::Throw(_) => Ok(()),
             ast::Stmt::FunDecl(f) => f.traverse_rs(map),
             ast::Stmt::ExternFunDecl(_) => Err(ResolveErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e)   => e.traverse_rs(map),

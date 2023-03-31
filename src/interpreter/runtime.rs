@@ -426,6 +426,9 @@ pub mod err {
 
         /// Unpack was attempted, but there were not enough elements
         UnpackTooMany(usize /* expected */),
+
+        /// Error was thrown using a throw statement.
+        Thrown(String)
     }
 
     impl GonErr for ValueErr {
@@ -444,6 +447,7 @@ pub mod err {
                 ValueErr::UnpackTooLittle(ex, got) => write!(f, "unpack failed, expected {ex} elements, but got {got}"),
                 ValueErr::UnpackTooLittleS(exa, got) => write!(f, "unpack failed, expected at least {exa} elements, but got {got}"),
                 ValueErr::UnpackTooMany(ex) => write!(f, "unpack failed, only expected {ex} elements"),
+                ValueErr::Thrown(s) => write!(f, "{s}"),
             }
         }
     }
@@ -902,6 +906,7 @@ impl TraverseRt for Located<ast::Stmt> {
             },
             ast::Stmt::Break     => Err(TermOp::Break),
             ast::Stmt::Continue  => Err(TermOp::Continue),
+            ast::Stmt::Throw(s)  => Err(ValueErr::Thrown(s.clone()).at_range(range))?,
             ast::Stmt::FunDecl(dcl) => dcl.traverse_rt(ctx),
             ast::Stmt::ExternFunDecl(_) => Err(FeatureErr::CompilerOnly("extern function declarations").at_range(range))?,
             ast::Stmt::Expr(e) => e.traverse_rt(ctx),

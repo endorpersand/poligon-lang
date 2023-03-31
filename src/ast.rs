@@ -169,6 +169,9 @@ pub enum Stmt {
     /// `continue`
     Continue,
     
+    /// `throw` statements (a very primitive version)
+    Throw(String),
+
     /// A function declaration with a defined body.
     /// 
     /// See [`FunDecl`] for examples.

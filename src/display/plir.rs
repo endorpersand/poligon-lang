@@ -57,6 +57,7 @@ impl Display for ProcStmt {
             },
             ProcStmt::Break => write!(f, "break"),
             ProcStmt::Continue => write!(f, "continue"),
+            ProcStmt::Throw(s) => write!(f, "throw {s:?}"),
             ProcStmt::Exit(me) => match me {
                 Some(e) => write!(f, "exit {e}"),
                 None => write!(f, "exit"),
