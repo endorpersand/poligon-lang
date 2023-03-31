@@ -1061,7 +1061,7 @@ impl Parser {
     pub fn has_ident(&self) -> Option<usize> {
         match (self.peek_token(), self.peek_nth_token(1)) {
             (Some(Token::Ident(_)), _) => Some(1),
-            (Some(token![#]), Some(Token::Ident(_))) => Some(2),
+            (Some(token![#]), Some(Token::Ident(_))) if self.intrinsic_mode => Some(2),
             _ => None
         }
     }
@@ -1106,20 +1106,25 @@ impl Parser {
     pub fn expect_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
         let ident = self.expect_ident()?.0;
         
-        if !self.match_langle() {
-           Err(expected_tokens![<])?;
-        }
-        let (params, _) = self.expect_tuple_of(Parser::match_ident)?;
-        if !self.match_rangle() {
-           Err(expected_tokens![>])?;
-        }
+        let params = if self.match_langle() {
+            let (params, _) = self.expect_tuple_of(Parser::match_ident)?;
+
+           let loc = self.peek_loc();
+           if !self.match_rangle() {
+              Err(expected_tokens![>].at_range(loc))?;
+           }
+
+           params
+        } else {
+            vec![]
+        };
 
         Ok(ast::GenericIdent {
             ident,
             params: params.into_iter().map(|t| t.0).collect(),
         })
     }
-    
+
     /// Match the next tokens in the input if they represent a type expression.
     /// 
     /// This is used to enable [`parser::expect_tuple_of(Parser::match_type)`][`Parser::expect_tuple_of`].
@@ -1655,37 +1660,50 @@ impl Parser {
             }
         }
 
-        let id = self.expect_ident()?;
+        let next_token_pos = self.has_ident()
+            .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))?;
+        let e = match self.tokens.get(next_token_pos) {
+            Some(FullToken { tt: token![<] | token![<<], .. }) => {
+                let ty = self.expect_type()?;
 
-        let e = if self.match1(token![#]) {
-            self.expect1(token!["{"])?;
-            match id.as_str() {
-                "set" => {
-                    let exprs = self.expect_closing_tuple(token!["}"])?;
-                    ast::Expr::SetLiteral(exprs)
-                },
-                "dict" => {
-                    let entries = self.expect_closing_tuple_of(
-                        match_entry,
-                        token!["}"], 
-                        ParseErr::ExpectedEntry
-                    )?;
-                    ast::Expr::DictLiteral(entries)
-                },
-                _ => {
-                    let entries = self.expect_closing_tuple_of(
-                        match_init_entry, 
-                        token!["}"], 
-                        ParseErr::ExpectedIdent
-                    )?;
-                    ast::Expr::ClassLiteral(
-                        id.map(|s| ast::Type(s, vec![])),
-                        entries
-                    )
+                self.expect1(token![#])?;
+                self.expect1(token!["{"])?;
+                let params = self.expect_closing_tuple_of(
+                    match_init_entry, 
+                    token!["}"], 
+                    ParseErr::ExpectedIdent
+                )?;
+                ast::Expr::ClassLiteral(ty, params)
+            },
+            Some(FullToken { tt: token![#], .. }) => {
+                let ty = self.expect_type()?;
+                
+                self.expect1(token![#])?;
+                self.expect1(token!["{"])?;
+                match ty.0.0.as_str() {
+                    "set" => {
+                        let exprs = self.expect_closing_tuple(token!["}"])?;
+                        ast::Expr::SetLiteral(exprs)
+                    },
+                    "dict" => {
+                        let entries = self.expect_closing_tuple_of(
+                            match_entry,
+                            token!["}"], 
+                            ParseErr::ExpectedEntry
+                        )?;
+                        ast::Expr::DictLiteral(entries)
+                    },
+                    _ => {
+                        let params = self.expect_closing_tuple_of(
+                            match_init_entry, 
+                            token!["}"], 
+                            ParseErr::ExpectedIdent
+                        )?;
+                        ast::Expr::ClassLiteral(ty, params)
+                    }
                 }
-            }
-        } else {
-            ast::Expr::Ident(id.0)
+            },
+            _ => ast::Expr::Ident(self.expect_ident()?.0)
         };
 
         Ok(e)
@@ -1782,13 +1800,18 @@ impl Parser {
     fn expect_d_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
         let ident = self.expect_d_ident()?.0;
         
-        if !self.match_langle() {
-           Err(expected_tokens![<])?;
-        }
-        let (params, _) = self.expect_tuple_of(Parser::match_d_ident)?;
-        if !self.match_rangle() {
-           Err(expected_tokens![>])?;
-        }
+        let params = if self.match_langle() {
+           let (params, _) = self.expect_tuple_of(Parser::match_d_ident)?;
+           
+           let loc = self.peek_loc();
+           if !self.match_rangle() {
+              Err(expected_tokens![>].at_range(loc))?;
+           }
+
+           params
+        } else {
+            vec![]
+        };
 
         Ok(ast::GenericIdent {
             ident,
