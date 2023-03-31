@@ -1767,53 +1767,42 @@ impl PLIRCodegen {
             ast::Expr::Call { funct, params } => {
                 let funct = match *funct {
                     // HACK: GEP, alloca, size_of
-                    Located(ast::Expr::StaticPath(sp), path_range) if sp.attr == "#gep" => {
-                        let tyrange = sp.ty.1.clone();
+                    Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
                         let ty = self.consume_type(sp.ty)?;
 
-                        let can_gep = match ty.as_ref() {
-                            plir::TypeRef::Generic("#ll_array", _) => true,
-                            _ => matches!(self.get_class(&ty, tyrange)?.ty, TypeStructure::Class(_))
-                        };
+                        let _ptr = plir::ty!("#ptr");
+                        let _int = plir::ty!(plir::Type::S_INT);
 
-                        return if can_gep {
-                            let _ptr = plir::ty!("#ptr");
-                            let _int = plir::ty!(plir::Type::S_INT);
-
-                            let mut piter = params.into_iter();
-                            let ptr = piter.next()
-                                .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
-                                .and_then(|e| self.consume_located_expr(e, Some(_ptr.clone())))
-                                .and_then(|le| {
-                                    self.apply_special_cast(le, &_ptr, CastType::Call)?
+                        let mut piter = params.into_iter();
+                        let ptr = piter.next()
+                            .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
+                            .and_then(|e| self.consume_located_expr(e, Some(_ptr.clone())))
+                            .and_then(|le| {
+                                self.apply_special_cast(le, &_ptr, CastType::Call)?
                                     .map(|le| le.0)
                                     .map_err(|le| {
                                         PLIRErr::ExpectedType(_ptr.clone(), le.0.ty).at_range(le.1)
                                     })
-                                })
-                                .map(Box::new)?;
-
-                            let params = piter.map(|expr| {
-                                let _int = plir::ty!(plir::Type::S_INT);
-                                let lparam = self.consume_located_expr(
-                                    expr, Some(_int.clone())
-                                )?;
-                                
-                                self.apply_special_cast(lparam, &_int, CastType::Call)?
-                                    .map(|le| le.0)
-                                    .map_err(|le| {
-                                        PLIRErr::ExpectedType(_int.clone(), le.0.ty).at_range(le.1)
-                                    })
                             })
-                            .collect::<Result<_, _>>()?;
+                            .map(Box::new)?;
 
-                            Ok(plir::Expr::new(
-                                plir::ty!("#ptr"),
-                                plir::ExprType::GEP(ty, ptr, params)
-                            ))
-                        } else {
-                            Err(PLIRErr::UndefinedAttr(ty, String::from("gep")).at_range(path_range))?
-                        };
+                        let params = piter.map(|expr| {
+                            let lparam = self.consume_located_expr(
+                                expr, Some(_int.clone())
+                            )?;
+                            
+                            self.apply_special_cast(lparam, &_int, CastType::Call)?
+                                .map(|le| le.0)
+                                .map_err(|le| {
+                                    PLIRErr::ExpectedType(_int.clone(), le.0.ty).at_range(le.1)
+                                })
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                        return Ok(plir::Expr::new(
+                            plir::ty!("#ptr"),
+                            plir::ExprType::GEP(ty, ptr, params)
+                        ))
                     },
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#alloca" => {
                         return Ok(plir::Expr::new(
