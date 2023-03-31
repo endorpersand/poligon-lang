@@ -260,7 +260,7 @@ enum UnresolvedType {
 }
 trait Unresolved {
     fn resolution_ident(&self) -> &str;
-    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self>
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self>
         where Self: Sized;
 }
 
@@ -274,7 +274,7 @@ impl Unresolved for UnresolvedValue {
         }
     }
 
-    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self> {
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self> {
         &mut block.unres_values
     }
 }
@@ -286,7 +286,7 @@ impl Unresolved for UnresolvedType {
         }
     }
 
-    fn block_map(block: &mut InsertBlock) -> &mut HashMap<String, Self> {
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self> {
         &mut block.unres_types
     }
 }
@@ -307,8 +307,8 @@ struct InsertBlock {
     // TODO: use aliases
     aliases: HashMap<String, String>,
     types: HashMap<String, TypeData>,
-    unres_values: HashMap<String, UnresolvedValue>,
-    unres_types: HashMap<String, UnresolvedType>,
+    unres_values: IndexMap<String, UnresolvedValue>,
+    unres_types: IndexMap<String, UnresolvedType>,
 
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
@@ -326,8 +326,8 @@ impl InsertBlock {
             vars: HashMap::new(),
             aliases: HashMap::new(),
             types: HashMap::new(),
-            unres_values: HashMap::new(),
-            unres_types: HashMap::new(),
+            unres_values: IndexMap::new(),
+            unres_types: IndexMap::new(),
             expected_ty
         }
     }
@@ -349,8 +349,8 @@ impl InsertBlock {
                 "#ptr",
                 "#byte"
             ]),
-            unres_values: HashMap::new(),
-            unres_types: HashMap::new(),
+            unres_values: IndexMap::new(),
+            unres_types: IndexMap::new(),
             expected_ty: None
         }
     }
@@ -805,7 +805,7 @@ impl PLIRCodegen {
 
     /// If there is an unresolved structure present at the identifier, try to resolve it.
     fn resolve_ident<'a>(&mut self, ident: &'a str) -> PLIRResult<&'a str> {
-        use std::collections::hash_map::Entry;
+        use indexmap::map::Entry;
 
         // mi is 0 to len
         let mi = self.blocks.iter().rev()
@@ -867,7 +867,7 @@ impl PLIRCodegen {
 
     /// [`PLIRCodegen::resolve_ident`], but using a type parameter
     fn resolve_type(&mut self, ty: &plir::Type) -> PLIRResult<()> {
-        use std::collections::hash_map::Entry;
+        use indexmap::map::Entry;
 
         let ident = ty.short_ident();
         // mi is 0 to len
