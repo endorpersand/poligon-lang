@@ -1097,7 +1097,8 @@ impl PLIRCodegen {
         let mut unres_types = &mut self.peek_block().unres_types;
         while let Some(ident) = unres_types.keys().next() {
             match unres_types.remove(&ident.clone()).unwrap() {
-                UnresolvedType::Class(c) => { self.consume_cls(c, todo!("generic class resolute"))?; },
+                // TODO: generic class resolution
+                UnresolvedType::Class(_) => { },
                 UnresolvedType::Import(_) => todo!(),
             }
             unres_types = &mut self.peek_block().unres_types;
