@@ -54,7 +54,7 @@ pub enum PLIRErr {
     /// Variable is not defined
     UndefinedVar(String),
     /// Type/class is not defined
-    UndefinedType(String),
+    UndefinedType(plir::Type),
     /// Attribute doesn't exist on type
     UndefinedAttr(plir::Type, String),
     /// Tried to use . access on a method
@@ -239,9 +239,9 @@ impl BlockBehavior {
     }
 }
 
-fn primitives(prims: &[&str]) -> HashMap<String, TypeData> {
-    prims.iter()
-        .map(|&s| (String::from(s), TypeData::primitive()))
+fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, TypeData> {
+    prims.into_iter()
+        .map(|t| (t, TypeData::primitive()))
         .collect()
 }
 
@@ -306,7 +306,7 @@ struct InsertBlock {
     vars: HashMap<String, plir::Type>,
     // TODO: use aliases
     aliases: HashMap<String, String>,
-    types: HashMap<String, TypeData>,
+    types: HashMap<plir::Type, TypeData>,
     unres_values: IndexMap<String, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
 
@@ -333,6 +333,8 @@ impl InsertBlock {
     }
 
     fn top() -> Self {
+        use plir::{Type, ty};
+
         Self {
             block: vec![],
             last_stmt_loc: (0, 0) ..= (0, 0),
@@ -340,14 +342,14 @@ impl InsertBlock {
             final_exit: None,
             vars: HashMap::new(),
             aliases: HashMap::new(),
-            types: primitives(&[
-                plir::Type::S_INT,
-                plir::Type::S_FLOAT,
-                plir::Type::S_BOOL,
-                plir::Type::S_CHAR,
-                plir::Type::S_VOID,
-                "#ptr",
-                "#byte"
+            types: primitives([
+                ty!(Type::S_INT),
+                ty!(Type::S_FLOAT),
+                ty!(Type::S_BOOL),
+                ty!(Type::S_CHAR),
+                ty!(Type::S_VOID),
+                ty!("#ptr"),
+                ty!("#byte"),
             ]),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
@@ -480,10 +482,10 @@ impl InsertBlock {
 
     /// Insert a class into the insert block's type register.
     fn insert_class(&mut self, cls: &plir::Class) {
-        self.types.insert(cls.ty.ident().to_string(), TypeData::structural(cls.clone()));
+        self.types.insert(cls.ty.clone(), TypeData::structural(cls.clone()));
     }
 
-    fn insert_unresolved_method(&mut self, cls: &plir::Type, method: ast::MethodDecl) {
+    fn insert_unresolved_method(&mut self, ty: &plir::Type, method: ast::MethodDecl) {
         let ast::MethodDecl {
             sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
             block 
@@ -512,19 +514,19 @@ impl InsertBlock {
                 ident: this, 
                 // since this is synthesized, there's no real cursor,
                 // so just assign an arbitary one
-                ty: Some(Located::new(as_ast_ty(cls), (0, 0) ..= (0, 0)))
+                ty: Some(Located::new(as_ast_ty(ty), (0, 0) ..= (0, 0)))
             });
         } else {
             // TODO, use this ident
         };
-        let metref = format!("{cls}::{method_name}");
+        let metref = format!("{ty}::{method_name}");
 
         let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
         self.insert_unresolved(UnresolvedValue::Fun(decl));
 
-        if let Some(c) = self.types.get_mut(&*cls.ident()) {
+        if let Some(c) = self.types.get_mut(ty) {
             c.insert_method(method_name, metref);
         }
     }
@@ -632,7 +634,7 @@ enum TypeStructure {
 /// A struct which holds the types declared by PLIR code generation.
 #[derive(Default, Clone)]
 pub struct DeclaredTypes {
-    pub(super) types: IndexMap<String, plir::Class>,
+    pub(super) types: IndexMap<plir::Type, plir::Class>,
     pub(super) values: IndexMap<String, plir::Type>
 }
 
@@ -684,7 +686,7 @@ impl Globals {
                 self.declared.values.insert(name.to_string(), plir::Type::Fun(f.ty()));
             },
             HoistedStmt::ClassDecl(c) => {
-                self.declared.types.insert(name.to_string(), c.clone());
+                self.declared.types.insert(c.ty.clone(), c.clone());
             },
             HoistedStmt::IGlobal(_, _) => {
                 self.declared.values.insert(name.to_string(), plir::ty!("#ptr"));
@@ -742,7 +744,7 @@ impl PLIRCodegen {
 
     /// Creates a new instance of the PLIRCodegen with the given types already declared.
     pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
-        use plir::Type;
+        use plir::{Type, ty};
 
         let mut top = InsertBlock::top();
         for (ident, cls) in &declared.types {
@@ -755,7 +757,7 @@ impl PLIRCodegen {
             // methods are of the form ty::ident(arg0: ty, ..)
             if let (Some((cls, met)), Type::Fun(fty)) = (ident.split_once("::"), value_ty) {
                 // FIXME: better method check
-                if let Some((Type::Prim(t1), cls_data)) = fty.params.get(0).zip(top.types.get_mut(cls)) {
+                if let Some((Type::Prim(t1), cls_data)) = fty.params.get(0).zip(top.types.get_mut(&ty!(cls))) {
                     if t1 == cls {
                         cls_data.insert_method(met.to_string(), ident.to_string());
                     }
@@ -981,22 +983,20 @@ impl PLIRCodegen {
         match ty.as_ref() {
             // HACK ll_array
             TypeRef::Generic("#ll_array", [t]) => {
-                let ty_ident = ty.ident();
-
-                if self.find_scoped(|ib| ib.types.get(&*ty_ident)).is_none() {
+                if self.find_scoped(|ib| ib.types.get(ty)).is_none() {
                     self.get_class(t, range)?;
-                    self.program.types.insert(ty_ident.to_string(), TypeData::primitive());
+                    self.program.types.insert(ty.clone(), TypeData::primitive());
                 }
 
-                Ok(&self.program.types[&*ty_ident])
+                Ok(&self.program.types[ty])
             },
             TypeRef::Generic("#ll_array", a) => {
                 Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
             },
             TypeRef::Prim(_) | TypeRef::Generic(_, _) => {
-                self.find_scoped(|ib| ib.types.get(&*ty.ident()))
+                self.find_scoped(|ib| ib.types.get(ty))
                     .ok_or_else(|| {
-                        PLIRErr::UndefinedType(ty.ident().to_string())
+                        PLIRErr::UndefinedType(ty.clone())
                             .at_range(range)
                     })
             },
