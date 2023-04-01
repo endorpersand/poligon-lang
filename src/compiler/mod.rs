@@ -34,6 +34,7 @@ pub mod plir;
 mod llvm;
 pub(self) mod internals;
 pub mod llvm_codegen;
+mod d_parser;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
@@ -50,8 +51,9 @@ pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
 use crate::err::{FullGonErr, GonErr};
 use crate::lexer;
-use crate::parser::{self, Parser};
+use crate::parser;
 
+use self::d_parser::DParser;
 use self::plir_codegen::DeclaredTypes;
 
 use lazy_static::lazy_static;
@@ -202,7 +204,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
-        let parser = Parser::new(lexed, false);
+        let parser = DParser::new(lexed, false);
         let ast = cast_e(parser.unwrap_d_program(), code)?;
 
         let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());

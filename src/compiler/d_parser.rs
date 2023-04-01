@@ -41,7 +41,7 @@ use crate::ast::{self, PatErr};
 /// ]));
 /// ```
 pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
-    Parser::new(tokens, false).parse()
+    DParser::new(tokens, false).parse()
 }
 
 /// A struct that does the conversion of tokens to a parseable program tree.
@@ -72,7 +72,7 @@ pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Prog
 ///     )
 /// ]));
 /// ```
-pub struct Parser {
+pub struct DParser {
     tokens: VecDeque<FullToken>,
     repl_mode: bool,
     eof: (usize, usize),
@@ -248,7 +248,7 @@ fn merge_ranges_in_place<T: Clone>(mr1: &mut Option<RangeInclusive<T>>, r2: Rang
     mr1.replace(new_range);
 }
 
-impl Iterator for Parser {
+impl Iterator for DParser {
     type Item = FullToken;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -258,7 +258,7 @@ impl Iterator for Parser {
     }
 }
 
-impl Parser {
+impl DParser {
     /// Create a new Parser to read a given set of tokens.
     /// 
     /// The `repl_mode` parameter alters some parser functionality 
@@ -532,7 +532,7 @@ impl Parser {
     /// The `{` would need to be [matched][Parser::match1] before this function is called.
     pub fn expect_closing_tuple(&mut self, closer: Token) -> ParseResult<Vec<Located<ast::Expr>>> 
     {
-        self.expect_closing_tuple_of(Parser::match_expr, closer, ParseErr::ExpectedExpr)
+        self.expect_closing_tuple_of(DParser::match_expr, closer, ParseErr::ExpectedExpr)
     }
 
     /// Expect that the next tokens in input represent values of type `T` separated by commas 
@@ -751,7 +751,7 @@ impl Parser {
                 self.push_loc_block("match_decl_pat list");
                 self.expect1(token!["["])?;
                 let tpl = self.expect_closing_tuple_of(
-                    Parser::match_decl_pat, 
+                    DParser::match_decl_pat, 
                     token!["]"], 
                     ParseErr::ExpectedPattern
                 )?;
@@ -867,7 +867,7 @@ impl Parser {
 
         self.expect1(token!["("])?;
         let params = self.expect_closing_tuple_of(
-            Parser::match_param,
+            DParser::match_param,
             token![")"], 
             ParseErr::ExpectedParam
         )?;
@@ -898,7 +898,7 @@ impl Parser {
         let ident = self.expect_generic_ident()?;
 
         self.expect1(token!["{"])?;
-        let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
+        let (fields, _) = self.expect_tuple_of(DParser::match_field_decl)?;
         
         let mut methods = vec![];
         while let Some(m) = self.match_method_decl()? {
@@ -958,7 +958,7 @@ impl Parser {
 
         self.expect1(token!["("])?;
         let params = self.expect_closing_tuple_of(
-            Parser::match_param,
+            DParser::match_param,
             token![")"], 
             ParseErr::ExpectedParam
         )?;
@@ -1107,7 +1107,7 @@ impl Parser {
         let ident = self.expect_ident()?.0;
         
         let params = if self.match_langle() {
-            let (params, _) = self.expect_tuple_of(Parser::match_ident)?;
+            let (params, _) = self.expect_tuple_of(DParser::match_ident)?;
 
            let loc = self.peek_loc();
            if !self.match_rangle() {
@@ -1137,7 +1137,7 @@ impl Parser {
             let params = if self.match_langle() {
                 let token_pos = self.peek_loc();
 
-                let (tpl, comma_end) = self.expect_tuple_of(Parser::match_type)?;
+                let (tpl, comma_end) = self.expect_tuple_of(DParser::match_type)?;
                 if !self.match_rangle() {
                     Err(if comma_end {
                         ParseErr::ExpectedType
@@ -1404,7 +1404,7 @@ impl Parser {
                 .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
             let range = self.pop_loc_block("match_unary").unwrap();
-            Some(Parser::wrap_unary_op(ops, e, range))
+            Some(DParser::wrap_unary_op(ops, e, range))
         };
 
         Ok(me)
@@ -1610,7 +1610,7 @@ impl Parser {
     pub fn expect_identoid(&mut self) -> ParseResult<ast::Expr> {
         type Entry = (Located<ast::Expr>, Located<ast::Expr>);
         /// Entry for dict literals
-        fn match_entry(this: &mut Parser) -> ParseResult<Option<Entry>> {
+        fn match_entry(this: &mut DParser) -> ParseResult<Option<Entry>> {
             if let Some(k) = this.match_expr()? {
                 this.expect1(token![:])?;
                 let v = this.expect_expr()?;
@@ -1643,7 +1643,7 @@ impl Parser {
                     },
                     _ => {
                         let params = self.expect_closing_tuple_of(
-                            Parser::match_init_entry, 
+                            DParser::match_init_entry, 
                             token!["}"], 
                             ParseErr::ExpectedIdent
                         )?;
@@ -1687,7 +1687,7 @@ impl Parser {
             Some(token![#]) => {
                 self.expect1(token!["{"])?;
                 let params = self.expect_closing_tuple_of(
-                    Parser::match_init_entry, 
+                    DParser::match_init_entry, 
                     token!["}"], 
                     ParseErr::ExpectedIdent
                 )?;
@@ -1755,6 +1755,108 @@ impl Parser {
         Ok(ast::Expr::For {
             ident, iterator: Box::new(iterator), block
         })
+    }
+
+    pub(crate) fn unwrap_d_program(mut self) -> ParseResult<ast::Program> {
+        self.intrinsic_mode = true;
+
+        let mut program = vec![];
+        loop {
+            self.push_loc_block("expect_d_program");
+            let stmt = match self.peek_token() {
+                Some(token![class]) => self.expect_d_class_decl().map(ast::Stmt::ClassDecl)?,
+                Some(token![extern]) => self.expect_d_extern_decl()?,
+                Some(_) => Err(expected_tokens![;].at_range(self.peek_loc()))?,
+                None => break
+            };
+
+            program.push(Located::new(stmt, self.pop_loc_block("expect_d_program").unwrap()));
+        }
+
+        Ok(ast::Program(program))
+    }
+
+    fn match_d_ident(&mut self) -> ParseResult<Option<Located<String>>> {
+        if let Some(Token::Str(_)) = self.peek_token() {
+            let tok = self.peek_loc();
+            let Some(Token::Str(s)) = self.next_token() else { unreachable!() };
+
+            Ok(Some(Located::new(s, tok)))
+        } else {
+            self.match_ident()
+        }
+    }
+    fn expect_d_ident(&mut self) -> ParseResult<Located<String>> {
+        self.match_d_ident()
+            .and_then(|t| t.ok_or_else(|| {
+                ParseErr::ExpectedIdent.at_range(self.peek_loc())
+            }))
+    }
+    fn expect_d_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
+        let ident = self.expect_d_ident()?.0;
+        
+        let params = if self.match_langle() {
+           let (params, _) = self.expect_tuple_of(DParser::match_d_ident)?;
+           
+           let loc = self.peek_loc();
+           if !self.match_rangle() {
+              Err(expected_tokens![>].at_range(loc))?;
+           }
+
+           params
+        } else {
+            vec![]
+        };
+
+        Ok(ast::GenericIdent {
+            ident,
+            params: params.into_iter().map(|t| t.0).collect(),
+        })
+    }
+
+    fn expect_d_class_decl(&mut self) -> ParseResult<ast::Class> {
+        self.expect1(token![class])?;
+        let ident = self.expect_d_generic_ident()?;
+
+        self.expect1(token!["{"])?;
+        let (fields, _) = self.expect_tuple_of(DParser::match_type)?;
+        let fields = fields.into_iter()
+            .enumerate()
+            .map(|(i, ty)| ast::FieldDecl {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: format!("#{i}"),
+                ty,
+            })
+            .collect();
+        self.expect1(token!["}"])?;
+        self.match1(token![;]);
+
+        Ok(ast::Class { ident, fields, methods: vec![] })
+    }
+
+    fn expect_d_extern_decl(&mut self) -> ParseResult<ast::Stmt> {
+        self.expect1(token![extern])?;
+        self.expect1(token![fun])?;
+
+        let ident = self.expect_d_ident()?.0;
+
+        self.expect1(token!["("])?;
+        let (params, end_comma) = self.expect_tuple_of(DParser::match_param)?;
+        let varargs = end_comma && self.match1(token![..]);
+        if varargs {
+            self.match1(token![,]);
+        }
+        self.expect1(token![")"])?;
+
+        let ret = if self.match1(token![->]) {
+            Some(self.expect_type()?)
+        } else {
+            None
+        };
+        self.expect1(token![;])?;
+
+        Ok(ast::Stmt::ExternFunDecl(ast::FunSignature { ident, params, varargs, ret }))
     }
 }
 
@@ -2119,7 +2221,7 @@ mod tests {
         fn assert_parse_type(input: &str, ty: Type) {
             let tokens = unwrap_fe(tokenize(input), input);
             assert_eq!(
-                unwrap_fe(Parser::new(tokens, false).expect_type(), input),
+                unwrap_fe(DParser::new(tokens, false).expect_type(), input),
                 ty
             )
         }
