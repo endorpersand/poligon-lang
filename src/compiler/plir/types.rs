@@ -121,8 +121,8 @@ impl Type {
         }
     }
 
-    pub(crate) fn fun_type(params: Vec<Type>, ret: Type, var_args: bool) -> Self {
-        Type::Fun(FunType::new(params, ret, var_args))
+    pub(crate) fn fun_type(params: impl IntoIterator<Item=Type>, ret: Type, var_args: bool) -> Self {
+        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
     }
 
     /// Test if this type is `never`.

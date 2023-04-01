@@ -1407,15 +1407,13 @@ impl PLIRCodegen {
             })
             .collect::<Result<_, _>>()?;
         
-        let param_tys = params.iter()
-            .map(|p| &p.ty)
-            .cloned()
-            .collect();
-    
         let ret = match ret {
             Some(t) => self.consume_type(t)?,
             None => plir::ty!(plir::Type::S_VOID),
         };
+        let param_tys = params.iter()
+            .map(|p| &p.ty)
+            .cloned();
 
         // declare function before parsing block
         self.declare(&new_id, 
@@ -1774,7 +1772,7 @@ impl PLIRCodegen {
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_VOID), // TODO: plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
+                    plir::ty!(plir::Type::S_VOID),
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
@@ -1783,12 +1781,12 @@ impl PLIRCodegen {
                 let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_VOID), // TODO: plir::ty!(plir::Type::S_LIST, [block.0.clone()]),
+                    plir::ty!(plir::Type::S_VOID),
                     plir::ExprType::For { ident, iterator, block }
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let funct = match *funct {
+                let (lparams, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
                         let ty = self.consume_type(sp.ty)?;
@@ -1839,36 +1837,47 @@ impl PLIRCodegen {
                             plir::ExprType::SizeOf(self.consume_type(sp.ty)?)
                         ))
                     }
-                    e => self.consume_located_expr(e, None)?
+                    e => {
+                        let lparams: Vec<_> = params.into_iter()
+                            .map(|le| self.consume_located_expr(le, None))
+                            .collect::<Result<_, _>>()?;
+
+                        let ptys = lparams.iter()
+                            .map(|e| e.ty.clone());
+                        let fun_ty = plir::Type::fun_type(
+                            ptys, 
+                            ctx_type.unwrap_or(plir::ty!(plir::Type::S_VOID)), 
+                            false
+                        );
+                        (lparams, self.consume_located_expr(e, Some(fun_ty))?)
+                    }
                 };
 
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType { params: param_tys, ret: _, varargs }) => {
                         let bad_arity = if *varargs {
-                            param_tys.len() > params.len()
+                            param_tys.len() > lparams.len()
                         } else {
-                            param_tys.len() != params.len()
+                            param_tys.len() != lparams.len()
                         };
 
                         if bad_arity {
-                            let err = PLIRErr::WrongArity(param_tys.len(), params.len()).at_range(range);
+                            let err = PLIRErr::WrongArity(param_tys.len(), lparams.len()).at_range(range);
                             return Err(err);
                         }
 
+                        // can't use zip bc varargs
                         let mut pty_iter = param_tys.iter();
-                        let params = params.into_iter()
-                            .map(|expr| {
-                                let mpty = pty_iter.next();
-                                let lparam = self.consume_located_expr(expr, mpty.cloned())?;
-                                
-                                if let Some(pty) = mpty {
+                        let params = lparams.into_iter()
+                            .map(|lparam| match pty_iter.next() {
+                                Some(pty) => {
                                     self.apply_special_cast(lparam, pty, CastType::Call)?
                                         .map_err(|le| {
                                             PLIRErr::ExpectedType(pty.clone(), le.0.ty).at_range(le.1)
                                         })
-                                } else {
-                                    Ok(lparam)
-                                }.map(|lp| lp.0)
+                                        .map(|lp| lp.0)
+                                }
+                                None => Ok(lparam.0),
                             })
                             .collect::<Result<_, _>>()?;
                         
