@@ -583,7 +583,7 @@ impl<'k> SigKey<'k> {
 /// This allows the PLIR codegen to replace methods with functions
 /// and access type fields.
 #[derive(Debug)]
-struct TypeData {
+pub(super) struct TypeData {
     ty: TypeStructure,
     methods: HashMap<SigKey<'static>, plir::FunIdent>
 }
@@ -1392,6 +1392,19 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
+    pub(crate) fn register_fun_sig(&mut self, fs: &plir::FunSignature) {
+        let plir::FunSignature { ident, params, varargs, ret } = fs;
+
+        let param_tys = params.iter()
+            .map(|p| &p.ty)
+            .cloned();
+
+        // declare function before parsing block
+        self.declare(ident, 
+            plir::Type::fun_type(param_tys, ret.clone(), *varargs)
+        );
+    }
+
     /// Consume a function signature and convert it into a PLIR function signature.
     fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
         let ast::FunSignature { ident: _, params, varargs, ret } = sig;
@@ -1412,16 +1425,10 @@ impl PLIRCodegen {
             Some(t) => self.consume_type(t)?,
             None => plir::ty!(plir::Type::S_VOID),
         };
-        let param_tys = params.iter()
-            .map(|p| &p.ty)
-            .cloned();
 
-        // declare function before parsing block
-        self.declare(&new_id, 
-            plir::Type::fun_type(param_tys, ret.clone(), varargs)
-        );
-
-        Ok(plir::FunSignature { ident: new_id, params, ret, varargs })
+        let fs = plir::FunSignature { ident: new_id, params, ret, varargs };
+        self.register_fun_sig(&fs);
+        Ok(fs)
     }
     /// Consume a function declaration statement into the current insert block.
     /// 
@@ -1451,17 +1458,36 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
+    pub(super) fn verify_type(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
+        let Located(ty, range) = ty;
+        self.get_class(ty, range)
+    }
     fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
         let Located(ty, range) = ty;
         let ty = plir::Type::from(ty);
 
-        // See if class is initialized, and if so, return the plir Type
-        self.get_class(&ty, range).map(|cls| (ty, cls))
+        let cls = self.verify_type(Located::new(&ty, range))?;
+        Ok((ty, cls))
     }
 
     fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
         self.consume_type_and_get_cls(ty)
             .map(|(ty, _)| ty)
+    }
+
+    pub(super) fn register_cls(
+        &mut self, cls: plir::Class, 
+        methods: impl IntoIterator<Item=ast::MethodDecl>, 
+        ty: &plir::Type
+    ) {
+        let ib = self.peek_block();
+        
+        ib.insert_class(&cls);
+        for method in methods {
+            ib.insert_unresolved_method(ty, method);
+        }
+
+        self.push_global(cls);
     }
 
     fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<bool> {
@@ -1489,15 +1515,7 @@ impl PLIRCodegen {
             .collect::<Result<_, _>>()?;
         
         let cls = plir::Class { ty: ty.clone(), fields };
-        
-        let ib = self.peek_block();
-        
-        ib.insert_class(&cls);
-        for method in methods {
-            ib.insert_unresolved_method(ty, method);
-        }
-
-        self.push_global(cls);
+        self.register_cls(cls, methods, ty);
         Ok(self.peek_block().is_open())
     }
 

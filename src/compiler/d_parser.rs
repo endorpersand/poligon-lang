@@ -58,7 +58,7 @@ struct RangeBlock(&'static str, Option<CursorRange>);
 
 /// An error that occurs in the parsing process.
 #[derive(Debug, PartialEq, Eq)]
-pub enum ParseErr {
+pub enum DParseErr {
     /// The parser expected one of the tokens.
     ExpectedTokens(Vec<Token>),
 
@@ -67,17 +67,19 @@ pub enum ParseErr {
 
     /// The parser expected a type expression (e.g. `list<str>`).
     ExpectedType,
+
+    UnexpectedToken
 }
-impl GonErr for ParseErr {
+impl GonErr for DParseErr {
     fn err_name(&self) -> &'static str {
         "syntax error"
     }
 }
 
-impl std::fmt::Display for ParseErr {
+impl std::fmt::Display for DParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseErr::ExpectedTokens(tokens) => match tokens.len() {
+            DParseErr::ExpectedTokens(tokens) => match tokens.len() {
                 0 => write!(f, "expected eof"),
                 1 => write!(f, "expected '{}'", tokens[0]),
                 _ => {
@@ -91,18 +93,19 @@ impl std::fmt::Display for ParseErr {
                     Ok(())
                 }
             },
-            ParseErr::ExpectedIdent => write!(f, "expected identifier"),
-            ParseErr::ExpectedType  => write!(f, "expected type expression"),
+            DParseErr::ExpectedIdent   => write!(f, "expected identifier"),
+            DParseErr::ExpectedType    => write!(f, "expected type expression"),
+            DParseErr::UnexpectedToken => write!(f, "unexpected token"),
         }
     }
 }
 /// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullParseErr>;
-type FullParseErr = FullGonErr<ParseErr>;
+type FullParseErr = FullGonErr<DParseErr>;
 
 macro_rules! expected_tokens {
     ($($t:tt),*) => {
-        ParseErr::ExpectedTokens(vec![$(token![$t]),*])
+        DParseErr::ExpectedTokens(vec![$(token![$t]),*])
     }
 }
 
@@ -156,9 +159,9 @@ impl DParser {
         loop {
             self.push_loc_block("expect_d_program");
             let stmt = match self.peek_token() {
-                Some(token![class]) => self.expect_d_class_decl().map(ast::Stmt::ClassDecl)?,
-                Some(token![extern]) => self.expect_d_extern_decl()?,
-                Some(_) => Err(expected_tokens![;].at_range(self.peek_loc()))?,
+                Some(token![class]) => self.expect_class_decl().map(ast::Stmt::ClassDecl)?,
+                Some(token![extern]) => self.expect_extern_decl()?,
+                Some(_) => Err(DParseErr::UnexpectedToken.at_range(self.peek_loc()))?,
                 None => break
             };
 
@@ -188,10 +191,10 @@ impl DParser {
             if t == u {
                 Ok(())
             } else {
-                Err(ParseErr::ExpectedTokens(vec![u]).at_range(loc))
+                Err(DParseErr::ExpectedTokens(vec![u]).at_range(loc))
             }
         } else {
-            Err(ParseErr::ExpectedTokens(vec![u]).at(self.eof))
+            Err(DParseErr::ExpectedTokens(vec![u]).at(self.eof))
         }
     }
 
@@ -215,10 +218,10 @@ impl DParser {
             if one_of.contains(&ft.tt) {
                 Ok(ft)
             } else {
-                Err(ParseErr::ExpectedTokens(vec![ft.tt]).at_range(ft.loc))
+                Err(DParseErr::ExpectedTokens(vec![ft.tt]).at_range(ft.loc))
             }
         } else {
-            Err(ParseErr::ExpectedTokens(one_of.into()).at(self.eof))
+            Err(DParseErr::ExpectedTokens(one_of.into()).at(self.eof))
         }
     }
 
@@ -365,7 +368,7 @@ impl DParser {
     /// This function requires a `Parser::match_x` function that can match values of type `T`,
     /// and an error to raise if a match was not found.
     pub fn expect_closing_tuple_of<T, F>(
-        &mut self, f: F, closer: Token, or_else: ParseErr
+        &mut self, f: F, closer: Token, or_else: DParseErr
     ) -> ParseResult<Vec<T>> 
         where F: FnMut(&mut Self) -> ParseResult<Option<T>>
     {
@@ -492,7 +495,7 @@ impl DParser {
     /// held by this identifier.
     pub fn has_ident(&self) -> Option<usize> {
         match (self.peek_token(), self.peek_nth_token(1)) {
-            (Some(Token::Ident(_)), _) => Some(1),
+            (Some(Token::Ident(_) | Token::Str(_)), _) => Some(1),
             (Some(token![#]), Some(Token::Ident(_))) => Some(2),
             _ => None
         }
@@ -504,9 +507,12 @@ impl DParser {
         match self.has_ident() {
             None => Ok(None),
             Some(1) => {
-                let Some(FullToken { tt: Token::Ident(s), loc }) = self.next() else { unreachable!() };
-
-                Ok(Some(Located::new(s, loc)))
+                match self.next() {
+                    Some(FullToken { tt: Token::Ident(s) | Token::Str(s), loc }) => {
+                        Ok(Some(Located::new(s, loc)))
+                    }
+                    _ => unreachable!()
+                }
             },
             Some(2) => {
                 self.push_loc_block("match_ident");
@@ -526,7 +532,7 @@ impl DParser {
     /// returning the identifier's string if successfully matched.
     pub fn expect_ident(&mut self) -> ParseResult<Located<String>> {
         self.match_ident()?
-            .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))
+            .ok_or_else(|| DParseErr::ExpectedIdent.at_range(self.peek_loc()))
     }
 
     /// Match the next tokens in the input if they represent a type expression.
@@ -544,7 +550,7 @@ impl DParser {
                 let (tpl, comma_end) = self.expect_tuple_of(DParser::match_type)?;
                 if !self.match_rangle() {
                     Err(if comma_end {
-                        ParseErr::ExpectedType
+                        DParseErr::ExpectedType
                     } else {
                         expected_tokens![,]
                     }.at_range(self.peek_loc()))?
@@ -555,7 +561,7 @@ impl DParser {
                 } else {
                     // list<>
                     //      ^
-                    Err(ParseErr::ExpectedType.at_range(token_pos))?
+                    Err(DParseErr::ExpectedType.at_range(token_pos))?
                 }
             } else {
                 vec![]
@@ -570,32 +576,18 @@ impl DParser {
     }
 
     /// Expect that the next tokens in the input represent a type expression.
+    /// 
+    /// This should be verified with [`PLIRCodegen::verify_type`].
     pub fn expect_type(&mut self) -> ParseResult<Located<ast::Type>> {
         self.match_type()?
-            .ok_or_else(|| ParseErr::ExpectedType.at_range(self.peek_loc()))
+            .ok_or_else(|| DParseErr::ExpectedType.at_range(self.peek_loc()))
     }
 
-    fn match_d_ident(&mut self) -> ParseResult<Option<Located<String>>> {
-        if let Some(Token::Str(_)) = self.peek_token() {
-            let tok = self.peek_loc();
-            let Some(Token::Str(s)) = self.next_token() else { unreachable!() };
-
-            Ok(Some(Located::new(s, tok)))
-        } else {
-            self.match_ident()
-        }
-    }
-    fn expect_d_ident(&mut self) -> ParseResult<Located<String>> {
-        self.match_d_ident()
-            .and_then(|t| t.ok_or_else(|| {
-                ParseErr::ExpectedIdent.at_range(self.peek_loc())
-            }))
-    }
     fn expect_d_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
-        let ident = self.expect_d_ident()?.0;
+        let ident = self.expect_ident()?.0;
         
         let params = if self.match_langle() {
-           let (params, _) = self.expect_tuple_of(DParser::match_d_ident)?;
+           let (params, _) = self.expect_tuple_of(DParser::match_ident)?;
            
            let loc = self.peek_loc();
            if !self.match_rangle() {
@@ -613,7 +605,10 @@ impl DParser {
         })
     }
 
-    fn expect_d_class_decl(&mut self) -> ParseResult<ast::Class> {
+    /// Expect the next tokens represent a PLIR class.
+    /// 
+    /// This class should be registered by [`PLIRCodegen::register_cls`].
+    fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
         self.expect1(token![class])?;
         let ident = self.expect_d_generic_ident()?;
 
@@ -634,11 +629,14 @@ impl DParser {
         Ok(ast::Class { ident, fields, methods: vec![] })
     }
 
-    fn expect_d_extern_decl(&mut self) -> ParseResult<ast::Stmt> {
+    /// Expect the next tokens represent an external function declaration.
+    /// 
+    /// This should be registered with [`PLIRCodegen::register_fun_sig`].
+    fn expect_extern_decl(&mut self) -> ParseResult<ast::Stmt> {
         self.expect1(token![extern])?;
         self.expect1(token![fun])?;
 
-        let ident = self.expect_d_ident()?.0;
+        let ident = self.expect_ident()?.0;
 
         self.expect1(token!["("])?;
         let (params, end_comma) = self.expect_tuple_of(DParser::match_param)?;
