@@ -52,7 +52,7 @@ pub enum PLIRErr {
     /// Could not determine the type of the expression
     CannotResolveType,
     /// Variable is not defined
-    UndefinedVar(String),
+    UndefinedVar(plir::FunIdent),
     /// Type/class is not defined
     UndefinedType(plir::Type),
     /// Attribute doesn't exist on type
@@ -869,7 +869,7 @@ impl PLIRCodegen {
             self.blocks.extend(storage);
         }
 
-        if let Some(t) = C_INTRINSICS_PLIR.get(ident.as_fun_ident().to_string().as_str()) {
+        if let Some(t) = C_INTRINSICS_PLIR.get(&*ident.as_fun_ident().as_llvm_ident()) {
             // If this is an intrinsic,
             // register the intrinsic on the top level
             // if it hasn't been registered
@@ -912,10 +912,11 @@ impl PLIRCodegen {
 
             match entry.get() {
                 UnresolvedType::Class(cls) => {
-                    let cls = if !cls.ident.params.is_empty() {
+                    let cls = if cls.ident.params.is_empty() {
                         let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
                         cls
                     } else {
+                        // causes Rc issues
                         cls.clone()
                     };
 
@@ -947,7 +948,7 @@ impl PLIRCodegen {
     {
         self.get_var_type_opt(ident)?
             .ok_or_else(|| {
-                PLIRErr::UndefinedVar(ident.as_fun_ident().to_string()).at_range(range)
+                PLIRErr::UndefinedVar(ident.as_fun_ident().into_owned()).at_range(range)
             })
     }
 
@@ -1698,7 +1699,7 @@ impl PLIRCodegen {
                 
                 let attrref = cls.get_method(&attr)
                     .ok_or_else(|| PLIRErr::UndefinedAttr(ty.clone(), attr.clone()))?
-                    .to_string();
+                    .clone();
                 Ok(plir::Path::Static(ty, attr, self.get_var_type(&attrref, range)?.clone()))
                     .map(Into::into)
             },
@@ -1920,7 +1921,7 @@ impl PLIRCodegen {
                 if matches!(path, plir::Path::Method(..)) {
                     Err(PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
                 } else {
-                    let metref = metref.to_string();
+                    let metref = metref.clone();
                     let mut fun_ty: plir::FunType = self.get_var_type(&metref, expr_range.clone())?
                         .clone()
                         .try_into()?;

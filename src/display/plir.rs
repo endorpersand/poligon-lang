@@ -21,11 +21,18 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
         write!(f, "{b}")
     }
 }
+
 fn wrap_ident(ident: &str, f: &mut Formatter<'_>) -> std::fmt::Result {
     if ident.chars().all(|t| t.is_alphanumeric() || t == '_') {
         ident.fmt(f)
     } else {
         write!(f, "{ident:?}")
+    }
+}
+fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
+    match ty {
+        Type::Prim(ident) => wrap_ident(ident, f),
+        _ => write!(f, "<{ty}>")
     }
 }
 
@@ -72,7 +79,9 @@ impl Display for ProcStmt {
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ty, fields: field_map } = self;
-        write!(f, "class <{ty}> {{ ")?;
+        write!(f, "class ")?;
+        wrap_ty(ty, f)?;
+        write!(f, " {{ ")?;
 
         let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;
@@ -174,7 +183,7 @@ impl Display for Param {
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_ref())
+        self.as_ref().fmt(f)
     }
 }
 impl Display for TypeRef<'_> {

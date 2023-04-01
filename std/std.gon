@@ -71,41 +71,41 @@ class string {
     }
 }
 
-class list<T> {
-    inner: #dynarray
-
-    fun ::new() -> list<T> {
-        <list<T>> #{ inner: #dynarray::new(0) };
-    }
-    fun self.len() -> int {
-        (self.inner.len / T::size_of()).trunc().iround();
-    }
-    fun self.push(e: T) {
-        let buf = T::#alloca();
-        *buf = e;
-        self.inner.extend(buf, T::size_of());
-    }
-    fun self.pop() -> T {
-        let pop_ptr = self.take(T::size_of());
-        *pop_ptr;
-    }
-    fun self.get(i: int) -> T {
-        if 0 <= i && i < t {
-            let access_ptr = T::#gep(self.inner.buf, i);
-            *access_ptr;
-        } else {
-            throw "array index out of bounds";
-        }
-    }
-    fun self.set(i: int, t: T) -> T {
-        if 0 <= i && i < t {
-            let access_ptr = T::#gep(self.inner.buf, i);
-            *access_ptr = t;
-        } else {
-            throw "array index out of bounds";
-        }
-    }
-}
+// class list<T> {
+//     inner: #dynarray
+// 
+//     fun ::new() -> list<T> {
+//         <list<T>> #{ inner: #dynarray::new(0) };
+//     }
+//     fun self.len() -> int {
+//         (self.inner.len / T::size_of()).trunc().iround();
+//     }
+//     fun self.push(e: T) {
+//         let buf = T::#alloca();
+//         *buf = e;
+//         self.inner.extend(buf, T::size_of());
+//     }
+//     fun self.pop() -> T {
+//         let pop_ptr = self.take(T::size_of());
+//         *pop_ptr;
+//     }
+//     fun self.get(i: int) -> T {
+//         if 0 <= i && i < t {
+//             let access_ptr = T::#gep(self.inner.buf, i);
+//             *access_ptr;
+//         } else {
+//             throw "array index out of bounds";
+//         }
+//     }
+//     fun self.set(i: int, t: T) -> T {
+//         if 0 <= i && i < t {
+//             let access_ptr = T::#gep(self.inner.buf, i);
+//             *access_ptr = t;
+//         } else {
+//             throw "array index out of bounds";
+//         }
+//     }
+// }
 
 global _tmpl_print = "%.*s\n\0";
 
