@@ -480,7 +480,7 @@ impl InsertBlock {
 
     /// Insert a class into the insert block's type register.
     fn insert_class(&mut self, cls: &plir::Class) {
-        self.types.insert(cls.ident.clone(), TypeData::structural(cls.clone()));
+        self.types.insert(cls.ty.ident().to_string(), TypeData::structural(cls.clone()));
     }
 
     fn insert_unresolved_method(&mut self, cls: &plir::Type, method: ast::MethodDecl) {
@@ -677,17 +677,17 @@ impl Globals {
         let name = stmt.get_ident();
         match &stmt {
             HoistedStmt::FunDecl(f) => {
-                self.declared.values.insert(name.to_owned(), plir::Type::Fun(f.sig.ty()));
+                self.declared.values.insert(name.to_string(), plir::Type::Fun(f.sig.ty()));
             },
             HoistedStmt::ExternFunDecl(f) => {
-                if self.declared.values.contains_key(name) { return; }
-                self.declared.values.insert(name.to_owned(), plir::Type::Fun(f.ty()));
+                if self.declared.values.contains_key(&*name) { return; }
+                self.declared.values.insert(name.to_string(), plir::Type::Fun(f.ty()));
             },
             HoistedStmt::ClassDecl(c) => {
-                self.declared.types.insert(name.to_owned(), c.clone());
+                self.declared.types.insert(name.to_string(), c.clone());
             },
             HoistedStmt::IGlobal(_, _) => {
-                self.declared.values.insert(name.to_owned(), plir::ty!("#ptr"));
+                self.declared.values.insert(name.to_string(), plir::ty!("#ptr"));
             }
         }
 
@@ -1501,7 +1501,7 @@ impl PLIRCodegen {
             })
             .collect::<Result<_, _>>()?;
         
-        let cls = plir::Class { ident: ty.ident().to_string(), fields };
+        let cls = plir::Class { ty: ty.clone(), fields };
         
         let ib = self.peek_block();
         

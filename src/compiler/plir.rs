@@ -48,6 +48,8 @@ impl Default for Block {
 }
 
 mod stmt {
+    use std::borrow::Cow;
+
     use super::{FunDecl, FunSignature, Class, Decl, Expr, ExprType};
 
     /// A statement that is always available (within PLIR).
@@ -143,12 +145,12 @@ mod stmt {
         }
 
         /// Gets the identifier associated with this hoisted statement.
-        pub fn get_ident(&self) -> &str {
+        pub fn get_ident(&self) -> Cow<str> {
             match self {
-                HoistedStmt::FunDecl(f) => &f.sig.ident,
-                HoistedStmt::ExternFunDecl(f) => &f.ident,
-                HoistedStmt::ClassDecl(c) => &c.ident,
-                HoistedStmt::IGlobal(name, _) => name,
+                HoistedStmt::FunDecl(f)       => Cow::from(&f.sig.ident),
+                HoistedStmt::ExternFunDecl(f) => Cow::from(&f.ident),
+                HoistedStmt::ClassDecl(c)     => c.ty.ident(),
+                HoistedStmt::IGlobal(name, _) => Cow::from(name),
             }
         }
     }

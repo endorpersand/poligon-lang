@@ -68,8 +68,8 @@ impl Display for ProcStmt {
 }
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Class { ident, fields: field_map } = self;
-        write!(f, "class {} {{ ", wrap_ident(ident))?;
+        let Class { ty, fields: field_map } = self;
+        write!(f, "class <{ty}> {{ ")?;
 
         let fields: Vec<_> = field_map.values().collect();
         fmt_list(f, &fields)?;

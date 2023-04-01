@@ -1260,20 +1260,20 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
     type Return = LLVMResult<'ctx, ()>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        let plir::Class { ident, fields } = self;
+        let plir::Class { ty, fields } = self;
 
         let fields: Vec<_> = fields.values()
             .map(|fd| compiler.get_layout(&fd.ty))
             .collect::<Result<_, _>>()?;
         
-        let struct_ty = compiler.ctx.opaque_struct_type(ident);
+        let struct_ty = compiler.ctx.opaque_struct_type(&ty.ident());
         struct_ty.set_body(&fields, false);
 
         let struct_name = struct_ty.get_name()
             .unwrap()
             .to_str()
             .unwrap();
-        compiler.define_type(plir::ty!(ident), struct_name, struct_ty);
+        compiler.define_type(ty.clone(), struct_name, struct_ty);
 
         Ok(())
     }

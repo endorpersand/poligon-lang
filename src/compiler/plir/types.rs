@@ -323,8 +323,8 @@ impl From<ast::Type> for Type {
 /// Those methods are redefined as functions in PLIR codegen.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Class {
-    /// Name of the class
-    pub ident: String,
+    /// The associated [`Type`] of this class
+    pub ty: Type,
     /// A mapping of identifiers to fields in the class
     pub fields: IndexMap<String, FieldDecl>
 }
