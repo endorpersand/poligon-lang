@@ -48,8 +48,6 @@ impl Default for Block {
 }
 
 mod stmt {
-    use std::borrow::Cow;
-
     use super::{FunDecl, FunSignature, Class, Decl, Expr, ExprType};
 
     /// A statement that is always available (within PLIR).
@@ -142,16 +140,6 @@ mod stmt {
                 | FunDecl(_)
                 | ClassDecl(_)
             )
-        }
-
-        /// Gets the identifier associated with this hoisted statement.
-        pub fn get_ident(&self) -> Cow<str> {
-            match self {
-                HoistedStmt::FunDecl(f)       => Cow::from(&f.sig.ident),
-                HoistedStmt::ExternFunDecl(f) => Cow::from(&f.ident),
-                HoistedStmt::ClassDecl(c)     => c.ty.ident(),
-                HoistedStmt::IGlobal(name, _) => Cow::from(name),
-            }
         }
     }
 
@@ -275,6 +263,60 @@ pub struct Param {
     pub ty: Type
 }
 
+/// The possible identifiers a function can have.
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum FunIdent {
+    /// Just an identifier. For functions in scope.
+    Simple(String),
+    /// A method identifier.
+    Static(Type, String)
+}
+
+impl FunIdent {
+    /// Finds the string identifier of this value when represented in LLVM.
+    pub fn as_llvm_ident(&self) -> Cow<str> {
+        match self {
+            FunIdent::Simple(s) => Cow::from(s),
+            FunIdent::Static(ty, attr) => Cow::from(format!("{ty}::{attr}")),
+        }
+    }
+
+    /// Creates a new [`FunIdent::Simple`] identifier.
+    pub fn new_simple(id: &str) -> Self {
+        Self::Simple(id.to_string())
+    }
+}
+
+pub(crate) trait AsFunIdent: indexmap::Equivalent<FunIdent> {
+    fn as_fun_ident(&self) -> Cow<FunIdent>;
+}
+impl AsFunIdent for FunIdent {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl indexmap::Equivalent<FunIdent> for str {
+    fn equivalent(&self, key: &FunIdent) -> bool {
+        matches!(key, FunIdent::Simple(t) if self == t)
+    }
+}
+impl AsFunIdent for str {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        Cow::Owned(FunIdent::new_simple(self))
+    }
+}
+impl indexmap::Equivalent<FunIdent> for String {
+    fn equivalent(&self, key: &FunIdent) -> bool {
+        self.as_str().equivalent(key)
+    }
+}
+impl AsFunIdent for String {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        self.as_str().as_fun_ident()
+    }
+}
+
 /// The function header / signature.
 /// 
 /// This struct corresponds to [`ast::FunSignature`],
@@ -288,7 +330,7 @@ pub struct Param {
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
     /// The function's identifier
-    pub ident: String,
+    pub ident: FunIdent,
     /// The function's parameters
     pub params: Vec<Param>,
     /// Whether the function is varargs

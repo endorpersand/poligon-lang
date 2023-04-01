@@ -201,7 +201,7 @@ pub struct LLVMCodegen<'ctx> {
 
     pub(super) vars: HashMap<String, PointerValue<'ctx>>,
     pub(super) globals: HashMap<String, GlobalValue<'ctx>>,
-    pub(super) fn_aliases: HashMap<String, String>
+    pub(super) fn_aliases: HashMap<plir::FunIdent, String>
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -269,7 +269,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
         for (ident, ty) in &dtypes.values {
             if let plir::Type::Fun(f) = ty {
-                let sig = f.fun_signature(ident);
+                let sig = f.fun_signature(ident.clone());
                 self.compile(&sig)?;
             }
             // TODO: allow other types
@@ -437,7 +437,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
                 let fun_ty = self.get_layout_or_void(ret)?
                     .fn_type(&arg_tys, *varargs);
-                let fun = self.module.add_function(ident, fun_ty, None);
+                let fun = self.module.add_function(&ident.as_llvm_ident(), fun_ty, None);
                 let fun_name = fun.get_name()
                     .to_str()
                     .expect("Expected UTF-8 function name")
@@ -459,7 +459,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Import a function using the provided PLIR function signature.
     fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
-        let intrinsic = self.import_intrinsic(&sig.ident)?;
+        let intrinsic = self.import_intrinsic(&sig.ident.as_llvm_ident())?;
 
         let llvm_name = intrinsic.get_name()
             .to_str()
@@ -469,10 +469,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(intrinsic)
     }
 
-    fn get_fn_by_plir_ident(&self, plir_ident: &str) -> Option<FunctionValue<'ctx>> {
-        let llvm_ident = self.fn_aliases.get(plir_ident)
-            .map_or(plir_ident, |t| t);
-        self.module.get_function(llvm_ident)
+    fn get_fn_by_plir_ident(&self, plir_ident: &plir::FunIdent) -> Option<FunctionValue<'ctx>> {
+        match self.fn_aliases.get(plir_ident) {
+            Some(id) => self.module.get_function(id),
+            None     => self.module.get_function(&plir_ident.as_llvm_ident()),
+        }
     }
 
     /// Define a type for the compiler to track.
@@ -560,7 +561,7 @@ pub enum LLVMErr<'ctx> {
     /// Variable was not declared.
     UndefinedVar(String),
     /// Function was not declared.
-    UndefinedFun(String),
+    UndefinedFun(plir::FunIdent),
     /// Imported object does not exist.
     CannotImport(String),
     /// The function created was invalid.
@@ -666,7 +667,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// -  Otherwise, all unhoisted statements are collected into a function (main).
     /// - If there is both a function named main and unhoisted statements present, this will error.
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        use plir::HoistedStmt;
+        use plir::{HoistedStmt, FunIdent};
 
         let _i8 = compiler.ctx.i8_type();
         // split the functions from everything else:
@@ -679,8 +680,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             match stmt {
                 HoistedStmt::FunDecl(dcl) => {
                     let fv = dcl.sig.write_value(compiler)?;
-                    if dcl.sig.ident == "main" {
-                        main_fun.replace(fv);
+                    match &dcl.sig.ident {
+                        FunIdent::Simple(s) if s == "main" => {
+                            main_fun.replace(fv);
+                        },
+                        _ => {}
                     }
                     fun_bodies.push(dcl);
                 },
@@ -999,23 +1003,22 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let mut pvals = vec![];
 
                 let fun_ident = match &funct.expr {
-                    plir::ExprType::Ident(ident) => Cow::from(ident),
+                    plir::ExprType::Ident(ident) => plir::FunIdent::new_simple(ident),
                     plir::ExprType::Path(p) => match p {
                         plir::Path::Static(ty, met, _) => {
-                            Cow::from(format!("{ty}::{met}"))
+                            plir::FunIdent::Static(ty.clone(), met.clone())
                         },
                         plir::Path::Struct(_, _) => unreachable!("struct attr cannot be fun"),
                         plir::Path::Method(referent, met, _) => {
-                            let ty = referent.ty.ident();
                             pvals.push(compiler.write_ref_value(referent)?);
-                            Cow::from(format!("{ty}::{met}"))
+                            plir::FunIdent::Static(referent.ty.clone(), met.clone())
                         },
                     },
                     e => todo!("arbitrary expr calls: {e:?}")
                 };
 
                 let fun = compiler.get_fn_by_plir_ident(&fun_ident)
-                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.into_owned()))?;
+                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident))?;
 
                 for p in params {
                     pvals.push(compiler.write_ref_value(p)?);

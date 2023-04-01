@@ -247,8 +247,8 @@ fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, 
 
 #[derive(Debug)]
 enum UnresolvedValue {
-    ExternFun(ast::FunSignature),
-    Fun(ast::FunDecl),
+    ExternFun(plir::FunIdent, ast::FunSignature),
+    Fun(plir::FunIdent, ast::FunDecl),
     FunBlock(plir::FunSignature, Located<Rc<ast::Block>>),
     Import(ast::StaticPath)
 }
@@ -258,31 +258,39 @@ enum UnresolvedType {
     #[allow(unused)]
     Import(ast::StaticPath)
 }
-trait Unresolved {
-    fn resolution_ident(&self) -> &str;
-    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self>
+trait Unresolved 
+    where <Self::Ident as ToOwned>::Owned: std::hash::Hash + Eq
+{
+    type Ident: ToOwned + ?Sized;
+
+    fn resolution_ident(&self) -> Cow<Self::Ident>;
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<<Self::Ident as ToOwned>::Owned, Self>
         where Self: Sized;
 }
 
 impl Unresolved for UnresolvedValue {
-    fn resolution_ident(&self) -> &str {
+    type Ident = plir::FunIdent;
+
+    fn resolution_ident(&self) -> Cow<plir::FunIdent> {
         match self {
-            UnresolvedValue::ExternFun(fs)   => &fs.ident,
-            UnresolvedValue::Fun(fd)         => &fd.sig.ident,
-            UnresolvedValue::FunBlock(fs, _) => &fs.ident,
-            UnresolvedValue::Import(mp)      => &mp.attr,
+            UnresolvedValue::ExternFun(id, _) => Cow::Borrowed(id),
+            UnresolvedValue::Fun(id, _)       => Cow::Borrowed(id),
+            UnresolvedValue::FunBlock(fs, _)  => Cow::Borrowed(&fs.ident),
+            UnresolvedValue::Import(mp)       => Cow::Owned(plir::FunIdent::new_simple(&mp.attr)),
         }
     }
 
-    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self> {
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<plir::FunIdent, Self> {
         &mut block.unres_values
     }
 }
 impl Unresolved for UnresolvedType {
-    fn resolution_ident(&self) -> &str {
+    type Ident = str;
+
+    fn resolution_ident(&self) -> Cow<str> {
         match self {
-            UnresolvedType::Class(cls) => &cls.ident.ident,
-            UnresolvedType::Import(mp) => &mp.attr,
+            UnresolvedType::Class(cls) => Cow::from(&cls.ident.ident),
+            UnresolvedType::Import(mp) => Cow::from(&mp.attr),
         }
     }
 
@@ -303,9 +311,10 @@ struct InsertBlock {
     /// If a conditional exit does not pass, this exit is how the block exits.
     final_exit: Option<Located<BlockExit>>,
 
-    vars: HashMap<String, plir::Type>,
+    vars: HashMap<plir::FunIdent, plir::Type>,
     types: HashMap<plir::Type, TypeData>,
-    unres_values: IndexMap<String, UnresolvedValue>,
+
+    unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
 
     /// If this is not None, then this block is expected to return the provided type.
@@ -471,9 +480,12 @@ impl InsertBlock {
     }
 
     /// Insert an unresolved class/function into the insert block.
-    fn insert_unresolved<U: Unresolved>(&mut self, unresolved: U) {
+    fn insert_unresolved<U>(&mut self, unresolved: U) 
+        where U: Unresolved,
+            <U::Ident as ToOwned>::Owned: std::hash::Hash + Eq
+    {
         U::block_map(self)
-            .insert(unresolved.resolution_ident().to_string(), unresolved);
+            .insert(unresolved.resolution_ident().into_owned(), unresolved);
     }
 
     /// Insert a class into the insert block's type register.
@@ -515,12 +527,12 @@ impl InsertBlock {
         } else {
             // TODO, use this ident
         };
-        let metref = format!("{ty}::{method_name}");
-
-        let sig = ast::FunSignature { ident: metref.clone(), params, varargs: false, ret };
+        
+        let metref = plir::FunIdent::Static(ty.clone(), method_name.clone());
+        let sig = ast::FunSignature { ident: String::from("#unnamed"), params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
-        self.insert_unresolved(UnresolvedValue::Fun(decl));
+        self.insert_unresolved(UnresolvedValue::Fun(metref.clone(), decl));
 
         if let Some(c) = self.types.get_mut(ty) {
             c.insert_method(method_name, metref);
@@ -528,8 +540,10 @@ impl InsertBlock {
     }
 
     /// Declares a variable within this insert block.
-    fn declare(&mut self, ident: &str, ty: plir::Type) {
-        self.vars.insert(String::from(ident), ty);
+    fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
+        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
+    {
+        self.vars.insert(ident.as_fun_ident().into_owned(), ty);
     }
 }
 
@@ -571,7 +585,7 @@ impl<'k> SigKey<'k> {
 #[derive(Debug)]
 struct TypeData {
     ty: TypeStructure,
-    methods: HashMap<SigKey<'static>, String>
+    methods: HashMap<SigKey<'static>, plir::FunIdent>
 }
 
 impl TypeData {
@@ -592,14 +606,14 @@ impl TypeData {
     }
 
     /// Get a method defined in the type.
-    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a str> {
+    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a plir::FunIdent> {
         let k = SigKey::new(ident, vec![]);
         
-        self.methods.get(&k).map(String::as_str)
+        self.methods.get(&k)
     }
 
     /// Add a method to the type.
-    pub fn insert_method(&mut self, ident: String, metref: String) {
+    pub fn insert_method(&mut self, ident: String, metref: plir::FunIdent) {
         let k = SigKey::new(ident, vec![]);
 
         self.methods.insert(k, metref);
@@ -631,7 +645,7 @@ enum TypeStructure {
 #[derive(Default, Clone)]
 pub struct DeclaredTypes {
     pub(super) types: IndexMap<plir::Type, plir::Class>,
-    pub(super) values: IndexMap<String, plir::Type>
+    pub(super) values: IndexMap<plir::FunIdent, plir::Type>
 }
 
 impl DeclaredTypes {
@@ -647,7 +661,7 @@ impl DeclaredTypes {
         }
         for (ident, val_ty) in &self.values {
             if let plir::Type::Fun(f) = val_ty {
-                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident)))?
+                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident.clone())))?
             }
             // TODO: don't ignore other types of decls
         }
@@ -672,20 +686,20 @@ impl Globals {
         use plir::HoistedStmt;
 
         let stmt: HoistedStmt = stmt.into();
-        let name = stmt.get_ident();
+
         match &stmt {
             HoistedStmt::FunDecl(f) => {
-                self.declared.values.insert(name.to_string(), plir::Type::Fun(f.sig.ty()));
+                self.declared.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
             },
             HoistedStmt::ExternFunDecl(f) => {
-                if self.declared.values.contains_key(&*name) { return; }
-                self.declared.values.insert(name.to_string(), plir::Type::Fun(f.ty()));
+                if self.declared.values.contains_key(&f.ident) { return; }
+                self.declared.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
             },
             HoistedStmt::ClassDecl(c) => {
                 self.declared.types.insert(c.ty.clone(), c.clone());
             },
-            HoistedStmt::IGlobal(_, _) => {
-                self.declared.values.insert(name.to_string(), plir::ty!("#ptr"));
+            HoistedStmt::IGlobal(id, _) => {
+                self.declared.values.insert(plir::FunIdent::new_simple(id), plir::ty!("#ptr"));
             }
         }
 
@@ -740,23 +754,18 @@ impl PLIRCodegen {
 
     /// Creates a new instance of the PLIRCodegen with the given types already declared.
     pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
-        use plir::{Type, ty};
-
         let mut top = InsertBlock::top();
         for (ident, cls) in &declared.types {
             top.types.insert(ident.clone(), TypeData::structural(cls.clone()));
         }
         for (ident, value_ty) in &declared.values {
+            // register values in scope
             top.declare(ident, value_ty.clone());
 
-            // register methods
-            // methods are of the form ty::ident(arg0: ty, ..)
-            if let (Some((cls, met)), Type::Fun(fty)) = (ident.split_once("::"), value_ty) {
-                // FIXME: better method check
-                if let Some((Type::Prim(t1), cls_data)) = fty.params.get(0).zip(top.types.get_mut(&ty!(cls))) {
-                    if t1 == cls {
-                        cls_data.insert_method(met.to_string(), ident.to_string());
-                    }
+            // register methods to cls data
+            if let plir::FunIdent::Static(ty, attr) = ident {
+                if let Some(cls) = top.types.get_mut(ty) {
+                    cls.insert_method(attr.clone(), ident.clone());
                 }
             }
         }
@@ -812,12 +821,16 @@ impl PLIRCodegen {
     }
 
     /// Declares a variable with a given type.
-    fn declare(&mut self, ident: &str, ty: plir::Type) {
+    fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
+        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
+    {
         self.peek_block().declare(ident, ty)
     }
 
     /// If there is an unresolved structure present at the identifier, try to resolve it.
-    fn resolve_ident<'a>(&mut self, ident: &'a str) -> PLIRResult<&'a str> {
+    fn resolve_ident<I>(&mut self, ident: &I) -> PLIRResult<()> 
+        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
+    {
         use indexmap::map::Entry;
 
         // mi is 0 to len
@@ -829,23 +842,23 @@ impl PLIRCodegen {
         if let Some(i) = mi {
             // repivot peek block to point to the unresolved item
             let storage = self.blocks.split_off(self.blocks.len() - i);
-
-            let Entry::Occupied(entry) = self.peek_block().unres_values.entry(ident.to_string()) else {
+            let fid = ident.as_fun_ident().into_owned();
+            let Entry::Occupied(entry) = self.peek_block().unres_values.entry(fid) else {
                 unreachable!()
             };
 
             match entry.get() {
-                UnresolvedValue::ExternFun(_) => {
-                    let UnresolvedValue::ExternFun(fs) = entry.remove() else { unreachable!() };
+                UnresolvedValue::ExternFun(_, _) => {
+                    let UnresolvedValue::ExternFun(id, fs) = entry.remove() else { unreachable!() };
                     
-                    let fs = self.consume_fun_sig(fs)?;
+                    let fs = self.consume_fun_sig(id, fs)?;
                     self.push_global(fs);
                 },
-                UnresolvedValue::Fun(_) => {
-                    let (k, UnresolvedValue::Fun(fd)) = entry.remove_entry() else { unreachable!() };
+                UnresolvedValue::Fun(_, _) => {
+                    let (k, UnresolvedValue::Fun(id, fd)) = entry.remove_entry() else { unreachable!() };
                     let ast::FunDecl { sig, block } = fd;
 
-                    let sig = self.consume_fun_sig(sig)?;
+                    let sig = self.consume_fun_sig(id, sig)?;
                     self.peek_block().unres_values.insert(k, UnresolvedValue::FunBlock(sig, block));
                 },
                 UnresolvedValue::FunBlock(_, _) => {},
@@ -856,13 +869,13 @@ impl PLIRCodegen {
             self.blocks.extend(storage);
         }
 
-        if let Some(t) = C_INTRINSICS_PLIR.get(ident) {
+        if let Some(t) = C_INTRINSICS_PLIR.get(ident.as_fun_ident().to_string().as_str()) {
             // If this is an intrinsic,
             // register the intrinsic on the top level
             // if it hasn't been registered
 
             self.push_global(plir::FunSignature {
-                ident: ident.to_string(),
+                ident: ident.as_fun_ident().into_owned(),
                 params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
                     rt: Default::default(),
                     mt: Default::default(),
@@ -875,7 +888,7 @@ impl PLIRCodegen {
             self.declare(ident, plir::Type::Fun(t.clone()));
         }
 
-        Ok(ident)
+        Ok(())
     }
 
     /// [`PLIRCodegen::resolve_ident`], but using a type parameter
@@ -915,25 +928,6 @@ impl PLIRCodegen {
             self.blocks.extend(storage);
         }
 
-        if let Some(t) = C_INTRINSICS_PLIR.get(ident) {
-            // If this is an intrinsic,
-            // register the intrinsic on the top level
-            // if it hasn't been registered
-
-            self.push_global(plir::FunSignature {
-                ident: ident.to_string(),
-                params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
-                    rt: Default::default(),
-                    mt: Default::default(),
-                    ident: format!("arg{i}"),
-                    ty: t.clone(),
-                }).collect(),
-                varargs: t.varargs,
-                ret: (*t.ret).clone(),
-            });
-            self.declare(ident, plir::Type::Fun(t.clone()));
-        }
-
         Ok(())
     }
 
@@ -948,10 +942,12 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type(&mut self, ident: &str, range: CursorRange) -> PLIRResult<&plir::Type> {
+    fn get_var_type<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<&plir::Type> 
+        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
+    {
         self.get_var_type_opt(ident)?
             .ok_or_else(|| {
-                PLIRErr::UndefinedVar(String::from(ident)).at_range(range)
+                PLIRErr::UndefinedVar(ident.as_fun_ident().to_string()).at_range(range)
             })
     }
 
@@ -959,10 +955,11 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type_opt(&mut self, mut ident: &str) -> PLIRResult<Option<&plir::Type>> {
-        ident = self.resolve_ident(ident)?;
-        
-        Ok(self.find_scoped(|ib| ib.vars.get(ident)))
+    fn get_var_type_opt<I>(&mut self, ident: &I) -> PLIRResult<Option<&plir::Type>> 
+        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
+    {
+        self.resolve_ident(ident)?;
+        Ok(self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident())))
     }
 
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
@@ -1040,10 +1037,12 @@ impl PLIRCodegen {
         for stmt in stmts {
             match stmt.0 {
                 ast::Stmt::FunDecl(fd) => {
-                    self.peek_block().insert_unresolved(UnresolvedValue::Fun(fd));
+                    let ident = plir::FunIdent::new_simple(&fd.sig.ident);
+                    self.peek_block().insert_unresolved(UnresolvedValue::Fun(ident, fd));
                 },
                 ast::Stmt::ExternFunDecl(fs) => {
-                    self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(fs));
+                    let ident = plir::FunIdent::new_simple(&fs.ident);
+                    self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(ident, fs));
                     }
                 ast::Stmt::ClassDecl(cls) => {
                     self.peek_block().insert_unresolved(UnresolvedType::Class(cls));
@@ -1077,14 +1076,14 @@ impl PLIRCodegen {
         let mut unres_values = &mut self.peek_block().unres_values;
         while let Some(ident) = unres_values.keys().next() {
             match unres_values.remove(&ident.clone()).unwrap() {
-                UnresolvedValue::ExternFun(fs) => {
-                    let fs = self.consume_fun_sig(fs)?;
+                UnresolvedValue::ExternFun(id, fs) => {
+                    let fs = self.consume_fun_sig(id, fs)?;
                     self.push_global(fs);
                 },
-                UnresolvedValue::Fun(fd) => {
+                UnresolvedValue::Fun(id, fd) => {
                     let ast::FunDecl { sig, block } = fd;
 
-                    let sig = self.consume_fun_sig(sig)?;
+                    let sig = self.consume_fun_sig(id, sig)?;
                     self.consume_fun_block(sig, block)?;
                 },
                 UnresolvedValue::FunBlock(sig, block) => {
@@ -1393,8 +1392,8 @@ impl PLIRCodegen {
     }
 
     /// Consume a function signature and convert it into a PLIR function signature.
-    fn consume_fun_sig(&mut self, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
-        let ast::FunSignature { ident, params, varargs, ret } = sig;
+    fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
+        let ast::FunSignature { ident: _, params, varargs, ret } = sig;
         
         let params: Vec<_> = params.into_iter()
             .map(|p| -> PLIRResult<_> {
@@ -1419,11 +1418,11 @@ impl PLIRCodegen {
         };
 
         // declare function before parsing block
-        self.declare(&ident, 
+        self.declare(&new_id, 
             plir::Type::fun_type(param_tys, ret.clone(), varargs)
         );
 
-        Ok(plir::FunSignature { ident, params, ret, varargs })
+        Ok(plir::FunSignature { ident: new_id, params, ret, varargs })
     }
     /// Consume a function declaration statement into the current insert block.
     /// 
