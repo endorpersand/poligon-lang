@@ -276,7 +276,7 @@ pub struct Decl {
 ///     const mut d: list<string>
 /// ) {}
 /// ```
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Param {
     /// Whether the parameter variable can be reassigned later
     pub rt: ReasgType,
@@ -314,7 +314,7 @@ pub enum MutType {
 /// An identifier that supports generic arguments.
 /// 
 /// This is used when a generic object is defined.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GenericIdent {
     /// The identifier
     pub ident: String,

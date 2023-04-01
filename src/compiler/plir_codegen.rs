@@ -900,8 +900,14 @@ impl PLIRCodegen {
             };
 
             match entry.get() {
-                UnresolvedType::Class(_) => {
-                    let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                UnresolvedType::Class(cls) => {
+                    let cls = if !cls.ident.params.is_empty() {
+                        let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                        cls
+                    } else {
+                        cls.clone()
+                    };
+
                     self.consume_cls(cls, ty)?;
                 },
                 UnresolvedType::Import(_) => todo!(),
@@ -969,17 +975,12 @@ impl PLIRCodegen {
     }
 
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
+        use plir::TypeRef;
         self.resolve_type(ty)?;
 
         match ty.as_ref() {
-            plir::TypeRef::Prim(ident) => self.find_scoped(|ib| ib.types.get(ident))
-                .ok_or_else(|| {
-                    PLIRErr::UndefinedType(String::from(ident))
-                        .at_range(range)
-                }),
-            
             // HACK ll_array
-            plir::TypeRef::Generic("#ll_array", [t]) => {
+            TypeRef::Generic("#ll_array", [t]) => {
                 let ty_ident = ty.ident();
 
                 if self.find_scoped(|ib| ib.types.get(&*ty_ident)).is_none() {
@@ -989,11 +990,17 @@ impl PLIRCodegen {
 
                 Ok(&self.program.types[&*ty_ident])
             },
-            plir::TypeRef::Generic("#ll_array", a) => {
+            TypeRef::Generic("#ll_array", a) => {
                 Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
             },
-
-            s => todo!("{s}")
+            TypeRef::Prim(_) | TypeRef::Generic(_, _) => {
+                self.find_scoped(|ib| ib.types.get(&*ty.ident()))
+                    .ok_or_else(|| {
+                        PLIRErr::UndefinedType(ty.ident().to_string())
+                            .at_range(range)
+                    })
+            },
+            s => todo!("getting type data for {s}")
         }
     }
 
@@ -1472,7 +1479,6 @@ impl PLIRCodegen {
 
     fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<bool> {
         use plir::Type;
-
         let ast::Class { ident, fields, methods } = cls;
 
         // verify that types are aligned:

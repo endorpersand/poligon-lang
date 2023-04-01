@@ -30,7 +30,7 @@ pub struct Type(pub String, pub Vec<Located<Type>>);
 ///     fn self.grow() { /* ... */ }
 /// }
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Class {
     /// Name of the class
     pub ident: GenericIdent,
@@ -56,7 +56,7 @@ pub struct Class {
 /// mut colors: list<int>,
 /// const mut content: list<str>
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FieldDecl {
     /// Whether the field can be reassigned later
     pub rt: ReasgType,
@@ -87,7 +87,7 @@ pub struct FieldDecl {
 /// fun .half();
 /// fun ::count();
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct MethodSignature {
     /// This method's referent (typically `self` or `Self`)
     pub referent: Option<String>,
@@ -105,7 +105,7 @@ pub struct MethodSignature {
 /// 
 /// This is similar to [`FunDecl`][`super::FunDecl`], 
 /// except using a [`MethodSignature`] instead of a [`FunSignature`][`super::FunSignature`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct MethodDecl {
     /// The method's signature
     pub sig: MethodSignature,
