@@ -304,8 +304,6 @@ struct InsertBlock {
     final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<String, plir::Type>,
-    // TODO: use aliases
-    aliases: HashMap<String, String>,
     types: HashMap<plir::Type, TypeData>,
     unres_values: IndexMap<String, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
@@ -324,7 +322,6 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
-            aliases: HashMap::new(),
             types: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
@@ -341,7 +338,6 @@ impl InsertBlock {
             exits: vec![],
             final_exit: None,
             vars: HashMap::new(),
-            aliases: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
                 ty!(Type::S_FLOAT),
@@ -969,13 +965,6 @@ impl PLIRCodegen {
         Ok(self.find_scoped(|ib| ib.vars.get(ident)))
     }
 
-    fn dealias<'a>(&'a self, ident: &'a str) -> &'a str {
-        match self.find_scoped(|ib| ib.aliases.get(ident)) {
-            Some(t) => t,
-            None => ident,
-        }
-    }
-
     fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
         self.resolve_type(ty)?;
@@ -1170,7 +1159,7 @@ impl PLIRCodegen {
         let InsertBlock { 
             mut block, last_stmt_loc, 
             exits, final_exit, 
-            vars: _, aliases: _, types: _, 
+            vars: _, types: _, 
             unres_values, unres_types, expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
@@ -1520,11 +1509,10 @@ impl PLIRCodegen {
         match expr {
             ast::Expr::Ident(ident) => {
                 let ty = self.get_var_type(&ident, range)?.clone();
-                let ref_ident = self.dealias(&ident).to_owned();
 
                 Ok(plir::Expr::new(
                     ty,
-                    plir::ExprType::Ident(ref_ident)
+                    plir::ExprType::Ident(ident)
                 ))
             },
             ast::Expr::Block(b) => {
