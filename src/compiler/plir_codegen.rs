@@ -916,7 +916,6 @@ impl PLIRCodegen {
                         let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
                         cls
                     } else {
-                        // causes Rc issues
                         cls.clone()
                     };
 
@@ -1431,7 +1430,7 @@ impl PLIRCodegen {
     fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<bool> {
         let Located(block, block_range) = block;
         let old_block = Rc::try_unwrap(block)
-            .expect("AST function declaration block was unexpectedly in use and cannot be consumed into PLIR.");
+            .unwrap_or_else(|ob| (*ob).clone());
     
         let block = {
             self.push_block(block_range, Some(sig.ret.clone()));
