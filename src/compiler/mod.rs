@@ -204,7 +204,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
-        let parser = DParser::new(lexed, false);
+        let parser = DParser::new(lexed);
         let ast = cast_e(parser.unwrap_d_program(), code)?;
 
         let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
