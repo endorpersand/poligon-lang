@@ -225,7 +225,7 @@ macro_rules! left_assoc_rules {
 
 macro_rules! expected_tokens {
     ($($t:tt),*) => {
-        ParseErr::ExpectedTokens(vec![$(token![$t])*,])
+        ParseErr::ExpectedTokens(vec![$(token![$t]),*])
     }
 }
 
@@ -1439,11 +1439,11 @@ impl Parser {
     /// (`*self.a`)
     /// or any expression with higher precedence.
     /// 
-    /// The next expression above in precedence is [`Parser::match_call_index`].
+    /// The next expression above in precedence is [`Parser::match_call_index_path`].
     pub fn match_deref(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         let peek = self.peek_loc();
         let is_deref_expr = self.match1(token![*]);
-        let ci = self.match_call_index();
+        let ci = self.match_call_index_path();
 
         if is_deref_expr {
             let inner = ci?.ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
@@ -1459,17 +1459,16 @@ impl Parser {
         }
     }
 
-    /// Match the next tokens in input if they represent a indexing or function call 
+    /// Match the next tokens in input if they represent an indexing operation, function call, or path.
     /// (`a[1]`, `f(1, 2, 3, 4)`)
     /// or any expression with higher precedence.
     /// 
     /// The next expression above in precedence is [`Parser::match_path`].
 
-    pub fn match_call_index(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
-        self.push_loc_block("match_call_index");
-        if let Some(mut e) = self.match_path()? {
-
-            while let Some(delim) = self.match_n(&[token!["("], token!["["]]) {
+    pub fn match_call_index_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
+        self.push_loc_block("match_call_index_path");
+        if let Some(mut e) = self.match_unit()? {
+            while let Some(delim) = self.match_n(&[token!["("], token!["["], token![.]]) {
                 match delim.tt {
                     token!["("] => {
                         let params = self.expect_closing_tuple(token![")"])?;
@@ -1492,77 +1491,32 @@ impl Parser {
                         });
                         e = Located::new(idx_expr, range);
                     },
+                    token![.] => {
+                        let attr = self.expect_ident()?.0;
+                        let loc_block = self.peek_loc_block().unwrap();
+
+                        e = match e {
+                            Located(ast::Expr::Path(ast::Path { ref mut attrs, .. }), ref mut range) => {
+                                attrs.push(attr);
+                                *range = loc_block;
+                                e
+                            },
+                            obj => {
+                                Located::new(ast::Expr::Path(ast::Path {
+                                    obj: Box::new(obj),
+                                    attrs: vec![attr]
+                                }), loc_block)
+                            }
+                        };
+                    }
                     _ => unreachable!()
                 }
             }
 
-            self.pop_loc_block("match_call_index");
+            self.pop_loc_block("match_call_index_path");
             Ok(Some(e))
         } else {
-            self.pop_loc_block("match_call_index");
-            Ok(None)
-        }
-    }
-
-    /// Match the next tokens in input if they represent a path expression (`Type::expr`, or `a.b.c.d.e`)
-    /// or any expression with higher precedence.
-    /// 
-    /// The next expression above in precedence is [`Parser::match_unit`].
-    pub fn match_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
-        self.push_loc_block("match_path");
-        
-        let mty = if let Some(next_i) = self.has_ident() {
-            // Single ident can be directly accessed by static path.
-            if matches!(self.peek_nth_token(next_i), Some(token![::])) {
-                Some(self.expect_type()?)
-            } else {
-                None
-            }
-        } else if self.match_langle() {
-            // wrap in <...> otherwise.
-            let t = self.expect_type()?;
-            
-            let loc = self.peek_loc();
-            if !self.match_rangle() {
-                Err(expected_tokens![>].at_range(loc))?;
-            }
-
-            Some(t)
-        } else {
-            None
-        };
-
-        // If a type was found, this indicates this is a static path
-        if let Some(ty) = mty {
-            self.expect1(token![::])?;
-            let attr = self.expect_ident()?.0;
-    
-            let e = Located::new(
-                ast::Expr::StaticPath(ast::StaticPath { ty, attr }), 
-                self.pop_loc_block("match_path").unwrap()
-            );
-
-            Ok(Some(e))
-        } else if let Some(mut e) = self.match_unit()? {
-            // Otherwise this is an instance path or something else.
-            let mut attrs = vec![];
-            while self.match1(token![.]) {
-                attrs.push(self.expect_ident()?.0);
-            }
-
-            let range = self.pop_loc_block("match_path");
-            if !attrs.is_empty() {
-                let path = ast::Expr::Path(ast::Path {
-                    obj: Box::new(e),
-                    attrs
-                });
-
-                e = Located::new(path, range.unwrap());
-            }
-            
-            Ok(Some(e))
-        } else {
-            self.pop_loc_block("match_path");
+            self.pop_loc_block("match_call_index_path");
             Ok(None)
         }
     }
@@ -1578,7 +1532,8 @@ impl Parser {
         };
 
         let unit = match peek {
-            token![#] | Token::Ident(_) => self.expect_ii()?,
+            token![#] | Token::Ident(_) => self.expect_identoid()?,
+            token![<] | token![<<]      => self.expect_diamondoid()?,
             Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
             token!["["]       => self.expect_list()?,
             token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
@@ -1628,11 +1583,31 @@ impl Parser {
         Ok(ast::Expr::ListLiteral(exprs))
     }
 
-    /// Expect that the next tokens are an identifier, 
-    /// a set literal (`set {1, 2, 3}`), 
-    /// a dict literal (`dict {"a": 1, "b": 2, "c": 3}`),
-    /// or a class initializer (`Class {a: 2, b: 3, c: 4}`).
-    pub fn expect_ii(&mut self) -> ParseResult<ast::Expr> {
+    /// Entry for class initializers
+    fn match_init_entry(&mut self) -> ParseResult<Option<(Located<String>, Located<ast::Expr>)>> {
+        let krange = self.peek_loc();
+        if let Some(Located(k, _)) = self.match_ident()? {
+            let v = if self.match1(token![:]) {
+                self.expect_expr()?
+            } else {
+                Located::new(ast::Expr::Ident(k.clone()), krange.clone())
+            };
+            
+            Ok(Some((Located::new(k, krange), v)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Expect that the next tokens are some expression that starts with an identifier.
+    /// 
+    /// This can be:
+    /// * a set literal (`set {1, 2, 3}`), 
+    /// * a dict literal (`dict {"a": 1, "b": 2, "c": 3}`),
+    /// * a class initializer (`Class {a: 2, b: 3, c: 4}`),
+    /// * a static path (`Type::attr`), or
+    /// * an identifier (`x`)
+    pub fn expect_identoid(&mut self) -> ParseResult<ast::Expr> {
         type Entry = (Located<ast::Expr>, Located<ast::Expr>);
         /// Entry for dict literals
         fn match_entry(this: &mut Parser) -> ParseResult<Option<Entry>> {
@@ -1644,40 +1619,13 @@ impl Parser {
                 Ok(None)
             }
         }
-        /// Entry for class initializers
-        fn match_init_entry(this: &mut Parser) -> ParseResult<Option<(Located<String>, Located<ast::Expr>)>> {
-            let krange = this.peek_loc();
-            if let Some(Located(k, _)) = this.match_ident()? {
-                let v = if this.match1(token![:]) {
-                    this.expect_expr()?
-                } else {
-                    Located::new(ast::Expr::Ident(k.clone()), krange.clone())
-                };
-                
-                Ok(Some((Located::new(k, krange), v)))
-            } else {
-                Ok(None)
-            }
-        }
 
         let next_token_pos = self.has_ident()
             .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))?;
         let e = match self.tokens.get(next_token_pos) {
-            Some(FullToken { tt: token![<] | token![<<], .. }) => {
-                let ty = self.expect_type()?;
-
-                self.expect1(token![#])?;
-                self.expect1(token!["{"])?;
-                let params = self.expect_closing_tuple_of(
-                    match_init_entry, 
-                    token!["}"], 
-                    ParseErr::ExpectedIdent
-                )?;
-                ast::Expr::ClassLiteral(ty, params)
-            },
             Some(FullToken { tt: token![#], .. }) => {
                 let ty = self.expect_type()?;
-                
+
                 self.expect1(token![#])?;
                 self.expect1(token!["{"])?;
                 match ty.0.0.as_str() {
@@ -1695,7 +1643,7 @@ impl Parser {
                     },
                     _ => {
                         let params = self.expect_closing_tuple_of(
-                            match_init_entry, 
+                            Parser::match_init_entry, 
                             token!["}"], 
                             ParseErr::ExpectedIdent
                         )?;
@@ -1703,7 +1651,54 @@ impl Parser {
                     }
                 }
             },
+            Some(FullToken { tt: token![::], .. }) => {
+                let ty = self.expect_type()?;
+                self.expect1(token![::])?;
+                let attr = self.expect_ident()?.0;
+
+                ast::Expr::StaticPath(ast::StaticPath { ty, attr })
+            },
             _ => ast::Expr::Ident(self.expect_ident()?.0)
+        };
+
+        Ok(e)
+    }
+
+    /// Expect that the next tokens are some expression that starts with a type diamond.
+    /// 
+    /// This can be:
+    /// * a class initializer (`<Class<T>> {a: 2, b: 3, c: 4}`), or
+    /// * a static path (`<Type<T>>::attr`)
+    pub fn expect_diamondoid(&mut self) -> ParseResult<ast::Expr> {
+        let angle_loc = self.peek_loc();
+        if !self.match_langle() {
+            Err(expected_tokens![<].at_range(angle_loc))?;
+        }
+
+        let ty = self.expect_type()?;
+
+        let angle_loc = self.peek_loc();
+        if !self.match_rangle() {
+            Err(expected_tokens![<].at_range(angle_loc))?;
+        }
+
+        let loc = self.peek_loc();
+        let e = match self.next_token() {
+            Some(token![#]) => {
+                self.expect1(token!["{"])?;
+                let params = self.expect_closing_tuple_of(
+                    Parser::match_init_entry, 
+                    token!["}"], 
+                    ParseErr::ExpectedIdent
+                )?;
+                ast::Expr::ClassLiteral(ty, params)
+            },
+            Some(token![::]) => {
+                let attr = self.expect_ident()?.0;
+    
+                ast::Expr::StaticPath(ast::StaticPath { ty, attr })
+            },
+            _ => Err(expected_tokens![::, #].at_range(loc))?
         };
 
         Ok(e)

@@ -75,10 +75,10 @@ class list<T> {
     inner: #dynarray
 
     fun ::new() -> list<T> {
-        list<T> #{ inner: #dynarray::new(0) };
+        <list<T>> #{ inner: #dynarray::new(0) };
     }
     fun self.len() -> int {
-        (self.inner.len / T::size_of()).trunc().iround()
+        (self.inner.len / T::size_of()).trunc().iround();
     }
     fun self.push(e: T) {
         let buf = T::#alloca();
