@@ -180,19 +180,19 @@ fit class int {
             0;
         }
     }
-    fun self.count_ones() {
+    fun self.count_ones() -> int {
         #ctpop(self);
     }
-    fun self.reverse_bits() {
+    fun self.reverse_bits() -> int {
         #bitreverse(self);
     }
-    fun self.reverse_bytes() {
+    fun self.reverse_bytes() -> int {
         #bswap(self);
     }
-    fun self.leading_zeroes() {
+    fun self.leading_zeroes() -> int {
         #ctlz(self, false);
     }
-    fun self.trailing_zeroes() {
+    fun self.trailing_zeroes() -> int {
         #cttz(self, false);
     }
 }

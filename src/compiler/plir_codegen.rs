@@ -1411,7 +1411,7 @@ impl PLIRCodegen {
     /// Consume a function signature and convert it into a PLIR function signature.
     fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
         let ast::FunSignature { ident: _, generics, params, varargs, ret } = sig;
-        debug_assert!(!generics.is_empty(), "todo: generic funs");
+        debug_assert!(generics.is_empty(), "todo: generic funs");
         
         let (params, ret): (Vec<_>, _) = self.with_generic_aliases(&new_id.resolution_type(), |this| -> PLIRResult<_> {
             let new_params = params.into_iter()

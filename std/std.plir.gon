@@ -257,24 +257,24 @@ fun <float>::to_string(self: float) -> string {
     return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
 }
 extern fun "#cttz"(arg0: int, arg1: bool) -> int;
-fun <int>::trailing_zeroes(self: int) -> void {
-    return <void>(castfrom <int>(<(int, bool) -> int>(#cttz)(<int>(self), <bool>(false))));
+fun <int>::trailing_zeroes(self: int) -> int {
+    return <int>(<(int, bool) -> int>(#cttz)(<int>(self), <bool>(false)));
 }
 extern fun "#ctlz"(arg0: int, arg1: bool) -> int;
-fun <int>::leading_zeroes(self: int) -> void {
-    return <void>(castfrom <int>(<(int, bool) -> int>(#ctlz)(<int>(self), <bool>(false))));
+fun <int>::leading_zeroes(self: int) -> int {
+    return <int>(<(int, bool) -> int>(#ctlz)(<int>(self), <bool>(false)));
 }
 extern fun "#bswap"(arg0: int) -> int;
-fun <int>::reverse_bytes(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#bswap)(<int>(self))));
+fun <int>::reverse_bytes(self: int) -> int {
+    return <int>(<(int) -> int>(#bswap)(<int>(self)));
 }
 extern fun "#bitreverse"(arg0: int) -> int;
-fun <int>::reverse_bits(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#bitreverse)(<int>(self))));
+fun <int>::reverse_bits(self: int) -> int {
+    return <int>(<(int) -> int>(#bitreverse)(<int>(self)));
 }
 extern fun "#ctpop"(arg0: int) -> int;
-fun <int>::count_ones(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#ctpop)(<int>(self))));
+fun <int>::count_ones(self: int) -> int {
+    return <int>(<(int) -> int>(#ctpop)(<int>(self)));
 }
 fun <int>::sign(self: int) -> int {
     return <int>(if <bool>(<int>(self) > <int>(0)) <int>{

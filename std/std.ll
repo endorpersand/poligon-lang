@@ -629,35 +629,55 @@ body:
   ret %string %5
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define void @"int::trailing_zeroes"(i64 %self) local_unnamed_addr #9 {
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::trailing_zeroes"(i64 %self) local_unnamed_addr #6 {
 body:
-  ret void
+  %0 = tail call i64 @llvm.cttz.i64(i64 %self, i1 false), !range !0
+  ret i64 %0
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define void @"int::leading_zeroes"(i64 %self) local_unnamed_addr #9 {
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.cttz.i64(i64, i1 immarg) #7
+
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::leading_zeroes"(i64 %self) local_unnamed_addr #6 {
 body:
-  ret void
+  %0 = tail call i64 @llvm.ctlz.i64(i64 %self, i1 false), !range !0
+  ret i64 %0
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define void @"int::reverse_bytes"(i64 %self) local_unnamed_addr #9 {
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.ctlz.i64(i64, i1 immarg) #7
+
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::reverse_bytes"(i64 %self) local_unnamed_addr #6 {
 body:
-  ret void
+  %0 = tail call i64 @llvm.bswap.i64(i64 %self)
+  ret i64 %0
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define void @"int::reverse_bits"(i64 %self) local_unnamed_addr #9 {
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.bswap.i64(i64) #7
+
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::reverse_bits"(i64 %self) local_unnamed_addr #6 {
 body:
-  ret void
+  %0 = tail call i64 @llvm.bitreverse.i64(i64 %self)
+  ret i64 %0
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define void @"int::count_ones"(i64 %self) local_unnamed_addr #9 {
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.bitreverse.i64(i64) #7
+
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::count_ones"(i64 %self) local_unnamed_addr #6 {
 body:
-  ret void
+  %0 = tail call i64 @llvm.ctpop.i64(i64 %self), !range !0
+  ret i64 %0
 }
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.ctpop.i64(i64) #7
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
 define i64 @"int::sign"(i64 %self) local_unnamed_addr #9 {
@@ -757,3 +777,5 @@ attributes #7 = { mustprogress nocallback nofree nosync nounwind readnone specul
 attributes #8 = { mustprogress nofree nounwind willreturn writeonly }
 attributes #9 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
 attributes #10 = { argmemonly mustprogress nocallback nofree nounwind willreturn }
+
+!0 = !{i64 0, i64 65}
