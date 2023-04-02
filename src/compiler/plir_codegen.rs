@@ -1392,7 +1392,7 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(crate) fn register_fun_sig(&mut self, fs: &plir::FunSignature) {
+    pub(super) fn register_fun_sig(&mut self, fs: &plir::FunSignature) {
         let plir::FunSignature { ident, params, varargs, ret } = fs;
 
         let param_tys = params.iter()
@@ -1477,14 +1477,13 @@ impl PLIRCodegen {
 
     pub(super) fn register_cls(
         &mut self, cls: plir::Class, 
-        methods: impl IntoIterator<Item=ast::MethodDecl>, 
-        ty: &plir::Type
+        methods: impl IntoIterator<Item=ast::MethodDecl>
     ) {
         let ib = self.peek_block();
         
         ib.insert_class(&cls);
         for method in methods {
-            ib.insert_unresolved_method(ty, method);
+            ib.insert_unresolved_method(&cls.ty, method);
         }
 
         self.push_global(cls);
@@ -1515,7 +1514,7 @@ impl PLIRCodegen {
             .collect::<Result<_, _>>()?;
         
         let cls = plir::Class { ty: ty.clone(), fields };
-        self.register_cls(cls, methods, ty);
+        self.register_cls(cls, methods);
         Ok(self.peek_block().is_open())
     }
 

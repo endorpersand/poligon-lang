@@ -9,15 +9,16 @@
 //! - [`parse`]: A function to parse [a list of lexed tokens][`crate::lexer`] into an AST.
 //! - [`Parser`]: The struct that does all the parsing.
 
-use ast::Located;
-
 use std::collections::VecDeque;
 use std::ops::RangeInclusive;
 
 use crate::GonErr;
 use crate::err::{FullGonErr, CursorRange};
 use crate::lexer::token::{Token, token, FullToken};
-use crate::ast;
+use crate::ast::{Located, GenericIdent, ReasgType, MutType};
+
+use super::{PLIRCodegen, plir};
+use super::plir_codegen::DeclaredTypes;
 
 /// A struct that does the conversion of tokens to a parseable program tree.
 /// 
@@ -50,7 +51,8 @@ use crate::ast;
 pub struct DParser {
     tokens: VecDeque<FullToken>,
     eof: (usize, usize),
-    tree_locs: Vec<RangeBlock>
+    tree_locs: Vec<RangeBlock>,
+    codegen: PLIRCodegen
 }
 
 #[derive(Clone, Debug)]
@@ -139,7 +141,7 @@ impl Iterator for DParser {
 }
 
 impl DParser {
-    pub fn new(tokens: impl IntoIterator<Item=FullToken>) -> Self {
+    pub fn new(tokens: impl IntoIterator<Item=FullToken>, dtypes: DeclaredTypes) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
             .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
             .collect();
@@ -151,24 +153,26 @@ impl DParser {
             (0, 0)
         };
 
-        Self { tokens, eof, tree_locs: vec![] }
+        Self { tokens, eof, tree_locs: vec![], codegen: PLIRCodegen::new_with_declared_types(dtypes) }
     }
 
-    pub fn unwrap_d_program(mut self) -> ParseResult<ast::Program> {
-        let mut program = vec![];
+    pub fn unwrap_dtypes(mut self) -> ParseResult<DeclaredTypes> {
         loop {
-            self.push_loc_block("expect_d_program");
-            let stmt = match self.peek_token() {
-                Some(token![class]) => self.expect_class_decl().map(ast::Stmt::ClassDecl)?,
-                Some(token![extern]) => self.expect_extern_decl()?,
+            match self.peek_token() {
+                Some(token![class]) => {
+                    let cls = self.expect_class_decl()?;
+                    self.codegen.register_cls(cls, None);
+                },
+                Some(token![extern]) => {
+                    let fs = self.expect_extern_decl()?;
+                    self.codegen.register_fun_sig(&fs);
+                },
                 Some(_) => Err(DParseErr::UnexpectedToken.at_range(self.peek_loc()))?,
                 None => break
             };
-
-            program.push(Located::new(stmt, self.pop_loc_block("expect_d_program").unwrap()));
         }
 
-        Ok(ast::Program(program))
+        Ok(self.codegen.declared_types())
     }
 
     /// Expect that the next token in the input is in the specified token, 
@@ -213,6 +217,7 @@ impl DParser {
     /// assert_eq!(parser.expect_n(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
     /// ```
+    #[allow(unused)]
     pub fn expect_n(&mut self, one_of: &[Token]) -> ParseResult<FullToken> {
         if let Some(ft) = self.next() {
             if one_of.contains(&ft.tt) {
@@ -267,6 +272,7 @@ impl DParser {
     /// assert_eq!(parser.match_n(&[token![&&], token![||]]), None);
     /// assert_eq!(parser.match_n(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
+    #[allow(unused)]
     pub fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
         match self.peek_token() {
             Some(t) if one_of.contains(t) => self.next(),
@@ -308,14 +314,6 @@ impl DParser {
     /// To remove the block and obtain the cursor range, use [`Parser::pop_loc_block`].
     pub fn push_loc_block(&mut self, name: &'static str) {
         self.tree_locs.push(RangeBlock(name, None));
-    }
-
-    /**
-     * Looks at the top cursor-tracking block without removing it.
-     */
-    pub fn peek_loc_block(&mut self) -> Option<CursorRange> {
-        self.tree_locs.last()
-            .and_then(|RangeBlock(_, r)| r.clone())
     }
 
     /// Remove a cursor-tracking block from the parser.
@@ -367,6 +365,7 @@ impl DParser {
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`,
     /// and an error to raise if a match was not found.
+    #[allow(unused)]
     pub fn expect_closing_tuple_of<T, F>(
         &mut self, f: F, closer: Token, or_else: DParseErr
     ) -> ParseResult<Vec<T>> 
@@ -445,17 +444,17 @@ impl DParser {
     }
 
     /// Match the next token to a reassignment type if it represents one.
-    pub fn match_reasg_type(&mut self) -> Option<ast::ReasgType> {
+    pub fn match_reasg_type(&mut self) -> Option<ReasgType> {
         if self.match1(token![let]) {
-            Some(ast::ReasgType::Let)
+            Some(ReasgType::Let)
         } else if self.match1(token![const]) {
-            Some(ast::ReasgType::Const)
+            Some(ReasgType::Const)
         } else {
             None
         }
     }
     /// Match the next tokens in the input if they represent a function parameter.
-    pub fn match_param(&mut self) -> ParseResult<Option<ast::Param>> {
+    pub fn match_param(&mut self) -> ParseResult<Option<plir::Param>> {
         let mrt = self.match_reasg_type();
         let (mut empty, rt) = match mrt {
             Some(t) => (false, t),
@@ -464,9 +463,9 @@ impl DParser {
         
         let mt = if self.match1(token![mut]) {
             empty = false;
-            ast::MutType::Mut
+            MutType::Mut
         } else {
-            ast::MutType::Immut
+            MutType::Immut
         };
 
         // the param checked so far is fully empty and probably not an actual param:
@@ -475,18 +474,10 @@ impl DParser {
         }
 
         let ident = self.expect_ident()?.0;
-        let ty = if self.match1(token![:]) {
-            Some(self.expect_type()?)
-        } else {
-            None
-        };
+        self.expect1(token![:])?;
+        let ty = self.expect_type()?;
 
-        Ok(Some(ast::Param {
-            rt,
-            mt,
-            ident,
-            ty
-        }))
+        Ok(Some(plir::Param { rt, mt, ident, ty }))
     }
 
     /// Check if the next input is an identifier.
@@ -537,10 +528,9 @@ impl DParser {
 
     /// Match the next tokens in the input if they represent a type expression.
     /// 
-    /// This is used to enable [`parser::expect_tuple_of(Parser::match_type)`][`Parser::expect_tuple_of`].
-    /// The function that *should* be used for type expression parsing purposes is [`Parser::expect_type`].
-    fn match_type(&mut self) -> ParseResult<Option<Located<ast::Type>>> {
-        self.push_loc_block("match_type");
+    /// This is used to enable [`parser.expect_tuple_of(Parser::match_type)`][`DParser::expect_tuple_of`].
+    /// The function that *should* be used for type expression parsing purposes is [`DParser::expect_type`].
+    fn match_type(&mut self) -> ParseResult<Option<plir::Type>> {
         if self.has_ident().is_some() {
             let ident = self.expect_ident()?.0;
 
@@ -567,23 +557,26 @@ impl DParser {
                 vec![]
             };
 
-            let result = Located::new(ast::Type(ident, params), self.pop_loc_block("match_type").unwrap());
+            let result = if params.is_empty() {
+                plir::Type::Prim(ident)
+            } else {
+                plir::Type::Generic(ident, params)
+            };
+            // TODO: verify type
             Ok(Some(result))
         } else {
-            self.pop_loc_block("match_type");
             Ok(None)
         }
     }
 
     /// Expect that the next tokens in the input represent a type expression.
-    /// 
-    /// This should be verified with [`PLIRCodegen::verify_type`].
-    pub fn expect_type(&mut self) -> ParseResult<Located<ast::Type>> {
+    pub fn expect_type(&mut self) -> ParseResult<plir::Type> {
         self.match_type()?
             .ok_or_else(|| DParseErr::ExpectedType.at_range(self.peek_loc()))
     }
 
-    fn expect_d_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
+    #[allow(unused)]
+    fn expect_d_generic_ident(&mut self) -> ParseResult<GenericIdent> {
         let ident = self.expect_ident()?.0;
         
         let params = if self.match_langle() {
@@ -599,44 +592,81 @@ impl DParser {
             vec![]
         };
 
-        Ok(ast::GenericIdent {
+        Ok(GenericIdent {
             ident,
             params: params.into_iter().map(|t| t.0).collect(),
         })
     }
 
+    /// Expect the next tokens represent a function identifier.
+    /// 
+    /// This can be `ident`, `Type::attr`, or `<Type>::attr`.
+    fn expect_fun_ident(&mut self) -> ParseResult<plir::FunIdent> {
+        let loc = self.peek_loc();
+
+        if let Some(size) = self.has_ident() {
+            // ident OR Type::attr
+
+            if let Some(token![::]) = self.peek_nth_token(size) {
+                // Type::attr
+                let ty = self.expect_type()?;
+                self.expect1(token![::])?;
+                let attr = self.expect_ident()?.0;
+
+                Ok(plir::FunIdent::Static(ty, attr))
+            } else {
+                self.expect_ident().map(|id| id.0).map(plir::FunIdent::Simple)
+            }
+        } else if let Some(token![<] | token![<<]) = self.peek_token() {
+            // <Type>::attr
+            let angle_loc = self.peek_loc();
+                if !self.match_langle() { Err(expected_tokens![<].at_range(angle_loc))? };
+                
+                let ty = self.expect_type()?;
+
+                let angle_loc = self.peek_loc();
+                if !self.match_rangle() { Err(expected_tokens![>].at_range(angle_loc))? };
+
+                self.expect1(token![::])?;
+                let attr = self.expect_ident()?.0;
+
+                Ok(plir::FunIdent::Static(ty, attr))
+        } else {
+            Err(expected_tokens![<].at_range(loc))
+        }
+    }
+
     /// Expect the next tokens represent a PLIR class.
     /// 
     /// This class should be registered by [`PLIRCodegen::register_cls`].
-    fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
+    fn expect_class_decl(&mut self) -> ParseResult<plir::Class> {
         self.expect1(token![class])?;
-        let ident = self.expect_d_generic_ident()?;
+        let ty = self.expect_type()?;
 
         self.expect1(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(DParser::match_type)?;
         let fields = fields.into_iter()
             .enumerate()
-            .map(|(i, ty)| ast::FieldDecl {
+            .map(|(i, ty)| (format!("#{i}"), plir::FieldDecl {
                 rt: Default::default(),
                 mt: Default::default(),
-                ident: format!("#{i}"),
                 ty,
-            })
+            }))
             .collect();
         self.expect1(token!["}"])?;
         self.match1(token![;]);
 
-        Ok(ast::Class { ident, fields, methods: vec![] })
+        Ok(plir::Class { ty, fields })
     }
 
     /// Expect the next tokens represent an external function declaration.
     /// 
     /// This should be registered with [`PLIRCodegen::register_fun_sig`].
-    fn expect_extern_decl(&mut self) -> ParseResult<ast::Stmt> {
+    fn expect_extern_decl(&mut self) -> ParseResult<plir::FunSignature> {
         self.expect1(token![extern])?;
         self.expect1(token![fun])?;
 
-        let ident = self.expect_ident()?.0;
+        let ident = self.expect_fun_ident()?;
 
         self.expect1(token!["("])?;
         let (params, end_comma) = self.expect_tuple_of(DParser::match_param)?;
@@ -645,14 +675,10 @@ impl DParser {
             self.match1(token![,]);
         }
         self.expect1(token![")"])?;
-
-        let ret = if self.match1(token![->]) {
-            Some(self.expect_type()?)
-        } else {
-            None
-        };
+        self.expect1(token![->])?;
+        let ret = self.expect_type()?;
         self.expect1(token![;])?;
 
-        Ok(ast::Stmt::ExternFunDecl(ast::FunSignature { ident, params, varargs, ret }))
+        Ok(plir::FunSignature { ident, params, varargs, ret })
     }
 }
