@@ -10,6 +10,7 @@ source_filename = "std.gon"
 @_tmpl_char_to_string = private unnamed_addr constant [4 x i8] c"%lc\00", align 1
 @throw_msg = private unnamed_addr constant [31 x i8] c"cannot take element from array\00", align 1
 @_write = private unnamed_addr constant [2 x i8] c"w\00", align 1
+@throw_msg.1 = private unnamed_addr constant [23 x i8] c"division by zero error\00", align 1
 @locale = private unnamed_addr constant [12 x i8] c"en_US.UTF-8\00", align 1
 
 ; Function Attrs: nofree nounwind
@@ -689,6 +690,30 @@ body:
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
 declare i64 @llvm.abs.i64(i64, i1 immarg) #7
+
+; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
+define i64 @"#idiv"(i64 %0, i64 %1) local_unnamed_addr #9 {
+body:
+  %2 = sdiv i64 %0, %1
+  ret i64 %2
+}
+
+define i64 @"int::idiv"(i64 %self, i64 %d) local_unnamed_addr {
+body:
+  %i_eq = icmp eq i64 %d, 0
+  br i1 %i_eq, label %then, label %else
+
+then:                                             ; preds = %body
+  %stderr = tail call ptr @fdopen(i64 2, ptr nonnull @_write)
+  %0 = tail call i64 @fwrite(ptr nonnull @throw_msg.1, i64 22, i64 1, ptr %stderr)
+  %1 = tail call i64 @fputwc(i32 10, ptr %stderr)
+  tail call void @exit(i64 1)
+  unreachable
+
+else:                                             ; preds = %body
+  %call = tail call i64 @"#idiv"(i64 %self, i64 %d)
+  ret i64 %call
+}
 
 define %string @"int::to_string"(i64 %self) local_unnamed_addr {
 body:

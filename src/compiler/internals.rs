@@ -8,6 +8,7 @@ use lazy_static::lazy_static;
 use crate::compiler::llvm::types::{FnTypeS, IntTypeS, PtrTypeS, VoidTypeS, RetTypeS, Concretize, FloatTypeS};
 use crate::compiler::{LLVMCodegen, LLVMResult, LLVMErr, plir};
 
+use super::llvm::Builder2;
 use super::llvm_codegen::params;
 
 macro_rules! map {
@@ -44,11 +45,25 @@ macro_rules! fn_type_s {
     };
 }
 
+macro_rules! add_body {
+    () => { None };
+    ($f3:ident) => { Some($f3 as _) };
+}
+fn build_idiv<'ctx>(builder: Builder2<'ctx>, f: FunctionValue<'ctx>) {
+    let [lhs, rhs] = *Box::<[_; 2]>::try_from(f.get_params())
+        .expect("two parameters to idiv");
+    let lhs = lhs.into_int_value();
+    let rhs = rhs.into_int_value();
+
+    let div = builder.build_int_signed_div(lhs, rhs, "");
+    builder.build_return(Some(&div));
+}
+
 macro_rules! c_intrinsics {
-    ($($c:ident: {$alias:expr, $f1:expr, $f2:expr}),* $(,)?) => {
+    ($($c:ident: {$alias:expr, $f1:expr, $f2:expr$(, $f3:ident)?}),* $(,)?) => {
         lazy_static! {
-            pub(in crate::compiler) static ref C_INTRINSICS_LLVM: HashMap<&'static str, (&'static str, FnTypeS)> = map! {
-                $(concat!("#", stringify!($c)) => ($alias, $f2)),*
+            pub(in crate::compiler) static ref C_INTRINSICS_LLVM: HashMap<&'static str, (&'static str, FnTypeS, Option<for <'ctx> fn(Builder2<'ctx>, FunctionValue<'ctx>)>)> = map! {
+                $(concat!("#", stringify!($c)) => ($alias, $f2, add_body!($($f3)?))),*
             };
         }
         lazy_static! {
@@ -387,6 +402,12 @@ c_intrinsics! {
         fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
         fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
     },
+    idiv: { // (int, int) -> int
+        "#idiv",
+        fun_type![(INT_P.clone(), INT_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*INT_L, *INT_L) -> *INT_L],
+        build_idiv
+    },
     fopen: { // (char*, char*) -> File*
         "fopen",
         fun_type![(PTR_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
@@ -422,14 +443,24 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// or a segmentation fault may occur.
     pub(crate) fn import_intrinsic(&self, s: &str) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // lookup intrinsic on HashMap
-        let (alias, ty) = C_INTRINSICS_LLVM.get(s)
-            .map(|(ident, ty)| (*ident, ty.as_concrete(self)))
+        let (alias, ty, mbody) = C_INTRINSICS_LLVM.get(s)
+            .map(|(ident, ty, bbu)| (*ident, ty.as_concrete(self), bbu))
             .ok_or_else(|| LLVMErr::CannotImport(String::from(s)))?;
 
         // access that fn
         let fun = self.module.get_function(alias)
             .unwrap_or_else(|| {
-                self.module.add_function(alias, ty, None)
+                let fun = self.module.add_function(alias, ty, None);
+
+                if let Some(body) = mbody {
+                    let builder = Builder2::new(self.ctx.create_builder());
+                    let bb = self.ctx.append_basic_block(fun, "body");
+                    builder.position_at_end(bb);
+
+                    body(builder, fun);
+                }
+
+                fun
             });
 
         Ok(fun)

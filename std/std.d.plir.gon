@@ -123,4 +123,6 @@ extern fun "#smax"(arg0: int, arg1: int) -> int;
 extern fun <int>::max(arg0: int, arg1: int) -> int;
 extern fun "#abs"(arg0: int, arg1: bool) -> int;
 extern fun <int>::abs(arg0: int) -> int;
+extern fun "#idiv"(arg0: int, arg1: int) -> int;
+extern fun <int>::idiv(arg0: int, arg1: int) -> int;
 extern fun <int>::to_string(arg0: int) -> string;

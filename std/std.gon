@@ -89,7 +89,7 @@ class list<T> {
     }
 
     fun self.len() -> int {
-        (self.inner.len / T::size_of()).trunc().iround();
+        self.inner.len.idiv(T::size_of());
     }
     fun self.push(e: T) {
         let buf = T::#alloca();
@@ -155,6 +155,13 @@ fit class int {
         };
     }
 
+    fun self.idiv(d: int) -> int {
+        if d == 0 {
+            throw "division by zero error";
+        } else {
+            #idiv(self, d);
+        }
+    }
     fun self.abs() -> int {
         #abs(self, false);
     }

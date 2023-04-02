@@ -297,6 +297,14 @@ extern fun "#abs"(arg0: int, arg1: bool) -> int;
 fun <int>::abs(self: int) -> int {
     return <int>(<(int, bool) -> int>(#abs)(<int>(self), <bool>(false)));
 }
+extern fun "#idiv"(arg0: int, arg1: int) -> int;
+fun <int>::idiv(self: int, d: int) -> int {
+    return <int>(if <bool>(<int>(d) == <int>(0)) <never>{
+        throw "division by zero error";
+    } else <int>{
+        exit <int>(<(int, int) -> int>(#idiv)(<int>(self), <int>(d)));
+    });
+}
 fun <int>::to_string(self: int) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
     let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_int_to_string), <int>(self)));
