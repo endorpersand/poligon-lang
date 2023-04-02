@@ -498,7 +498,7 @@ impl InsertBlock {
 
     fn insert_unresolved_method(&mut self, ty: &plir::Type, method: ast::MethodDecl) {
         let ast::MethodDecl {
-            sig: ast::MethodSignature { referent, is_static, name: method_name, mut params, ret }, 
+            sig: ast::MethodSignature { referent, is_static, name: method_name, generics, mut params, ret }, 
             block 
         } = method;
 
@@ -532,7 +532,7 @@ impl InsertBlock {
         };
         
         let metref = plir::FunIdent::Static(ty.clone(), method_name.clone());
-        let sig = ast::FunSignature { ident: String::from("#unnamed"), params, varargs: false, ret };
+        let sig = ast::FunSignature { ident: String::from("#unnamed"), generics, params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
         self.insert_unresolved(UnresolvedValue::Fun(metref.clone(), decl));
@@ -1410,8 +1410,9 @@ impl PLIRCodegen {
 
     /// Consume a function signature and convert it into a PLIR function signature.
     fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
-        let ast::FunSignature { ident: _, params, varargs, ret } = sig;
-
+        let ast::FunSignature { ident: _, generics, params, varargs, ret } = sig;
+        debug_assert!(!generics.is_empty(), "todo: generic funs");
+        
         let (params, ret): (Vec<_>, _) = self.with_generic_aliases(&new_id.resolution_type(), |this| -> PLIRResult<_> {
             let new_params = params.into_iter()
                 .map(|p| -> PLIRResult<_> {

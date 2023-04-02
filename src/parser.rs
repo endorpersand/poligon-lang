@@ -821,6 +821,15 @@ impl Parser {
 
         let ident = self.expect_ident()?.0;
 
+        let generics = if self.match_(token![<]).is_some() {
+            let (generics, _) = self.expect_tuple_of(Parser::match_ident)?;
+           self.expect(token![>])?;
+
+           generics.into_iter().map(|t| t.0).collect()
+        } else {
+            vec![]
+        };
+
         self.expect(token!["("])?;
         let params = self.expect_closing_tuple_of(
             Parser::match_param,
@@ -833,7 +842,7 @@ impl Parser {
             None    => None,
         };
 
-        Ok(ast::FunSignature { ident, params, varargs: false, ret })
+        Ok(ast::FunSignature { ident, generics, params, varargs: false, ret })
     }
 
     /// Expect that the next tokens in the input represent a function declaration.
@@ -921,6 +930,15 @@ impl Parser {
     pub fn expect_method_sig(&mut self) -> ParseResult<ast::MethodSignature> {
         let (referent, method_name, is_static) = self.expect_method_ident()?;
 
+        let generics = if self.match_(token![<]).is_some() {
+            let (generics, _) = self.expect_tuple_of(Parser::match_ident)?;
+           self.expect(token![>])?;
+
+           generics.into_iter().map(|t| t.0).collect()
+        } else {
+            vec![]
+        };
+
         self.expect(token!["("])?;
         let params = self.expect_closing_tuple_of(
             Parser::match_param,
@@ -937,6 +955,7 @@ impl Parser {
             referent,
             is_static,
             name: method_name,
+            generics,
             params,
             ret,
         })

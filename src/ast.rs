@@ -329,6 +329,8 @@ pub enum MutType {
 pub struct FunSignature {
     /// The function's identifier
     pub ident: String,
+    /// Generic parameters
+    pub generics: Vec<String>,
     /// The function's parameters
     pub params: Vec<Param>,
     /// Whether the function is varargs

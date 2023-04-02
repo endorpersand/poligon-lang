@@ -103,10 +103,16 @@ impl Display for DeclUnit {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, params, varargs, ret } = self;
+        let FunSignature { ident, generics, params, varargs, ret } = self;
 
-        write!(f, "fun {ident}(")?;
-        
+        write!(f, "fun {ident}")?;
+        if !generics.is_empty() {
+            write!(f, "<")?;
+            fmt_list(f, generics)?;
+            write!(f, ">")?;
+        }
+        write!(f, "(")?;
+
         let mut pd: Vec<_> = params.iter()
         .map(|t| t as _)
         .collect();
@@ -124,7 +130,7 @@ impl Display for FunSignature {
 }
 impl Display for MethodSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let MethodSignature { referent, is_static, name, params, ret } = self;
+        let MethodSignature { referent, is_static, name, generics, params, ret } = self;
 
         write!(f, "fun ")?;
         if let Some(ref_ident) = referent {
@@ -134,8 +140,14 @@ impl Display for MethodSignature {
             true  => write!(f, "::"),
             false => write!(f, "."),
         }?;
+        write!(f, "{name}")?;
         
-        write!(f, "{name}(")?;
+        if !generics.is_empty() {
+            write!(f, "<")?;
+            fmt_list(f, generics)?;
+            write!(f, ">")?;
+        }
+        write!(f, "(")?;
         fmt_list(f, params)?;
         write!(f, ") ")?;
 

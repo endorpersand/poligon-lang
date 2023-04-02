@@ -97,6 +97,8 @@ pub struct MethodSignature {
     pub is_static: bool,
     /// The function's name
     pub name: String,
+    /// The function's generic parameters
+    pub generics: Vec<String>,
     /// The function's parameters
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
