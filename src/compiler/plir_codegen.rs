@@ -909,22 +909,25 @@ impl PLIRCodegen {
             // repivot peek block to point to the unresolved item
             let storage = self.blocks.split_off(self.blocks.len() - i);
 
-            let Entry::Occupied(entry) = self.peek_block().unres_types.entry(ident.to_string()) else {
-                unreachable!()
-            };
-
-            match entry.get() {
-                UnresolvedType::Class(cls) => {
-                    let cls = if cls.ident.params.is_empty() {
-                        let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                        cls
-                    } else {
-                        cls.clone()
-                    };
-
-                    self.consume_cls(cls, ty)?;
-                },
-                UnresolvedType::Import(_) => todo!(),
+            // for generic types, we want to skip resolving a second time
+            if !self.peek_block().types.contains_key(*ty) {
+                let Entry::Occupied(entry) = self.peek_block().unres_types.entry(ident.to_string()) else {
+                    unreachable!()
+                };
+    
+                match entry.get() {
+                    UnresolvedType::Class(cls) => {
+                        let cls = if cls.ident.params.is_empty() {
+                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                            cls
+                        } else {
+                            cls.clone()
+                        };
+    
+                        self.consume_cls(cls, ty)?;
+                    },
+                    UnresolvedType::Import(_) => todo!(),
+                }
             }
 
             // revert peek block after
@@ -1477,9 +1480,19 @@ impl PLIRCodegen {
         self.get_class(lty.map(|t| &*t))
     }
     fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
-        let Located(ty, range) = ty;
+        let Located(ast::Type(ty_ident, ty_params), range) = ty;
         
-        let mut ty = plir::Type::from(ty);
+        let mut ty = {
+            if ty_params.is_empty() {
+                plir::Type::Prim(ty_ident)
+            } else {
+                let ty_params = ty_params.into_iter()
+                    .map(|t| self.consume_type(t))
+                    .collect::<Result<_, _>>()?;
+                
+                plir::Type::Generic(ty_ident, ty_params)
+            }
+        };
         let cls = self.verify_type(Located::new(&mut ty, range))?;
         Ok((ty, cls))
     }
@@ -1559,7 +1572,6 @@ impl PLIRCodegen {
         })?;
         
         let cls = plir::Class { ty: ty.clone(), fields };
-        println!("{cls}");
         self.register_cls(cls, methods);
         
         Ok(())

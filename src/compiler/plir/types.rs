@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use crate::ast;
 use crate::compiler::plir_codegen::OpErr;
 
-use super::{Split, Located};
+use super::Split;
 
 /// A type expression.
 /// 
@@ -310,21 +310,6 @@ macro_rules! ty {
     };
 }
 pub(crate) use ty;
-
-impl From<ast::Type> for Type {
-    fn from(ty: ast::Type) -> Self {
-        let ast::Type(ident, params) = ty;
-        
-        if params.is_empty() {
-            Type::Prim(ident)
-        } else {
-            let p = params.into_iter()
-                .map(|Located(t, _)| t.into())
-                .collect();
-            Type::Generic(ident, p)
-        }
-    }
-}
 
 /// A class declaration.
 /// 

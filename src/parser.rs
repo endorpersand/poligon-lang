@@ -1463,8 +1463,7 @@ impl Parser {
     /// (`a[1]`, `f(1, 2, 3, 4)`)
     /// or any expression with higher precedence.
     /// 
-    /// The next expression above in precedence is [`Parser::match_path`].
-
+    /// The next expression above in precedence is [`Parser::match_unit`].
     pub fn match_call_index_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_call_index_path");
         if let Some(mut e) = self.match_unit()? {
