@@ -17,7 +17,7 @@ use crate::err::{FullGonErr, CursorRange};
 use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{Located, GenericIdent, ReasgType, MutType};
 
-use super::{PLIRCodegen, plir};
+use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;
 
 /// A struct that does the conversion of tokens to a parseable program tree.
@@ -59,7 +59,7 @@ pub struct DParser {
 struct RangeBlock(&'static str, Option<CursorRange>);
 
 /// An error that occurs in the parsing process.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum DParseErr {
     /// The parser expected one of the tokens.
     ExpectedTokens(Vec<Token>),
@@ -70,11 +70,16 @@ pub enum DParseErr {
     /// The parser expected a type expression (e.g. `list<str>`).
     ExpectedType,
 
-    UnexpectedToken
+    UnexpectedToken,
+
+    PLIRErr(PLIRErr),
 }
 impl GonErr for DParseErr {
     fn err_name(&self) -> &'static str {
-        "syntax error"
+        match self {
+            DParseErr::PLIRErr(e) => e.err_name(),
+            _ => "syntax error"
+        }
     }
 }
 
@@ -98,12 +103,13 @@ impl std::fmt::Display for DParseErr {
             DParseErr::ExpectedIdent   => write!(f, "expected identifier"),
             DParseErr::ExpectedType    => write!(f, "expected type expression"),
             DParseErr::UnexpectedToken => write!(f, "unexpected token"),
+            DParseErr::PLIRErr(e)      => e.fmt(f),
         }
     }
 }
 /// A [`Result`] type for operations in the parsing process.
-pub type ParseResult<T> = Result<T, FullParseErr>;
-type FullParseErr = FullGonErr<DParseErr>;
+pub type DParseResult<T> = Result<T, FullDParseErr>;
+type FullDParseErr = FullGonErr<DParseErr>;
 
 macro_rules! expected_tokens {
     ($($t:tt),*) => {
@@ -156,7 +162,7 @@ impl DParser {
         Self { tokens, eof, tree_locs: vec![], codegen: PLIRCodegen::new_with_declared_types(dtypes) }
     }
 
-    pub fn unwrap_dtypes(mut self) -> ParseResult<DeclaredTypes> {
+    pub fn unwrap_dtypes(mut self) -> DParseResult<DeclaredTypes> {
         loop {
             match self.peek_token() {
                 Some(token![class]) => {
@@ -190,7 +196,7 @@ impl DParser {
     /// assert!(parser.expect1(token![true]).is_ok());
     /// assert!(parser.expect1(token![||]).is_err());
     /// ```
-    pub fn expect1(&mut self, u: Token) -> ParseResult<()> {
+    pub fn expect1(&mut self, u: Token) -> DParseResult<()> {
         if let Some(FullToken {tt: t, loc}) = self.next() {
             if t == u {
                 Ok(())
@@ -218,7 +224,7 @@ impl DParser {
     /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
     /// ```
     #[allow(unused)]
-    pub fn expect_n(&mut self, one_of: &[Token]) -> ParseResult<FullToken> {
+    pub fn expect_n(&mut self, one_of: &[Token]) -> DParseResult<FullToken> {
         if let Some(ft) = self.next() {
             if one_of.contains(&ft.tt) {
                 Ok(ft)
@@ -338,8 +344,8 @@ impl DParser {
     /// matched values and a bool value indicating whether the tuple had a terminating comma.
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`.
-    pub fn expect_tuple_of<T, F>(&mut self, mut f: F) -> ParseResult<(Vec<T>, bool /* ended in comma? */)> 
-        where F: FnMut(&mut Self) -> ParseResult<Option<T>>
+    pub fn expect_tuple_of<T, F>(&mut self, mut f: F) -> DParseResult<(Vec<T>, bool /* ended in comma? */)> 
+        where F: FnMut(&mut Self) -> DParseResult<Option<T>>
     {
         let mut exprs = vec![];
         let mut comma_end = true;
@@ -368,8 +374,8 @@ impl DParser {
     #[allow(unused)]
     pub fn expect_closing_tuple_of<T, F>(
         &mut self, f: F, closer: Token, or_else: DParseErr
-    ) -> ParseResult<Vec<T>> 
-        where F: FnMut(&mut Self) -> ParseResult<Option<T>>
+    ) -> DParseResult<Vec<T>> 
+        where F: FnMut(&mut Self) -> DParseResult<Option<T>>
     {
         let (exprs, comma_end) = self.expect_tuple_of(f)?;
 
@@ -454,7 +460,7 @@ impl DParser {
         }
     }
     /// Match the next tokens in the input if they represent a function parameter.
-    pub fn match_param(&mut self) -> ParseResult<Option<plir::Param>> {
+    pub fn match_param(&mut self) -> DParseResult<Option<plir::Param>> {
         let mrt = self.match_reasg_type();
         let (mut empty, rt) = match mrt {
             Some(t) => (false, t),
@@ -475,7 +481,7 @@ impl DParser {
 
         let ident = self.expect_ident()?.0;
         self.expect1(token![:])?;
-        let ty = self.expect_type()?;
+        let ty = self.expect_type(true)?;
 
         Ok(Some(plir::Param { rt, mt, ident, ty }))
     }
@@ -494,7 +500,7 @@ impl DParser {
 
     /// Match the next token in input if it is an identifier token,
     /// returning the identifier's string if successfully matched.
-    pub fn match_ident(&mut self) -> ParseResult<Option<Located<String>>> {
+    pub fn match_ident(&mut self) -> DParseResult<Option<Located<String>>> {
         match self.has_ident() {
             None => Ok(None),
             Some(1) => {
@@ -521,7 +527,7 @@ impl DParser {
 
     /// Expect that the next token in the input is an identifier token,
     /// returning the identifier's string if successfully matched.
-    pub fn expect_ident(&mut self) -> ParseResult<Located<String>> {
+    pub fn expect_ident(&mut self) -> DParseResult<Located<String>> {
         self.match_ident()?
             .ok_or_else(|| DParseErr::ExpectedIdent.at_range(self.peek_loc()))
     }
@@ -530,14 +536,17 @@ impl DParser {
     /// 
     /// This is used to enable [`parser.expect_tuple_of(Parser::match_type)`][`DParser::expect_tuple_of`].
     /// The function that *should* be used for type expression parsing purposes is [`DParser::expect_type`].
-    fn match_type(&mut self) -> ParseResult<Option<plir::Type>> {
+    /// 
+    /// The verify parameter indicates whether or not the type should be checked for existence.
+    fn match_type(&mut self, verify: bool) -> DParseResult<Option<plir::Type>> {
         if self.has_ident().is_some() {
+            self.push_loc_block("match_type");
             let ident = self.expect_ident()?.0;
 
             let params = if self.match_langle() {
                 let token_pos = self.peek_loc();
 
-                let (tpl, comma_end) = self.expect_tuple_of(DParser::match_type)?;
+                let (tpl, comma_end) = self.expect_tuple_of(|p| p.match_type(true))?;
                 if !self.match_rangle() {
                     Err(if comma_end {
                         DParseErr::ExpectedType
@@ -562,7 +571,15 @@ impl DParser {
             } else {
                 plir::Type::Generic(ident, params)
             };
-            // TODO: verify type
+            
+            let block = self.pop_loc_block("match_type").unwrap();
+
+            if verify {
+                match self.codegen.verify_type(Located::new(&result, block)) {
+                    Ok(_) => {},
+                    Err(e) => Err(e.map(DParseErr::PLIRErr))?,
+                }
+            }
             Ok(Some(result))
         } else {
             Ok(None)
@@ -570,13 +587,15 @@ impl DParser {
     }
 
     /// Expect that the next tokens in the input represent a type expression.
-    pub fn expect_type(&mut self) -> ParseResult<plir::Type> {
-        self.match_type()?
+    /// 
+    /// The verify parameter indicates whether or not the type should be checked for existence.
+    pub fn expect_type(&mut self, verify: bool) -> DParseResult<plir::Type> {
+        self.match_type(verify)?
             .ok_or_else(|| DParseErr::ExpectedType.at_range(self.peek_loc()))
     }
 
     #[allow(unused)]
-    fn expect_d_generic_ident(&mut self) -> ParseResult<GenericIdent> {
+    fn expect_d_generic_ident(&mut self) -> DParseResult<GenericIdent> {
         let ident = self.expect_ident()?.0;
         
         let params = if self.match_langle() {
@@ -601,7 +620,7 @@ impl DParser {
     /// Expect the next tokens represent a function identifier.
     /// 
     /// This can be `ident`, `Type::attr`, or `<Type>::attr`.
-    fn expect_fun_ident(&mut self) -> ParseResult<plir::FunIdent> {
+    fn expect_fun_ident(&mut self) -> DParseResult<plir::FunIdent> {
         let loc = self.peek_loc();
 
         if let Some(size) = self.has_ident() {
@@ -609,7 +628,7 @@ impl DParser {
 
             if let Some(token![::]) = self.peek_nth_token(size) {
                 // Type::attr
-                let ty = self.expect_type()?;
+                let ty = self.expect_type(true)?;
                 self.expect1(token![::])?;
                 let attr = self.expect_ident()?.0;
 
@@ -622,7 +641,7 @@ impl DParser {
             let angle_loc = self.peek_loc();
                 if !self.match_langle() { Err(expected_tokens![<].at_range(angle_loc))? };
                 
-                let ty = self.expect_type()?;
+                let ty = self.expect_type(true)?;
 
                 let angle_loc = self.peek_loc();
                 if !self.match_rangle() { Err(expected_tokens![>].at_range(angle_loc))? };
@@ -639,12 +658,12 @@ impl DParser {
     /// Expect the next tokens represent a PLIR class.
     /// 
     /// This class should be registered by [`PLIRCodegen::register_cls`].
-    fn expect_class_decl(&mut self) -> ParseResult<plir::Class> {
+    fn expect_class_decl(&mut self) -> DParseResult<plir::Class> {
         self.expect1(token![class])?;
-        let ty = self.expect_type()?;
+        let ty = self.expect_type(false)?;
 
         self.expect1(token!["{"])?;
-        let (fields, _) = self.expect_tuple_of(DParser::match_type)?;
+        let (fields, _) = self.expect_tuple_of(|p| p.match_type(true))?;
         let fields = fields.into_iter()
             .enumerate()
             .map(|(i, ty)| (format!("#{i}"), plir::FieldDecl {
@@ -662,7 +681,7 @@ impl DParser {
     /// Expect the next tokens represent an external function declaration.
     /// 
     /// This should be registered with [`PLIRCodegen::register_fun_sig`].
-    fn expect_extern_decl(&mut self) -> ParseResult<plir::FunSignature> {
+    fn expect_extern_decl(&mut self) -> DParseResult<plir::FunSignature> {
         self.expect1(token![extern])?;
         self.expect1(token![fun])?;
 
@@ -676,7 +695,7 @@ impl DParser {
         }
         self.expect1(token![")"])?;
         self.expect1(token![->])?;
-        let ret = self.expect_type()?;
+        let ret = self.expect_type(true)?;
         self.expect1(token![;])?;
 
         Ok(plir::FunSignature { ident, params, varargs, ret })
