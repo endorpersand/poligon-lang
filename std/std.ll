@@ -135,9 +135,9 @@ then:                                             ; preds = %body
   %path_access4 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %path_load5 = load i64, ptr %path_access4, align 4
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %call, ptr align 1 %path_load3, i64 %path_load5, i1 false)
-  tail call void @free(ptr %path_load3)
   store ptr %call, ptr %self, align 8
   store i64 %new_cap, ptr %path_access, align 4
+  tail call void @free(ptr %path_load3)
   br label %merge
 
 merge:                                            ; preds = %body, %then
@@ -151,7 +151,7 @@ declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #4
 declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #5
 
 ; Function Attrs: mustprogress nounwind willreturn
-define %string @"string::new"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
+define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
 body:
   %inner = alloca %"#dynarray", align 8
   %call = tail call %"#dynarray" @"#dynarray::new"(i64 %len)
@@ -171,6 +171,14 @@ body:
   %2 = insertvalue %"#dynarray" %1, i64 %.unpack8, 2
   %3 = insertvalue %string zeroinitializer, %"#dynarray" %2, 0
   ret %string %3
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn
+define %string @"string::new"() local_unnamed_addr #3 {
+body:
+  %call = tail call %"#dynarray" @"#dynarray::new"(i64 0)
+  %0 = insertvalue %string zeroinitializer, %"#dynarray" %call, 0
+  ret %string %0
 }
 
 define ptr @"#dynarray::take"(ptr nocapture %self, i64 %sub_len) local_unnamed_addr {

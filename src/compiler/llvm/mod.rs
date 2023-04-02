@@ -2,8 +2,8 @@ pub(crate) mod types;
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
-use inkwell::types::{StructType, BasicType};
-use inkwell::values::{BasicValueEnum, StructValue, BasicValue, PointerValue, IntValue};
+use inkwell::types::BasicType;
+use inkwell::values::{BasicValueEnum, BasicValue, PointerValue, IntValue, AggregateValue};
 
 use super::{LLVMResult, LLVMErr};
 
@@ -30,18 +30,22 @@ impl<'ctx> Builder2<'ctx> {
 
     /// Initializes a new struct value 
     /// and assigns all the fields of that struct.
-    pub fn create_struct_value(
+    pub fn create_agg_value<A>(
         &self, 
-        ty: StructType<'ctx>,
+        ty: A,
         values: &[BasicValueEnum<'ctx>]
-    ) -> LLVMResult<'ctx, StructValue<'ctx>> {
+    ) -> LLVMResult<'ctx, A::Value> 
+        where A: BasicTypeT<'ctx>,
+            A::Value: AggregateValue<'ctx>
+    {
         let mut result = ty.const_zero();
         
         for (i, &fval) in values.iter().enumerate() {
             result = self.build_insert_value(result, fval, i as u32, "")
                 .ok_or_else(|| LLVMErr::StructIndexOOB(i))?
+                .as_basic_value_enum()
                 .try_into()
-                .unwrap();
+                .unwrap_or_else(|_| unreachable!());
         }
 
         Ok(result)
@@ -82,7 +86,16 @@ impl<'ctx> Builder2<'ctx> {
 
 pub trait BasicTypeT<'ctx>: BasicType<'ctx> {
     type Value: BasicValue<'ctx> + TryFrom<BasicValueEnum<'ctx>>;
+
+    fn const_zero(&self) -> Self::Value {
+        self.as_basic_type_enum()
+            .const_zero()
+            .try_into()
+            .ok()
+            .unwrap_or_else(|| unreachable!())
+    }
 }
+
 macro_rules! btt_impl {
     ($($BT:ident: $BV:ident;)*) => {
         $(

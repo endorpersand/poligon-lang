@@ -74,7 +74,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
         let _int = layout!(self, S_INT).into_int_type();
         let _str = layout!(self, S_STR).into_struct_type();
 
-        let str_new = self.module.get_function("string::new").unwrap();
+        let ident = plir::FunIdent::new_static(&plir::ty!(plir::Type::S_STR), "from_raw");
+        let str_from_raw = self.get_fn_by_plir_ident(&ident).unwrap();
 
         // get ptr to content:
         let content_arr = self.ctx.const_string(s.as_bytes(), false);
@@ -83,7 +84,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         // get len:
         let len = _int.const_int(content_arr.get_type().len() as _, false);
 
-        let string = self.builder.build_call(str_new, params![content, len], "string_literal")
+        let string = self.builder.build_call(str_from_raw, params![content, len], "string_literal")
             .try_as_basic_value()
             .unwrap_left();
         

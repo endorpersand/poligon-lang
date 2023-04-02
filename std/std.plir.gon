@@ -32,7 +32,7 @@ fun <string>::add_string(self: string, other: string) -> string {
     <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
     return string #{<#dynarray>(result_inner)};
 }
-fun <string>::new(contents: #ptr, len: int) -> string {
+fun <string>::from_raw(contents: #ptr, len: int) -> string {
     let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(len)));
     <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
     return string #{<#dynarray>(inner)};
@@ -46,6 +46,29 @@ fun <#dynarray>::extend(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
         exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
     };
 }
+fun <string>::new() -> string {
+    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+}
+extern fun "#malloc"(arg0: int) -> #ptr;
+extern fun "#free"(arg0: #ptr) -> void;
+fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
+    return <void>(if <bool>(<int>(<#dynarray>(self).2) < <int>(new_cap)) <void>{
+        let old_buf: #ptr = <#ptr>(<#dynarray>(self).0);
+        let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(new_cap)));
+        <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(new_buf), <#ptr>(old_buf), <int>(<#dynarray>(self).1)));
+        <#ptr>{
+            exit <#ptr>(<#dynarray>(self).0 = <#ptr>(new_buf));
+        }
+        <int>{
+            exit <int>(<#dynarray>(self).2 = <int>(new_cap));
+        }
+        exit <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
+    });
+}
+fun <#dynarray>::new(cap: int) -> #dynarray {
+    let buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(cap)));
+    return #dynarray #{<#ptr>(buf), <int>(0), <int>(cap)};
+}
 fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
     return <#ptr>(if <bool>(<int>(<#dynarray>(self).1) >= <int>(sub_len)) <#ptr>{
         <int>{
@@ -55,26 +78,6 @@ fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
     } else <never>{
         throw "cannot take element from array";
     });
-}
-extern fun "#malloc"(arg0: int) -> #ptr;
-extern fun "#free"(arg0: #ptr) -> void;
-fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
-    return <void>(if <bool>(<int>(<#dynarray>(self).2) < <int>(new_cap)) <void>{
-        let old_buf: #ptr = <#ptr>(<#dynarray>(self).0);
-        let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(new_cap)));
-        <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(new_buf), <#ptr>(old_buf), <int>(<#dynarray>(self).1)));
-        <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
-        <#ptr>{
-            exit <#ptr>(<#dynarray>(self).0 = <#ptr>(new_buf));
-        }
-        exit <void>{
-            exit <void>(castfrom <int>(<#dynarray>(self).2 = <int>(new_cap)));
-        };
-    });
-}
-fun <#dynarray>::new(cap: int) -> #dynarray {
-    let buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(cap)));
-    return #dynarray #{<#ptr>(buf), <int>(0), <int>(cap)};
 }
 fun <string>::len(self: string) -> int {
     return <int>(<#dynarray>(<string>(self).0).1);

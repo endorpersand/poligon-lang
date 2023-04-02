@@ -827,7 +827,35 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 Ok(bval)
             },
             plir::ExprType::Literal(literal) => literal.write_value(compiler),
-            plir::ExprType::ListLiteral(_) => todo!(),
+            plir::ExprType::ListLiteral(exprs) => {
+                let plir::TypeRef::Generic(plir::Type::S_LIST, [t]) = expr_ty.as_ref() else {
+                    panic!("expected list literal to return list, but actually returned {expr_ty}")
+                };
+
+                let _int = layout!(compiler, S_INT).into_int_type();
+                let arr_ty = compiler.get_layout(t)?.array_type(exprs.len() as _);
+                let elements: Vec<_> = exprs.iter()
+                .map(|e| {
+                    e.write_value(compiler)
+                        .map(|gv| compiler.basic_value_of(gv))
+                })
+                .collect::<Result<_, _>>()?;
+
+                let arr = compiler.builder.create_agg_value(arr_ty, &elements)?;
+                let alloca = compiler.builder.build_alloca(arr_ty, "");
+                compiler.builder.build_store(alloca, arr);
+
+                let id = plir::FunIdent::new_static(expr_ty, "from_raw");
+                let list_from_raw = compiler.get_fn_by_plir_ident(&id)
+                    .ok_or_else(|| LLVMErr::UndefinedFun(id))?;
+
+                let lst = compiler.builder.build_call(list_from_raw, params![alloca, _int.const_int(exprs.len() as _, false)], "list_literal")
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap();
+
+                Ok(GonValue::Basic(lst))
+            },
             plir::ExprType::SetLiteral(_) => todo!(),
             plir::ExprType::DictLiteral(_) => todo!(),
             plir::ExprType::ClassLiteral(t, entries) => {
@@ -839,7 +867,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     })
                     .collect::<Result<_, _>>()?;
 
-                compiler.builder.create_struct_value(layout, &entries)
+                compiler.builder.create_agg_value(layout, &entries)
                     .map(|bv| GonValue::Basic(bv.into()))
             },
             plir::ExprType::Assign(target, expr) => {

@@ -286,6 +286,11 @@ impl FunIdent {
         Self::Simple(id.to_string())
     }
 
+    /// Creates a new [`FunIdent::Static`] identifier.
+    pub fn new_static(ty: &Type, attr: &str) -> Self {
+        Self::Static(ty.clone(), attr.to_string())
+    }
+
     /// Find the generic resolution type for this function identifier.
     /// 
     /// When resolving the function associated with this function ident,

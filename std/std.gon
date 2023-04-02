@@ -44,7 +44,10 @@ class #dynarray {
 
 class string {
     inner: #dynarray
-    fun ::new(contents: #ptr, len: int) -> string {
+    fun ::new() -> string {
+        string #{ inner: #dynarray::new(0) };
+     }
+    fun ::from_raw(contents: #ptr, len: int) -> string {
         let inner = #dynarray::new(len);
         inner.extend(contents, len);
 
@@ -72,41 +75,63 @@ class string {
     }
 }
 
-// class list<T> {
-//     inner: #dynarray
-// 
-//     fun ::new() -> list<T> {
-//         <list<T>> #{ inner: #dynarray::new(0) };
-//     }
-//     fun self.len() -> int {
-//         (self.inner.len / T::size_of()).trunc().iround();
-//     }
-//     fun self.push(e: T) {
-//         let buf = T::#alloca();
-//         *buf = e;
-//         self.inner.extend(buf, T::size_of());
-//     }
-//     fun self.pop() -> T {
-//         let pop_ptr = self.take(T::size_of());
-//         *pop_ptr;
-//     }
-//     fun self.get(i: int) -> T {
-//         if 0 <= i && i < t {
-//             let access_ptr = T::#gep(self.inner.buf, i);
-//             *access_ptr;
-//         } else {
-//             throw "array index out of bounds";
-//         }
-//     }
-//     fun self.set(i: int, t: T) -> T {
-//         if 0 <= i && i < t {
-//             let access_ptr = T::#gep(self.inner.buf, i);
-//             *access_ptr = t;
-//         } else {
-//             throw "array index out of bounds";
-//         }
-//     }
-// }
+class list<T> {
+    inner: #dynarray
+
+    fun ::new() -> list<T> {
+        <list<T>> #{ inner: #dynarray::new(0) };
+    }
+    fun ::from_raw(contents: #ptr, len: int) -> list<T> {
+        let inner = #dynarray::new(len * T::size_of());
+        inner.extend(contents, len * T::size_of());
+
+        <list<T>> #{ inner };
+    }
+
+    fun self.len() -> int {
+        (self.inner.len / T::size_of()).trunc().iround();
+    }
+    fun self.push(e: T) {
+        let buf = T::#alloca();
+        *buf = e;
+        self.inner.extend(buf, T::size_of());
+    }
+    fun self.pop() -> T {
+        let pop_ptr = self.inner.take(T::size_of());
+        *pop_ptr;
+    }
+    fun self.get(i: int) -> T {
+        if 0 <= i && i < self.len() {
+            let access_ptr = T::#gep(self.inner.buf, i);
+            *access_ptr;
+        } else {
+            throw "array index out of bounds";
+        }
+    }
+    fun self.set(i: int, t: T) -> T {
+        if 0 <= i && i < self.len() {
+            let access_ptr = T::#gep(self.inner.buf, i);
+            *access_ptr = t;
+        } else {
+            throw "array index out of bounds";
+        }
+    }
+    fun self.to_string() -> string {
+        if self.len() == 0 {
+            "[]";
+        } else {
+            let result = "[";
+            let i = 0;
+            while i < self.len() - 1 {
+                result = result + self.get(i).to_string() + ", ";
+                i = i + 1;
+            }
+            result = result + self.get(self.len() - 1).to_string() + "]";
+
+            result;
+        }
+    }
+}
 
 global _tmpl_print = "%.*s\n\0";
 
