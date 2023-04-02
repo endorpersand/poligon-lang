@@ -301,6 +301,16 @@ impl FunIdent {
             FunIdent::Static(t, _) => Cow::Borrowed(t),
         }
     }
+
+    /// Constructs a PLIR expression out of this function identifier.
+    /// 
+    /// This can either be an identifier expression or a static path.
+    pub fn into_expr(self, fun_ty: Type) -> Expr {
+        match self {
+            FunIdent::Simple(id) => Expr::new(fun_ty, ExprType::Ident(id)),
+            FunIdent::Static(cls_ty, attr) => Path::Static(cls_ty, attr, fun_ty).into(),
+        }
+    }
 }
 
 pub(crate) trait AsFunIdent: indexmap::Equivalent<FunIdent> {

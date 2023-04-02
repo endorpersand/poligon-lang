@@ -72,8 +72,8 @@ impl<'a> Cast<'a> {
                 let cls = cg.get_class(Located::new(&self.src.ty, self.src.1.clone()))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
-                    let met_ident = met_ident.to_string();
-                    
+                    let met_ident = met_ident.clone();
+
                     cg.get_var_type_opt(&met_ident)?
                         .filter(|&t| match t.as_ref() {
                             Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
@@ -108,13 +108,13 @@ impl<'a> Cast<'a> {
                     let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
                         .get_method("to_string")
                         .unwrap()
-                        .to_string();
+                        .clone();
                     
-                    let fn_type = cg.get_var_type(&to_string, src_range.clone())?
+                    let fun_type = cg.get_var_type(&to_string, src_range.clone())?
                         .clone();
                     
                     Located::new(Expr::call(
-                        Located::new(Expr::new(fn_type, ExprType::Ident(to_string)), src_range.clone()), 
+                        Located::new(to_string.into_expr(fun_type), src_range.clone()), 
                         vec![src]
                     )?, src_range)
                 },
@@ -217,11 +217,11 @@ impl super::PLIRCodegen {
         let ident = self.get_class(left)?
             .get_method(method_name)
             .unwrap()
-            .to_string();
+            .clone();
 
         let e = self.get_var_type_opt(&ident)?
             .cloned()
-            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+            .map(|fun_ty| ident.into_expr(fun_ty));
         
         Ok(e)
     }
@@ -296,11 +296,11 @@ impl super::PLIRCodegen {
         let ident = self.get_class(left)?
             .get_method(&format!("{method_name}_{right}"))
             .unwrap()
-            .to_string();
+            .clone();
 
         let e = self.get_var_type_opt(&ident)?
             .cloned()
-            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+            .map(|fun_ty| ident.into_expr(fun_ty));
         
         Ok(e)
     }
