@@ -1055,7 +1055,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .map(Into::into)
                     .collect();
 
-                let call = compiler.builder.build_call(fun, &pvals, "call");
+                let call = compiler.builder.build_call(fun, &pvals, "");
                 Ok(call.try_as_basic_value().left().into())
             },
             plir::ExprType::Index(idx) => idx.write_value(compiler),
@@ -1162,7 +1162,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, last_ty)) = attrs.last() {
                     let el_ptr = self.write_ptr(compiler)?;
-                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
+                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, &format!("{}.load", el_ptr.get_name().to_string_lossy()));
                     
                     Ok(GonValue::Basic(el))
                 } else {
@@ -1184,15 +1184,26 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
                     let ptr = e.write_ptr(compiler)?;
                     let ty = compiler.get_layout(&e.ty)?;
 
-                    let mut indexes = vec![_i32.const_zero()];
-                    let attr_idx = attrs.iter()
-                        .map(|&(i, _)| i)
-                        .map(|i| _i32.const_int(i as u64, false));
-                    indexes.extend(attr_idx);
+                    let usize_indexes: Vec<_> = attrs.iter()
+                    .map(|&(i, _)| i)
+                    .collect();
+
+                    let mut gep_indexes = vec![_i32.const_zero()];
+                    let iv_indexes = usize_indexes.iter()
+                        .map(|&i| _i32.const_int(i as u64, false));
+                    gep_indexes.extend(iv_indexes);
+
+                    let mut ssa_name = ptr.get_name()
+                        .to_string_lossy()
+                        .into_owned();
+                    for idx in usize_indexes {
+                        ssa_name.push('.');
+                        ssa_name += &idx.to_string();
+                    }
 
                     // SAFETY: After PLIR pass, this should be valid.
                     let el_ptr = unsafe {
-                        compiler.builder.build_in_bounds_gep(ty, ptr, &indexes, "path_access")
+                        compiler.builder.build_in_bounds_gep(ty, ptr, &gep_indexes, &ssa_name)
                     };
 
                     Ok(el_ptr)
