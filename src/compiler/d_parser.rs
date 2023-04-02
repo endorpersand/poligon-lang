@@ -171,7 +171,7 @@ impl DParser {
                 },
                 Some(token![extern]) => {
                     let fs = self.expect_extern_decl()?;
-                    self.codegen.register_fun_sig(&fs);
+                    self.codegen.register_fun_sig(fs);
                 },
                 Some(_) => Err(DParseErr::UnexpectedToken.at_range(self.peek_loc()))?,
                 None => break
@@ -344,6 +344,7 @@ impl DParser {
     /// matched values and a bool value indicating whether the tuple had a terminating comma.
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`.
+    // #[allow(unused)]
     pub fn expect_tuple_of<T, F>(&mut self, mut f: F) -> DParseResult<(Vec<T>, bool /* ended in comma? */)> 
         where F: FnMut(&mut Self) -> DParseResult<Option<T>>
     {
@@ -371,7 +372,6 @@ impl DParser {
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`,
     /// and an error to raise if a match was not found.
-    #[allow(unused)]
     pub fn expect_closing_tuple_of<T, F>(
         &mut self, f: F, closer: Token, or_else: DParseErr
     ) -> DParseResult<Vec<T>> 
@@ -655,6 +655,31 @@ impl DParser {
         }
     }
 
+    /// Match the next tokens if they represent a field declaration.
+    fn match_field_decl(&mut self) -> DParseResult<Option<(String, plir::FieldDecl)>> {
+        let (mut empty, rt) = match self.match_reasg_type() {
+            Some(t) => (false, t),
+            None => (true, Default::default()),
+        };
+
+        let mt = if self.match1(token![mut]) {
+            empty = false;
+            MutType::Mut
+        } else {
+            MutType::Immut
+        };
+
+        if empty && self.has_ident().is_none() {
+            return Ok(None);
+        }
+
+        let ident = self.expect_ident()?.0;
+        self.expect1(token![:])?;
+        let ty = self.expect_type(true)?;
+
+        Ok(Some((ident, plir::FieldDecl { rt, mt, ty })))
+    }
+
     /// Expect the next tokens represent a PLIR class.
     /// 
     /// This class should be registered by [`PLIRCodegen::register_cls`].
@@ -663,16 +688,12 @@ impl DParser {
         let ty = self.expect_type(false)?;
 
         self.expect1(token!["{"])?;
-        let (fields, _) = self.expect_tuple_of(|p| p.match_type(true))?;
-        let fields = fields.into_iter()
-            .enumerate()
-            .map(|(i, ty)| (format!("#{i}"), plir::FieldDecl {
-                rt: Default::default(),
-                mt: Default::default(),
-                ty,
-            }))
-            .collect();
-        self.expect1(token!["}"])?;
+        let fields = self.expect_closing_tuple_of(
+            DParser::match_field_decl,
+            token!["}"],
+            DParseErr::ExpectedIdent
+        )?;
+        let fields = fields.into_iter().collect();
         self.match1(token![;]);
 
         Ok(plir::Class { ty, fields })

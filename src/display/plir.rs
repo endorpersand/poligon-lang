@@ -81,13 +81,24 @@ impl Display for Class {
         let Class { ty, fields: field_map } = self;
         write!(f, "class ")?;
         wrap_ty(ty, f)?;
-        write!(f, " {{ ")?;
+        
+        if field_map.is_empty() {
+            write!(f, "{{ }}")
+        } else {
+            writeln!(f, " {{")?;
 
-        let fields: Vec<_> = field_map.values().collect();
-        fmt_list(f, &fields)?;
-        write!(f, " }}")
+            for (fname, fdcl) in field_map.iter().take(field_map.len() - 1) {
+                writeln!(f, "{:4}{fname}: {fdcl},", "")?;
+            }
+
+            let (fname, fdcl) = field_map.last().unwrap();
+            writeln!(f, "{:4}{fname}: {fdcl}", "")?;
+
+            write!(f, "}}")
+        }
     }
 }
+
 impl Display for FieldDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FieldDecl { rt, mt, ty } = self;

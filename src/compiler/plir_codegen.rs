@@ -645,7 +645,7 @@ enum TypeStructure {
 }
 
 /// A struct which holds the types declared by PLIR code generation.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct DeclaredTypes {
     pub(super) types: IndexMap<plir::Type, plir::Class>,
     pub(super) values: IndexMap<plir::FunIdent, plir::Type>
@@ -1399,17 +1399,9 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn register_fun_sig(&mut self, fs: &plir::FunSignature) {
-        let plir::FunSignature { ident, params, varargs, ret } = fs;
-
-        let param_tys = params.iter()
-            .map(|p| &p.ty)
-            .cloned();
-
-        // declare function before parsing block
-        self.declare(ident, 
-            plir::Type::fun_type(param_tys, ret.clone(), *varargs)
-        );
+    pub(super) fn register_fun_sig(&mut self, fs: plir::FunSignature) {
+        self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
+        self.push_global(fs);
     }
 
     /// Consume a function signature and convert it into a PLIR function signature.
@@ -1438,7 +1430,7 @@ impl PLIRCodegen {
         })?;
 
         let fs = plir::FunSignature { ident: new_id, params, ret, varargs };
-        self.register_fun_sig(&fs);
+        self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
         Ok(fs)
     }
 
@@ -1772,7 +1764,7 @@ impl PLIRCodegen {
                 let (ty, cls) = self.consume_type_and_get_cls(ty)?;
                 
                 let attrref = cls.get_method(&attr)
-                    .ok_or_else(|| PLIRErr::UndefinedAttr(ty.clone(), attr.clone()))?
+                    .ok_or_else(|| PLIRErr::UndefinedAttr(ty.clone(), attr.clone()).at_range(range.clone()))?
                     .clone();
                 Ok(plir::Path::Static(ty, attr, self.get_var_type(&attrref, range)?.clone()))
                     .map(Into::into)

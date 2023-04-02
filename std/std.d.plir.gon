@@ -1,5 +1,11 @@
-class "#dynarray" { #ptr, int, int }
-class string { #dynarray }
+class "#dynarray" {
+    buf: #ptr,
+    len: int,
+    cap: int
+}
+class string {
+    inner: #dynarray
+}
 extern fun "#printf"(arg0: #ptr, ..) -> int;
 extern fun print(arg0: string) -> void;
 extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;

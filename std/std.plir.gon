@@ -2,8 +2,14 @@ global _tmpl_print = "%.*s\n\0";
 global _tmpl_int_to_string = "%d\0";
 global _tmpl_float_to_string = "%#f\0";
 global _tmpl_char_to_string = "%lc\0";
-class "#dynarray" { #ptr, int, int }
-class string { #dynarray }
+class "#dynarray" {
+    buf: #ptr,
+    len: int,
+    cap: int
+}
+class string {
+    inner: #dynarray
+}
 extern fun "#printf"(arg0: #ptr, ..) -> int;
 fun print(s: string) -> void {
     return <void>(castfrom <int>(<(#ptr, ..) -> int>(#printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
