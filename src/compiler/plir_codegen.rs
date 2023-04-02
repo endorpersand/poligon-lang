@@ -684,7 +684,11 @@ struct Globals {
     stmts: Vec<plir::HoistedStmt>,
     declared: DeclaredTypes
 }
+
 impl Globals {
+    /// Includes the hoisted statement into the global hoisted statement list.
+    /// 
+    /// This will also export the type/value into [`DeclaredTypes`].
     fn push(&mut self, stmt: impl Into<plir::HoistedStmt>) {
         use plir::HoistedStmt;
 
