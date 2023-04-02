@@ -1616,10 +1616,13 @@ impl PLIRCodegen {
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+
+                let mut coll_ty = plir::ty!(plir::Type::S_LIST, [el_ty]);
+                self.verify_type(Located::new(&mut coll_ty, range))?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_LIST, [el_ty]),
+                    coll_ty,
                     plir::ExprType::ListLiteral(new_inner)
                 ))
             },
@@ -1636,10 +1639,13 @@ impl PLIRCodegen {
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
 
+                let mut coll_ty = plir::ty!(plir::Type::S_SET, [el_ty]);
+                self.verify_type(Located::new(&mut coll_ty, range))?;
+    
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_SET, [el_ty]),
+                    coll_ty,
                     plir::ExprType::SetLiteral(new_inner)
                 ))
             },
@@ -1664,10 +1670,13 @@ impl PLIRCodegen {
                     .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
                 let val_ty = plir::Type::resolve_collection_ty(val_tys)
                     .or(vty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                
+                let mut coll_ty = plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]);
+                self.verify_type(Located::new(&mut coll_ty, range))?;
 
                 Ok(plir::Expr::new(
-                    plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]),
+                    coll_ty,
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
