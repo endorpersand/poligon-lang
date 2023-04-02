@@ -17,8 +17,9 @@ class #dynarray {
             let old_buf = self.buf;
             let new_buf = #malloc(new_cap);
             #memcpy(new_buf, old_buf, self.len);
-            #free(old_buf);
+            self.buf = new_buf;
             self.cap = new_cap;
+            #free(old_buf);
         }
     }
 

@@ -64,6 +64,9 @@ fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
         let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(new_cap)));
         <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(new_buf), <#ptr>(old_buf), <int>(<#dynarray>(self).1)));
         <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
+        <#ptr>{
+            exit <#ptr>(<#dynarray>(self).0 = <#ptr>(new_buf));
+        }
         exit <void>{
             exit <void>(castfrom <int>(<#dynarray>(self).2 = <int>(new_cap)));
         };

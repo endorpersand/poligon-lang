@@ -131,7 +131,12 @@ body:
 
 then:                                             ; preds = %body
   %path_load3 = load ptr, ptr %self, align 8
+  %call = tail call ptr @malloc(i64 %new_cap)
+  %path_access4 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
+  %path_load5 = load i64, ptr %path_access4, align 4
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %call, ptr align 1 %path_load3, i64 %path_load5, i1 false)
   tail call void @free(ptr %path_load3)
+  store ptr %call, ptr %self, align 8
   store i64 %new_cap, ptr %path_access, align 4
   br label %merge
 
