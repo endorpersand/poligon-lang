@@ -313,6 +313,7 @@ struct InsertBlock {
 
     vars: HashMap<plir::FunIdent, plir::Type>,
     types: HashMap<plir::Type, TypeData>,
+    type_aliases: HashMap<plir::Type, plir::Type>,
 
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
@@ -332,6 +333,7 @@ impl InsertBlock {
             final_exit: None,
             vars: HashMap::new(),
             types: HashMap::new(),
+            type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
             expected_ty
@@ -356,6 +358,7 @@ impl InsertBlock {
                 ty!("#ptr"),
                 ty!("#byte"),
             ]),
+            type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
             expected_ty: None
@@ -892,7 +895,7 @@ impl PLIRCodegen {
     }
 
     /// [`PLIRCodegen::resolve_ident`], but using a type parameter
-    fn resolve_type(&mut self, ty: &plir::Type) -> PLIRResult<()> {
+    fn resolve_type(&mut self, ty: Located<&plir::Type>) -> PLIRResult<()> {
         use indexmap::map::Entry;
 
         let ident = ty.short_ident();
@@ -962,15 +965,16 @@ impl PLIRCodegen {
         Ok(self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident())))
     }
 
-    fn get_class(&mut self, ty: &plir::Type, range: CursorRange) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
-        self.resolve_type(ty)?;
+        self.resolve_type(Located::clone(&ty))?;
+        let Located(ty, range) = ty;
 
         match ty.as_ref() {
             // HACK ll_array
             TypeRef::Generic("#ll_array", [t]) => {
                 if self.find_scoped(|ib| ib.types.get(ty)).is_none() {
-                    self.get_class(t, range)?;
+                    self.get_class(Located(t, range))?;
                     self.program.types.insert(ty.clone(), TypeData::primitive());
                 }
 
@@ -1159,7 +1163,7 @@ impl PLIRCodegen {
         let InsertBlock { 
             mut block, last_stmt_loc, 
             exits, final_exit, 
-            vars: _, types: _, 
+            vars: _, types: _, type_aliases: _,
             unres_values, unres_types, expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
@@ -1408,28 +1412,33 @@ impl PLIRCodegen {
     /// Consume a function signature and convert it into a PLIR function signature.
     fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
         let ast::FunSignature { ident: _, params, varargs, ret } = sig;
-        
-        let params: Vec<_> = params.into_iter()
-            .map(|p| -> PLIRResult<_> {
-                let ast::Param { rt, mt, ident, ty } = p;
-                let ty = match ty {
-                    Some(t) => self.consume_type(t)?,
-                    None => plir::ty!(plir::Type::S_UNK),
-                };
 
-                Ok(plir::Param { rt, mt, ident, ty })
-            })
-            .collect::<Result<_, _>>()?;
-        
-        let ret = match ret {
-            Some(t) => self.consume_type(t)?,
-            None => plir::ty!(plir::Type::S_VOID),
-        };
+        let (params, ret): (Vec<_>, _) = self.with_generic_aliases(&new_id.resolution_type(), |this| -> PLIRResult<_> {
+            let new_params = params.into_iter()
+                .map(|p| -> PLIRResult<_> {
+                    let ast::Param { rt, mt, ident, ty } = p;
+                    let ty = match ty {
+                        Some(t) => this.consume_type(t)?,
+                        None => plir::ty!(plir::Type::S_UNK),
+                    };
+    
+                    Ok(plir::Param { rt, mt, ident, ty })
+                })
+                .collect::<Result<_, _>>()?;
+
+            let ret = match ret {
+                Some(t) => this.consume_type(t)?,
+                None => plir::ty!(plir::Type::S_VOID),
+            };
+
+            Ok((new_params, ret))
+        })?;
 
         let fs = plir::FunSignature { ident: new_id, params, ret, varargs };
         self.register_fun_sig(&fs);
         Ok(fs)
     }
+
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
@@ -1445,11 +1454,13 @@ impl PLIRCodegen {
                 self.declare(ident, ty.clone());
             }
     
-            // collect all the statements from this block
-            self.consume_stmts(old_block.0)?;
-    
-            let insert_block = self.pop_block().unwrap();
-            self.consume_insert_block(insert_block, BlockBehavior::Function)?
+            self.with_generic_aliases(&sig.ident.resolution_type(), |this| {
+                // collect all the statements from this block
+                this.consume_stmts(old_block.0)?;
+        
+                let insert_block = this.pop_block().unwrap();
+                this.consume_insert_block(insert_block, BlockBehavior::Function)
+            })?
         };
 
         let fun_decl = plir::FunDecl { sig, block };
@@ -1458,15 +1469,18 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn verify_type(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
-        let Located(ty, range) = ty;
-        self.get_class(ty, range)
+    pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<&TypeData> {
+        if let Some(aliased_ty) = self.find_scoped(|ib| ib.type_aliases.get(lty.0)) {
+            *lty.0 = aliased_ty.clone();
+        }
+
+        self.get_class(lty.map(|t| &*t))
     }
     fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
         let Located(ty, range) = ty;
-        let ty = plir::Type::from(ty);
-
-        let cls = self.verify_type(Located::new(&ty, range))?;
+        
+        let mut ty = plir::Type::from(ty);
+        let cls = self.verify_type(Located::new(&mut ty, range))?;
         Ok((ty, cls))
     }
 
@@ -1489,31 +1503,63 @@ impl PLIRCodegen {
         self.push_global(cls);
     }
 
-    fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<()> {
-        use plir::Type;
+    fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
+        match ty {
+            plir::Type::Generic(id, _) => {
+                let mgcls = self.find_scoped(|ib| match ib.unres_types.get(id) {
+                    Some(UnresolvedType::Class(cls)) => Some(cls),
+                    _ => None
+                });
+
+                match mgcls {
+                    Some(gcls) => Cow::from(&gcls.ident.params),
+                    None => Cow::from(vec![]),
+                }
+            },
+            _ => Cow::from(vec![])
+        }
+    }
+
+    fn with_generic_aliases<T>(&mut self, ty: &plir::Type, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
+        std::iter::zip(self.get_generic_params(ty).into_owned(), &*ty.generic_args())
+            .for_each(|(p, arg)| {
+                self.peek_block().type_aliases.insert(plir::ty!(p), arg.clone());
+            });
+            
+        let result = f(self);
+            
+        // it is, in fact, necessary
+        #[allow(clippy::unnecessary_to_owned)]
+        self.get_generic_params(ty).into_owned().into_iter()
+            .for_each(|p| {
+                self.peek_block().type_aliases.remove(&plir::ty!(p));
+            });
+
+        result
+    }
+
+    fn consume_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
         let ast::Class { ident, fields, methods } = cls;
+        let Located(ty, tyrange) = ty;
 
         // verify that types are aligned:
-        match (ty, ident.params.len()) {
-            (Type::Prim(_), 0) => Ok(()),
-            (Type::Prim(_), n) => Err(PLIRErr::WrongTypeArity(0, n)),
-            (Type::Generic(_, p), n) if p.len() == n => Ok(()),
-            (Type::Generic(_, p), n) => Err(PLIRErr::WrongTypeArity(p.len(), n)),
-            (Type::Tuple(_), 0) => Ok(()),
-            (Type::Tuple(_), n) => Err(PLIRErr::WrongTypeArity(0, n)),
-            (Type::Fun(_), 0)   => Ok(()),
-            (Type::Fun(_), n)   => Err(PLIRErr::WrongTypeArity(0, n))
+        match (ident.params.len(), ty.generic_args().len()) {
+            (a, b) if a == b => Ok(()),
+            (a, b) => Err(PLIRErr::WrongTypeArity(a, b).at_range(tyrange))
         }?;
 
-        let fields = fields.into_iter()
-            .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
-                self.consume_type(ty).map(|ty| {
-                    (ident, plir::FieldDecl { rt, mt, ty })
+        let fields = self.with_generic_aliases(ty, |this| {
+            fields.into_iter()
+                .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
+                    this.consume_type(ty).map(|ty| {
+                        (ident, plir::FieldDecl { rt, mt, ty })
+                    })
                 })
-            })
-            .collect::<Result<_, _>>()?;
+                .collect::<Result<_, _>>()
+        })?;
         
         let cls = plir::Class { ty: ty.clone(), fields };
+        println!("{cls}");
         self.register_cls(cls, methods);
         
         Ok(())
@@ -1546,7 +1592,7 @@ impl PLIRCodegen {
                 };
 
                 // check type exists (for string, this may not happen if std isn't loaded)
-                self.get_class(&ty, range)?;
+                self.get_class(Located::new(&ty, range))?;
                 //
 
                 Ok(plir::Expr::new(
@@ -1625,7 +1671,7 @@ impl PLIRCodegen {
                 let tyrange = ty.range();
                 let ty = self.consume_type(ty)?;
                 
-                let cls_fields: IndexMap<_, _> = self.get_class(&ty, tyrange.clone())?
+                let cls_fields: IndexMap<_, _> = self.get_class(Located::new(&ty, tyrange.clone()))?
                     .fields()
                     .ok_or_else(|| {
                         PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
@@ -1942,7 +1988,7 @@ impl PLIRCodegen {
 
         for attr in attrs {
             let top_ty = path.ty();
-            let cls = self.get_class(&top_ty, expr_range.clone())?;
+            let cls = self.get_class(Located::new(&top_ty, expr_range.clone()))?;
 
             if let Some(metref) = cls.get_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {

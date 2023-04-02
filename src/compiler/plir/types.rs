@@ -243,6 +243,18 @@ impl Type {
             },
         }
     }
+
+    /// Gets the generic parameters of this type.
+    /// 
+    /// This function does not allocate or clone anything.
+    pub fn generic_args(&self) -> Cow<[Type]> {
+        match self {
+            Type::Prim(_)       => Cow::from(vec![]),
+            Type::Generic(_, p) => Cow::from(p),
+            Type::Tuple(_)      => Cow::from(vec![]),
+            Type::Fun(_)        => Cow::from(vec![]),
+        }
+    }
 }
 
 impl<'a> PartialEq<TypeRef<'a>> for Type {

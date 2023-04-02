@@ -566,7 +566,7 @@ impl DParser {
                 vec![]
             };
 
-            let result = if params.is_empty() {
+            let mut result = if params.is_empty() {
                 plir::Type::Prim(ident)
             } else {
                 plir::Type::Generic(ident, params)
@@ -575,7 +575,7 @@ impl DParser {
             let block = self.pop_loc_block("match_type").unwrap();
 
             if verify {
-                match self.codegen.verify_type(Located::new(&result, block)) {
+                match self.codegen.verify_type(Located::new(&mut result, block)) {
                     Ok(_) => {},
                     Err(e) => Err(e.map(DParseErr::PLIRErr))?,
                 }

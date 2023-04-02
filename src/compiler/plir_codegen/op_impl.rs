@@ -69,7 +69,7 @@ impl<'a> Cast<'a> {
             (Prim(Type::S_INT),  Prim(Type::S_FLOAT), Any | Decl | FunDecl | Call) => true,
             (_, Prim(Type::S_STR), Any | Decl | FunDecl | Call) => {
                 // Load src class
-                let cls = cg.get_class(&self.src.ty, self.src.1.clone())?;
+                let cls = cg.get_class(Located::new(&self.src.ty, self.src.1.clone()))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
                     let met_ident = met_ident.to_string();
@@ -105,7 +105,7 @@ impl<'a> Cast<'a> {
                 (l, r) if l == r => self.src,
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
-                    let to_string = cg.get_class(&src.ty, src_range.clone())?
+                    let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
                         .get_method("to_string")
                         .unwrap()
                         .to_string();
@@ -214,7 +214,7 @@ impl super::PLIRCodegen {
             op::Unary::BitNot => "bitnot",
         };
 
-        let ident = self.get_class(left.0, left.1)?
+        let ident = self.get_class(left)?
             .get_method(method_name)
             .unwrap()
             .to_string();
@@ -293,7 +293,7 @@ impl super::PLIRCodegen {
             op::Binary::LogOr  => return Ok(None),
         };
 
-        let ident = self.get_class(left.0, left.1)?
+        let ident = self.get_class(left)?
             .get_method(&format!("{method_name}_{right}"))
             .unwrap()
             .to_string();
