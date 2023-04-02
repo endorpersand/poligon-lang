@@ -406,15 +406,15 @@ lazy_static! {
     static ref SPLITTABLES: HashMap<(&'static Token, &'static Token), Token> = {
         let mut m = HashMap::new();
         // m.insert((&token![..], &token![.]), token![.]);
-        m.insert((&token![&&], &token![&]), token![&]);
-        m.insert((&token![||], &token![|]), token![|]);
-        m.insert((&token![<=], &token![<]), token![=]);
-        m.insert((&token![>=], &token![>]), token![=]);
-        m.insert((&token![==], &token![=]), token![=]);
+        // m.insert((&token![&&], &token![&]), token![&]);
+        // m.insert((&token![||], &token![|]), token![|]);
+        // m.insert((&token![<=], &token![<]), token![=]);
+        // m.insert((&token![>=], &token![>]), token![=]);
+        // m.insert((&token![==], &token![=]), token![=]);
         m.insert((&token![<<], &token![<]), token![<]);
         m.insert((&token![>>], &token![>]), token![>]);
-        m.insert((&token![::], &token![:]), token![:]);
-        m.insert((&token![->], &token![-]), token![>]);
+        // m.insert((&token![::], &token![:]), token![:]);
+        // m.insert((&token![->], &token![-]), token![>]);
         m
     };
 }
