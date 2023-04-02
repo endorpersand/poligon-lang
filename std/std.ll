@@ -699,13 +699,6 @@ body:
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
 declare i64 @llvm.abs.i64(i64, i1 immarg) #7
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define i64 @"#idiv"(i64 %0, i64 %1) local_unnamed_addr #9 {
-body:
-  %2 = sdiv i64 %0, %1
-  ret i64 %2
-}
-
 define i64 @"int::idiv"(i64 %self, i64 %d) local_unnamed_addr {
 body:
   %i_eq = icmp eq i64 %d, 0

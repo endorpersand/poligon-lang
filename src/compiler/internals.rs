@@ -458,6 +458,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     builder.position_at_end(bb);
 
                     body(builder, fun);
+                    fun.set_linkage(inkwell::module::Linkage::Internal);
                 }
 
                 fun

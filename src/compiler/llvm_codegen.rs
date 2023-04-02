@@ -1253,7 +1253,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        compiler.define_fun(self).map(|(fv, _)| fv)
+        // TODO: remove when visibility is added
+        compiler.import(self)
+            .or_else(|e| match e {
+                LLVMErr::CannotImport(_) => compiler.define_fun(self).map(|(fv, _)| fv),
+                _ => Err(e)
+            })
     }
 }
 
