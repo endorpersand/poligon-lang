@@ -630,7 +630,7 @@ impl TypeData {
         }
     }
 
-    fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::FieldDecl>> {
+    fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::Field>> {
         match &self.ty {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => Some(&cls.fields)
@@ -1562,7 +1562,7 @@ impl PLIRCodegen {
             fields.into_iter()
                 .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
                     this.consume_type(ty).map(|ty| {
-                        (ident, plir::FieldDecl { rt, mt, ty })
+                        (ident, plir::Field { rt, mt, ty })
                     })
                 })
                 .collect::<Result<_, _>>()

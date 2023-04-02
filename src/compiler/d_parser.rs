@@ -582,7 +582,7 @@ impl DParser {
     }
 
     /// Match the next tokens if they represent a field declaration.
-    fn match_field_decl(&mut self) -> DParseResult<Option<(String, plir::FieldDecl)>> {
+    fn match_field_decl(&mut self) -> DParseResult<Option<(String, plir::Field)>> {
         let (mut empty, rt) = match self.match_reasg_type() {
             Some(t) => (false, t),
             None => (true, Default::default()),
@@ -604,7 +604,7 @@ impl DParser {
         self.expect(token![:])?;
         let ty = self.expect_type(true)?;
 
-        Ok(Some((ident, plir::FieldDecl { rt, mt, ty })))
+        Ok(Some((ident, plir::Field { rt, mt, ty })))
     }
 
     /// Expect the next tokens represent a PLIR class.

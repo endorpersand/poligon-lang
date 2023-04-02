@@ -323,7 +323,7 @@ pub struct Class {
     /// The associated [`Type`] of this class
     pub ty: Type,
     /// A mapping of identifiers to fields in the class
-    pub fields: IndexMap<String, FieldDecl>
+    pub fields: IndexMap<String, Field>
 }
 
 /// A field declaration.
@@ -331,7 +331,7 @@ pub struct Class {
 /// This corresponds to [`ast::FieldDecl`].
 /// Unlike `ast::FieldDecl`, the field's name is omitted (and has been moved to [`Class`]).
 #[derive(Debug, PartialEq, Clone)]
-pub struct FieldDecl {
+pub struct Field {
     /// Whether the field can be reassigned later
     pub rt: ast::ReasgType,
     

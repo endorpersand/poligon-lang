@@ -99,9 +99,9 @@ impl Display for Class {
     }
 }
 
-impl Display for FieldDecl {
+impl Display for Field {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FieldDecl { rt, mt, ty } = self;
+        let Field { rt, mt, ty } = self;
         
         match rt {
             ReasgType::Let => {},
