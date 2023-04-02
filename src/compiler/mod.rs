@@ -309,7 +309,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let pm = PassManager::create(());
         pm_builder.populate_module_pass_manager(&pm);
-
+        pm.add_function_inlining_pass();
         pm.run_on(&self.module);
     }
     /// Writes the type data and module to disk.

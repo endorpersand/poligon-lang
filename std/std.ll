@@ -59,30 +59,31 @@ body:
 ; Function Attrs: mustprogress nounwind willreturn
 define %string @"string::add_string"(ptr nocapture readonly %self, ptr nocapture readonly %other) local_unnamed_addr #2 {
 body:
-  %call = tail call i64 @"string::len"(ptr %self)
-  %call1 = tail call i64 @"string::len"(ptr %other)
-  %i_add = add i64 %call1, %call
-  %result_inner = alloca %"#dynarray", align 8
-  %call2 = tail call %"#dynarray" @"#dynarray::new"(i64 %i_add)
-  %call2.elt = extractvalue %"#dynarray" %call2, 0
-  store ptr %call2.elt, ptr %result_inner, align 8
-  %result_inner.repack1 = getelementptr inbounds %"#dynarray", ptr %result_inner, i64 0, i32 1
-  store i64 0, ptr %result_inner.repack1, align 8
-  %result_inner.repack3 = getelementptr inbounds %"#dynarray", ptr %result_inner, i64 0, i32 2
-  %call2.elt4 = extractvalue %"#dynarray" %call2, 2
-  store i64 %call2.elt4, ptr %result_inner.repack3, align 8
+  %path_access.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
+  %path_load.i = load i64, ptr %path_access.i, align 4
+  %path_access.i11 = getelementptr inbounds %string, ptr %other, i64 0, i32 0, i32 1
+  %path_load.i12 = load i64, ptr %path_access.i11, align 4
+  %i_add = add i64 %path_load.i12, %path_load.i
+  %call.i = tail call ptr @malloc(i64 %i_add)
   %path_load = load ptr, ptr %self, align 8
-  %call3 = tail call i64 @"string::len"(ptr nonnull %self)
-  call void @"#dynarray::extend"(ptr nonnull %result_inner, ptr %path_load, i64 %call3)
-  %path_load5 = load ptr, ptr %other, align 8
-  %call6 = tail call i64 @"string::len"(ptr nonnull %other)
-  call void @"#dynarray::extend"(ptr nonnull %result_inner, ptr %path_load5, i64 %call6)
-  %.unpack = load ptr, ptr %result_inner, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack, 0
-  %.unpack6 = load i64, ptr %result_inner.repack1, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack6, 1
-  %.unpack8 = load i64, ptr %result_inner.repack3, align 8
-  %2 = insertvalue %"#dynarray" %1, i64 %.unpack8, 2
+  %i_lt.i.i22 = icmp slt i64 %i_add, %path_load.i
+  br i1 %i_lt.i.i22, label %"#dynarray::extend.exit33", label %"#dynarray::extend.exit"
+
+"#dynarray::extend.exit33":                       ; preds = %body
+  %call.i.i24 = tail call ptr @malloc(i64 %path_load.i)
+  tail call void @free(ptr %call.i)
+  br label %"#dynarray::extend.exit"
+
+"#dynarray::extend.exit":                         ; preds = %body, %"#dynarray::extend.exit33"
+  %call.i.i24.sink = phi ptr [ %call.i.i24, %"#dynarray::extend.exit33" ], [ %call.i, %body ]
+  %result_inner.sroa.15.1 = phi i64 [ %path_load.i, %"#dynarray::extend.exit33" ], [ %i_add, %body ]
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %call.i.i24.sink, ptr align 1 %path_load, i64 %path_load.i, i1 false)
+  %path_load544 = load ptr, ptr %other, align 8
+  %gep.i = getelementptr i8, ptr %call.i.i24.sink, i64 %path_load.i
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i, ptr align 1 %path_load544, i64 %path_load.i12, i1 false)
+  %0 = insertvalue %"#dynarray" undef, ptr %call.i.i24.sink, 0
+  %1 = insertvalue %"#dynarray" %0, i64 %i_add, 1
+  %2 = insertvalue %"#dynarray" %1, i64 %result_inner.sroa.15.1, 2
   %3 = insertvalue %string zeroinitializer, %"#dynarray" %2, 0
   ret %string %3
 }
@@ -111,8 +112,23 @@ body:
   %path_access = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %path_load = load i64, ptr %path_access, align 4
   %i_add = add i64 %path_load, %add_len
-  tail call void @"#dynarray::resize"(ptr %self, i64 %i_add)
-  %path_load4 = load i64, ptr %path_access, align 4
+  %path_access.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %path_load.i = load i64, ptr %path_access.i, align 4
+  %i_lt.i = icmp slt i64 %path_load.i, %i_add
+  br i1 %i_lt.i, label %then.i, label %"#dynarray::resize.exit"
+
+then.i:                                           ; preds = %body
+  %path_load3.i = load ptr, ptr %self, align 8
+  %call.i = tail call ptr @malloc(i64 %i_add)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %call.i, ptr align 1 %path_load3.i, i64 %path_load, i1 false)
+  store ptr %call.i, ptr %self, align 8
+  store i64 %i_add, ptr %path_access.i, align 4
+  tail call void @free(ptr %path_load3.i)
+  %path_load4.pre = load i64, ptr %path_access, align 4
+  br label %"#dynarray::resize.exit"
+
+"#dynarray::resize.exit":                         ; preds = %body, %then.i
+  %path_load4 = phi i64 [ %path_load, %body ], [ %path_load4.pre, %then.i ]
   %path_load6 = load ptr, ptr %self, align 8
   %gep = getelementptr i8, ptr %path_load6, i64 %path_load4
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep, ptr align 1 %add_buf, i64 %add_len, i1 false)
@@ -151,25 +167,14 @@ declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #4
 ; Function Attrs: inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free")
 declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #5
 
-; Function Attrs: mustprogress nounwind willreturn
-define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
+; Function Attrs: mustprogress nofree nounwind willreturn
+define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #3 {
 body:
-  %inner = alloca %"#dynarray", align 8
-  %call = tail call %"#dynarray" @"#dynarray::new"(i64 %len)
-  %call.elt = extractvalue %"#dynarray" %call, 0
-  store ptr %call.elt, ptr %inner, align 8
-  %inner.repack1 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 1
-  store i64 0, ptr %inner.repack1, align 8
-  %inner.repack3 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 2
-  %call.elt4 = extractvalue %"#dynarray" %call, 2
-  store i64 %call.elt4, ptr %inner.repack3, align 8
-  call void @"#dynarray::extend"(ptr nonnull %inner, ptr %contents, i64 %len)
-  %.unpack = load ptr, ptr %inner, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack, 0
-  %.unpack6 = load i64, ptr %inner.repack1, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack6, 1
-  %.unpack8 = load i64, ptr %inner.repack3, align 8
-  %2 = insertvalue %"#dynarray" %1, i64 %.unpack8, 2
+  %call.i = tail call ptr @malloc(i64 %len)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %call.i, ptr align 1 %contents, i64 %len, i1 false)
+  %0 = insertvalue %"#dynarray" undef, ptr %call.i, 0
+  %1 = insertvalue %"#dynarray" %0, i64 %len, 1
+  %2 = insertvalue %"#dynarray" %1, i64 %len, 2
   %3 = insertvalue %string zeroinitializer, %"#dynarray" %2, 0
   ret %string %3
 }
@@ -177,9 +182,12 @@ body:
 ; Function Attrs: mustprogress nofree nounwind willreturn
 define %string @"string::new"() local_unnamed_addr #3 {
 body:
-  %call = tail call %"#dynarray" @"#dynarray::new"(i64 0)
-  %0 = insertvalue %string zeroinitializer, %"#dynarray" %call, 0
-  ret %string %0
+  %call.i = tail call ptr @malloc(i64 0)
+  %0 = insertvalue %"#dynarray" zeroinitializer, ptr %call.i, 0
+  %1 = insertvalue %"#dynarray" %0, i64 0, 1
+  %2 = insertvalue %"#dynarray" %1, i64 0, 2
+  %3 = insertvalue %string zeroinitializer, %"#dynarray" %2, 0
+  ret %string %3
 }
 
 define ptr @"#dynarray::take"(ptr nocapture %self, i64 %sub_len) local_unnamed_addr {
@@ -711,8 +719,8 @@ then:                                             ; preds = %body
   unreachable
 
 else:                                             ; preds = %body
-  %call = tail call i64 @"#idiv"(i64 %self, i64 %d)
-  ret i64 %call
+  %2 = sdiv i64 %self, %d
+  ret i64 %2
 }
 
 define %string @"int::to_string"(i64 %self) local_unnamed_addr {
