@@ -609,10 +609,10 @@ impl TypeData {
     }
 
     /// Get a method defined in the type.
-    pub fn get_method<'a>(&'a self, ident: &'a str, /* params: &'a [plir::Type] */) -> Option<&'a plir::FunIdent> {
+    pub fn get_method(&self, ident: &str, /* params: &[plir::Type] */) -> Option<plir::FunIdent> {
         let k = SigKey::new(ident, vec![]);
         
-        self.methods.get(&k)
+        self.methods.get(&k).cloned()
     }
 
     /// Add a method to the type.
@@ -1764,8 +1764,9 @@ impl PLIRCodegen {
                 let (ty, cls) = self.consume_type_and_get_cls(ty)?;
                 
                 let attrref = cls.get_method(&attr)
-                    .ok_or_else(|| PLIRErr::UndefinedAttr(ty.clone(), attr.clone()).at_range(range.clone()))?
-                    .clone();
+                    .ok_or_else(|| {
+                        PLIRErr::UndefinedAttr(ty.clone(), attr.clone()).at_range(range.clone())
+                    })?;
                 Ok(plir::Path::Static(ty, attr, self.get_var_type(&attrref, range)?.clone()))
                     .map(Into::into)
             },
