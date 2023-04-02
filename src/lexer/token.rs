@@ -3,11 +3,11 @@
 //! See [`Token`] for more information.
 
 use std::fmt::{Debug, Display};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use lazy_static::lazy_static;
 use crate::err::CursorRange;
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
 /// A specific unit that carries some graphemic value in Poligon.
 pub enum Token {
     /// An identifier, such as function names or variable names. (e.g. `abcd`, `a_b`, `a1`)
@@ -42,6 +42,13 @@ pub enum Token {
     LineSep
 }
 
+impl Token {
+    /// Checks if one token contains another in it.
+    pub fn starts_with<P: TokenPattern>(&self, lhs: P) -> bool {
+        lhs.fully_accepts(self) || lhs.is_strict_prefix_of(self)
+    }
+}
+
 /// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
@@ -53,6 +60,23 @@ impl FullToken {
     /// Create a FullToken using a token and its given position.
     pub fn new(tt: Token, loc: CursorRange) -> Self {
         Self { loc, tt }
+    }
+
+    /// Attempts to split the full token into two. 
+    /// 
+    /// If successful, the LHS token is returned (and removed from this token).
+    /// 
+    /// If unsuccessful, the token stays unchanged.
+    pub fn try_split<P: TokenPattern>(&mut self, lhs: P) -> Option<Self> {
+        lhs.strip_strict_prefix_of(self)
+    }
+}
+
+impl std::ops::Deref for FullToken {
+    type Target = Token;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tt
     }
 }
 
@@ -67,10 +91,135 @@ impl PartialEq<FullToken> for Token {
     }
 }
 
+mod pat {
+    use super::{Token, FullToken, SPLITTABLES};
+
+    /// A token pattern.
+    /// 
+    /// Similar to std [`std::str::pattern::Pattern`], this can be used to
+    /// search a pattern in a given Token.
+    /// 
+    /// [`Token`] == verify if that token is in the given output
+    /// [`[Token]`] == verify if any one of those tokens are in the given input
+    pub trait TokenPattern: Sized {
+        /// Tests if this pattern matches the token pattern exactly.
+        fn fully_accepts(&self, t: &Token) -> bool;
+        /// Tests if this pattern strictly prefixes the token.
+        /// 
+        /// To check for non-strict prefixes, 
+        /// one can perform `self.contains(t) || self.is_strict_prefix_of(t)`.
+        fn is_strict_prefix_of(&self, t: &Token) -> bool;
+        /// Removes the prefix from a given FullToken, returning it if present.
+        /// 
+        /// This will not work if the pattern encompasses the token fully.
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken>;
+        /// Provides which tokens this pattern expects.
+        fn expected_tokens(self) -> Vec<Token>;
+    }
+    
+    impl TokenPattern for Token {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            (&self).fully_accepts(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            (&self).is_strict_prefix_of(t)
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            (&self).strip_strict_prefix_of(t)
+        }
+
+        fn expected_tokens(self) -> Vec<Token> {
+            vec![self]
+        }
+    }
+    impl<const N: usize> TokenPattern for [Token; N] {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            (&self[..]).fully_accepts(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            (&self[..]).is_strict_prefix_of(t)
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            (&self[..]).strip_strict_prefix_of(t)
+        }
+
+        fn expected_tokens(self) -> Vec<Token> {
+            self.into()
+        }
+    }
+    impl<'a> TokenPattern for &'a Token {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self == &t
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            SPLITTABLES.contains_key(&(t, self))
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            let FullToken { tt, loc } = t;
+            if let Some(rhs) = SPLITTABLES.get(&(tt, self)) {
+                let (&(slno, scno), &(elno, ecno)) = (loc.start(), loc.end());
+    
+                let lloc = (slno, scno) ..= (slno, scno);
+                let rloc = (elno, ecno) ..= (elno, ecno);
+    
+                *t = FullToken { tt: rhs.clone(), loc: rloc };
+                Some(FullToken { tt: (*self).clone(), loc: lloc })
+            } else {
+                None
+            }
+        }
+
+        fn expected_tokens(self) -> Vec<Token> {
+            self.clone().expected_tokens()
+        }
+    }
+    impl<'a> TokenPattern for &'a [Token] {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self.contains(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            self.iter().any(|pat| pat.is_strict_prefix_of(t))
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
+        }
+
+        fn expected_tokens(self) -> Vec<Token> {
+            self.to_vec()
+        }
+    }
+    impl<'a, const N: usize> TokenPattern for &'a [Token; N] {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self[..].contains(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            self[..].iter().any(|pat| pat.is_strict_prefix_of(t))
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            self[..].iter().find_map(|pat| pat.strip_strict_prefix_of(t))
+        }
+
+        fn expected_tokens(self) -> Vec<Token> {
+            self[..].to_vec()
+        }
+    }
+}
+pub use pat::TokenPattern;
+
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
         /// Enum that provides all the given Poligon keywords
-        #[derive(PartialEq, Eq, Debug, Clone)]
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Keyword {
             $(
                 #[allow(missing_docs)] $id
@@ -106,7 +255,7 @@ macro_rules! define_operators_and_delimiters {
         delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
     ) => {
         /// The defined Poligon operators.
-        #[derive(PartialEq, Eq, Debug, Clone)]
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Operator {
             $(
                 #[allow(missing_docs)] $id
@@ -122,7 +271,7 @@ macro_rules! define_operators_and_delimiters {
         }
 
         /// The defined Poligon delimiters (`()`, `[]`, etc.).
-        #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Delimiter {
             $(
                 #[allow(missing_docs)] $idl,
@@ -250,6 +399,24 @@ define_operators_and_delimiters! {
         LCurly: "{",    RCurly: "}",
         LComment: "/*", RComment: "*/"
     }
+}
+
+lazy_static! {
+    /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
+    static ref SPLITTABLES: HashMap<(&'static Token, &'static Token), Token> = {
+        let mut m = HashMap::new();
+        // m.insert((&token![..], &token![.]), token![.]);
+        m.insert((&token![&&], &token![&]), token![&]);
+        m.insert((&token![||], &token![|]), token![|]);
+        m.insert((&token![<=], &token![<]), token![=]);
+        m.insert((&token![>=], &token![>]), token![=]);
+        m.insert((&token![==], &token![=]), token![=]);
+        m.insert((&token![<<], &token![<]), token![<]);
+        m.insert((&token![>>], &token![>]), token![>]);
+        m.insert((&token![::], &token![:]), token![:]);
+        m.insert((&token![->], &token![-]), token![>]);
+        m
+    };
 }
 
 /// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.

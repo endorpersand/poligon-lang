@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use crate::GonErr;
 use crate::err::{FullGonErr, CursorRange};
-use crate::lexer::token::{Token, token, FullToken};
+use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{self, PatErr};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
@@ -185,7 +185,7 @@ macro_rules! left_assoc_op {
         pub fn $n(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
             self.push_loc_block(stringify!($n));
             if let Some(mut e) = self.$ds()? {
-                while let Some(op) = self.match_n(&[$(token![$op]),+]) {
+                while let Some(op) = self.match_([$(token![$op]),+]) {
                     let binop = ast::Expr::BinaryOp {
                         op: op.tt.try_into().unwrap(),
                         left: Box::new(e),
@@ -341,6 +341,9 @@ impl Parser {
     /// erroring if the next token does not match.
     /// 
     /// # Example
+    /// 
+    /// Checking that the next token is the specified token.
+    /// 
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -348,19 +351,32 @@ impl Parser {
     /// 
     /// let mut tokens = tokenize("return true && false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect1(token![return]).is_ok());
-    /// assert!(parser.expect1(token![true]).is_ok());
-    /// assert!(parser.expect1(token![||]).is_err());
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert!(parser.expect(token![true]).is_ok());
+    /// assert!(parser.expect(token![||]).is_err());
     /// ```
-    pub fn expect1(&mut self, u: Token) -> ParseResult<()> {
-        if let Some(FullToken {tt: t, loc}) = self.next() {
-            if t == u {
-                Ok(())
-            } else {
-                Err(ParseErr::ExpectedTokens(vec![u]).at_range(loc))
-            }
-        } else {
-            Err(ParseErr::ExpectedTokens(vec![u]).at(self.eof))
+    /// 
+    /// Checking that the next token is one of a few given tokens.
+    /// 
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true + false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
+    /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
+    /// ```
+    pub fn expect<P: TokenPattern>(&mut self, u: P) -> ParseResult<FullToken> {
+        match self.tokens.get_mut(0) {
+            Some(t) if u.fully_accepts(t) => self.next().ok_or_else(|| unreachable!()),
+            Some(t) => match u.strip_strict_prefix_of(t) {
+                Some(prefix) => Ok(prefix),
+                None => Err(ParseErr::ExpectedTokens(u.expected_tokens()).at_range(t.loc.clone()))
+            },
+            _ => Err(ParseErr::ExpectedTokens(u.expected_tokens()).at(self.eof))
         }
     }
 
@@ -375,26 +391,18 @@ impl Parser {
     /// 
     /// let mut tokens = tokenize("return true + false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect1(token![return]).is_ok());
+    /// assert!(parser.expect(token![return]).is_ok());
     /// assert_eq!(parser.expect_n(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
     /// ```
-    pub fn expect_n(&mut self, one_of: &[Token]) -> ParseResult<FullToken> {
-        if let Some(ft) = self.next() {
-            if one_of.contains(&ft.tt) {
-                Ok(ft)
-            } else {
-                Err(ParseErr::ExpectedTokens(vec![ft.tt]).at_range(ft.loc))
-            }
-        } else {
-            Err(ParseErr::ExpectedTokens(one_of.into()).at(self.eof))
-        }
-    }
 
-    /// Test whether the next token in the input matches the specified token,
+    /// Test whether the next token in the input matches the specified token pattern,
     /// and consume the token if it does.
     /// 
     /// # Example
+    /// 
+    /// Checking if the next token matches a specified token:
+    /// 
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -402,22 +410,13 @@ impl Parser {
     /// 
     /// let mut tokens = tokenize("return true").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(!parser.match1(token![break]));
-    /// assert!(!parser.match1(token![continue]));
-    /// assert!(parser.match1(token![return]));
-    /// assert!(parser.match1(token![true]));
+    /// assert!(!parser.match_(token![break]));
+    /// assert!(!parser.match_(token![continue]));
+    /// assert!(parser.match_(token![return]));
+    /// assert!(parser.match_(token![true]));
     /// ```
-    pub fn match1(&mut self, u: Token) -> bool {
-        match self.peek_token() {
-            Some(t) if t == &u => self.next().is_some(),
-            _ => false
-        }
-    }
-
-    /// Check whether the next token in the input is in the specified list of tokens, 
-    /// consuming and returning the token if it is.
     /// 
-    /// # Example
+    /// Checking if the next token matches one of a few given tokens:
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -426,17 +425,26 @@ impl Parser {
     /// let mut tokens = tokenize("return true + false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
     /// assert_eq!(
-    ///     parser.match_n(&[token![break], token![continue], token![return]]).unwrap(), 
+    ///     parser.match_(&[token![break], token![continue], token![return]]).unwrap(), 
     ///     token![return]
     /// );
-    /// assert!(parser.match1(token![true]));
-    /// assert_eq!(parser.match_n(&[token![&&], token![||]]), None);
-    /// assert_eq!(parser.match_n(&[token![+], token![-]]).unwrap(), token![+]);
+    /// assert!(parser.match_(token![true]));
+    /// assert_eq!(parser.match_(&[token![&&], token![||]]), None);
+    /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
-    pub fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
-        match self.peek_token() {
-            Some(t) if one_of.contains(t) => self.next(),
-            _ => None,
+    pub fn match_<P: TokenPattern>(&mut self, u: P) -> Option<FullToken> {
+        match self.tokens.get_mut(0) {
+            Some(t) if u.fully_accepts(t) => self.next(),
+            Some(t) => {
+                let mprefix = u.strip_strict_prefix_of(t);
+                
+                if let Some(prefix) = &mprefix {
+                    self.append_range(prefix.loc.clone());
+                }
+
+                mprefix
+            },
+            _ => None
         }
     }
 
@@ -516,7 +524,7 @@ impl Parser {
         while let Some(e) = f(self)? {
             exprs.push(e);
 
-            if !self.match1(token![,]) {
+            if self.match_(token![,]).is_none() {
                 comma_end = false;
                 break;
             }
@@ -529,7 +537,7 @@ impl Parser {
     /// (optionally a terminating comma), and ending with the closer token.
     /// 
     /// For example, if the closer was `}`, then `1, 2, 3, 4 }` would be valid here.
-    /// The `{` would need to be [matched][Parser::match1] before this function is called.
+    /// The `{` would need to be [matched][Parser::match_] before this function is called.
     pub fn expect_closing_tuple(&mut self, closer: Token) -> ParseResult<Vec<Located<ast::Expr>>> 
     {
         self.expect_closing_tuple_of(Parser::match_expr, closer, ParseErr::ExpectedExpr)
@@ -539,7 +547,7 @@ impl Parser {
     /// (optionally a terminating comma), and ending with the closer token.
     /// 
     /// For example, if the closer was `}`, then `t, t, t, t }` would be valid here.
-    /// The `{` would need to be [matched][Parser::match1] before this function is called.
+    /// The `{` would need to be [matched][Parser::match_] before this function is called.
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`,
     /// and an error to raise if a match was not found.
@@ -552,7 +560,7 @@ impl Parser {
 
         // if the next token is not the close token,
         // then raise an error, because the tuple did not close properly
-        if self.match1(closer) {
+        if self.match_(closer).is_some() {
             Ok(exprs)
         } else {
             let e = if comma_end {
@@ -562,54 +570,6 @@ impl Parser {
             };
 
             Err(e.at_range(self.peek_loc()))
-        }
-    }
-
-    /// Match a left angle bracket in type expressions (`<`). 
-    /// 
-    /// This function differs from [`parser::match1(token![<])`][Parser::match1] 
-    /// because the `<<` is also matched and is treated by this function as two `<`s.
-    pub fn match_langle(&mut self) -> bool {
-        // if the next token matches <, then done
-        // also have to check for <<
-        self.match1(token![<]) || {
-            let is_double = matches!(self.peek_token(), Some(token![<<]));
-            
-            if is_double {
-                let FullToken { loc, .. } = &self.tokens[0];
-
-                let &(slno, scno) = loc.start();
-                let &end = loc.end();
-
-                self.append_range((slno, scno) ..= (slno, scno));
-                self.tokens[0] = FullToken::new(token![<], (slno, scno + 1)..=end);
-            }
-
-            is_double
-        }
-    }
-
-    /// Match a right angle bracket in type expressions (`>`). 
-    ///
-    /// This function differs from [`parser::match1(token![>])`][Parser::match1] 
-    /// because the `>>` is also matched and is treated by this function as two `>`s.
-    pub fn match_rangle(&mut self) -> bool {
-        // if they match >, then done
-        // also have to check for >>
-        self.match1(token![>]) || {
-            let is_double = matches!(self.peek_token(), Some(token![>>]));
-            
-            if is_double {
-                let FullToken { loc, .. } = &self.tokens[0];
-
-                let &(slno, scno) = loc.start();
-                let &end = loc.end();
-
-                self.append_range((slno, scno) ..= (slno, scno));
-                self.tokens[0] = FullToken::new(token![>], (slno, scno + 1)..=end);
-            }
-
-            is_double
         }
     }
     
@@ -644,24 +604,24 @@ impl Parser {
                 if st.ends_with_block() {
                     // for block-terminating statements, semi isn't needed
                     // drop the semi if it exists, but don't do anything with it
-                    self.match1(token![;]);
+                    self.match_(token![;]);
                 } else if self.repl_mode {
                     // in REPL mode, semicolon does not need to appear at the end of
                     // the last statement of a block
 
-                    if !self.match1(token![;]) {
+                    if self.match_(token![;]).is_none() {
                         let stmt = Located::new(st, self.pop_loc_block("expect_stmts").unwrap());
                         stmts.push(stmt);
                         break;
                     }
                 } else {
                     // outside of REPL mode, semicolon does need to appear.
-                    self.expect1(token![;])?;
+                    self.expect(token![;])?;
                 };
                 
                 let stmt = Located::new(st, self.pop_loc_block("expect_stmts").unwrap());
                 stmts.push(stmt);
-            } else if !self.match1(token![;]) {
+            } else if self.match_(token![;]).is_none() {
                 self.pop_loc_block("expect_stmts");
                 break; 
             }
@@ -681,9 +641,9 @@ impl Parser {
     pub fn expect_block(&mut self) -> ParseResult<Located<ast::Block>> {
         self.push_loc_block("expect_block");
 
-        self.expect1(token!["{"])?;
+        self.expect(token!["{"])?;
         let p = self.expect_stmts()?;
-        self.expect1(token!["}"])?;
+        self.expect(token!["}"])?;
 
         Ok(Located::new(ast::Block(p), self.pop_loc_block("expect_block").unwrap()))
     }
@@ -700,7 +660,7 @@ impl Parser {
             Some(token![throw])    => Some(self.expect_throw()?),
             Some(token![fun])      => Some(self.expect_fun_decl()?).map(ast::Stmt::FunDecl),
             Some(token![extern])   => {
-                self.expect1(token![extern])?;
+                self.expect(token![extern])?;
                 Some(self.expect_fun_sig()?).map(ast::Stmt::ExternFunDecl)
             },
             Some(token![class])    => Some(self.expect_class_decl()?).map(ast::Stmt::ClassDecl),
@@ -721,13 +681,12 @@ impl Parser {
         let pat = self.match_decl_pat()?
             .ok_or_else(|| ParseErr::ExpectedPattern.at_range(self.peek_loc()))?;
 
-        let ty = if self.match1(token![:]) {
-            Some(self.expect_type()?)
-        } else {
-            None
+        let ty = match self.match_(token![:]) {
+            Some(_) => Some(self.expect_type()?),
+            None    => None,
         };
 
-        self.expect1(token![=])?;
+        self.expect(token![=])?;
         let expr = self.expect_expr()?;
 
         Ok(ast::Decl {
@@ -749,7 +708,7 @@ impl Parser {
         let pat = match peek {
             token!["["] => {
                 self.push_loc_block("match_decl_pat list");
-                self.expect1(token!["["])?;
+                self.expect(token!["["])?;
                 let tpl = self.expect_closing_tuple_of(
                     Parser::match_decl_pat, 
                     token!["]"], 
@@ -760,17 +719,16 @@ impl Parser {
             },
             token![..] => {
                 self.push_loc_block("match_decl_pat spread");
-                self.expect1(token![..])?;
+                self.expect(token![..])?;
                 let item = self.match_decl_pat()?.map(Box::new);
 
                 Located::new(ast::Pat::Spread(item), self.pop_loc_block("match_decl_pat spread").unwrap())
             }
             token![mut] | token![#] | Token::Ident(_) => {
                 self.push_loc_block("match_decl_pat unit");
-                let mt = if self.match1(token![mut]) {
-                    ast::MutType::Mut
-                } else {
-                    ast::MutType::Immut
+                let mt = match self.match_(token![mut]) {
+                    Some(_) => ast::MutType::Mut,
+                    None    => ast::MutType::Immut,
                 };
 
                 let node = ast::DeclUnit(self.expect_ident()?.0, mt);
@@ -784,12 +742,10 @@ impl Parser {
 
     /// Match the next token to a reassignment type if it represents one.
     pub fn match_reasg_type(&mut self) -> Option<ast::ReasgType> {
-        if self.match1(token![let]) {
-            Some(ast::ReasgType::Let)
-        } else if self.match1(token![const]) {
-            Some(ast::ReasgType::Const)
-        } else {
-            None
+        match *self.match_([token![let], token![const]])? {
+            token![let]   => Some(ast::ReasgType::Let),
+            token![const] => Some(ast::ReasgType::Const),
+            _ => unreachable!()
         }
     }
     /// Match the next tokens in the input if they represent a function parameter.
@@ -800,11 +756,12 @@ impl Parser {
             None => (true, Default::default()),
         };
         
-        let mt = if self.match1(token![mut]) {
-            empty = false;
-            ast::MutType::Mut
-        } else {
-            ast::MutType::Immut
+        let mt = match self.match_(token![mut]) {
+            Some(_) => {
+                empty = false;
+                ast::MutType::Mut
+            }
+            None => ast::MutType::Immut,
         };
 
         // the param checked so far is fully empty and probably not an actual param:
@@ -813,10 +770,9 @@ impl Parser {
         }
 
         let ident = self.expect_ident()?.0;
-        let ty = if self.match1(token![:]) {
-            Some(self.expect_type()?)
-        } else {
-            None
+        let ty = match self.match_(token![:]) {
+            Some(_) => Some(self.expect_type()?),
+            None    => None,
         };
 
         Ok(Some(ast::Param {
@@ -829,7 +785,7 @@ impl Parser {
 
     /// Expect that the next tokens in the input represent a return statement.
     pub fn expect_return(&mut self) -> ParseResult<ast::Stmt> {
-        self.expect1(token![return])?;
+        self.expect(token![return])?;
         let e = self.match_expr()?;
 
         Ok(ast::Stmt::Return(e))
@@ -837,19 +793,19 @@ impl Parser {
 
     /// Expect that the next tokens in the input represent a break statement.
     pub fn expect_break(&mut self) -> ParseResult<ast::Stmt> {
-        self.expect1(token![break])?;
+        self.expect(token![break])?;
 
         Ok(ast::Stmt::Break)
     }
     /// Expect that the next tokens in the input represent a continue statement.
     pub fn expect_cont(&mut self) -> ParseResult<ast::Stmt> {
-        self.expect1(token![continue])?;
+        self.expect(token![continue])?;
 
         Ok(ast::Stmt::Continue)
     }
     /// Expect that the next tokens in the input represent a throw statement.
     pub fn expect_throw(&mut self) -> ParseResult<ast::Stmt> {
-        self.expect1(token![throw])?;
+        self.expect(token![throw])?;
         
         let loc = self.peek_loc();
         if let Some(Token::Str(msg)) = self.next_token() {
@@ -861,21 +817,20 @@ impl Parser {
 
     /// Expect that the next tokens in the input represent a function signature.
     pub fn expect_fun_sig(&mut self) -> ParseResult<ast::FunSignature> {
-        self.expect1(token![fun])?;
+        self.expect(token![fun])?;
 
         let ident = self.expect_ident()?.0;
 
-        self.expect1(token!["("])?;
+        self.expect(token!["("])?;
         let params = self.expect_closing_tuple_of(
             Parser::match_param,
             token![")"], 
             ParseErr::ExpectedParam
         )?;
 
-        let ret = if self.match1(token![->]) {
-            Some(self.expect_type()?)
-        } else {
-            None
+        let ret = match self.match_(token![->]) {
+            Some(_) => Some(self.expect_type()?),
+            None    => None,
         };
 
         Ok(ast::FunSignature { ident, params, varargs: false, ret })
@@ -894,30 +849,26 @@ impl Parser {
 
     /// Expect that the next tokens in the input represent a class declaration.
     pub fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
-        self.expect1(token![class])?;
+        self.expect(token![class])?;
         let ident = self.expect_ident()?.0;
         
-        let generics = if self.match_langle() {
+        let generics = if self.match_(token![<]).is_some() {
             let (generics, _) = self.expect_tuple_of(Parser::match_ident)?;
-
-           let loc = self.peek_loc();
-           if !self.match_rangle() {
-              Err(expected_tokens![>].at_range(loc))?;
-           }
+           self.expect(token![>])?;
 
            generics.into_iter().map(|t| t.0).collect()
         } else {
             vec![]
         };
 
-        self.expect1(token!["{"])?;
+        self.expect(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
         
         let mut methods = vec![];
         while let Some(m) = self.match_method_decl()? {
             methods.push(m);
         }
-        self.expect1(token!["}"])?;
+        self.expect(token!["}"])?;
 
         Ok(ast::Class { ident, generics, fields, methods })
     }
@@ -929,11 +880,12 @@ impl Parser {
             None => (true, Default::default()),
         };
 
-        let mt = if self.match1(token![mut]) {
-            empty = false;
-            ast::MutType::Mut
-        } else {
-            ast::MutType::Immut
+        let mt = match self.match_(token![mut]) {
+            Some(_) => {
+                empty = false;
+                ast::MutType::Mut
+            }
+            None => ast::MutType::Immut,
         };
 
         if empty && self.has_ident().is_none() {
@@ -941,7 +893,7 @@ impl Parser {
         }
 
         let ident = self.expect_ident()?.0;
-        self.expect1(token![:])?;
+        self.expect(token![:])?;
         let ty = self.expect_type()?;
 
         Ok(Some(ast::FieldDecl { rt, mt, ident, ty }))
@@ -955,7 +907,7 @@ impl Parser {
     pub fn expect_method_ident(&mut self) -> ParseResult<(Option<String>, String, bool)> {
         let referent = self.match_ident()?.map(|ls| ls.0);
 
-        let is_static = match self.expect_n(&[token![.], token![::]])?.tt {
+        let is_static = match self.expect(&[token![.], token![::]])?.tt {
             token![.] => false,
             token![::] => true,
             _ => unreachable!()
@@ -969,17 +921,16 @@ impl Parser {
     pub fn expect_method_sig(&mut self) -> ParseResult<ast::MethodSignature> {
         let (referent, method_name, is_static) = self.expect_method_ident()?;
 
-        self.expect1(token!["("])?;
+        self.expect(token!["("])?;
         let params = self.expect_closing_tuple_of(
             Parser::match_param,
             token![")"], 
             ParseErr::ExpectedParam
         )?;
 
-        let ret = if self.match1(token![->]) {
-            Some(self.expect_type()?)
-        } else {
-            None
+        let ret = match self.match_(token![->]) {
+            Some(_) => Some(self.expect_type()?),
+            None    => None,
         };
 
         Ok(ast::MethodSignature {
@@ -993,7 +944,7 @@ impl Parser {
 
     /// Match the next tokens if they represent a method declaration.
     pub fn match_method_decl(&mut self) -> ParseResult<Option<ast::MethodDecl>> {
-        self.match1(token![fun]).then(|| {
+        self.match_(token![fun]).map(|_| {
             let sig = self.expect_method_sig()?;
             let block = self.expect_block()?;
 
@@ -1006,7 +957,7 @@ impl Parser {
     /// If this is an "import intrinsic" declaration, return None and switch the intrinsic mode.
     /// Otherwise, return the import declaration.
     pub fn expect_import_decl(&mut self) -> ParseResult<Option<ast::Stmt>> {
-        self.expect1(token![import])?;
+        self.expect(token![import])?;
         
         let ident = self.expect_ident()?
             .map(|id| ast::Type(id, vec![]));
@@ -1014,7 +965,7 @@ impl Parser {
             self.intrinsic_mode = true;
             Ok(None)
         } else {
-            self.expect1(token![::])?;
+            self.expect(token![::])?;
             let sub = self.expect_ident()?.0;
             Ok(Some(ast::Stmt::Import(ast::StaticPath {
                 ty: ident,
@@ -1028,9 +979,9 @@ impl Parser {
     /// This will error if the program is not in intrinsic mode.
     pub fn expect_global_decl(&mut self) -> ParseResult<ast::Stmt> {
         if self.intrinsic_mode {
-            self.expect1(token![global])?;
+            self.expect(token![global])?;
             let ident = self.expect_ident()?.0;
-            self.expect1(token![=])?;
+            self.expect(token![=])?;
             
             let literal_tok = self.peek_loc();
             let ast::Expr::Literal(literal) = self.expect_literal()? else { unreachable!() };
@@ -1051,15 +1002,15 @@ impl Parser {
     /// This will error if the program is not in intrinsic mode.
     pub fn expect_fit_class_decl(&mut self) -> ParseResult<ast::Stmt> {
         if self.intrinsic_mode {
-            self.expect1(token![fit])?;
-            self.expect1(token![class])?;
+            self.expect(token![fit])?;
+            self.expect(token![class])?;
             let ident = self.expect_ident()?.0;
-            self.expect1(token!["{"])?;
+            self.expect(token!["{"])?;
                 let mut methods = vec![];
                 while let Some(m) = self.match_method_decl()? {
                     methods.push(m);
                 }
-            self.expect1(token!["}"])?;
+            self.expect(token!["}"])?;
 
             Ok(ast::Stmt::FitClassDecl(ident, methods))
         } else {
@@ -1092,7 +1043,7 @@ impl Parser {
             Some(2) => {
                 self.push_loc_block("match_ident");
 
-                self.expect1(token![#])?;
+                self.expect(token![#])?;
                 let Some(Token::Ident(s)) = self.next_token() else { unreachable!() };
 
                 let ident_loc = self.pop_loc_block("match_ident").unwrap();
@@ -1123,17 +1074,14 @@ impl Parser {
         if self.has_ident().is_some() {
             let ident = self.expect_ident()?.0;
 
-            let params = if self.match_langle() {
+            let params = if self.match_(token![<]).is_some() {
                 let token_pos = self.peek_loc();
 
-                let (tpl, comma_end) = self.expect_tuple_of(Parser::match_type)?;
-                if !self.match_rangle() {
-                    Err(if comma_end {
-                        ParseErr::ExpectedType
-                    } else {
-                        expected_tokens![,]
-                    }.at_range(self.peek_loc()))?
-                }
+                let tpl = self.expect_closing_tuple_of(
+                    Parser::match_type,
+                    token![>],
+                    ParseErr::ExpectedType
+                )?;
 
                 if !tpl.is_empty() {
                     tpl
@@ -1186,7 +1134,7 @@ impl Parser {
         // TODO: asg ops
 
         let mut eq_pos = self.peek_loc();
-        while self.match1(token![=]) {
+        while self.match_(token![=]).is_some() {
             // if there was an equal sign, this expression must've been a pattern:
             let pat_expr = last
                 .ok_or_else(|| ParseErr::ExpectedPattern.at_range(eq_pos.clone()))?;
@@ -1273,7 +1221,7 @@ impl Parser {
 
             // check if there's a comparison here
             let mut rights = vec![];
-            while let Some(t) = self.match_n(&*CMP_OPS) {
+            while let Some(t) = self.match_(&*CMP_OPS) {
                 let op = t.tt.try_into().unwrap();
                 let rexpr = self.match_spread()?
                     .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
@@ -1305,7 +1253,7 @@ impl Parser {
     /// The next expression above in precedence is [`Parser::match_range`].
     pub fn match_spread(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_spread");
-        if self.match1(token![..]) {
+        if self.match_(token![..]).is_some() {
             let me = self.match_range()?;
             let inner = me.map(Box::new);
 
@@ -1325,11 +1273,11 @@ impl Parser {
     pub fn match_range(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_range");
         if let Some(mut e) = self.match_bor()? {
-            if self.match1(token![..]) {
+            if self.match_(token![..]).is_some() {
                 let right = self.match_bor()?
                 .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
-                let step = if self.match1(token![step]) {
+                let step = if self.match_(token![step]).is_some() {
                     let sexpr = self.match_bor()?
                     .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
                     Some(sexpr)
@@ -1381,7 +1329,7 @@ impl Parser {
 
         self.push_loc_block("match_unary");
         let mut ops = vec![];
-        while let Some(t) = self.match_n(&*UNARY_OPS) {
+        while let Some(t) = self.match_(&*UNARY_OPS) {
             ops.push(t.tt.try_into().unwrap());
         }
 
@@ -1431,7 +1379,7 @@ impl Parser {
     /// The next expression above in precedence is [`Parser::match_call_index_path`].
     pub fn match_deref(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         let peek = self.peek_loc();
-        let is_deref_expr = self.match1(token![*]);
+        let is_deref_expr = self.match_(token![*]).is_some();
         let ci = self.match_call_index_path();
 
         if is_deref_expr {
@@ -1456,7 +1404,7 @@ impl Parser {
     pub fn match_call_index_path(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_call_index_path");
         if let Some(mut e) = self.match_unit()? {
-            while let Some(delim) = self.match_n(&[token!["("], token!["["], token![.]]) {
+            while let Some(delim) = self.match_(&[token!["("], token!["["], token![.]]) {
                 match delim.tt {
                     token!["("] => {
                         let params = self.expect_closing_tuple(token![")"])?;
@@ -1470,7 +1418,7 @@ impl Parser {
                     },
                     token!["["] => {
                         let index = self.expect_expr()?;
-                        self.expect1(token!["]"])?;
+                        self.expect(token!["]"])?;
                         let range = self.peek_loc_block().unwrap();
 
                         let idx_expr = ast::Expr::Index(ast::Index {
@@ -1529,9 +1477,9 @@ impl Parser {
             token![while]     => self.expect_while()?,
             token![for]       => self.expect_for()?,
             token!["("] => {
-                self.expect1(token!["("])?;
+                self.expect(token!["("])?;
                 let e = self.expect_expr()?;
-                self.expect1(token![")"])?;
+                self.expect(token![")"])?;
         
                 // We can drop the inner expr in favor of the outer one,
                 // it doesn't really matter.
@@ -1565,7 +1513,7 @@ impl Parser {
 
     /// Expect that the next tokens in input represent a list literal (`[1, 2, 3]`).
     pub fn expect_list(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(token!["["])?;
+        self.expect(token!["["])?;
         let exprs = self.expect_closing_tuple(token!["]"])?;
         
         Ok(ast::Expr::ListLiteral(exprs))
@@ -1575,10 +1523,9 @@ impl Parser {
     fn match_init_entry(&mut self) -> ParseResult<Option<(Located<String>, Located<ast::Expr>)>> {
         let krange = self.peek_loc();
         if let Some(Located(k, _)) = self.match_ident()? {
-            let v = if self.match1(token![:]) {
-                self.expect_expr()?
-            } else {
-                Located::new(ast::Expr::Ident(k.clone()), krange.clone())
+            let v = match self.match_(token![:]) {
+                Some(_) => self.expect_expr()?,
+                None    => Located::new(ast::Expr::Ident(k.clone()), krange.clone()),
             };
             
             Ok(Some((Located::new(k, krange), v)))
@@ -1600,7 +1547,7 @@ impl Parser {
         /// Entry for dict literals
         fn match_entry(this: &mut Parser) -> ParseResult<Option<Entry>> {
             if let Some(k) = this.match_expr()? {
-                this.expect1(token![:])?;
+                this.expect(token![:])?;
                 let v = this.expect_expr()?;
                 Ok(Some((k, v)))
             } else {
@@ -1614,8 +1561,8 @@ impl Parser {
             Some(FullToken { tt: token![#], .. }) => {
                 let ty = self.expect_type()?;
 
-                self.expect1(token![#])?;
-                self.expect1(token!["{"])?;
+                self.expect(token![#])?;
+                self.expect(token!["{"])?;
                 match ty.0.0.as_str() {
                     "set" => {
                         let exprs = self.expect_closing_tuple(token!["}"])?;
@@ -1641,7 +1588,7 @@ impl Parser {
             },
             Some(FullToken { tt: token![::], .. }) => {
                 let ty = self.expect_type()?;
-                self.expect1(token![::])?;
+                self.expect(token![::])?;
                 let attr = self.expect_ident()?.0;
 
                 ast::Expr::StaticPath(ast::StaticPath { ty, attr })
@@ -1658,22 +1605,14 @@ impl Parser {
     /// * a class initializer (`<Class<T>> {a: 2, b: 3, c: 4}`), or
     /// * a static path (`<Type<T>>::attr`)
     pub fn expect_diamondoid(&mut self) -> ParseResult<ast::Expr> {
-        let angle_loc = self.peek_loc();
-        if !self.match_langle() {
-            Err(expected_tokens![<].at_range(angle_loc))?;
-        }
-
+        self.expect(token![<])?;
         let ty = self.expect_type()?;
-
-        let angle_loc = self.peek_loc();
-        if !self.match_rangle() {
-            Err(expected_tokens![<].at_range(angle_loc))?;
-        }
+        self.expect(token![>])?;
 
         let loc = self.peek_loc();
         let e = match self.next_token() {
             Some(token![#]) => {
-                self.expect1(token!["{"])?;
+                self.expect(token!["{"])?;
                 let params = self.expect_closing_tuple_of(
                     Parser::match_init_entry, 
                     token!["}"], 
@@ -1695,15 +1634,15 @@ impl Parser {
     /// Expect that the next tokens in input represent an if-else expression 
     /// (`if cond {}`, `if cond {} else cond {}`, etc.)
     pub fn expect_if(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(token![if])?;
+        self.expect(token![if])?;
 
         let mut conditionals = vec![(self.expect_expr()?, self.expect_block()?)];
         let mut last = None;
 
-        while self.match1(token![else]) {
+        while self.match_(token![else]).is_some() {
             match self.peek_token() {
                 Some(&token![if]) => {
-                    self.expect1(token![if])?;
+                    self.expect(token![if])?;
                     conditionals.push((self.expect_expr()?, self.expect_block()?));
                 },
                 Some(&token!["{"]) => {
@@ -1723,7 +1662,7 @@ impl Parser {
 
     /// Expect that the next tokens in input represent an `while` loop.
     pub fn expect_while(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(token![while])?;
+        self.expect(token![while])?;
         let condition = self.expect_expr()?;
         let block = self.expect_block()?;
         
@@ -1734,9 +1673,9 @@ impl Parser {
 
     /// Expect that the next tokens in input represent an `for` loop.
     pub fn expect_for(&mut self) -> ParseResult<ast::Expr> {
-        self.expect1(token![for])?;
+        self.expect(token![for])?;
         let ident = self.expect_ident()?.0;
-        self.expect1(token![in])?;
+        self.expect(token![in])?;
         let iterator = self.expect_expr()?;
         let block = self.expect_block()?;
         

@@ -14,7 +14,7 @@ use std::ops::RangeInclusive;
 
 use crate::GonErr;
 use crate::err::{FullGonErr, CursorRange};
-use crate::lexer::token::{Token, token, FullToken};
+use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{Located, ReasgType, MutType};
 
 use super::{PLIRCodegen, plir, PLIRErr};
@@ -185,6 +185,9 @@ impl DParser {
     /// erroring if the next token does not match.
     /// 
     /// # Example
+    /// 
+    /// Checking that the next token is the specified token.
+    /// 
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -192,19 +195,32 @@ impl DParser {
     /// 
     /// let mut tokens = tokenize("return true && false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect1(token![return]).is_ok());
-    /// assert!(parser.expect1(token![true]).is_ok());
-    /// assert!(parser.expect1(token![||]).is_err());
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert!(parser.expect(token![true]).is_ok());
+    /// assert!(parser.expect(token![||]).is_err());
     /// ```
-    pub fn expect1(&mut self, u: Token) -> DParseResult<()> {
-        if let Some(FullToken {tt: t, loc}) = self.next() {
-            if t == u {
-                Ok(())
-            } else {
-                Err(DParseErr::ExpectedTokens(vec![u]).at_range(loc))
-            }
-        } else {
-            Err(DParseErr::ExpectedTokens(vec![u]).at(self.eof))
+    /// 
+    /// Checking that the next token is one of a few given tokens.
+    /// 
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true + false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
+    /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
+    /// ```
+    pub fn expect<P: TokenPattern>(&mut self, u: P) -> DParseResult<FullToken> {
+        match self.tokens.get_mut(0) {
+            Some(t) if u.fully_accepts(t) => self.next().ok_or_else(|| unreachable!()),
+            Some(t) => match u.strip_strict_prefix_of(t) {
+                Some(prefix) => Ok(prefix),
+                None => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at_range(t.loc.clone()))
+            },
+            _ => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at(self.eof))
         }
     }
 
@@ -219,27 +235,18 @@ impl DParser {
     /// 
     /// let mut tokens = tokenize("return true + false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect1(token![return]).is_ok());
+    /// assert!(parser.expect(token![return]).is_ok());
     /// assert_eq!(parser.expect_n(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect_n(&[token![||], token![&&]]).is_err());
     /// ```
-    #[allow(unused)]
-    pub fn expect_n(&mut self, one_of: &[Token]) -> DParseResult<FullToken> {
-        if let Some(ft) = self.next() {
-            if one_of.contains(&ft.tt) {
-                Ok(ft)
-            } else {
-                Err(DParseErr::ExpectedTokens(vec![ft.tt]).at_range(ft.loc))
-            }
-        } else {
-            Err(DParseErr::ExpectedTokens(one_of.into()).at(self.eof))
-        }
-    }
 
-    /// Test whether the next token in the input matches the specified token,
+    /// Test whether the next token in the input matches the specified token pattern,
     /// and consume the token if it does.
     /// 
     /// # Example
+    /// 
+    /// Checking if the next token matches a specified token:
+    /// 
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -247,22 +254,13 @@ impl DParser {
     /// 
     /// let mut tokens = tokenize("return true").unwrap();
     /// let mut parser = Parser::new(tokens, false);
-    /// assert!(!parser.match1(token![break]));
-    /// assert!(!parser.match1(token![continue]));
-    /// assert!(parser.match1(token![return]));
-    /// assert!(parser.match1(token![true]));
+    /// assert!(!parser.match_(token![break]));
+    /// assert!(!parser.match_(token![continue]));
+    /// assert!(parser.match_(token![return]));
+    /// assert!(parser.match_(token![true]));
     /// ```
-    pub fn match1(&mut self, u: Token) -> bool {
-        match self.peek_token() {
-            Some(t) if t == &u => self.next().is_some(),
-            _ => false
-        }
-    }
-
-    /// Check whether the next token in the input is in the specified list of tokens, 
-    /// consuming and returning the token if it is.
     /// 
-    /// # Example
+    /// Checking if the next token matches one of a few given tokens:
     /// ```
     /// use poligon_lang::lexer::tokenize;
     /// use poligon_lang::lexer::token::token;
@@ -271,18 +269,26 @@ impl DParser {
     /// let mut tokens = tokenize("return true + false").unwrap();
     /// let mut parser = Parser::new(tokens, false);
     /// assert_eq!(
-    ///     parser.match_n(&[token![break], token![continue], token![return]]).unwrap(), 
+    ///     parser.match_(&[token![break], token![continue], token![return]]).unwrap(), 
     ///     token![return]
     /// );
-    /// assert!(parser.match1(token![true]));
-    /// assert_eq!(parser.match_n(&[token![&&], token![||]]), None);
-    /// assert_eq!(parser.match_n(&[token![+], token![-]]).unwrap(), token![+]);
+    /// assert!(parser.match_(token![true]));
+    /// assert_eq!(parser.match_(&[token![&&], token![||]]), None);
+    /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
-    #[allow(unused)]
-    pub fn match_n(&mut self, one_of: &[Token]) -> Option<FullToken> {
-        match self.peek_token() {
-            Some(t) if one_of.contains(t) => self.next(),
-            _ => None,
+    pub fn match_<P: TokenPattern>(&mut self, u: P) -> Option<FullToken> {
+        match self.tokens.get_mut(0) {
+            Some(t) if u.fully_accepts(t) => self.next(),
+            Some(t) => {
+                let mprefix = u.strip_strict_prefix_of(t);
+                
+                if let Some(prefix) = &mprefix {
+                    self.append_range(prefix.loc.clone());
+                }
+
+                mprefix
+            },
+            _ => None
         }
     }
 
@@ -344,7 +350,6 @@ impl DParser {
     /// matched values and a bool value indicating whether the tuple had a terminating comma.
     /// 
     /// This function requires a `Parser::match_x` function that can match values of type `T`.
-    // #[allow(unused)]
     pub fn expect_tuple_of<T, F>(&mut self, mut f: F) -> DParseResult<(Vec<T>, bool /* ended in comma? */)> 
         where F: FnMut(&mut Self) -> DParseResult<Option<T>>
     {
@@ -355,7 +360,7 @@ impl DParser {
         while let Some(e) = f(self)? {
             exprs.push(e);
 
-            if !self.match1(token![,]) {
+            if self.match_(token![,]).is_none() {
                 comma_end = false;
                 break;
             }
@@ -381,7 +386,7 @@ impl DParser {
 
         // if the next token is not the close token,
         // then raise an error, because the tuple did not close properly
-        if self.match1(closer) {
+        if self.match_(closer).is_some() {
             Ok(exprs)
         } else {
             let e = if comma_end {
@@ -394,54 +399,6 @@ impl DParser {
         }
     }
 
-    /// Match a left angle bracket in type expressions (`<`). 
-    /// 
-    /// This function differs from [`parser::match1(token![<])`][Parser::match1] 
-    /// because the `<<` is also matched and is treated by this function as two `<`s.
-    pub fn match_langle(&mut self) -> bool {
-        // if the next token matches <, then done
-        // also have to check for <<
-        self.match1(token![<]) || {
-            let is_double = matches!(self.peek_token(), Some(token![<<]));
-            
-            if is_double {
-                let FullToken { loc, .. } = &self.tokens[0];
-
-                let &(slno, scno) = loc.start();
-                let &end = loc.end();
-
-                self.append_range((slno, scno) ..= (slno, scno));
-                self.tokens[0] = FullToken::new(token![<], (slno, scno + 1)..=end);
-            }
-
-            is_double
-        }
-    }
-
-    /// Match a right angle bracket in type expressions (`>`). 
-    ///
-    /// This function differs from [`parser::match1(token![>])`][Parser::match1] 
-    /// because the `>>` is also matched and is treated by this function as two `>`s.
-    pub fn match_rangle(&mut self) -> bool {
-        // if they match >, then done
-        // also have to check for >>
-        self.match1(token![>]) || {
-            let is_double = matches!(self.peek_token(), Some(token![>>]));
-            
-            if is_double {
-                let FullToken { loc, .. } = &self.tokens[0];
-
-                let &(slno, scno) = loc.start();
-                let &end = loc.end();
-
-                self.append_range((slno, scno) ..= (slno, scno));
-                self.tokens[0] = FullToken::new(token![>], (slno, scno + 1)..=end);
-            }
-
-            is_double
-        }
-    }
-
     /// Extends the range of the top cursor-tracking block to reach the bounds of new_range.
     fn append_range(&mut self, new_range: CursorRange) {
         if let Some(rb) = self.tree_locs.last_mut() {
@@ -451,12 +408,10 @@ impl DParser {
 
     /// Match the next token to a reassignment type if it represents one.
     pub fn match_reasg_type(&mut self) -> Option<ReasgType> {
-        if self.match1(token![let]) {
-            Some(ReasgType::Let)
-        } else if self.match1(token![const]) {
-            Some(ReasgType::Const)
-        } else {
-            None
+        match *self.match_([token![let], token![const]])? {
+            token![let]   => Some(ReasgType::Let),
+            token![const] => Some(ReasgType::Const),
+            _ => unreachable!()
         }
     }
     /// Match the next tokens in the input if they represent a function parameter.
@@ -467,11 +422,12 @@ impl DParser {
             None => (true, Default::default()),
         };
         
-        let mt = if self.match1(token![mut]) {
-            empty = false;
-            MutType::Mut
-        } else {
-            MutType::Immut
+        let mt = match self.match_(token![mut]) {
+            Some(_) => {
+                empty = false;
+                MutType::Mut
+            }
+            None => MutType::Immut,
         };
 
         // the param checked so far is fully empty and probably not an actual param:
@@ -480,7 +436,7 @@ impl DParser {
         }
 
         let ident = self.expect_ident()?.0;
-        self.expect1(token![:])?;
+        self.expect(token![:])?;
         let ty = self.expect_type(true)?;
 
         Ok(Some(plir::Param { rt, mt, ident, ty }))
@@ -514,7 +470,7 @@ impl DParser {
             Some(2) => {
                 self.push_loc_block("match_ident");
 
-                self.expect1(token![#])?;
+                self.expect(token![#])?;
                 let Some(Token::Ident(s)) = self.next_token() else { unreachable!() };
 
                 let ident_loc = self.pop_loc_block("match_ident").unwrap();
@@ -543,17 +499,14 @@ impl DParser {
             self.push_loc_block("match_type");
             let ident = self.expect_ident()?.0;
 
-            let params = if self.match_langle() {
+            let params = if self.match_(token![<]).is_some() {
                 let token_pos = self.peek_loc();
 
-                let (tpl, comma_end) = self.expect_tuple_of(|p| p.match_type(true))?;
-                if !self.match_rangle() {
-                    Err(if comma_end {
-                        DParseErr::ExpectedType
-                    } else {
-                        expected_tokens![,]
-                    }.at_range(self.peek_loc()))?
-                }
+                let tpl = self.expect_closing_tuple_of(
+                    |p| p.match_type(true),
+                    token![>],
+                    DParseErr::ExpectedType
+                )?;
 
                 if !tpl.is_empty() {
                     tpl
@@ -606,7 +559,7 @@ impl DParser {
             if let Some(token![::]) = self.peek_nth_token(size) {
                 // Type::attr
                 let ty = self.expect_type(true)?;
-                self.expect1(token![::])?;
+                self.expect(token![::])?;
                 let attr = self.expect_ident()?.0;
 
                 Ok(plir::FunIdent::Static(ty, attr))
@@ -615,18 +568,14 @@ impl DParser {
             }
         } else if let Some(token![<] | token![<<]) = self.peek_token() {
             // <Type>::attr
-            let angle_loc = self.peek_loc();
-                if !self.match_langle() { Err(expected_tokens![<].at_range(angle_loc))? };
-                
-                let ty = self.expect_type(true)?;
+            self.expect(token![<])?;
+            let ty = self.expect_type(true)?;
+            self.expect(token![>])?;
 
-                let angle_loc = self.peek_loc();
-                if !self.match_rangle() { Err(expected_tokens![>].at_range(angle_loc))? };
+            self.expect(token![::])?;
+            let attr = self.expect_ident()?.0;
 
-                self.expect1(token![::])?;
-                let attr = self.expect_ident()?.0;
-
-                Ok(plir::FunIdent::Static(ty, attr))
+            Ok(plir::FunIdent::Static(ty, attr))
         } else {
             Err(expected_tokens![<].at_range(loc))
         }
@@ -639,11 +588,12 @@ impl DParser {
             None => (true, Default::default()),
         };
 
-        let mt = if self.match1(token![mut]) {
-            empty = false;
-            MutType::Mut
-        } else {
-            MutType::Immut
+        let mt = match self.match_(token![mut]) {
+            Some(_) => {
+                empty = false;
+                MutType::Mut
+            }
+            None => MutType::Immut,
         };
 
         if empty && self.has_ident().is_none() {
@@ -651,7 +601,7 @@ impl DParser {
         }
 
         let ident = self.expect_ident()?.0;
-        self.expect1(token![:])?;
+        self.expect(token![:])?;
         let ty = self.expect_type(true)?;
 
         Ok(Some((ident, plir::FieldDecl { rt, mt, ty })))
@@ -661,17 +611,17 @@ impl DParser {
     /// 
     /// This class should be registered by [`PLIRCodegen::register_cls`].
     fn expect_class_decl(&mut self) -> DParseResult<plir::Class> {
-        self.expect1(token![class])?;
+        self.expect(token![class])?;
         let ty = self.expect_type(false)?;
 
-        self.expect1(token!["{"])?;
+        self.expect(token!["{"])?;
         let fields = self.expect_closing_tuple_of(
             DParser::match_field_decl,
             token!["}"],
             DParseErr::ExpectedIdent
         )?;
         let fields = fields.into_iter().collect();
-        self.match1(token![;]);
+        self.match_(token![;]);
 
         Ok(plir::Class { ty, fields })
     }
@@ -680,21 +630,21 @@ impl DParser {
     /// 
     /// This should be registered with [`PLIRCodegen::register_fun_sig`].
     fn expect_extern_decl(&mut self) -> DParseResult<plir::FunSignature> {
-        self.expect1(token![extern])?;
-        self.expect1(token![fun])?;
+        self.expect(token![extern])?;
+        self.expect(token![fun])?;
 
         let ident = self.expect_fun_ident()?;
 
-        self.expect1(token!["("])?;
+        self.expect(token!["("])?;
         let (params, end_comma) = self.expect_tuple_of(DParser::match_param)?;
-        let varargs = end_comma && self.match1(token![..]);
+        let varargs = end_comma && self.match_(token![..]).is_some();
         if varargs {
-            self.match1(token![,]);
+            self.match_(token![,]);
         }
-        self.expect1(token![")"])?;
-        self.expect1(token![->])?;
+        self.expect(token![")"])?;
+        self.expect(token![->])?;
         let ret = self.expect_type(true)?;
-        self.expect1(token![;])?;
+        self.expect(token![;])?;
 
         Ok(plir::FunSignature { ident, params, varargs, ret })
     }
