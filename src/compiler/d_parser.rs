@@ -15,7 +15,7 @@ use std::ops::RangeInclusive;
 use crate::GonErr;
 use crate::err::{FullGonErr, CursorRange};
 use crate::lexer::token::{Token, token, FullToken};
-use crate::ast::{Located, GenericIdent, ReasgType, MutType};
+use crate::ast::{Located, ReasgType, MutType};
 
 use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;
@@ -592,29 +592,6 @@ impl DParser {
     pub fn expect_type(&mut self, verify: bool) -> DParseResult<plir::Type> {
         self.match_type(verify)?
             .ok_or_else(|| DParseErr::ExpectedType.at_range(self.peek_loc()))
-    }
-
-    #[allow(unused)]
-    fn expect_d_generic_ident(&mut self) -> DParseResult<GenericIdent> {
-        let ident = self.expect_ident()?.0;
-        
-        let params = if self.match_langle() {
-           let (params, _) = self.expect_tuple_of(DParser::match_ident)?;
-           
-           let loc = self.peek_loc();
-           if !self.match_rangle() {
-              Err(expected_tokens![>].at_range(loc))?;
-           }
-
-           params
-        } else {
-            vec![]
-        };
-
-        Ok(GenericIdent {
-            ident,
-            params: params.into_iter().map(|t| t.0).collect(),
-        })
     }
 
     /// Expect the next tokens represent a function identifier.

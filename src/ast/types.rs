@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use super::{MutType, ReasgType, Block, Param, Located, GenericIdent};
+use super::{MutType, ReasgType, Block, Param, Located};
 
 /// A type expression.
 /// 
@@ -33,7 +33,9 @@ pub struct Type(pub String, pub Vec<Located<Type>>);
 #[derive(Debug, PartialEq, Clone)]
 pub struct Class {
     /// Name of the class
-    pub ident: GenericIdent,
+    pub ident: String,
+    /// Generic parameters of the class
+    pub generics: Vec<String>,
     /// A vec of fields declared in this class
     pub fields: Vec<FieldDecl>,
     /// A vec of methods declared in this class

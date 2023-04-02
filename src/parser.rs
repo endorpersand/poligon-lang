@@ -895,7 +895,20 @@ impl Parser {
     /// Expect that the next tokens in the input represent a class declaration.
     pub fn expect_class_decl(&mut self) -> ParseResult<ast::Class> {
         self.expect1(token![class])?;
-        let ident = self.expect_generic_ident()?;
+        let ident = self.expect_ident()?.0;
+        
+        let generics = if self.match_langle() {
+            let (generics, _) = self.expect_tuple_of(Parser::match_ident)?;
+
+           let loc = self.peek_loc();
+           if !self.match_rangle() {
+              Err(expected_tokens![>].at_range(loc))?;
+           }
+
+           generics.into_iter().map(|t| t.0).collect()
+        } else {
+            vec![]
+        };
 
         self.expect1(token!["{"])?;
         let (fields, _) = self.expect_tuple_of(Parser::match_field_decl)?;
@@ -906,7 +919,7 @@ impl Parser {
         }
         self.expect1(token!["}"])?;
 
-        Ok(ast::Class { ident, fields, methods })
+        Ok(ast::Class { ident, generics, fields, methods })
     }
 
     /// Match the next tokens if they represent a field declaration.
@@ -1099,30 +1112,6 @@ impl Parser {
     pub fn expect_ident(&mut self) -> ParseResult<Located<String>> {
         self.match_ident()?
             .ok_or_else(|| ParseErr::ExpectedIdent.at_range(self.peek_loc()))
-    }
-
-    /// Expect that the next token in the input is a generic identifier,
-    /// returning the identifier if successfully matched.
-    pub fn expect_generic_ident(&mut self) -> ParseResult<ast::GenericIdent> {
-        let ident = self.expect_ident()?.0;
-        
-        let params = if self.match_langle() {
-            let (params, _) = self.expect_tuple_of(Parser::match_ident)?;
-
-           let loc = self.peek_loc();
-           if !self.match_rangle() {
-              Err(expected_tokens![>].at_range(loc))?;
-           }
-
-           params
-        } else {
-            vec![]
-        };
-
-        Ok(ast::GenericIdent {
-            ident,
-            params: params.into_iter().map(|t| t.0).collect(),
-        })
     }
 
     /// Match the next tokens in the input if they represent a type expression.

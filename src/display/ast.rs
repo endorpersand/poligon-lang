@@ -193,8 +193,14 @@ impl Display for Type {
 
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Class { ident, fields, methods } = self;
-        write!(f, "class {ident} {{")?;
+        let Class { ident, generics, fields, methods } = self;
+        write!(f, "class {ident}")?;
+        if !generics.is_empty() {
+            write!(f, "<")?;
+            fmt_list(f, generics)?;
+            write!(f, ">")?;
+        }
+        write!(f, " {{")?;
         for field in fields {
             writeln!(f,"{field}")?;
         }
@@ -205,19 +211,7 @@ impl Display for Class {
         write!(f, "}}")
     }
 }
-impl Display for GenericIdent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let GenericIdent { ident, params } = self;
-        write!(f, "{ident}")?;
-        
-        if !params.is_empty() {
-            write!(f, "<")?;
-            fmt_list(f, params)?;
-            write!(f, ">")?;
-        }
-        Ok(())
-    }
-}
+
 impl Display for FieldDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FieldDecl { rt, mt, ident, ty } = self;

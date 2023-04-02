@@ -289,7 +289,7 @@ impl Unresolved for UnresolvedType {
 
     fn resolution_ident(&self) -> Cow<str> {
         match self {
-            UnresolvedType::Class(cls) => Cow::from(&cls.ident.ident),
+            UnresolvedType::Class(cls) => Cow::from(&cls.ident),
             UnresolvedType::Import(mp) => Cow::from(&mp.attr),
         }
     }
@@ -917,7 +917,7 @@ impl PLIRCodegen {
     
                 match entry.get() {
                     UnresolvedType::Class(cls) => {
-                        let cls = if cls.ident.params.is_empty() {
+                        let cls = if cls.generics.is_empty() {
                             let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
                             cls
                         } else {
@@ -1517,7 +1517,7 @@ impl PLIRCodegen {
                 });
 
                 match mgcls {
-                    Some(gcls) => Cow::from(&gcls.ident.params),
+                    Some(gcls) => Cow::from(&gcls.generics),
                     None => Cow::from(vec![]),
                 }
             },
@@ -1544,11 +1544,11 @@ impl PLIRCodegen {
     }
 
     fn consume_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
-        let ast::Class { ident, fields, methods } = cls;
+        let ast::Class { ident: _, generics, fields, methods } = cls;
         let Located(ty, tyrange) = ty;
 
         // verify that types are aligned:
-        match (ident.params.len(), ty.generic_args().len()) {
+        match (generics.len(), ty.generic_args().len()) {
             (a, b) if a == b => Ok(()),
             (a, b) => Err(PLIRErr::WrongTypeArity(a, b).at_range(tyrange))
         }?;
