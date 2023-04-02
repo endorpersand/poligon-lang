@@ -1489,7 +1489,7 @@ impl PLIRCodegen {
         self.push_global(cls);
     }
 
-    fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<bool> {
+    fn consume_cls(&mut self, cls: ast::Class, ty: &plir::Type) -> PLIRResult<()> {
         use plir::Type;
         let ast::Class { ident, fields, methods } = cls;
 
@@ -1515,7 +1515,8 @@ impl PLIRCodegen {
         
         let cls = plir::Class { ty: ty.clone(), fields };
         self.register_cls(cls, methods);
-        Ok(self.peek_block().is_open())
+        
+        Ok(())
     }
 
     fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
