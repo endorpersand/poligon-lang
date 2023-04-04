@@ -556,9 +556,11 @@ pub enum ExprType {
 
     /// A `for` loop.
     For {
-        /// Variable to bind elements of the iterator to.
+        /// Variable to bind elements of the iterator to
         ident: String,
-        /// The iterator.
+        /// The type of the element
+        element_type: Type,
+        /// The iterator
         iterator: Box<Expr>,
         /// The block to run in each iteration.
         block: Block

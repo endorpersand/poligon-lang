@@ -338,7 +338,7 @@ impl Display for ExprType {
                 }
             },
             ExprType::While { condition, block } => write!(f, "while {condition} {block}"),
-            ExprType::For { ident, iterator, block } => write!(f, "for {ident} in {iterator} {block}"),
+            ExprType::For { ident, element_type, iterator, block } => write!(f, "for <{element_type}>({ident}) in {iterator} {block}"),
             ExprType::Call { funct, params } => {
                 write!(f, "{funct}(")?;
                 fmt_list(f, params)?;

@@ -49,6 +49,8 @@ pub enum PLIRErr {
     // TODO: split into Covariant, Invariant, and Contravariant
     /// Expected one type, but found a different type
     ExpectedType(plir::Type /* expected */, plir::Type /* found */),
+    /// Cannot iterate over this type
+    CannotIterateType(plir::Type),
     /// Could not determine the type of the expression
     CannotResolveType,
     /// Variable is not defined
@@ -102,6 +104,7 @@ impl GonErr for PLIRErr {
             => "syntax error",
             
             | PLIRErr::ExpectedType(_, _)
+            | PLIRErr::CannotIterateType(_)
             | PLIRErr::CannotResolveType
             | PLIRErr::UndefinedType(_)
             | PLIRErr::CannotAccessOnMethod
@@ -135,6 +138,7 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::CannotContinue               => write!(f, "cannot 'continue' here"),
             PLIRErr::CannotReturn                 => write!(f, "cannot 'return' here"),
             PLIRErr::ExpectedType(e, g)           => write!(f, "expected type '{e}', but got '{g}'"),
+            PLIRErr::CannotIterateType(t)         => write!(f, "cannot iterate over type '{t}'"),
             PLIRErr::CannotResolveType            => write!(f, "cannot determine type"),
             PLIRErr::UndefinedVar(name)           => write!(f, "could not find identifier '{name}'"),
             PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
@@ -1861,12 +1865,30 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::For { ident, iterator, block } => {
+                let itrange = iterator.1.clone();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
-                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
 
+                // FIXME: cleanup
+                let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
+                let m = cls.get_method("next")
+                    .ok_or_else(|| {
+                        PLIRErr::UndefinedVar(plir::FunIdent::new_static(&iterator.ty, "next"))
+                    })?;
+                let element_type = match self.get_var_type(&m, itrange.clone())?.as_ref() {
+                    plir::TypeRef::Fun([a], plir::Type::Generic(ri, rp), false) if a == &iterator.ty && ri == "option" && rp.len() == 1 => {
+                        let idty = rp[0].clone();
+                        // FIXME: put this inside block scope
+                        self.declare(&ident, idty.clone());
+
+                        idty
+                    }
+                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?,
+                };
+
+                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_VOID),
-                    plir::ExprType::For { ident, iterator, block }
+                    plir::ExprType::For { ident, element_type, iterator, block }
                 ))
             },
             ast::Expr::Call { funct, params } => {

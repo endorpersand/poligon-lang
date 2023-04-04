@@ -1023,10 +1023,50 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb))?; 
 
                 compiler.builder.position_at_end(exit_loop_bb);
-                Ok(compiler.new_bool(true)) // TODO
+                Ok(GonValue::Unit)
 
             },
-            plir::ExprType::For { .. } => todo!(),
+            plir::ExprType::For { ident, element_type, iterator, block } => {
+                // FIXME: cleanup
+                let bb = compiler.get_insert_block();
+                let fun = compiler.parent_fn();
+
+                let cond_bb = compiler.ctx.append_basic_block(fun, "for_cond");
+                let loop_bb = compiler.ctx.append_basic_block(fun, "for");
+                let exit_loop_bb = compiler.ctx.append_basic_block(fun, "post_for");
+                
+                // iteration stuff:
+                let i_ptr = compiler.alloca(element_type, ident)?;
+                let it_id = plir::FunIdent::new_static(&iterator.ty, "next");
+                let it_next = compiler.get_fn_by_plir_ident(&it_id)
+                    .unwrap_or_else(|| unimplemented!("nonexistent ::next should have been detected by PLIR"));
+                let iterator = compiler.write_ref_value(iterator)?;
+
+                // end BB by going into loop
+                compiler.builder.position_at_end(bb);
+                compiler.builder.branch_and_goto(cond_bb);
+
+                let mvalue = compiler.builder.build_call(it_next, params![iterator], "")
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_struct_value();
+                let present = compiler.builder.build_extract_value(mvalue, 0, "present")
+                    .unwrap()
+                    .into_int_value();
+                compiler.builder.build_conditional_branch(present, loop_bb, exit_loop_bb);
+
+                compiler.builder.position_at_end(loop_bb);
+                let value_ptr = compiler.builder.build_extract_value(mvalue, 1, "")
+                    .unwrap()
+                    .into_pointer_value();
+                let value = compiler.builder.build_load(compiler.get_layout(element_type)?, value_ptr, "");
+                compiler.builder.build_store(i_ptr, value);
+                compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb))?; 
+
+                compiler.builder.position_at_end(exit_loop_bb);
+                Ok(GonValue::Unit)
+            },
             plir::ExprType::Call { funct, params } => {
                 let mut pvals = vec![];
 
