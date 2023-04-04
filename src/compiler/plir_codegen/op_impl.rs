@@ -72,7 +72,7 @@ impl<'a> Cast<'a> {
                 let cls = cg.get_class(Located::new(&self.src.ty, self.src.1.clone()))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
-                    cg.get_var_type_opt(&met_ident)?
+                    cg.get_var_type(&met_ident)?
                         .filter(|&t| match t.as_ref() {
                             Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
                             _ => false
@@ -107,7 +107,7 @@ impl<'a> Cast<'a> {
                         .get_method("to_string")
                         .unwrap();
                     
-                    let fun_type = cg.get_var_type(&to_string, src_range.clone())?
+                    let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?
                         .clone();
                     
                     Located::new(Expr::call(
@@ -215,7 +215,7 @@ impl super::PLIRCodegen {
             .get_method(method_name)
             .unwrap();
 
-        let e = self.get_var_type_opt(&ident)?
+        let e = self.get_var_type(&ident)?
             .cloned()
             .map(|fun_ty| ident.into_expr(fun_ty));
         
@@ -293,7 +293,7 @@ impl super::PLIRCodegen {
             .get_method(&format!("{method_name}_{right}"))
             .unwrap();
 
-        let e = self.get_var_type_opt(&ident)?
+        let e = self.get_var_type(&ident)?
             .cloned()
             .map(|fun_ty| ident.into_expr(fun_ty));
         
