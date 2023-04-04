@@ -53,12 +53,10 @@ pub enum PLIRErr {
     CannotIterateType(plir::Type),
     /// Could not determine the type of the expression
     CannotResolveType,
-    /// Variable is not defined
-    UndefinedVar(plir::FunIdent),
+    /// Variable (or attribute) is not defined
+    UndefinedVarAttr(plir::FunIdent),
     /// Type/class is not defined
     UndefinedType(plir::Type),
-    /// Attribute doesn't exist on type
-    UndefinedAttr(plir::Type, String),
     /// Tried to use . access on a method
     CannotAccessOnMethod,
     /// Tried to assign to a method
@@ -116,8 +114,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotDeref
             => "type error",
             
-            | PLIRErr::UndefinedVar(_)
-            | PLIRErr::UndefinedAttr(_, _)
+            | PLIRErr::UndefinedVarAttr(_)
             => "name error",
             
             | PLIRErr::UninitializedField(_, _)
@@ -133,6 +130,8 @@ impl GonErr for PLIRErr {
 
 impl std::fmt::Display for PLIRErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use plir::FunIdent;
+
         match self {
             PLIRErr::CannotBreak                  => write!(f, "cannot 'break' here"),
             PLIRErr::CannotContinue               => write!(f, "cannot 'continue' here"),
@@ -140,9 +139,11 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::ExpectedType(e, g)           => write!(f, "expected type '{e}', but got '{g}'"),
             PLIRErr::CannotIterateType(t)         => write!(f, "cannot iterate over type '{t}'"),
             PLIRErr::CannotResolveType            => write!(f, "cannot determine type"),
-            PLIRErr::UndefinedVar(name)           => write!(f, "could not find identifier '{name}'"),
+            PLIRErr::UndefinedVarAttr(id)         => match id {
+                FunIdent::Simple(name)     => write!(f, "could not find identifier '{name}'"),
+                FunIdent::Static(ty, attr) => write!(f, "could not find attribute '{attr}' on '{ty}'"),
+            },
             PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
-            PLIRErr::UndefinedAttr(t, name)       => write!(f, "could not find attribute '{name}' on '{t}'"),
             PLIRErr::CannotAccessOnMethod         => write!(f, "cannot access on method"),
             PLIRErr::CannotAssignToMethod         => write!(f, "cannot assign to method"),
             PLIRErr::CannotCall(t)                => write!(f, "cannot call value of type '{t}'"),
@@ -629,7 +630,8 @@ impl TypeData {
     pub fn get_method_or_err(&self, ident: &str, range: CursorRange) -> PLIRResult<plir::FunIdent> {
         self.get_method(ident)
             .ok_or_else(|| {
-                PLIRErr::UndefinedAttr(self.plir_ty.clone(), ident.to_string()).at_range(range)
+                let id = plir::FunIdent::new_static(&self.plir_ty, ident);
+                PLIRErr::UndefinedVarAttr(id).at_range(range)
             })
     }
 
@@ -986,7 +988,7 @@ impl PLIRCodegen {
     {
         self.get_var_type(ident)?
             .ok_or_else(|| {
-                PLIRErr::UndefinedVar(ident.as_fun_ident().into_owned()).at_range(range)
+                PLIRErr::UndefinedVarAttr(ident.as_fun_ident().into_owned()).at_range(range)
             })
     }
 
@@ -1797,7 +1799,8 @@ impl PLIRCodegen {
                 
                 let attrref = cls.get_method(&attr)
                     .ok_or_else(|| {
-                        PLIRErr::UndefinedAttr(ty.clone(), attr.clone()).at_range(range.clone())
+                        let id = plir::FunIdent::new_static(&ty, &attr);
+                        PLIRErr::UndefinedVarAttr(id).at_range(range.clone())
                     })?;
                 Ok(plir::Path::Static(ty, attr, self.get_var_type_or_err(&attrref, range)?.clone()))
                     .map(Into::into)
@@ -1886,7 +1889,8 @@ impl PLIRCodegen {
                 let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
                 let m = cls.get_method("next")
                     .ok_or_else(|| {
-                        PLIRErr::UndefinedVar(plir::FunIdent::new_static(&iterator.ty, "next"))
+                        let id = plir::FunIdent::new_static(&iterator.ty, "next");
+                        PLIRErr::UndefinedVarAttr(id)
                     })?;
                 let element_type = match self.get_var_type_or_err(&m, itrange.clone())?.as_ref() {
                     plir::TypeRef::Fun([a], plir::Type::Generic(ri, rp), false) if a == &iterator.ty && ri == "option" && rp.len() == 1 => {
@@ -2065,8 +2069,8 @@ impl PLIRCodegen {
                 let field = cls.get_field(&attr)
                     .map(|(i, t)| (i, t.clone()))
                     .ok_or_else(|| {
-                        PLIRErr::UndefinedAttr(top_ty.into_owned(), attr.clone())
-                            .at_range(expr_range.clone())
+                        let id = plir::FunIdent::new_static(&top_ty, &attr);
+                        PLIRErr::UndefinedVarAttr(id).at_range(expr_range.clone())
                     })?;
     
                 path.add_struct_seg(field)
