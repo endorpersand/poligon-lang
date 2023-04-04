@@ -97,21 +97,24 @@ class list<T> {
         self.inner.extend(buf, T::size_of());
     }
     fun self.pop() -> T {
-        let pop_ptr = self.inner.take(T::size_of());
-        *pop_ptr;
+        *self.inner.take(T::size_of());
+    }
+    
+    fun self.extend(lst: list<T>) {
+        for e in lst.iterator() {
+            self.push(e);
+        }
     }
     fun self.get(i: int) -> T {
         if 0 <= i && i < self.len() {
-            let access_ptr = T::#gep(self.inner.buf, i);
-            *access_ptr;
+            *T::#gep(self.inner.buf, i);
         } else {
             throw "array index out of bounds";
         }
     }
-    fun self.set(i: int, t: T) -> T {
+    fun self.set(i: int, t: T) {
         if 0 <= i && i < self.len() {
-            let access_ptr = T::#gep(self.inner.buf, i);
-            *access_ptr = t;
+            *T::#gep(self.inner.buf, i) = t;
         } else {
             throw "array index out of bounds";
         }
@@ -121,14 +124,67 @@ class list<T> {
             "[]";
         } else {
             let result = "[";
-            let i = 0;
-            while i < self.len() - 1 {
-                result = result + self.get(i).to_string() + ", ";
-                i = i + 1;
+            let it = self.iterator();
+
+            result = result + it.get();
+            for e in it {
+                result = ", " + e;
             }
-            result = result + self.get(self.len() - 1).to_string() + "]";
+            result = result + "]";
 
             result;
+        }
+    }
+
+    fun self.iterator() -> listiterator<T> {
+        <listiterator<T>>::new(self);
+    }
+}
+class option<T> {
+    present: bool,
+    value: #ptr
+
+    fun ::some(t: T) -> option<T> {
+        let value = #malloc(T::size_of());
+        *value = t;
+        <option<T>> #{ present: true, value };
+    }
+    fun ::none() -> option<T> {
+        <option<T>> #{ present: false, value: #ptr::null() };
+    }
+    fun self.get() -> T {
+        if self.present {
+            *self.value;
+        } else {
+            throw "no value present";
+        }
+    }
+    fun self.to_string() -> string {
+        if self.present {
+            let value: T = *self.value;
+            "some(" + value + ")";
+        } else {
+            "none";
+        }
+    }
+}
+class listiterator<T> {
+    inner: list<T>,
+    i: int
+
+    fun ::new(inner: list<T>) -> listiterator<T> {
+        <listiterator<T>> #{
+            inner, i: 0
+        };
+    }
+
+    fun self.next() -> option<T> {
+        if self.i >= self.inner.len() {
+            <option<T>>::none();
+        } else {
+            let t = <option<T>>::some(self.inner.get(self.i));
+            self.i = self.i + 1;
+            t;
         }
     }
 }
