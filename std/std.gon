@@ -349,3 +349,9 @@ fit class char {
         };
     }
 }
+
+fit class #ptr {
+    fun ::null() -> #ptr {
+        #ptrnull();
+    }
+}

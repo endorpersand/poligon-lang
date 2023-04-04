@@ -58,6 +58,11 @@ fn build_idiv<'ctx>(builder: Builder2<'ctx>, f: FunctionValue<'ctx>) {
     let div = builder.build_int_signed_div(lhs, rhs, "");
     builder.build_return(Some(&div));
 }
+fn build_ptrnull<'ctx>(builder: Builder2<'ctx>, _: FunctionValue<'ctx>) {
+    let ctx = builder.get_insert_block().unwrap().get_context();
+    let null = ctx.i8_type().ptr_type(Default::default()).const_zero();
+    builder.build_return(Some(&null));
+}
 
 macro_rules! c_intrinsics {
     ($($c:ident: {$alias:expr, $f1:expr, $f2:expr$(, $f3:ident)?}),* $(,)?) => {
@@ -433,6 +438,12 @@ c_intrinsics! {
         fun_type![(INT_P.clone()) -> VOID_P.clone()],
         fn_type_s![(*INT_L) -> *VOID_L]
     },
+    ptrnull: { // () -> ptr
+        "#ptrnull",
+        fun_type![() -> PTR_P.clone()],
+        fn_type_s![() -> *PTR_L],
+        build_ptrnull
+    }
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {

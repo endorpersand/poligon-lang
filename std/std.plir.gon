@@ -14,13 +14,9 @@ extern fun "#printf"(arg0: #ptr, ..) -> int;
 fun print(s: string) -> void {
     return <void>(castfrom <int>(<(#ptr, ..) -> int>(#printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
 }
-extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
-fun <char>::to_string(self: char) -> string {
-    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
-    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+extern fun "#ptrnull"() -> #ptr;
+fun <#ptr>::null() -> #ptr {
+    return <#ptr>(<() -> #ptr>(#ptrnull)());
 }
 fun <string>::to_string(self: string) -> string {
     return <string>(self);
@@ -81,6 +77,14 @@ fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
 }
 fun <string>::len(self: string) -> int {
     return <int>(<#dynarray>(<string>(self).0).1);
+}
+extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
+fun <char>::to_string(self: char) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
+    let buf: #ptr = <#ptr>(*buf_ptr);
+    let cap: int = <int>(<int>(len) + <int>(1));
+    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
 }
 extern fun "#isnan"(arg0: float) -> bool;
 fun <float>::isnan(self: float) -> bool {
