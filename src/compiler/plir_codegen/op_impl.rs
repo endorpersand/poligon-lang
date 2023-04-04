@@ -104,8 +104,7 @@ impl<'a> Cast<'a> {
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
                     let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
-                        .get_method("to_string")
-                        .unwrap();
+                        .get_method_or_err("to_string", src_range.clone())?;
                     
                     let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?
                         .clone();
@@ -211,9 +210,9 @@ impl super::PLIRCodegen {
             op::Unary::BitNot => "bitnot",
         };
 
+        let lrange = left.1.clone();
         let ident = self.get_class(left)?
-            .get_method(method_name)
-            .unwrap();
+            .get_method_or_err(method_name, lrange)?;
 
         let e = self.get_var_type(&ident)?
             .cloned()

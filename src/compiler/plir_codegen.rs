@@ -245,7 +245,10 @@ impl BlockBehavior {
 
 fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, TypeData> {
     prims.into_iter()
-        .map(|t| (t, TypeData::primitive()))
+        .map(|t| {
+            let dat = TypeData::primitive(&t);
+            (t, dat)
+        })
         .collect()
 }
 
@@ -591,15 +594,17 @@ impl<'k> SigKey<'k> {
 /// and access type fields.
 #[derive(Debug)]
 pub(super) struct TypeData {
-    ty: TypeStructure,
+    plir_ty: plir::Type,
+    structure: TypeStructure,
     methods: HashMap<SigKey<'static>, plir::FunIdent>
 }
 
 impl TypeData {
     /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
-    pub fn primitive() -> Self {
+    pub fn primitive(ty: &plir::Type) -> Self {
         Self {
-            ty: TypeStructure::Primitive,
+            plir_ty: ty.clone(),
+            structure: TypeStructure::Primitive,
             methods: Default::default()
         }
     }
@@ -607,7 +612,8 @@ impl TypeData {
     /// Create a structural type (a type whose fields are defined in Poligon)
     pub fn structural(cls: plir::Class) -> Self {
         Self {
-            ty: TypeStructure::Class(cls),
+            plir_ty: cls.ty.clone(),
+            structure: TypeStructure::Class(cls),
             methods: Default::default()
         }
     }
@@ -619,6 +625,14 @@ impl TypeData {
         self.methods.get(&k).cloned()
     }
 
+    /// Get a method defined in the type or produce an error.
+    pub fn get_method_or_err(&self, ident: &str, range: CursorRange) -> PLIRResult<plir::FunIdent> {
+        self.get_method(ident)
+            .ok_or_else(|| {
+                PLIRErr::UndefinedAttr(self.plir_ty.clone(), ident.to_string()).at_range(range)
+            })
+    }
+
     /// Add a method to the type.
     pub fn insert_method(&mut self, ident: String, metref: plir::FunIdent) {
         let k = SigKey::new(ident, vec![]);
@@ -628,14 +642,14 @@ impl TypeData {
 
     /// Get a field on the type (if present).
     pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
-        match &self.ty {
+        match &self.structure {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
         }
     }
 
     fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::Field>> {
-        match &self.ty {
+        match &self.structure {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => Some(&cls.fields)
         }
@@ -986,7 +1000,7 @@ impl PLIRCodegen {
             TypeRef::Generic("#ll_array", [t]) => {
                 if self.find_scoped(|ib| ib.types.get(ty)).is_none() {
                     self.get_class(Located(t, range))?;
-                    self.program.types.insert(ty.clone(), TypeData::primitive());
+                    self.program.types.insert(ty.clone(), TypeData::primitive(ty));
                 }
 
                 Ok(&self.program.types[ty])
