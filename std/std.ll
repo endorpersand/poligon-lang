@@ -210,6 +210,50 @@ declare i64 @fputwc(i32, ptr) local_unnamed_addr
 
 declare void @exit(i64) local_unnamed_addr
 
+; Function Attrs: mustprogress nofree nounwind willreturn
+define %string @"bool::to_string"(i1 %self) local_unnamed_addr #4 {
+body:
+  br i1 %self, label %then, label %else
+
+then:                                             ; preds = %body
+  %0 = alloca [4 x i8], align 4
+  store i8 116, ptr %0, align 4
+  %.repack5 = getelementptr inbounds [4 x i8], ptr %0, i64 0, i64 1
+  store i8 114, ptr %.repack5, align 1
+  %.repack6 = getelementptr inbounds [4 x i8], ptr %0, i64 0, i64 2
+  store i8 117, ptr %.repack6, align 2
+  %.repack7 = getelementptr inbounds [4 x i8], ptr %0, i64 0, i64 3
+  store i8 101, ptr %.repack7, align 1
+  %1 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
+  %2 = load i32, ptr %0, align 4
+  store i32 %2, ptr %1, align 1
+  br label %merge
+
+else:                                             ; preds = %body
+  %3 = alloca [5 x i8], align 1
+  store i8 102, ptr %3, align 1
+  %.repack1 = getelementptr inbounds [5 x i8], ptr %3, i64 0, i64 1
+  store i8 97, ptr %.repack1, align 1
+  %.repack2 = getelementptr inbounds [5 x i8], ptr %3, i64 0, i64 2
+  store i8 108, ptr %.repack2, align 1
+  %.repack3 = getelementptr inbounds [5 x i8], ptr %3, i64 0, i64 3
+  store i8 115, ptr %.repack3, align 1
+  %.repack4 = getelementptr inbounds [5 x i8], ptr %3, i64 0, i64 4
+  store i8 101, ptr %.repack4, align 1
+  %4 = tail call dereferenceable_or_null(5) ptr @malloc(i64 5)
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %4, ptr noundef nonnull align 1 dereferenceable(5) %3, i64 5, i1 false)
+  br label %merge
+
+merge:                                            ; preds = %else, %then
+  %.unpack.i.pn = phi ptr [ %1, %then ], [ %4, %else ]
+  %.unpack7.i.pn = phi i64 [ 4, %then ], [ 5, %else ]
+  %.pn31 = insertvalue %"#dynarray" undef, ptr %.unpack.i.pn, 0
+  %.pn = insertvalue %"#dynarray" %.pn31, i64 %.unpack7.i.pn, 1
+  %.pn30 = insertvalue %"#dynarray" %.pn, i64 %.unpack7.i.pn, 2
+  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %.pn30, 0
+  ret %string %if_result
+}
+
 define %string @"char::to_string"(i32 %self) local_unnamed_addr {
 body:
   %0 = alloca ptr, align 8

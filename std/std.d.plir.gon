@@ -22,6 +22,7 @@ extern fun <#dynarray>::resize(arg0: #dynarray, arg1: int) -> void;
 extern fun <#dynarray>::new(arg0: int) -> #dynarray;
 extern fun <#dynarray>::take(arg0: #dynarray, arg1: int) -> #ptr;
 extern fun <string>::len(arg0: string) -> int;
+extern fun <bool>::to_string(arg0: bool) -> string;
 extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
 extern fun <char>::to_string(arg0: char) -> string;
 extern fun "#isnan"(arg0: float) -> bool;

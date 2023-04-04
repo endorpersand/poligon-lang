@@ -78,6 +78,13 @@ fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
 fun <string>::len(self: string) -> int {
     return <int>(<#dynarray>(<string>(self).0).1);
 }
+fun <bool>::to_string(self: bool) -> string {
+    return <string>(if <bool>(self) <string>{
+        exit <string>("true");
+    } else <string>{
+        exit <string>("false");
+    });
+}
 extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
 fun <char>::to_string(self: char) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());

@@ -406,6 +406,16 @@ fit class char {
     }
 }
 
+fit class bool {
+    fun self.to_string() -> string {
+        if self {
+            "true";
+        } else {
+            "false";
+        }
+    }
+}
+
 fit class #ptr {
     fun ::null() -> #ptr {
         #ptrnull();
