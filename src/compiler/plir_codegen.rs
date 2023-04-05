@@ -1887,11 +1887,7 @@ impl PLIRCodegen {
 
                 // FIXME: cleanup
                 let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
-                let m = cls.get_method("next")
-                    .ok_or_else(|| {
-                        let id = plir::FunIdent::new_static(&iterator.ty, "next");
-                        PLIRErr::UndefinedVarAttr(id)
-                    })?;
+                let m = cls.get_method_or_err("next", itrange.clone())?;
                 let element_type = match self.get_var_type_or_err(&m, itrange.clone())?.as_ref() {
                     plir::TypeRef::Fun([a], plir::Type::Generic(ri, rp), false) if a == &iterator.ty && ri == "option" && rp.len() == 1 => {
                         let idty = rp[0].clone();
