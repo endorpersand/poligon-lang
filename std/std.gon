@@ -73,6 +73,53 @@ class string {
     fun self.to_string() -> string {
         self;
     }
+    
+    fun self.slice_bytes(start: int, end: int) -> string {
+        if 0 <= start && start <= end && end <= self.len() {
+            string #{
+                inner: #dynarray #{
+                    buf: #byte::#gep(self.inner.buf, start),
+                    len: end - start,
+                    cap: self.inner.cap - start
+                }
+            };
+        } else {
+            throw "invalid slice";
+        }
+    }
+
+    fun self.chars() -> string_chars {
+        string_chars::new(self);
+    }
+}
+
+class string_chars {
+    str: string,
+    buf: #ptr
+
+    fun ::new(str: string) -> string_chars {
+        string_chars #{
+            str, buf: #malloc(char::size_of())
+        };
+    }
+
+    fun self.next() -> option<char> {
+        if self.str.len() == 0 {
+            <option<char>>::none();
+        } else {
+            let bytes_read = #mbtowc(self.buf, self.str.inner.buf, 6.min(self.str.len()));
+
+            if bytes_read < 1 {
+                self.str = string::new();
+                <option<char>>::none();
+            } else {
+                self.str = self.str.slice_bytes(bytes_read, self.str.len());
+
+                let chr: char = *self.buf;
+                <option<char>>::some(chr);
+            }
+        }
+    }
 }
 
 class list<T> {

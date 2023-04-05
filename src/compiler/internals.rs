@@ -125,8 +125,8 @@ c_intrinsics! {
         fun_type![(PTR_P.clone(), PTR_P.clone(), ~) -> INT_P.clone()],
         fn_type_s![(*PTR_L, *PTR_L, ~) -> *INT_L]
     },
-    mbstowcs: { // (wchar_t*, char*, int) -> int
-        "mbstowcs",
+    mbtowc: { // (wchar_t*, char*, int) -> int
+        "mbtowc",
         fun_type![(PTR_P.clone(), PTR_P.clone(), INT_P.clone()) -> INT_P.clone()],
         fn_type_s![(*PTR_L, *PTR_L, *INT_L) -> *INT_L]
     },
