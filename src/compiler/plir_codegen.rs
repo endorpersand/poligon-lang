@@ -864,7 +864,7 @@ impl PLIRCodegen {
         let mi = self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
             .enumerate()
-            .find_map(|(i, ib)| ib.unres_values.contains_key(ident).then_some(i));
+            .find_map(|(i, ib)| ib.unres_values.contains_key(&*ident.as_fun_ident()).then_some(i));
 
         if let Some(i) = mi {
             // repivot peek block to point to the unresolved item
