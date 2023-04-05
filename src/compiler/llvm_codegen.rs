@@ -1074,12 +1074,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     plir::ExprType::Ident(ident) => plir::FunIdent::new_simple(ident),
                     plir::ExprType::Path(p) => match p {
                         plir::Path::Static(ty, met, _) => {
-                            plir::FunIdent::Static(ty.clone(), met.clone())
+                            plir::FunIdent::new_static(ty, met)
                         },
                         plir::Path::Struct(_, _) => unreachable!("struct attr cannot be fun"),
                         plir::Path::Method(referent, met, _) => {
                             pvals.push(compiler.write_ref_value(referent)?);
-                            plir::FunIdent::Static(referent.ty.clone(), met.clone())
+                            plir::FunIdent::new_static(&referent.ty, met)
                         },
                     },
                     e => todo!("arbitrary expr calls: {e:?}")

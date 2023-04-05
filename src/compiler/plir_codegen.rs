@@ -539,7 +539,7 @@ impl InsertBlock {
             // TODO, use this ident
         };
         
-        let metref = plir::FunIdent::Static(ty.clone(), method_name.clone());
+        let metref = plir::FunIdent::new_static(ty, &method_name);
         let sig = ast::FunSignature { ident: String::from("#unnamed"), generics, params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
