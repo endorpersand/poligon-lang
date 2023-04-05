@@ -125,6 +125,11 @@ c_intrinsics! {
         fun_type![(PTR_P.clone(), PTR_P.clone(), ~) -> INT_P.clone()],
         fn_type_s![(*PTR_L, *PTR_L, ~) -> *INT_L]
     },
+    mbstowcs: { // (wchar_t*, char*, int) -> int
+        "mbstowcs",
+        fun_type![(PTR_P.clone(), PTR_P.clone(), INT_P.clone()) -> INT_P.clone()],
+        fn_type_s![(*PTR_L, *PTR_L, *INT_L) -> *INT_L]
+    },
     setlocale: { // (int, char*) -> char* /// (cat, locale) -> locale
         "setlocale",
         fun_type![(INT_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
