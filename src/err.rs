@@ -19,35 +19,27 @@ use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 /// This trait requires that the struct provides the name of the error type and the message of the error (in Display).
 /// Implementing these enables functionality to designate *where* an error occurred and to produce 
 /// a formatted error message.
-pub trait GonErr: Display {
+pub trait GonErr: Display + Sized {
     /// The name of the error type (e.g. `syntax error`, `runtime error`)
     fn err_name(&self) -> &'static str;
 
     /// Designate that this error occurred at a specific position
-    fn at(self, p: Cursor) -> FullGonErr<Self> 
-        where Self: Sized
-    {
+    fn at(self, p: Cursor) -> FullGonErr<Self> {
         FullGonErr::new(self, ErrPos::from_point(p))
     }
     
     /// Designate that this error occurred at a few specific positions
-    fn at_points(self, pts: &[Cursor]) -> FullGonErr<Self> 
-        where Self: Sized
-    {
+    fn at_points(self, pts: &[Cursor]) -> FullGonErr<Self> {
         FullGonErr::new(self, ErrPos::from_points(pts))
     }
     
     /// Designate that this error occurred within a range of positions
-    fn at_range(self, range: impl RangeBounds<Cursor>) -> FullGonErr<Self> 
-        where Self: Sized
-    {
+    fn at_range(self, range: impl RangeBounds<Cursor>) -> FullGonErr<Self> {
         FullGonErr::new(self, ErrPos::from_range(range))
     }
 
     /// Designate that this error occurred at an unknown position in the code
-    fn at_unknown(self) -> FullGonErr<Self>
-        where Self: Sized
-    {
+    fn at_unknown(self) -> FullGonErr<Self> {
         FullGonErr::new(self, ErrPos::Unknown)
     }
 }
