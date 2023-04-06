@@ -14,7 +14,7 @@ use crate::{lexer, ast, parser};
 use crate::lexer::token::{FullToken, Token};
 
 pub mod prelude {
-    pub use super::{TestLoader, Test, TestResult, IoExtract};
+    pub use super::{TestLoader, Test, TestResult, IoExtract, TestErr};
 
     macro_rules! load_tests {
         ($f:literal) => {
@@ -45,7 +45,8 @@ pub enum TestErr {
     LexFailed(String),
     TestFailed(String /* name of test */, String /* the error */),
     TestPassed(String /* name of test */),
-    UnknownTest(String)
+    UnknownTest(String),
+    ExitWrong(u8)
 }
 impl From<std::io::Error> for TestErr {
     fn from(value: std::io::Error) -> Self {
@@ -63,7 +64,8 @@ impl Debug for TestErr {
             Self::LexFailed(err) => write!(f, "lexing of test file failed:\n{err}"),
             Self::TestPassed(test) => write!(f, "{test} passed"),
             Self::TestFailed(test, err) => write!(f, "{test} panicked:\n{err}"),
-            Self::UnknownTest(name) => write!(f, "unknown test {name}")
+            Self::UnknownTest(name) => write!(f, "unknown test {name}"),
+            Self::ExitWrong(code) => write!(f, "program exited with code {code:?}")
         }
     }
 }

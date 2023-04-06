@@ -1055,7 +1055,7 @@ impl PLIRCodegen {
     }
 
     fn push_global(&mut self, global: impl Into<plir::HoistedStmt>) {
-        self.globals.push(global.into())
+        self.globals.push(global)
     }
 
     /// Consumes an AST program into PLIR and attaches it to the [`PLIRCodegen`].

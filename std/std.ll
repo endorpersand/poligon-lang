@@ -1100,7 +1100,7 @@ body:
 }
 
 define i8 @main() local_unnamed_addr {
-init:
+body:
   %0 = tail call ptr @setlocale(i64 0, ptr nonnull @locale)
   ret i8 0
 }

@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 use std::io::{BufReader, BufRead};
 use std::path::Path;
+use std::process::ExitCode;
 
 use inkwell::context::Context;
 use poligon_lang::compiler::Compiler;
 use poligon_lang::interpreter::runtime::IoHook;
 use poligon_lang::Interpreter;
 
-fn compile_and_run(fp: impl AsRef<Path>) {
+fn compile_and_run(fp: impl AsRef<Path>) -> ExitCode {
     let ctx = Context::create();
 
     let path = fp.as_ref();
@@ -46,6 +47,6 @@ fn lexical_scope_i_test() {
 
 #[test]
 #[ignore]
-fn lexical_scope_c_test() {
-    compile_and_run("tests/files/lexical_scope_c.gon");
+fn lexical_scope_c_test() -> ExitCode {
+    compile_and_run("tests/files/lexical_scope_c.gon")
 }

@@ -312,6 +312,7 @@ impl<'ctx> Compiler<'ctx> {
         pm.add_function_inlining_pass();
         pm.run_on(&self.module);
     }
+
     /// Writes the type data and module to disk.
     pub fn write_to_disk(&self, write_to: GonSaveTo) -> CompileResult<'ctx, ()> {
         self.optimize_module();
@@ -345,10 +346,15 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// # Safety
     /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
+    pub unsafe fn jit_run(&self) -> CompileResult<'ctx, std::process::ExitCode> {
+        self.jit_run_raw().map(|t| std::process::ExitCode::from(t as u8))
+    }
+
+    /// Executes the current module JIT, and returns the resulting value.
     /// 
-    /// Any calls to this function should ensure that the value returned in Poligon
-    /// would align to the provided type in Rust.
-    pub unsafe fn jit_run<T>(&self) -> CompileResult<'ctx, T> {
+    /// # Safety
+    /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
+    unsafe fn jit_run_raw(&self) -> CompileResult<'ctx, std::ffi::c_int> {
         self.optimize_module();
         let main = self.module.get_function("main").expect("Expected main function");
 

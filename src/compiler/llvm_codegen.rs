@@ -170,24 +170,16 @@ pub(crate) fn module_to_bc(module: &Module, p: impl AsRef<Path>) {
     module.write_bitcode_to_path(p.as_ref());
 }
 
-/// Executes a compiled program JIT, and returns the resulting value.
+/// Executes a function as main (via JIT), and returns the error code.
 /// 
 /// # Safety
-/// Currently, any type can be returned from this function. 
-/// Any calls to this function should ensure that the value returned in Poligon
-/// would align to the provided type in Rust.
-#[allow(unused)]
-pub(crate) unsafe fn module_jit_run<'ctx, T>(module: &Module<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
-    let fn_name = fun.get_name()
-        .to_str()
-        .unwrap();
-
+/// This is unsafe as it is a call to LLVM (not Rust).
+pub(crate) unsafe fn module_jit_run<'ctx>(module: &Module<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, std::ffi::c_int> {
     let jit = module.create_jit_execution_engine(OptimizationLevel::Default)
         .map_err(LLVMErr::LLVMErr)?;
 
     unsafe {
-        let jit_fun = jit.get_function::<unsafe extern "C" fn() -> T>(fn_name).unwrap();
-        Ok(jit_fun.call())
+        Ok(jit.run_function_as_main(fun, &[]))
     }
 }
 
@@ -220,15 +212,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
         }
     }
 
-    /// Executes a compiled program JIT, and returns the resulting value.
+    /// Executes a function as main (via JIT), and returns the error code.
     /// 
     /// # Safety
-    /// Currently, any type can be returned from this function. 
-    /// Any calls to this function should ensure that the value returned in Poligon
-    /// would align to the provided type in Rust.
-    #[allow(unused)]
-    pub unsafe fn jit_run<T>(&self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, T> {
-        module_jit_run(&self.module, fun)
+    /// This is unsafe as it is a call to LLVM (not Rust).
+    pub unsafe fn jit_run(&self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, std::process::ExitCode> {
+        module_jit_run(&self.module, fun).map(|t| std::process::ExitCode::from(t as u8))
     }
 
     /// Writes LLVM bytecode for the current module into the provided file path.
@@ -1420,8 +1409,13 @@ mod tests {
         compiler.load_gon_str(t.source(), None)
             .map_err(|e| t.wrap_compile_err(e))?;
 
-        unsafe { compiler.jit_run() }
-            .map_err(|e| t.wrap_compile_err(e))
+        let result = unsafe { compiler.jit_run_raw() }
+            .map_err(|e| t.wrap_compile_err(e))?;
+
+        match result {
+            0 => Ok(()),
+            t => Err(TestErr::ExitWrong(t as u8))
+        }
     }
 
     load_tests!("compiler",

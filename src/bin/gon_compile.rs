@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::{io, fs};
 
 use clap::Parser;
@@ -32,7 +33,7 @@ struct Cli {
     file: PathBuf
 }
 
-fn main() -> io::Result<()> {
+fn main() -> io::Result<ExitCode> {
     let args = Cli::parse();
     let fp = args.file;
 
@@ -82,7 +83,7 @@ fn main() -> io::Result<()> {
     unwrap_or_exit! { compiler.write_to_disk(GonSaveTo::SameLoc(fp.as_ref())) };
     unwrap_or_exit! { compiler.to_ll(fp.with_extension("ll")) };
 
-    unwrap_or_exit! { unsafe { compiler.jit_run::<()>() } }
+    let exit = unwrap_or_exit! { unsafe { compiler.jit_run() } };
     
-    Ok(())
+    Ok(exit)
 }
