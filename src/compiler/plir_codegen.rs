@@ -684,7 +684,7 @@ impl DeclaredTypes {
         }
         for (ident, val_ty) in &self.values {
             if let plir::Type::Fun(f) = val_ty {
-                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.fun_signature(ident.clone())))?
+                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.extern_fun_sig(ident.clone())))?
             }
             // TODO: don't ignore other types of decls
         }
@@ -716,11 +716,16 @@ impl Globals {
 
         match &stmt {
             HoistedStmt::FunDecl(f) => {
-                self.declared.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
+                if !f.sig.private {
+                    self.declared.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
+                }
             },
             HoistedStmt::ExternFunDecl(f) => {
                 if self.declared.values.contains_key(&f.ident) { return; }
-                self.declared.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
+
+                if !f.private {
+                    self.declared.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
+                }
             },
             HoistedStmt::ClassDecl(c) => {
                 self.declared.types.insert(c.ty.clone(), c.clone());
@@ -902,6 +907,7 @@ impl PLIRCodegen {
             // if it hasn't been registered
 
             self.push_global(plir::FunSignature {
+                private: false,
                 ident: ident.as_fun_ident().into_owned(),
                 params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
                     rt: Default::default(),
@@ -1454,7 +1460,7 @@ impl PLIRCodegen {
             Ok((new_params, ret))
         })?;
 
-        let fs = plir::FunSignature { ident: new_id, params, ret, varargs };
+        let fs = plir::FunSignature { private: !self.blocks.is_empty(), ident: new_id, params, ret, varargs };
         self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
         Ok(fs)
     }

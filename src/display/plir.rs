@@ -151,7 +151,10 @@ impl Display for FunIdent {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, params, ret, varargs } = self;
+        let FunSignature { private, ident, params, ret, varargs } = self;
+        if *private {
+            write!(f, "priv ")?;
+        }
         write!(f, "fun {ident}(")?;
 
         let mut pd: Vec<_> = params.iter()

@@ -288,9 +288,9 @@ impl super::PLIRCodegen {
             op::Binary::LogOr  => return Ok(None),
         };
 
+        let lrange = left.range();
         let ident = self.get_class(left)?
-            .get_method(&format!("{method_name}_{right}"))
-            .unwrap();
+            .get_method_or_err(&format!("{method_name}_{right}"), lrange)?;
 
         let e = self.get_var_type(&ident)?
             .cloned()

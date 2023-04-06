@@ -18,7 +18,7 @@ use std::path::Path;
 use inkwell::{OptimizationLevel, AddressSpace};
 use inkwell::basic_block::BasicBlock;
 use inkwell::context::Context;
-use inkwell::module::Module;
+use inkwell::module::{Module, Linkage};
 use inkwell::support::LLVMString;
 use inkwell::types::{BasicTypeEnum, PointerType, BasicType, FunctionType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue, GlobalValue};
@@ -269,7 +269,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
         for (ident, ty) in &dtypes.values {
             if let plir::Type::Fun(f) = ty {
-                let sig = f.fun_signature(ident.clone());
+                let sig = f.extern_fun_sig(ident.clone());
                 self.compile(&sig)?;
             }
             // TODO: allow other types
@@ -426,7 +426,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Create a function value from the function's PLIR signature.
     fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
-        let plir::FunSignature { ident, params, ret, varargs } = sig;
+        let plir::FunSignature { private, ident, params, ret, varargs } = sig;
 
         let fun = match self.get_fn_by_plir_ident(ident) {
             Some(f) => f,
@@ -437,7 +437,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
                 let fun_ty = self.get_layout_or_void(ret)?
                     .fn_type(&arg_tys, *varargs);
-                let fun = self.module.add_function(&ident.as_llvm_ident(), fun_ty, None);
+                let linkage = match private {
+                    true  => Some(Linkage::Private),
+                    false => None,
+                };
+                let fun = self.module.add_function(&ident.as_llvm_ident(), fun_ty, linkage);
                 let fun_name = fun.get_name()
                     .to_str()
                     .expect("Expected UTF-8 function name")

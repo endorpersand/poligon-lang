@@ -360,6 +360,8 @@ impl AsFunIdent for String {
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
+    /// Whether or not the function is accessible from other modules
+    pub private: bool,
     /// The function's identifier
     pub ident: FunIdent,
     /// The function's parameters

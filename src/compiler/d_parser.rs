@@ -651,6 +651,6 @@ impl DParser {
         let ret = self.expect_type(true)?;
         self.expect(token![;])?;
 
-        Ok(plir::FunSignature { ident, params, varargs, ret })
+        Ok(plir::FunSignature { private: false, ident, params, varargs, ret })
     }
 }

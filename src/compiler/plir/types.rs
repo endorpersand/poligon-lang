@@ -42,7 +42,7 @@ impl FunType {
     }
 
     /// Constructs a function signature (with parameter names lost) out of a given function type.
-    pub fn fun_signature(&self, ident: super::FunIdent) -> super::FunSignature {
+    pub fn extern_fun_sig(&self, ident: super::FunIdent) -> super::FunSignature {
         let params = self.params.iter()
             .enumerate()
             .map(|(i, t)| super::Param {
@@ -54,6 +54,7 @@ impl FunType {
             .collect();
 
         super::FunSignature {
+            private: false,
             ident,
             params,
             varargs: self.varargs,
