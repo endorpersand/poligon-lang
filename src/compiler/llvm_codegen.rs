@@ -673,7 +673,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         use plir::{HoistedStmt, FunIdent};
 
+        let _void = compiler.ctx.void_type();
         let _i8 = compiler.ctx.i8_type();
+
         // split the functions from everything else:
         let mut main_fun = None;
         let mut fun_bodies = vec![];
@@ -710,7 +712,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             (None, stmts) => {
                 let main_fn = compiler.module.add_function(
                     "main", 
-                    fn_type![() -> _i8],
+                    fn_type![() -> _void],
                     None
                 );
                 (main_fn, Some(stmts))
@@ -745,20 +747,35 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             for stmt in stmts {
                 stmt.write_value(compiler)?;
             }
-            compiler.builder.build_return(Some(&_i8.const_zero()));
+            compiler.builder.build_return(None);
         }
 
-        // main initializer
-        let main_bb = main.get_first_basic_block().unwrap();
-        let init_bb = compiler.ctx.prepend_basic_block(main_bb, "init");
-        compiler.builder.position_at_end(init_bb);
+        // fix main
+        // 1. currently, main is () -> void. we need it to be () -> #byte.
+        // 2. a locale needs to be registered so that wchar_t functions properly
 
+        main.as_global_value().set_name("main.inner");
+        main.set_linkage(Linkage::Private);
+
+        let inner_main = main;
+        let main = compiler.module.add_function(
+            "main", 
+            _i8.fn_type(&[], false),
+            None
+        );
+
+        let bb = compiler.ctx.append_basic_block(main, "body");
+        compiler.builder.position_at_end(bb);
+        
+        // register default locale
         let setlocale = compiler.import_intrinsic("#setlocale")?;
         let _int = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
         compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
 
-        compiler.builder.build_unconditional_branch(main_bb);
+        // wrap inner main
+        compiler.builder.build_call(inner_main, &[], "");
+        compiler.builder.build_return(Some(&_i8.const_zero()));
 
         match compiler.module.verify() {
             Ok(_)  => Ok(main),
