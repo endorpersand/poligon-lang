@@ -107,6 +107,7 @@ impl std::fmt::Display for DParseErr {
         }
     }
 }
+
 /// A [`Result`] type for operations in the parsing process.
 pub type DParseResult<T> = Result<T, FullDParseErr>;
 type FullDParseErr = FullGonErr<DParseErr>;
@@ -167,11 +168,13 @@ impl DParser {
             match self.peek_token() {
                 Some(token![class]) => {
                     let cls = self.expect_class_decl()?;
-                    self.codegen.register_cls(cls, None);
+                    self.codegen.register_cls(cls, None)
+                        .map_err(|e| e.map(DParseErr::PLIRErr))?;
                 },
                 Some(token![extern]) => {
                     let fs = self.expect_extern_decl()?;
-                    self.codegen.register_fun_sig(fs);
+                    self.codegen.register_fun_sig(fs)
+                        .map_err(|e| e.map(DParseErr::PLIRErr))?;
                 },
                 Some(_) => Err(DParseErr::UnexpectedToken.at_range(self.peek_loc()))?,
                 None => break

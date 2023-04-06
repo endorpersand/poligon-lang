@@ -47,7 +47,10 @@ impl Display for HoistedStmt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
-            HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
+            HoistedStmt::ExternFunDecl(fs) => {
+                write!(f, "extern ")?;
+                fun_signature(f, fs, true)
+            },
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
             HoistedStmt::IGlobal(id, val) => {
                 write!(f, "global ")?;
@@ -149,21 +152,25 @@ impl Display for FunIdent {
     }
 }
 
+fn fun_signature(f: &mut Formatter<'_>, fs: &FunSignature, external: bool) -> std::fmt::Result {
+    let FunSignature { private, ident, params, ret, varargs } = fs;
+    if !external && *private {
+        write!(f, "priv ")?;
+    }
+    write!(f, "fun {ident}(")?;
+    
+    let mut pd: Vec<_> = params.iter()
+        .map(|t| t as _)
+        .collect();
+    if *varargs { pd.push(&".." as _); }
+    fmt_dyn_list(f, &pd)?;
+    
+    write!(f, ") -> {ret}")
+}
+
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { private, ident, params, ret, varargs } = self;
-        if *private {
-            write!(f, "priv ")?;
-        }
-        write!(f, "fun {ident}(")?;
-
-        let mut pd: Vec<_> = params.iter()
-            .map(|t| t as _)
-            .collect();
-        if *varargs { pd.push(&".." as _); }
-        fmt_dyn_list(f, &pd)?;
-
-        write!(f, ") -> {ret}")
+        fun_signature(f, self, false)
     }
 }
 

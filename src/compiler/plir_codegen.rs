@@ -79,6 +79,10 @@ pub enum PLIRErr {
     OpErr(OpErr),
     /// Cannot deref this expression (because it is not a pointer)
     CannotDeref,
+    /// Identifier has multiple definitions
+    DuplicateValueDefs(plir::FunIdent),
+    /// Type has multiple definitions
+    DuplicateTypeDefs(plir::Type),
 }
 
 type FullPLIRErr = FullGonErr<PLIRErr>;
@@ -115,6 +119,8 @@ impl GonErr for PLIRErr {
             => "type error",
             
             | PLIRErr::UndefinedVarAttr(_)
+            | PLIRErr::DuplicateValueDefs(_)
+            | PLIRErr::DuplicateTypeDefs(_)
             => "name error",
             
             | PLIRErr::UninitializedField(_, _)
@@ -143,6 +149,8 @@ impl std::fmt::Display for PLIRErr {
                 FunIdent::Simple(name)     => write!(f, "could not find identifier '{name}'"),
                 FunIdent::Static(ty, attr) => write!(f, "could not find attribute '{attr}' on '{ty}'"),
             },
+            PLIRErr::DuplicateValueDefs(t)        => write!(f, "{t} has multiple definitions"),
+            PLIRErr::DuplicateTypeDefs(t)         => write!(f, "{t} has multiple definitions"),
             PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
             PLIRErr::CannotAccessOnMethod         => write!(f, "cannot access on method"),
             PLIRErr::CannotAssignToMethod         => write!(f, "cannot assign to method"),
@@ -691,6 +699,25 @@ impl DeclaredTypes {
 
         Ok(())
     }
+
+    fn push(&mut self, stmt: &plir::HoistedStmt) {
+        use plir::HoistedStmt;
+
+        match stmt {
+            HoistedStmt::FunDecl(f) => {
+                self.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
+            },
+            HoistedStmt::ExternFunDecl(f) => {
+                self.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
+            },
+            HoistedStmt::ClassDecl(c) => {
+                self.types.insert(c.ty.clone(), c.clone());
+            },
+            HoistedStmt::IGlobal(id, _) => {
+                self.values.insert(plir::FunIdent::new_simple(id), plir::ty!("#ptr"));
+            },
+        }
+    }
 }
 impl std::ops::AddAssign for DeclaredTypes {
     fn add_assign(&mut self, rhs: Self) {
@@ -699,9 +726,15 @@ impl std::ops::AddAssign for DeclaredTypes {
     }
 }
 
+#[derive(PartialEq, Eq, Hash)]
+enum GlobalKey {
+    Value(plir::FunIdent),
+    Type(plir::Type)
+}
+
 #[derive(Default)]
 struct Globals {
-    stmts: Vec<plir::HoistedStmt>,
+    stmts: IndexMap<GlobalKey, plir::HoistedStmt>,
     declared: DeclaredTypes
 }
 
@@ -709,33 +742,47 @@ impl Globals {
     /// Includes the hoisted statement into the global hoisted statement list.
     /// 
     /// This will also export the type/value into [`DeclaredTypes`].
-    fn push(&mut self, stmt: impl Into<plir::HoistedStmt>) {
+    fn push(&mut self, stmt: impl Into<plir::HoistedStmt>) -> PLIRResult<()> {
         use plir::HoistedStmt;
+        use indexmap::map::Entry;
 
         let stmt: HoistedStmt = stmt.into();
 
-        match &stmt {
+        let (key, should_export) = match &stmt {
             HoistedStmt::FunDecl(f) => {
-                if !f.sig.private {
-                    self.declared.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
-                }
+                (GlobalKey::Value(f.sig.ident.clone()), !f.sig.private)
             },
             HoistedStmt::ExternFunDecl(f) => {
-                if self.declared.values.contains_key(&f.ident) { return; }
-
-                if !f.private {
-                    self.declared.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
-                }
+                (GlobalKey::Value(f.ident.clone()), !f.private)
             },
             HoistedStmt::ClassDecl(c) => {
-                self.declared.types.insert(c.ty.clone(), c.clone());
+                (GlobalKey::Type(c.ty.clone()), true)
             },
             HoistedStmt::IGlobal(id, _) => {
-                self.declared.values.insert(plir::FunIdent::new_simple(id), plir::ty!("#ptr"));
+                let id = plir::FunIdent::new_simple(id);
+                (GlobalKey::Value(id), true)
             }
+        };
+
+        match self.stmts.entry(key) {
+            Entry::Occupied(e) => match (e.get(), &stmt) {
+                // ignore in this case:
+                (HoistedStmt::ExternFunDecl(l), HoistedStmt::ExternFunDecl(r)) if l == r => {},
+                // throw in every other case:
+                _ => match e.remove_entry().0 {
+                    GlobalKey::Value(k) => Err(PLIRErr::DuplicateValueDefs(k))?,
+                    GlobalKey::Type(k)  => Err(PLIRErr::DuplicateTypeDefs(k))?,
+                }
+            },
+            Entry::Vacant(e) => {
+                if should_export {
+                    self.declared.push(&stmt);
+                }
+                e.insert(stmt);
+            },
         }
 
-        self.stmts.push(stmt);
+        Ok(())
     }
 }
 
@@ -805,7 +852,7 @@ impl PLIRCodegen {
         Self { 
             program: top, 
             globals: Globals {
-                stmts: vec![],
+                stmts: IndexMap::new(),
                 declared
             },
             blocks: vec![],
@@ -834,7 +881,8 @@ impl PLIRCodegen {
             }
         }?;
 
-        Ok(plir::Program(self.globals.stmts, block))
+        let stmts = self.globals.stmts.into_values().collect();
+        Ok(plir::Program(stmts, block))
     }
 
     /// Gets all the types declared by this code generation.
@@ -884,7 +932,7 @@ impl PLIRCodegen {
                     let UnresolvedValue::ExternFun(id, fs) = entry.remove() else { unreachable!() };
                     
                     let fs = self.consume_fun_sig(id, fs)?;
-                    self.push_global(fs);
+                    self.push_global(fs)?;
                 },
                 UnresolvedValue::Fun(_, _) => {
                     let (k, UnresolvedValue::Fun(id, fd)) = entry.remove_entry() else { unreachable!() };
@@ -907,7 +955,7 @@ impl PLIRCodegen {
             // if it hasn't been registered
 
             self.push_global(plir::FunSignature {
-                private: false,
+                private: true,
                 ident: ident.as_fun_ident().into_owned(),
                 params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
                     rt: Default::default(),
@@ -917,7 +965,7 @@ impl PLIRCodegen {
                 }).collect(),
                 varargs: t.varargs,
                 ret: (*t.ret).clone(),
-            });
+            })?;
             self.declare(ident, plir::Type::Fun(t.clone()));
         }
 
@@ -1054,7 +1102,7 @@ impl PLIRCodegen {
         }
     }
 
-    fn push_global(&mut self, global: impl Into<plir::HoistedStmt>) {
+    fn push_global(&mut self, global: impl Into<plir::HoistedStmt>) -> PLIRResult<()> {
         self.globals.push(global)
     }
 
@@ -1089,7 +1137,7 @@ impl PLIRCodegen {
                 },
                 ast::Stmt::IGlobal(id, s) => {
                     self.program.declare(&id, plir::ty!("#ptr"));
-                    self.push_global(plir::HoistedStmt::IGlobal(id, s));
+                    self.push_global(plir::HoistedStmt::IGlobal(id, s))?;
                 },
                 ast::Stmt::FitClassDecl(ty, methods) => {
                     let ty = self.consume_type(ty)?;
@@ -1115,7 +1163,7 @@ impl PLIRCodegen {
             match unres_values.remove(&ident.clone()).unwrap() {
                 UnresolvedValue::ExternFun(id, fs) => {
                     let fs = self.consume_fun_sig(id, fs)?;
-                    self.push_global(fs);
+                    self.push_global(fs)?;
                 },
                 UnresolvedValue::Fun(id, fd) => {
                     let ast::FunDecl { sig, block } = fd;
@@ -1429,9 +1477,9 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn register_fun_sig(&mut self, fs: plir::FunSignature) {
+    pub(super) fn register_fun_sig(&mut self, fs: plir::FunSignature) -> PLIRResult<()> {
         self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
-        self.push_global(fs);
+        self.push_global(fs)
     }
 
     /// Consume a function signature and convert it into a PLIR function signature.
@@ -1491,7 +1539,7 @@ impl PLIRCodegen {
 
         let fun_decl = plir::FunDecl { sig, block };
         
-        self.push_global(fun_decl);
+        self.push_global(fun_decl)?;
         Ok(self.peek_block().is_open())
     }
 
@@ -1528,7 +1576,7 @@ impl PLIRCodegen {
     pub(super) fn register_cls(
         &mut self, cls: plir::Class, 
         methods: impl IntoIterator<Item=ast::MethodDecl>
-    ) {
+    ) -> PLIRResult<()> {
         let ib = self.peek_block();
         
         ib.insert_class(&cls);
@@ -1536,7 +1584,7 @@ impl PLIRCodegen {
             ib.insert_unresolved_method(&cls.ty, method);
         }
 
-        self.push_global(cls);
+        self.push_global(cls)
     }
 
     fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
@@ -1595,7 +1643,7 @@ impl PLIRCodegen {
         })?;
         
         let cls = plir::Class { ty: ty.clone(), fields };
-        self.register_cls(cls, methods);
+        self.register_cls(cls, methods)?;
         
         Ok(())
     }
