@@ -309,7 +309,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let pm = PassManager::create(());
         pm_builder.populate_module_pass_manager(&pm);
-        pm.add_function_inlining_pass();
+        if self.opt != OptimizationLevel::None {
+            pm.add_function_inlining_pass();
+        }
         pm.run_on(&self.module);
     }
 
