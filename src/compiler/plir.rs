@@ -141,16 +141,6 @@ mod stmt {
                 | ClassDecl(_)
             )
         }
-
-        /// Gets the identifier associated with this hoisted statement.
-        pub fn get_ident(&self) -> &str {
-            match self {
-                HoistedStmt::FunDecl(f) => &f.sig.ident,
-                HoistedStmt::ExternFunDecl(f) => &f.ident,
-                HoistedStmt::ClassDecl(c) => &c.ident,
-                HoistedStmt::IGlobal(name, _) => name,
-            }
-        }
     }
 
     impl ProcStmt {
@@ -273,6 +263,91 @@ pub struct Param {
     pub ty: Type
 }
 
+/// The possible identifiers a function can have.
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum FunIdent {
+    /// Just an identifier. For functions in scope.
+    Simple(String),
+    /// A method identifier.
+    Static(Type, String)
+}
+
+impl FunIdent {
+    /// Finds the string identifier of this value when represented in LLVM.
+    pub fn as_llvm_ident(&self) -> Cow<str> {
+        match self {
+            FunIdent::Simple(s) => Cow::from(s),
+            FunIdent::Static(ty, attr) => Cow::from(format!("{ty}::{attr}")),
+        }
+    }
+
+    /// Creates a new [`FunIdent::Simple`] identifier.
+    pub fn new_simple(id: &str) -> Self {
+        Self::Simple(id.to_string())
+    }
+
+    /// Creates a new [`FunIdent::Static`] identifier.
+    pub fn new_static(ty: &Type, attr: &str) -> Self {
+        Self::Static(ty.clone(), attr.to_string())
+    }
+
+    /// Find the generic resolution type for this function identifier.
+    /// 
+    /// When resolving the function associated with this function ident,
+    /// it may need to resolve generic parameters.
+    /// 
+    /// If this function identifier is a method identifier, this accesses
+    /// the type the method comes from (which can be used to identify generic parameters).
+    /// 
+    /// Otherwise, this returns a type without any type parameters.
+    pub(super) fn resolution_type(&self) -> Cow<Type> {
+        match self {
+            FunIdent::Simple(_) => Cow::Owned(ty!(Type::S_VOID)),
+            FunIdent::Static(t, _) => Cow::Borrowed(t),
+        }
+    }
+
+    /// Constructs a PLIR expression out of this function identifier.
+    /// 
+    /// This can either be an identifier expression or a static path.
+    pub fn into_expr(self, fun_ty: Type) -> Expr {
+        match self {
+            FunIdent::Simple(id) => Expr::new(fun_ty, ExprType::Ident(id)),
+            FunIdent::Static(cls_ty, attr) => Path::Static(cls_ty, attr, fun_ty).into(),
+        }
+    }
+}
+
+pub(crate) trait AsFunIdent: indexmap::Equivalent<FunIdent> {
+    fn as_fun_ident(&self) -> Cow<FunIdent>;
+}
+impl AsFunIdent for FunIdent {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl indexmap::Equivalent<FunIdent> for str {
+    fn equivalent(&self, key: &FunIdent) -> bool {
+        matches!(key, FunIdent::Simple(t) if self == t)
+    }
+}
+impl AsFunIdent for str {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        Cow::Owned(FunIdent::new_simple(self))
+    }
+}
+impl indexmap::Equivalent<FunIdent> for String {
+    fn equivalent(&self, key: &FunIdent) -> bool {
+        self.as_str().equivalent(key)
+    }
+}
+impl AsFunIdent for String {
+    fn as_fun_ident(&self) -> Cow<FunIdent> {
+        self.as_str().as_fun_ident()
+    }
+}
+
 /// The function header / signature.
 /// 
 /// This struct corresponds to [`ast::FunSignature`],
@@ -286,7 +361,7 @@ pub struct Param {
 #[derive(Debug, PartialEq, Eq)]
 pub struct FunSignature {
     /// The function's identifier
-    pub ident: String,
+    pub ident: FunIdent,
     /// The function's parameters
     pub params: Vec<Param>,
     /// Whether the function is varargs
@@ -481,9 +556,11 @@ pub enum ExprType {
 
     /// A `for` loop.
     For {
-        /// Variable to bind elements of the iterator to.
+        /// Variable to bind elements of the iterator to
         ident: String,
-        /// The iterator.
+        /// The type of the element
+        element_type: Type,
+        /// The iterator
         iterator: Box<Expr>,
         /// The block to run in each iteration.
         block: Block

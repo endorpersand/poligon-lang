@@ -17,40 +17,37 @@ class #dynarray {
             let old_buf = self.buf;
             let new_buf = #malloc(new_cap);
             #memcpy(new_buf, old_buf, self.len);
-            #free(old_buf);
+            self.buf = new_buf;
             self.cap = new_cap;
-        }
-    }
-
-    fun self.push(byte: #byte) {
-        self.resize(self.len + 1);
-        
-        let push_ptr = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
-        self.len = self.len + 1;
-        *push_ptr = byte;
-    }
-
-    fun self.pop() {
-        if self.len > 0 {
-            self.len = self.len - 1;
-        } else {
-            self.len = 0;
+            #free(old_buf);
         }
     }
 
     fun self.extend(add_buf: #ptr, add_len: int) {
         self.resize(self.len + add_len);
 
-        let shift_buf = <#ll_array<#byte>>::#gep(self.buf, 0, self.len);
+        let shift_buf = #byte::#gep(self.buf, self.len);
         #memcpy(shift_buf, add_buf, add_len);
 
         self.len = self.len + add_len;
+    }
+
+    fun self.take(sub_len: int) -> #ptr {
+        if self.len >= sub_len {
+            self.len = self.len - sub_len;
+            #byte::#gep(self.buf, self.len);
+        } else {
+            throw "cannot take element from array";
+        }
     }
 }
 
 class string {
     inner: #dynarray
-    fun ::new(contents: #ptr, len: int) -> string {
+    fun ::new() -> string {
+        string #{ inner: #dynarray::new(0) };
+     }
+    fun ::from_raw(contents: #ptr, len: int) -> string {
         let inner = #dynarray::new(len);
         inner.extend(contents, len);
 
@@ -76,6 +73,167 @@ class string {
     fun self.to_string() -> string {
         self;
     }
+    
+    fun self.slice_bytes(start: int, end: int) -> string {
+        if 0 <= start && start <= end && end <= self.len() {
+            string #{
+                inner: #dynarray #{
+                    buf: #byte::#gep(self.inner.buf, start),
+                    len: end - start,
+                    cap: self.inner.cap - start
+                }
+            };
+        } else {
+            throw "invalid slice";
+        }
+    }
+
+    fun self.chars() -> string_chars {
+        string_chars::new(self);
+    }
+}
+
+class string_chars {
+    str: string,
+    buf: #ptr
+
+    fun ::new(str: string) -> string_chars {
+        string_chars #{
+            str, buf: #malloc(char::size_of())
+        };
+    }
+
+    fun self.next() -> option<char> {
+        if self.str.len() == 0 {
+            <option<char>>::none();
+        } else {
+            let bytes_read = #mbtowc(self.buf, self.str.inner.buf, 6.min(self.str.len()));
+
+            if bytes_read < 1 {
+                self.str = string::new();
+                <option<char>>::none();
+            } else {
+                self.str = self.str.slice_bytes(bytes_read, self.str.len());
+
+                let chr: char = *self.buf;
+                <option<char>>::some(chr);
+            }
+        }
+    }
+}
+
+class list<T> {
+    inner: #dynarray
+
+    fun ::new() -> list<T> {
+        <list<T>> #{ inner: #dynarray::new(0) };
+    }
+    fun ::from_raw(contents: #ptr, len: int) -> list<T> {
+        let inner = #dynarray::new(len * T::size_of());
+        inner.extend(contents, len * T::size_of());
+
+        <list<T>> #{ inner };
+    }
+
+    fun self.len() -> int {
+        self.inner.len.idiv(T::size_of());
+    }
+    fun self.push(e: T) {
+        let buf = T::#alloca();
+        *buf = e;
+        self.inner.extend(buf, T::size_of());
+    }
+    fun self.pop() -> T {
+        *self.inner.take(T::size_of());
+    }
+    
+    fun self.extend(lst: list<T>) {
+        for e in lst.iterator() {
+            self.push(e);
+        }
+    }
+    fun self.get(i: int) -> T {
+        if 0 <= i && i < self.len() {
+            *T::#gep(self.inner.buf, i);
+        } else {
+            throw "array index out of bounds";
+        }
+    }
+    fun self.set(i: int, t: T) {
+        if 0 <= i && i < self.len() {
+            *T::#gep(self.inner.buf, i) = t;
+        } else {
+            throw "array index out of bounds";
+        }
+    }
+    fun self.to_string() -> string {
+        if self.len() == 0 {
+            "[]";
+        } else {
+            let result = "[";
+            let it = self.iterator();
+
+            result = result + it.get();
+            for e in it {
+                result = ", " + e;
+            }
+            result = result + "]";
+
+            result;
+        }
+    }
+
+    fun self.iterator() -> listiterator<T> {
+        <listiterator<T>>::new(self);
+    }
+}
+class option<T> {
+    present: bool,
+    value: #ptr
+
+    fun ::some(t: T) -> option<T> {
+        let value = #malloc(T::size_of());
+        *value = t;
+        <option<T>> #{ present: true, value };
+    }
+    fun ::none() -> option<T> {
+        <option<T>> #{ present: false, value: #ptr::null() };
+    }
+    fun self.get() -> T {
+        if self.present {
+            *self.value;
+        } else {
+            throw "no value present";
+        }
+    }
+    fun self.to_string() -> string {
+        if self.present {
+            let value: T = *self.value;
+            "some(" + value + ")";
+        } else {
+            "none";
+        }
+    }
+}
+class listiterator<T> {
+    inner: list<T>,
+    i: int
+
+    fun ::new(inner: list<T>) -> listiterator<T> {
+        <listiterator<T>> #{
+            inner, i: 0
+        };
+    }
+
+    fun self.next() -> option<T> {
+        if self.i >= self.inner.len() {
+            <option<T>>::none();
+        } else {
+            let t = <option<T>>::some(self.inner.get(self.i));
+            self.i = self.i + 1;
+            t;
+        }
+    }
 }
 
 global _tmpl_print = "%.*s\n\0";
@@ -100,6 +258,13 @@ fit class int {
         };
     }
 
+    fun self.idiv(d: int) -> int {
+        if d == 0 {
+            throw "division by zero error";
+        } else {
+            #idiv(self, d);
+        }
+    }
     fun self.abs() -> int {
         #abs(self, false);
     }
@@ -118,19 +283,19 @@ fit class int {
             0;
         }
     }
-    fun self.count_ones() {
+    fun self.count_ones() -> int {
         #ctpop(self);
     }
-    fun self.reverse_bits() {
+    fun self.reverse_bits() -> int {
         #bitreverse(self);
     }
-    fun self.reverse_bytes() {
+    fun self.reverse_bytes() -> int {
         #bswap(self);
     }
-    fun self.leading_zeroes() {
+    fun self.leading_zeroes() -> int {
         #ctlz(self, false);
     }
-    fun self.trailing_zeroes() {
+    fun self.trailing_zeroes() -> int {
         #cttz(self, false);
     }
 }
@@ -285,5 +450,21 @@ fit class char {
         string #{
             inner: #dynarray #{ buf, len, cap }
         };
+    }
+}
+
+fit class bool {
+    fun self.to_string() -> string {
+        if self {
+            "true";
+        } else {
+            "false";
+        }
+    }
+}
+
+fit class #ptr {
+    fun ::null() -> #ptr {
+        #ptrnull();
     }
 }

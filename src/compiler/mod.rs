@@ -34,6 +34,7 @@ pub mod plir;
 mod llvm;
 pub(self) mod internals;
 pub mod llvm_codegen;
+mod d_parser;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
@@ -50,8 +51,9 @@ pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
 use crate::err::{FullGonErr, GonErr};
 use crate::lexer;
-use crate::parser::{self, Parser};
+use crate::parser;
 
+use self::d_parser::DParser;
 use self::plir_codegen::DeclaredTypes;
 
 use lazy_static::lazy_static;
@@ -202,13 +204,8 @@ impl<'ctx> Compiler<'ctx> {
 
     fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
-        let parser = Parser::new(lexed, false);
-        let ast = cast_e(parser.unwrap_d_program(), code)?;
-
-        let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
-        cast_e(cg.consume_program(ast), code)?;
-        
-        let dt = cg.declared_types();
+        let parser = DParser::new(lexed, self.declared_types.clone());
+        let dt = cast_e(parser.unwrap_dtypes(), code)?;
         Ok(dt)
     }
 
@@ -312,7 +309,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let pm = PassManager::create(());
         pm_builder.populate_module_pass_manager(&pm);
-
+        pm.add_function_inlining_pass();
         pm.run_on(&self.module);
     }
     /// Writes the type data and module to disk.

@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use crate::ast;
 use crate::compiler::plir_codegen::OpErr;
 
-use super::{Split, Located};
+use super::Split;
 
 /// A type expression.
 /// 
@@ -42,7 +42,7 @@ impl FunType {
     }
 
     /// Constructs a function signature (with parameter names lost) out of a given function type.
-    pub fn fun_signature(&self, ident: &str) -> super::FunSignature {
+    pub fn fun_signature(&self, ident: super::FunIdent) -> super::FunSignature {
         let params = self.params.iter()
             .enumerate()
             .map(|(i, t)| super::Param {
@@ -54,7 +54,7 @@ impl FunType {
             .collect();
 
         super::FunSignature {
-            ident: ident.to_string(),
+            ident,
             params,
             varargs: self.varargs,
             ret: (*self.ret).clone(),
@@ -121,8 +121,8 @@ impl Type {
         }
     }
 
-    pub(crate) fn fun_type(params: Vec<Type>, ret: Type, var_args: bool) -> Self {
-        Type::Fun(FunType::new(params, ret, var_args))
+    pub(crate) fn fun_type(params: impl IntoIterator<Item=Type>, ret: Type, var_args: bool) -> Self {
+        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
     }
 
     /// Test if this type is `never`.
@@ -243,6 +243,18 @@ impl Type {
             },
         }
     }
+
+    /// Gets the generic parameters of this type.
+    /// 
+    /// This function does not allocate or clone anything.
+    pub fn generic_args(&self) -> Cow<[Type]> {
+        match self {
+            Type::Prim(_)       => Cow::from(vec![]),
+            Type::Generic(_, p) => Cow::from(p),
+            Type::Tuple(_)      => Cow::from(vec![]),
+            Type::Fun(_)        => Cow::from(vec![]),
+        }
+    }
 }
 
 impl<'a> PartialEq<TypeRef<'a>> for Type {
@@ -299,21 +311,6 @@ macro_rules! ty {
 }
 pub(crate) use ty;
 
-impl From<ast::Type> for Type {
-    fn from(ty: ast::Type) -> Self {
-        let ast::Type(ident, params) = ty;
-        
-        if params.is_empty() {
-            Type::Prim(ident)
-        } else {
-            let p = params.into_iter()
-                .map(|Located(t, _)| t.into())
-                .collect();
-            Type::Generic(ident, p)
-        }
-    }
-}
-
 /// A class declaration.
 /// 
 /// This corresponds to [`ast::Class`].
@@ -323,10 +320,10 @@ impl From<ast::Type> for Type {
 /// Those methods are redefined as functions in PLIR codegen.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Class {
-    /// Name of the class
-    pub ident: String,
+    /// The associated [`Type`] of this class
+    pub ty: Type,
     /// A mapping of identifiers to fields in the class
-    pub fields: IndexMap<String, FieldDecl>
+    pub fields: IndexMap<String, Field>
 }
 
 /// A field declaration.
@@ -334,7 +331,7 @@ pub struct Class {
 /// This corresponds to [`ast::FieldDecl`].
 /// Unlike `ast::FieldDecl`, the field's name is omitted (and has been moved to [`Class`]).
 #[derive(Debug, PartialEq, Clone)]
-pub struct FieldDecl {
+pub struct Field {
     /// Whether the field can be reassigned later
     pub rt: ast::ReasgType,
     

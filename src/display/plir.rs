@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{ReasgType, MutType};
@@ -22,11 +21,18 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
         write!(f, "{b}")
     }
 }
-fn wrap_ident(ident: &str) -> Cow<str> {
+
+fn wrap_ident(ident: &str, f: &mut Formatter<'_>) -> std::fmt::Result {
     if ident.chars().all(|t| t.is_alphanumeric() || t == '_') {
-        Cow::from(ident)
+        ident.fmt(f)
     } else {
-        Cow::from(format!("{ident:?}"))
+        write!(f, "{ident:?}")
+    }
+}
+fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
+    match ty {
+        Type::Prim(ident) => wrap_ident(ident, f),
+        _ => write!(f, "<{ty}>")
     }
 }
 
@@ -43,7 +49,11 @@ impl Display for HoistedStmt {
             HoistedStmt::FunDecl(fd) => write!(f, "{fd}"),
             HoistedStmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
-            HoistedStmt::IGlobal(id, val) => write!(f, "global {} = {val:?}", wrap_ident(id)),
+            HoistedStmt::IGlobal(id, val) => {
+                write!(f, "global ")?;
+                wrap_ident(id, f)?;
+                write!(f, " = {val:?}")
+            },
         }
     }
 }
@@ -68,17 +78,30 @@ impl Display for ProcStmt {
 }
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Class { ident, fields: field_map } = self;
-        write!(f, "class {} {{ ", wrap_ident(ident))?;
+        let Class { ty, fields: field_map } = self;
+        write!(f, "class ")?;
+        wrap_ty(ty, f)?;
+        
+        if field_map.is_empty() {
+            write!(f, "{{ }}")
+        } else {
+            writeln!(f, " {{")?;
 
-        let fields: Vec<_> = field_map.values().collect();
-        fmt_list(f, &fields)?;
-        write!(f, " }}")
+            for (fname, fdcl) in field_map.iter().take(field_map.len() - 1) {
+                writeln!(f, "{:4}{fname}: {fdcl},", "")?;
+            }
+
+            let (fname, fdcl) = field_map.last().unwrap();
+            writeln!(f, "{:4}{fname}: {fdcl}", "")?;
+
+            write!(f, "}}")
+        }
     }
 }
-impl Display for FieldDecl {
+
+impl Display for Field {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FieldDecl { rt, mt, ty } = self;
+        let Field { rt, mt, ty } = self;
         
         match rt {
             ReasgType::Let => {},
@@ -105,7 +128,8 @@ impl Display for Decl {
             MutType::Immut => {},
         };
 
-        write!(f, "{}: {ty} = ", wrap_ident(ident))?;
+        wrap_ident(ident, f)?;
+        write!(f, ": {ty} = ")?;
         match val {
             Expr { expr: ExprType::Block(b), .. } => fmt_typed_block(f, b, ty == &b.0),
             e => write!(f, "{e}"),
@@ -113,10 +137,22 @@ impl Display for Decl {
     }
 }
 
+impl Display for FunIdent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FunIdent::Simple(s) => wrap_ident(s, f),
+            FunIdent::Static(t, attr) => {
+                write!(f, "<{t}>::")?;
+                wrap_ident(attr, f)
+            },
+        }
+    }
+}
+
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let FunSignature { ident, params, ret, varargs } = self;
-        write!(f, "fun {}(", wrap_ident(ident))?;
+        write!(f, "fun {ident}(")?;
 
         let mut pd: Vec<_> = params.iter()
             .map(|t| t as _)
@@ -151,13 +187,14 @@ impl Display for Param {
             MutType::Immut => {},
         }
 
-        write!(f, "{}: {ty}", wrap_ident(ident))
+        wrap_ident(ident, f)?;
+        write!(f, ": {ty}")
     }
 }
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_ref())
+        self.as_ref().fmt(f)
     }
 }
 impl Display for TypeRef<'_> {
@@ -301,7 +338,7 @@ impl Display for ExprType {
                 }
             },
             ExprType::While { condition, block } => write!(f, "while {condition} {block}"),
-            ExprType::For { ident, iterator, block } => write!(f, "for {ident} in {iterator} {block}"),
+            ExprType::For { ident, element_type, iterator, block } => write!(f, "for <{element_type}>({ident}) in {iterator} {block}"),
             ExprType::Call { funct, params } => {
                 write!(f, "{funct}(")?;
                 fmt_list(f, params)?;
@@ -365,7 +402,10 @@ impl Display for AsgUnit {
 impl Display for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Path::Static(o, attr, _) => write!(f, "{o}::{attr}"),
+            Path::Static(o, attr, _) => {
+                write!(f, "<{o}>::")?;
+                wrap_ident(attr, f)
+            },
             Path::Struct(o, attrs) => match attrs.split_last() {
                 Some(((last, _), rest)) => {
                     for (_, ty) in rest.iter().rev() {
@@ -379,7 +419,10 @@ impl Display for Path {
                 },
                 None => write!(f, "{o}"),
             },
-            Path::Method(o, method, _) => write!(f, "{o}.{method}"),
+            Path::Method(o, method, _) => {
+                write!(f, "{o}.")?;
+                wrap_ident(method, f)
+            },
         }
     }
 }

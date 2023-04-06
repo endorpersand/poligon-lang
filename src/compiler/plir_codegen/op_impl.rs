@@ -69,12 +69,10 @@ impl<'a> Cast<'a> {
             (Prim(Type::S_INT),  Prim(Type::S_FLOAT), Any | Decl | FunDecl | Call) => true,
             (_, Prim(Type::S_STR), Any | Decl | FunDecl | Call) => {
                 // Load src class
-                let cls = cg.get_class(&self.src.ty, self.src.1.clone())?;
+                let cls = cg.get_class(Located::new(&self.src.ty, self.src.1.clone()))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
-                    let met_ident = met_ident.to_string();
-                    
-                    cg.get_var_type_opt(&met_ident)?
+                    cg.get_var_type(&met_ident)?
                         .filter(|&t| match t.as_ref() {
                             Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
                             _ => false
@@ -105,16 +103,14 @@ impl<'a> Cast<'a> {
                 (l, r) if l == r => self.src,
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
-                    let to_string = cg.get_class(&src.ty, src_range.clone())?
-                        .get_method("to_string")
-                        .unwrap()
-                        .to_string();
+                    let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
+                        .get_method_or_err("to_string", src_range.clone())?;
                     
-                    let fn_type = cg.get_var_type(&to_string, src_range.clone())?
+                    let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?
                         .clone();
                     
                     Located::new(Expr::call(
-                        Located::new(Expr::new(fn_type, ExprType::Ident(to_string)), src_range.clone()), 
+                        Located::new(to_string.into_expr(fun_type), src_range.clone()), 
                         vec![src]
                     )?, src_range)
                 },
@@ -214,14 +210,13 @@ impl super::PLIRCodegen {
             op::Unary::BitNot => "bitnot",
         };
 
-        let ident = self.get_class(left.0, left.1)?
-            .get_method(method_name)
-            .unwrap()
-            .to_string();
+        let lrange = left.1.clone();
+        let ident = self.get_class(left)?
+            .get_method_or_err(method_name, lrange)?;
 
-        let e = self.get_var_type_opt(&ident)?
+        let e = self.get_var_type(&ident)?
             .cloned()
-            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+            .map(|fun_ty| ident.into_expr(fun_ty));
         
         Ok(e)
     }
@@ -293,14 +288,13 @@ impl super::PLIRCodegen {
             op::Binary::LogOr  => return Ok(None),
         };
 
-        let ident = self.get_class(left.0, left.1)?
+        let ident = self.get_class(left)?
             .get_method(&format!("{method_name}_{right}"))
-            .unwrap()
-            .to_string();
+            .unwrap();
 
-        let e = self.get_var_type_opt(&ident)?
+        let e = self.get_var_type(&ident)?
             .cloned()
-            .map(|t| Expr::new(t, ExprType::Ident(ident)));
+            .map(|fun_ty| ident.into_expr(fun_ty));
         
         Ok(e)
     }

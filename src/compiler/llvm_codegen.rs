@@ -201,7 +201,7 @@ pub struct LLVMCodegen<'ctx> {
 
     pub(super) vars: HashMap<String, PointerValue<'ctx>>,
     pub(super) globals: HashMap<String, GlobalValue<'ctx>>,
-    pub(super) fn_aliases: HashMap<String, String>
+    pub(super) fn_aliases: HashMap<plir::FunIdent, String>
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -269,7 +269,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
         for (ident, ty) in &dtypes.values {
             if let plir::Type::Fun(f) = ty {
-                let sig = f.fun_signature(ident);
+                let sig = f.fun_signature(ident.clone());
                 self.compile(&sig)?;
             }
             // TODO: allow other types
@@ -437,7 +437,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
                 let fun_ty = self.get_layout_or_void(ret)?
                     .fn_type(&arg_tys, *varargs);
-                let fun = self.module.add_function(ident, fun_ty, None);
+                let fun = self.module.add_function(&ident.as_llvm_ident(), fun_ty, None);
                 let fun_name = fun.get_name()
                     .to_str()
                     .expect("Expected UTF-8 function name")
@@ -459,7 +459,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Import a function using the provided PLIR function signature.
     fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
         // TODO: type check?
-        let intrinsic = self.import_intrinsic(&sig.ident)?;
+        let intrinsic = self.import_intrinsic(&sig.ident.as_llvm_ident())?;
 
         let llvm_name = intrinsic.get_name()
             .to_str()
@@ -469,10 +469,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(intrinsic)
     }
 
-    fn get_fn_by_plir_ident(&self, plir_ident: &str) -> Option<FunctionValue<'ctx>> {
-        let llvm_ident = self.fn_aliases.get(plir_ident)
-            .map_or(plir_ident, |t| t);
-        self.module.get_function(llvm_ident)
+    fn get_fn_by_plir_ident(&self, plir_ident: &plir::FunIdent) -> Option<FunctionValue<'ctx>> {
+        match self.fn_aliases.get(plir_ident) {
+            Some(id) => self.module.get_function(id),
+            None     => self.module.get_function(&plir_ident.as_llvm_ident()),
+        }
     }
 
     /// Define a type for the compiler to track.
@@ -560,7 +561,7 @@ pub enum LLVMErr<'ctx> {
     /// Variable was not declared.
     UndefinedVar(String),
     /// Function was not declared.
-    UndefinedFun(String),
+    UndefinedFun(plir::FunIdent),
     /// Imported object does not exist.
     CannotImport(String),
     /// The function created was invalid.
@@ -666,7 +667,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// -  Otherwise, all unhoisted statements are collected into a function (main).
     /// - If there is both a function named main and unhoisted statements present, this will error.
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        use plir::HoistedStmt;
+        use plir::{HoistedStmt, FunIdent};
 
         let _i8 = compiler.ctx.i8_type();
         // split the functions from everything else:
@@ -679,8 +680,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             match stmt {
                 HoistedStmt::FunDecl(dcl) => {
                     let fv = dcl.sig.write_value(compiler)?;
-                    if dcl.sig.ident == "main" {
-                        main_fun.replace(fv);
+                    match &dcl.sig.ident {
+                        FunIdent::Simple(s) if s == "main" => {
+                            main_fun.replace(fv);
+                        },
+                        _ => {}
                     }
                     fun_bodies.push(dcl);
                 },
@@ -823,7 +827,35 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 Ok(bval)
             },
             plir::ExprType::Literal(literal) => literal.write_value(compiler),
-            plir::ExprType::ListLiteral(_) => todo!(),
+            plir::ExprType::ListLiteral(exprs) => {
+                let plir::TypeRef::Generic(plir::Type::S_LIST, [t]) = expr_ty.as_ref() else {
+                    panic!("expected list literal to return list, but actually returned {expr_ty}")
+                };
+
+                let _int = layout!(compiler, S_INT).into_int_type();
+                let arr_ty = compiler.get_layout(t)?.array_type(exprs.len() as _);
+                let elements: Vec<_> = exprs.iter()
+                .map(|e| {
+                    e.write_value(compiler)
+                        .map(|gv| compiler.basic_value_of(gv))
+                })
+                .collect::<Result<_, _>>()?;
+
+                let arr = compiler.builder.create_agg_value(arr_ty, &elements)?;
+                let alloca = compiler.builder.build_alloca(arr_ty, "");
+                compiler.builder.build_store(alloca, arr);
+
+                let id = plir::FunIdent::new_static(expr_ty, "from_raw");
+                let list_from_raw = compiler.get_fn_by_plir_ident(&id)
+                    .ok_or_else(|| LLVMErr::UndefinedFun(id))?;
+
+                let lst = compiler.builder.build_call(list_from_raw, params![alloca, _int.const_int(exprs.len() as _, false)], "list_literal")
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap();
+
+                Ok(GonValue::Basic(lst))
+            },
             plir::ExprType::SetLiteral(_) => todo!(),
             plir::ExprType::DictLiteral(_) => todo!(),
             plir::ExprType::ClassLiteral(t, entries) => {
@@ -835,7 +867,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     })
                     .collect::<Result<_, _>>()?;
 
-                compiler.builder.create_struct_value(layout, &entries)
+                compiler.builder.create_agg_value(layout, &entries)
                     .map(|bv| GonValue::Basic(bv.into()))
             },
             plir::ExprType::Assign(target, expr) => {
@@ -991,31 +1023,70 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb))?; 
 
                 compiler.builder.position_at_end(exit_loop_bb);
-                Ok(compiler.new_bool(true)) // TODO
+                Ok(GonValue::Unit)
 
             },
-            plir::ExprType::For { .. } => todo!(),
+            plir::ExprType::For { ident, element_type, iterator, block } => {
+                // FIXME: cleanup
+                let bb = compiler.get_insert_block();
+                let fun = compiler.parent_fn();
+
+                let cond_bb = compiler.ctx.append_basic_block(fun, "for_cond");
+                let loop_bb = compiler.ctx.append_basic_block(fun, "for");
+                let exit_loop_bb = compiler.ctx.append_basic_block(fun, "post_for");
+                
+                // iteration stuff:
+                let i_ptr = compiler.alloca(element_type, ident)?;
+                let it_id = plir::FunIdent::new_static(&iterator.ty, "next");
+                let it_next = compiler.get_fn_by_plir_ident(&it_id)
+                    .unwrap_or_else(|| unimplemented!("nonexistent ::next should have been detected by PLIR"));
+                let iterator = compiler.write_ref_value(iterator)?;
+
+                // end BB by going into loop
+                compiler.builder.position_at_end(bb);
+                compiler.builder.branch_and_goto(cond_bb);
+
+                let mvalue = compiler.builder.build_call(it_next, params![iterator], "")
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_struct_value();
+                let present = compiler.builder.build_extract_value(mvalue, 0, "present")
+                    .unwrap()
+                    .into_int_value();
+                compiler.builder.build_conditional_branch(present, loop_bb, exit_loop_bb);
+
+                compiler.builder.position_at_end(loop_bb);
+                let value_ptr = compiler.builder.build_extract_value(mvalue, 1, "")
+                    .unwrap()
+                    .into_pointer_value();
+                let value = compiler.builder.build_load(compiler.get_layout(element_type)?, value_ptr, "");
+                compiler.builder.build_store(i_ptr, value);
+                compiler.write_block(block, ExitPointers::loopy(cond_bb, exit_loop_bb))?; 
+
+                compiler.builder.position_at_end(exit_loop_bb);
+                Ok(GonValue::Unit)
+            },
             plir::ExprType::Call { funct, params } => {
                 let mut pvals = vec![];
 
                 let fun_ident = match &funct.expr {
-                    plir::ExprType::Ident(ident) => Cow::from(ident),
+                    plir::ExprType::Ident(ident) => plir::FunIdent::new_simple(ident),
                     plir::ExprType::Path(p) => match p {
                         plir::Path::Static(ty, met, _) => {
-                            Cow::from(format!("{ty}::{met}"))
+                            plir::FunIdent::new_static(ty, met)
                         },
                         plir::Path::Struct(_, _) => unreachable!("struct attr cannot be fun"),
                         plir::Path::Method(referent, met, _) => {
-                            let ty = referent.ty.ident();
                             pvals.push(compiler.write_ref_value(referent)?);
-                            Cow::from(format!("{ty}::{met}"))
+                            plir::FunIdent::new_static(&referent.ty, met)
                         },
                     },
                     e => todo!("arbitrary expr calls: {e:?}")
                 };
 
                 let fun = compiler.get_fn_by_plir_ident(&fun_ident)
-                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.into_owned()))?;
+                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident))?;
 
                 for p in params {
                     pvals.push(compiler.write_ref_value(p)?);
@@ -1024,7 +1095,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     .map(Into::into)
                     .collect();
 
-                let call = compiler.builder.build_call(fun, &pvals, "call");
+                let call = compiler.builder.build_call(fun, &pvals, "");
                 Ok(call.try_as_basic_value().left().into())
             },
             plir::ExprType::Index(idx) => idx.write_value(compiler),
@@ -1131,7 +1202,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
             plir::Path::Struct(e, attrs) => {
                 if let Some((_, last_ty)) = attrs.last() {
                     let el_ptr = self.write_ptr(compiler)?;
-                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, "path_load");
+                    let el = compiler.builder.build_load(compiler.get_layout(last_ty)?, el_ptr, &format!("{}.load", el_ptr.get_name().to_string_lossy()));
                     
                     Ok(GonValue::Basic(el))
                 } else {
@@ -1153,15 +1224,26 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
                     let ptr = e.write_ptr(compiler)?;
                     let ty = compiler.get_layout(&e.ty)?;
 
-                    let mut indexes = vec![_i32.const_zero()];
-                    let attr_idx = attrs.iter()
-                        .map(|&(i, _)| i)
-                        .map(|i| _i32.const_int(i as u64, false));
-                    indexes.extend(attr_idx);
+                    let usize_indexes: Vec<_> = attrs.iter()
+                    .map(|&(i, _)| i)
+                    .collect();
+
+                    let mut gep_indexes = vec![_i32.const_zero()];
+                    let iv_indexes = usize_indexes.iter()
+                        .map(|&i| _i32.const_int(i as u64, false));
+                    gep_indexes.extend(iv_indexes);
+
+                    let mut ssa_name = ptr.get_name()
+                        .to_string_lossy()
+                        .into_owned();
+                    for idx in usize_indexes {
+                        ssa_name.push('.');
+                        ssa_name += &idx.to_string();
+                    }
 
                     // SAFETY: After PLIR pass, this should be valid.
                     let el_ptr = unsafe {
-                        compiler.builder.build_in_bounds_gep(ty, ptr, &indexes, "path_access")
+                        compiler.builder.build_in_bounds_gep(ty, ptr, &gep_indexes, &ssa_name)
                     };
 
                     Ok(el_ptr)
@@ -1211,7 +1293,12 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
     type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        compiler.define_fun(self).map(|(fv, _)| fv)
+        // TODO: remove when visibility is added
+        compiler.import(self)
+            .or_else(|e| match e {
+                LLVMErr::CannotImport(_) => compiler.define_fun(self).map(|(fv, _)| fv),
+                _ => Err(e)
+            })
     }
 }
 
@@ -1260,20 +1347,20 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
     type Return = LLVMResult<'ctx, ()>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        let plir::Class { ident, fields } = self;
+        let plir::Class { ty, fields } = self;
 
         let fields: Vec<_> = fields.values()
             .map(|fd| compiler.get_layout(&fd.ty))
             .collect::<Result<_, _>>()?;
         
-        let struct_ty = compiler.ctx.opaque_struct_type(ident);
+        let struct_ty = compiler.ctx.opaque_struct_type(&ty.ident());
         struct_ty.set_body(&fields, false);
 
         let struct_name = struct_ty.get_name()
             .unwrap()
             .to_str()
             .unwrap();
-        compiler.define_type(plir::ty!(ident), struct_name, struct_ty);
+        compiler.define_type(ty.clone(), struct_name, struct_ty);
 
         Ok(())
     }

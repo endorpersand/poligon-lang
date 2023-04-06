@@ -2,204 +2,359 @@ global _tmpl_print = "%.*s\n\0";
 global _tmpl_int_to_string = "%d\0";
 global _tmpl_float_to_string = "%#f\0";
 global _tmpl_char_to_string = "%lc\0";
-class "#dynarray" { #ptr, int, int }
-class string { #dynarray }
-extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
-fun "int::to_string"(self: int) -> string {
-    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
-    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_int_to_string), <int>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+class "#dynarray" {
+    buf: #ptr,
+    len: int,
+    cap: int
+}
+class string {
+    inner: #dynarray
+}
+extern fun "#printf"(arg0: #ptr, ..) -> int;
+fun print(s: string) -> void {
+    return <void>(castfrom <int>(<(#ptr, ..) -> int>(#printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
+}
+extern fun "#ptrnull"() -> #ptr;
+fun <#ptr>::null() -> #ptr {
+    return <#ptr>(<() -> #ptr>(#ptrnull)());
+}
+class string_chars {
+    str: string,
+    buf: #ptr
+}
+fun <string>::chars(self: string) -> string_chars {
+    return <string_chars>(<(string) -> string_chars>(<string_chars>::new)(<string>(self)));
+}
+fun <string>::slice_bytes(self: string, start: int, end: int) -> string {
+    return <string>(if <bool>(<bool>(<bool>(<int>(0) <= <int>(start)) && <bool>(<int>(start) <= <int>(end))) && <bool>(<int>(end) <= <int>(<() -> int>(<string>(self).len)()))) <string>{
+        exit string #{#dynarray #{<#ptr>(<#byte>::#gep(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(start))), <int>(<int>(end) - <int>(start)), <int>(<int>(<#dynarray>(<string>(self).0).2) - <int>(start))}};
+    } else <never>{
+        throw "invalid slice";
+    });
+}
+extern fun "#malloc"(arg0: int) -> #ptr;
+fun <string_chars>::new(str: string) -> string_chars {
+    return string_chars #{<string>(str), <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())))};
+}
+fun <string>::len(self: string) -> int {
+    return <int>(<#dynarray>(<string>(self).0).1);
+}
+fun <string>::to_string(self: string) -> string {
+    return <string>(self);
+}
+fun <string>::add_string(self: string, other: string) -> string {
+    let new_len: int = <int>(<int>(<() -> int>(<string>(self).len)()) + <int>(<() -> int>(<string>(other).len)()));
+    let result_inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(new_len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(<() -> int>(<string>(self).len)())));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
+    return string #{<#dynarray>(result_inner)};
+}
+class <option<char>> {
+    present: bool,
+    value: #ptr
+}
+extern fun "#mbtowc"(arg0: #ptr, arg1: #ptr, arg2: int) -> int;
+fun <string_chars>::next(self: string_chars) -> option<char> {
+    return <option<char>>(if <bool>(<int>(<() -> int>(<string>(<string_chars>(self).0).len)()) == <int>(0)) <option<char>>{
+        exit <option<char>>(<() -> option<char>>(<option<char>>::none)());
+    } else <option<char>>{
+        let bytes_read: int = <int>(<(#ptr, #ptr, int) -> int>(#mbtowc)(<#ptr>(<string_chars>(self).1), <#ptr>(<#dynarray>(<string>(<string_chars>(self).0).0).0), <int>(<(int) -> int>(<int>(6).min)(<int>(<() -> int>(<string>(<string_chars>(self).0).len)())))));
+        exit <option<char>>(if <bool>(<int>(bytes_read) < <int>(1)) <option<char>>{
+            <string>{
+                exit <string>(<string_chars>(self).0 = <string>(<() -> string>(<string>::new)()));
+            }
+            exit <option<char>>(<() -> option<char>>(<option<char>>::none)());
+        } else <option<char>>{
+            <string>{
+                exit <string>(<string_chars>(self).0 = <string>(<(int, int) -> string>(<string>(<string_chars>(self).0).slice_bytes)(<int>(bytes_read), <int>(<() -> int>(<string>(<string_chars>(self).0).len)()))));
+            }
+            let chr: char = <char>(*<string_chars>(self).1);
+            exit <option<char>>(<(char) -> option<char>>(<option<char>>::some)(<char>(chr)));
+        });
+    });
 }
 extern fun "#memcpy"(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
-fun "#dynarray::extend"(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
+fun <#dynarray>::extend(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
     <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
-    let shift_buf: #ptr = <#ptr>(<#ll_array<#byte>>::#gep(<#ptr>(<#dynarray>(self).0), <int>(0), <int>(<#dynarray>(self).1)));
+    let shift_buf: #ptr = <#ptr>(<#byte>::#gep(<#ptr>(<#dynarray>(self).0), <int>(<#dynarray>(self).1)));
     <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(shift_buf), <#ptr>(add_buf), <int>(add_len)));
     return <void>{
         exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
     };
 }
-extern fun "#expm1"(arg0: float) -> float;
-fun "float::expm1"(self: float) -> float {
-    return <float>(<(float) -> float>(#expm1)(<float>(self)));
+fun <option<char>>::some(t: char) -> option<char> {
+    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())));
+    <char>{
+        exit <char>(*value = <char>(t));
+    }
+    return option<char> #{<bool>(true), <#ptr>(value)};
 }
-fun "string::new"(contents: #ptr, len: int) -> string {
-    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(#dynarray::new)(<int>(len)));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
-    return string #{<#dynarray>(inner)};
-}
-extern fun "#erfc"(arg0: float) -> float;
-fun "float::erfc"(self: float) -> float {
-    return <float>(<(float) -> float>(#erfc)(<float>(self)));
-}
-extern fun "#fabs"(arg0: float) -> float;
-fun "float::abs"(self: float) -> float {
-    return <float>(<(float) -> float>(#fabs)(<float>(self)));
-}
-extern fun "#cos"(arg0: float) -> float;
-fun "float::cos"(self: float) -> float {
-    return <float>(<(float) -> float>(#cos)(<float>(self)));
-}
-extern fun "#isnan"(arg0: float) -> bool;
-fun "float::isnan"(self: float) -> bool {
-    return <bool>(<(float) -> bool>(#isnan)(<float>(self)));
-}
-extern fun "#nexttoward"(arg0: float, arg1: float) -> float;
-fun "float::nexttoward"(self: float, twd: float) -> float {
-    return <float>(<(float, float) -> float>(#nexttoward)(<float>(self), <float>(twd)));
-}
-extern fun "#round"(arg0: float) -> float;
-fun "float::round"(self: float) -> float {
-    return <float>(<(float) -> float>(#round)(<float>(self)));
-}
-extern fun "#smax"(arg0: int, arg1: int) -> int;
-fun "int::max"(self: int, o: int) -> int {
-    return <int>(<(int, int) -> int>(#smax)(<int>(self), <int>(o)));
-}
-extern fun "#sinh"(arg0: float) -> float;
-fun "float::sinh"(self: float) -> float {
-    return <float>(<(float) -> float>(#sinh)(<float>(self)));
-}
-extern fun "#malloc"(arg0: int) -> #ptr;
 extern fun "#free"(arg0: #ptr) -> void;
-fun "#dynarray::resize"(self: #dynarray, new_cap: int) -> void {
+fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
     return <void>(if <bool>(<int>(<#dynarray>(self).2) < <int>(new_cap)) <void>{
         let old_buf: #ptr = <#ptr>(<#dynarray>(self).0);
         let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(new_cap)));
         <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(new_buf), <#ptr>(old_buf), <int>(<#dynarray>(self).1)));
-        <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
-        exit <void>{
-            exit <void>(castfrom <int>(<#dynarray>(self).2 = <int>(new_cap)));
-        };
+        <#ptr>{
+            exit <#ptr>(<#dynarray>(self).0 = <#ptr>(new_buf));
+        }
+        <int>{
+            exit <int>(<#dynarray>(self).2 = <int>(new_cap));
+        }
+        exit <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
     });
 }
-extern fun "#cosh"(arg0: float) -> float;
-fun "float::cosh"(self: float) -> float {
-    return <float>(<(float) -> float>(#cosh)(<float>(self)));
-}
-extern fun "#log10"(arg0: float) -> float;
-fun "float::log10"(self: float) -> float {
-    return <float>(<(float) -> float>(#log10)(<float>(self)));
-}
-extern fun "#cttz"(arg0: int, arg1: bool) -> int;
-fun "int::trailing_zeroes"(self: int) -> void {
-    return <void>(castfrom <int>(<(int, bool) -> int>(#cttz)(<int>(self), <bool>(false))));
-}
-extern fun "#isinf"(arg0: float) -> bool;
-fun "float::isinf"(self: float) -> bool {
-    return <bool>(<(float) -> bool>(#isinf)(<float>(self)));
-}
-fun "#dynarray::pop"(self: #dynarray) -> void {
-    return <void>(if <bool>(<int>(<#dynarray>(self).1) > <int>(0)) <void>{
-        exit <void>{
-            exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) - <int>(1))));
-        };
-    } else <void>{
-        exit <void>{
-            exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(0)));
-        };
+fun <option<char>>::to_string(self: option<char>) -> string {
+    return <string>(if <bool>(<option<char>>(self).0) <string>{
+        let value: char = <char>(*<option<char>>(self).1);
+        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(<(char) -> string>(<char>::to_string)(<char>(value))))), <string>(")")));
+    } else <string>{
+        exit <string>("none");
     });
 }
-extern fun "#lgamma"(arg0: float) -> float;
-fun "float::lgamma"(self: float) -> float {
-    return <float>(<(float) -> float>(#lgamma)(<float>(self)));
+fun <string>::new() -> string {
+    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
 }
-extern fun "#asinh"(arg0: float) -> float;
-fun "float::asinh"(self: float) -> float {
-    return <float>(<(float) -> float>(#asinh)(<float>(self)));
+extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
+fun <char>::to_string(self: char) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
+    let buf: #ptr = <#ptr>(*buf_ptr);
+    let cap: int = <int>(<int>(len) + <int>(1));
+    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
 }
-extern fun "#hypot"(arg0: float, arg1: float) -> float;
-fun "float::hypot"(self: float, y: float) -> float {
-    return <float>(<(float, float) -> float>(#hypot)(<float>(self), <float>(y)));
+fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
+    return <#ptr>(if <bool>(<int>(<#dynarray>(self).1) >= <int>(sub_len)) <#ptr>{
+        <int>{
+            exit <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) - <int>(sub_len)));
+        }
+        exit <#ptr>(<#byte>::#gep(<#ptr>(<#dynarray>(self).0), <int>(<#dynarray>(self).1)));
+    } else <never>{
+        throw "cannot take element from array";
+    });
 }
-extern fun "#trunc"(arg0: float) -> float;
-fun "float::trunc"(self: float) -> float {
-    return <float>(<(float) -> float>(#trunc)(<float>(self)));
-}
-extern fun "#abs"(arg0: int, arg1: bool) -> int;
-fun "int::abs"(self: int) -> int {
-    return <int>(<(int, bool) -> int>(#abs)(<int>(self), <bool>(false)));
-}
-extern fun "#tanh"(arg0: float) -> float;
-fun "float::tanh"(self: float) -> float {
-    return <float>(<(float) -> float>(#tanh)(<float>(self)));
-}
-extern fun "#log2"(arg0: float) -> float;
-fun "float::log2"(self: float) -> float {
-    return <float>(<(float) -> float>(#log2)(<float>(self)));
-}
-extern fun "#copysign"(arg0: float, arg1: float) -> float;
-fun "float::sign"(self: float) -> float {
-    return <float>(<(float, float) -> float>(#copysign)(<float>(castfrom <int>(1)), <float>(self)));
-}
-extern fun "#pow"(arg0: float, arg1: float) -> float;
-fun "float::powi"(self: float, exp: int) -> float {
-    return <float>(<(float, float) -> float>(#pow)(<float>(self), <float>(castfrom <int>(exp))));
-}
-fun "string::add_string"(self: string, other: string) -> string {
-    let new_len: int = <int>(<int>(<() -> int>(<string>(self).len)()) + <int>(<() -> int>(<string>(other).len)()));
-    let result_inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(#dynarray::new)(<int>(new_len)));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(<() -> int>(<string>(self).len)())));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
-    return string #{<#dynarray>(result_inner)};
-}
-extern fun "#ctpop"(arg0: int) -> int;
-fun "int::count_ones"(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#ctpop)(<int>(self))));
-}
-extern fun "#acos"(arg0: float) -> float;
-fun "float::acos"(self: float) -> float {
-    return <float>(<(float) -> float>(#acos)(<float>(self)));
-}
-extern fun "#bswap"(arg0: int) -> int;
-fun "int::reverse_bytes"(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#bswap)(<int>(self))));
-}
-fun "#dynarray::new"(cap: int) -> #dynarray {
+fun <#dynarray>::new(cap: int) -> #dynarray {
     let buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(cap)));
     return #dynarray #{<#ptr>(buf), <int>(0), <int>(cap)};
 }
-extern fun "#tgamma"(arg0: float) -> float;
-fun "float::tgamma"(self: float) -> float {
-    return <float>(<(float) -> float>(#tgamma)(<float>(self)));
+fun <option<char>>::get(self: option<char>) -> char {
+    return <char>(if <bool>(<option<char>>(self).0) <char>{
+        exit <char>(*<option<char>>(self).1);
+    } else <never>{
+        throw "no value present";
+    });
 }
-extern fun "#bitreverse"(arg0: int) -> int;
-fun "int::reverse_bits"(self: int) -> void {
-    return <void>(castfrom <int>(<(int) -> int>(#bitreverse)(<int>(self))));
+fun <string>::from_raw(contents: #ptr, len: int) -> string {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
+    return string #{<#dynarray>(inner)};
 }
-fun "string::to_string"(self: string) -> string {
-    return <string>(self);
-}
-extern fun "#exp"(arg0: float) -> float;
-fun "float::exp"(self: float) -> float {
-    return <float>(<(float) -> float>(#exp)(<float>(self)));
-}
-fun "float::pow"(self: float, exp: float) -> float {
-    return <float>(<(float, float) -> float>(#pow)(<float>(self), <float>(exp)));
-}
-extern fun "#log1p"(arg0: float) -> float;
-fun "float::log1p"(self: float) -> float {
-    return <float>(<(float) -> float>(#log1p)(<float>(self)));
+fun <bool>::to_string(self: bool) -> string {
+    return <string>(if <bool>(self) <string>{
+        exit <string>("true");
+    } else <string>{
+        exit <string>("false");
+    });
 }
 extern fun "#smin"(arg0: int, arg1: int) -> int;
-fun "int::min"(self: int, o: int) -> int {
+fun <int>::min(self: int, o: int) -> int {
     return <int>(<(int, int) -> int>(#smin)(<int>(self), <int>(o)));
 }
+extern fun "#isnan"(arg0: float) -> bool;
+fun <float>::isnan(self: float) -> bool {
+    return <bool>(<(float) -> bool>(#isnan)(<float>(self)));
+}
+extern fun "#isinf"(arg0: float) -> bool;
+fun <float>::isinf(self: float) -> bool {
+    return <bool>(<(float) -> bool>(#isinf)(<float>(self)));
+}
+extern fun "#copysign"(arg0: float, arg1: float) -> float;
+fun <float>::sign(self: float) -> float {
+    return <float>(<(float, float) -> float>(#copysign)(<float>(castfrom <int>(1)), <float>(self)));
+}
+extern fun "#nexttoward"(arg0: float, arg1: float) -> float;
+fun <float>::nexttoward(self: float, twd: float) -> float {
+    return <float>(<(float, float) -> float>(#nexttoward)(<float>(self), <float>(twd)));
+}
+extern fun "#lround"(arg0: float) -> int;
+fun <float>::iround(self: float) -> int {
+    return <int>(<(float) -> int>(#lround)(<float>(self)));
+}
+extern fun "#round"(arg0: float) -> float;
+fun <float>::round(self: float) -> float {
+    return <float>(<(float) -> float>(#round)(<float>(self)));
+}
+extern fun "#trunc"(arg0: float) -> float;
+fun <float>::trunc(self: float) -> float {
+    return <float>(<(float) -> float>(#trunc)(<float>(self)));
+}
+extern fun "#floor"(arg0: float) -> float;
+fun <float>::floor(self: float) -> float {
+    return <float>(<(float) -> float>(#floor)(<float>(self)));
+}
 extern fun "#ceil"(arg0: float) -> float;
-fun "float::ceil"(self: float) -> float {
+fun <float>::ceil(self: float) -> float {
     return <float>(<(float) -> float>(#ceil)(<float>(self)));
 }
+extern fun "#tgamma"(arg0: float) -> float;
+fun <float>::tgamma(self: float) -> float {
+    return <float>(<(float) -> float>(#tgamma)(<float>(self)));
+}
+extern fun "#lgamma"(arg0: float) -> float;
+fun <float>::lgamma(self: float) -> float {
+    return <float>(<(float) -> float>(#lgamma)(<float>(self)));
+}
+extern fun "#erfc"(arg0: float) -> float;
+fun <float>::erfc(self: float) -> float {
+    return <float>(<(float) -> float>(#erfc)(<float>(self)));
+}
+extern fun "#erf"(arg0: float) -> float;
+fun <float>::erf(self: float) -> float {
+    return <float>(<(float) -> float>(#erf)(<float>(self)));
+}
+extern fun "#atanh"(arg0: float) -> float;
+fun <float>::atanh(self: float) -> float {
+    return <float>(<(float) -> float>(#atanh)(<float>(self)));
+}
+extern fun "#acosh"(arg0: float) -> float;
+fun <float>::acosh(self: float) -> float {
+    return <float>(<(float) -> float>(#acosh)(<float>(self)));
+}
+extern fun "#asinh"(arg0: float) -> float;
+fun <float>::asinh(self: float) -> float {
+    return <float>(<(float) -> float>(#asinh)(<float>(self)));
+}
+extern fun "#tanh"(arg0: float) -> float;
+fun <float>::tanh(self: float) -> float {
+    return <float>(<(float) -> float>(#tanh)(<float>(self)));
+}
+extern fun "#cosh"(arg0: float) -> float;
+fun <float>::cosh(self: float) -> float {
+    return <float>(<(float) -> float>(#cosh)(<float>(self)));
+}
+extern fun "#sinh"(arg0: float) -> float;
+fun <float>::sinh(self: float) -> float {
+    return <float>(<(float) -> float>(#sinh)(<float>(self)));
+}
+extern fun "#atan2"(arg0: float, arg1: float) -> float;
+fun <float>::atan2(self: float, x: float) -> float {
+    return <float>(<(float, float) -> float>(#atan2)(<float>(self), <float>(x)));
+}
+extern fun "#atan"(arg0: float) -> float;
+fun <float>::atan(self: float) -> float {
+    return <float>(<(float) -> float>(#atan)(<float>(self)));
+}
+extern fun "#acos"(arg0: float) -> float;
+fun <float>::acos(self: float) -> float {
+    return <float>(<(float) -> float>(#acos)(<float>(self)));
+}
+extern fun "#asin"(arg0: float) -> float;
+fun <float>::asin(self: float) -> float {
+    return <float>(<(float) -> float>(#asin)(<float>(self)));
+}
+extern fun "#tan"(arg0: float) -> float;
+fun <float>::tan(self: float) -> float {
+    return <float>(<(float) -> float>(#tan)(<float>(self)));
+}
+extern fun "#cos"(arg0: float) -> float;
+fun <float>::cos(self: float) -> float {
+    return <float>(<(float) -> float>(#cos)(<float>(self)));
+}
+extern fun "#sin"(arg0: float) -> float;
+fun <float>::sin(self: float) -> float {
+    return <float>(<(float) -> float>(#sin)(<float>(self)));
+}
+extern fun "#pow"(arg0: float, arg1: float) -> float;
+fun <float>::powi(self: float, exp: int) -> float {
+    return <float>(<(float, float) -> float>(#pow)(<float>(self), <float>(castfrom <int>(exp))));
+}
+fun <float>::pow(self: float, exp: float) -> float {
+    return <float>(<(float, float) -> float>(#pow)(<float>(self), <float>(exp)));
+}
+extern fun "#hypot"(arg0: float, arg1: float) -> float;
+fun <float>::hypot(self: float, y: float) -> float {
+    return <float>(<(float, float) -> float>(#hypot)(<float>(self), <float>(y)));
+}
 extern fun "#cbrt"(arg0: float) -> float;
-fun "float::cbrt"(self: float) -> float {
+fun <float>::cbrt(self: float) -> float {
     return <float>(<(float) -> float>(#cbrt)(<float>(self)));
 }
+extern fun "#sqrt"(arg0: float) -> float;
+fun <float>::sqrt(self: float) -> float {
+    return <float>(<(float) -> float>(#sqrt)(<float>(self)));
+}
+extern fun "#log1p"(arg0: float) -> float;
+fun <float>::log1p(self: float) -> float {
+    return <float>(<(float) -> float>(#log1p)(<float>(self)));
+}
+extern fun "#log10"(arg0: float) -> float;
+fun <float>::log10(self: float) -> float {
+    return <float>(<(float) -> float>(#log10)(<float>(self)));
+}
+extern fun "#log2"(arg0: float) -> float;
+fun <float>::log2(self: float) -> float {
+    return <float>(<(float) -> float>(#log2)(<float>(self)));
+}
 extern fun "#log"(arg0: float) -> float;
-fun "float::log"(self: float) -> float {
+fun <float>::log(self: float) -> float {
     return <float>(<(float) -> float>(#log)(<float>(self)));
 }
-fun "int::sign"(self: int) -> int {
+extern fun "#expm1"(arg0: float) -> float;
+fun <float>::expm1(self: float) -> float {
+    return <float>(<(float) -> float>(#expm1)(<float>(self)));
+}
+extern fun "#exp2"(arg0: float) -> float;
+fun <float>::exp2(self: float) -> float {
+    return <float>(<(float) -> float>(#exp2)(<float>(self)));
+}
+extern fun "#exp"(arg0: float) -> float;
+fun <float>::exp(self: float) -> float {
+    return <float>(<(float) -> float>(#exp)(<float>(self)));
+}
+extern fun "#minnum"(arg0: float, arg1: float) -> float;
+fun <float>::min(self: float, o: float) -> float {
+    return <float>(<(float, float) -> float>(#minnum)(<float>(self), <float>(o)));
+}
+extern fun "#maxnum"(arg0: float, arg1: float) -> float;
+fun <float>::max(self: float, o: float) -> float {
+    return <float>(<(float, float) -> float>(#maxnum)(<float>(self), <float>(o)));
+}
+extern fun "#fma"(arg0: float, arg1: float, arg2: float) -> float;
+fun <float>::fma(self: float, multiplicand: float, addend: float) -> float {
+    return <float>(<(float, float, float) -> float>(#fma)(<float>(self), <float>(multiplicand), <float>(addend)));
+}
+extern fun "#fabs"(arg0: float) -> float;
+fun <float>::abs(self: float) -> float {
+    return <float>(<(float) -> float>(#fabs)(<float>(self)));
+}
+fun <float>::to_string(self: float) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_float_to_string), <float>(self)));
+    let buf: #ptr = <#ptr>(*buf_ptr);
+    let cap: int = <int>(<int>(len) + <int>(1));
+    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+}
+extern fun "#cttz"(arg0: int, arg1: bool) -> int;
+fun <int>::trailing_zeroes(self: int) -> int {
+    return <int>(<(int, bool) -> int>(#cttz)(<int>(self), <bool>(false)));
+}
+extern fun "#ctlz"(arg0: int, arg1: bool) -> int;
+fun <int>::leading_zeroes(self: int) -> int {
+    return <int>(<(int, bool) -> int>(#ctlz)(<int>(self), <bool>(false)));
+}
+extern fun "#bswap"(arg0: int) -> int;
+fun <int>::reverse_bytes(self: int) -> int {
+    return <int>(<(int) -> int>(#bswap)(<int>(self)));
+}
+extern fun "#bitreverse"(arg0: int) -> int;
+fun <int>::reverse_bits(self: int) -> int {
+    return <int>(<(int) -> int>(#bitreverse)(<int>(self)));
+}
+extern fun "#ctpop"(arg0: int) -> int;
+fun <int>::count_ones(self: int) -> int {
+    return <int>(<(int) -> int>(#ctpop)(<int>(self)));
+}
+fun <int>::sign(self: int) -> int {
     return <int>(if <bool>(<int>(self) > <int>(0)) <int>{
         exit <int>(1);
     } elseif <bool>(<int>(self) < <int>(0)) <int>{
@@ -208,98 +363,29 @@ fun "int::sign"(self: int) -> int {
         exit <int>(0);
     });
 }
-extern fun "#minnum"(arg0: float, arg1: float) -> float;
-fun "float::min"(self: float, o: float) -> float {
-    return <float>(<(float, float) -> float>(#minnum)(<float>(self), <float>(o)));
+fun <option<char>>::none() -> option<char> {
+    return option<char> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
 }
-extern fun "#printf"(arg0: #ptr, ..) -> int;
-fun print(s: string) -> void {
-    return <void>(castfrom <int>(<(#ptr, ..) -> int>(#printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
+extern fun "#smax"(arg0: int, arg1: int) -> int;
+fun <int>::max(self: int, o: int) -> int {
+    return <int>(<(int, int) -> int>(#smax)(<int>(self), <int>(o)));
 }
-extern fun "#erf"(arg0: float) -> float;
-fun "float::erf"(self: float) -> float {
-    return <float>(<(float) -> float>(#erf)(<float>(self)));
+extern fun "#abs"(arg0: int, arg1: bool) -> int;
+fun <int>::abs(self: int) -> int {
+    return <int>(<(int, bool) -> int>(#abs)(<int>(self), <bool>(false)));
 }
-extern fun "#floor"(arg0: float) -> float;
-fun "float::floor"(self: float) -> float {
-    return <float>(<(float) -> float>(#floor)(<float>(self)));
+extern fun "#idiv"(arg0: int, arg1: int) -> int;
+fun <int>::idiv(self: int, d: int) -> int {
+    return <int>(if <bool>(<int>(d) == <int>(0)) <never>{
+        throw "division by zero error";
+    } else <int>{
+        exit <int>(<(int, int) -> int>(#idiv)(<int>(self), <int>(d)));
+    });
 }
-extern fun "#ctlz"(arg0: int, arg1: bool) -> int;
-fun "int::leading_zeroes"(self: int) -> void {
-    return <void>(castfrom <int>(<(int, bool) -> int>(#ctlz)(<int>(self), <bool>(false))));
-}
-extern fun "#tan"(arg0: float) -> float;
-fun "float::tan"(self: float) -> float {
-    return <float>(<(float) -> float>(#tan)(<float>(self)));
-}
-extern fun "#acosh"(arg0: float) -> float;
-fun "float::acosh"(self: float) -> float {
-    return <float>(<(float) -> float>(#acosh)(<float>(self)));
-}
-extern fun "#atanh"(arg0: float) -> float;
-fun "float::atanh"(self: float) -> float {
-    return <float>(<(float) -> float>(#atanh)(<float>(self)));
-}
-extern fun "#exp2"(arg0: float) -> float;
-fun "float::exp2"(self: float) -> float {
-    return <float>(<(float) -> float>(#exp2)(<float>(self)));
-}
-extern fun "#atan2"(arg0: float, arg1: float) -> float;
-fun "float::atan2"(self: float, x: float) -> float {
-    return <float>(<(float, float) -> float>(#atan2)(<float>(self), <float>(x)));
-}
-fun "char::to_string"(self: char) -> string {
+fun <int>::to_string(self: int) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
-    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_int_to_string), <int>(self)));
     let buf: #ptr = <#ptr>(*buf_ptr);
     let cap: int = <int>(<int>(len) + <int>(1));
     return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
-}
-fun "string::len"(self: string) -> int {
-    return <int>(<#dynarray>(<string>(self).0).1);
-}
-extern fun "#lround"(arg0: float) -> int;
-fun "float::iround"(self: float) -> int {
-    return <int>(<(float) -> int>(#lround)(<float>(self)));
-}
-extern fun "#atan"(arg0: float) -> float;
-fun "float::atan"(self: float) -> float {
-    return <float>(<(float) -> float>(#atan)(<float>(self)));
-}
-extern fun "#asin"(arg0: float) -> float;
-fun "float::asin"(self: float) -> float {
-    return <float>(<(float) -> float>(#asin)(<float>(self)));
-}
-fun "float::to_string"(self: float) -> string {
-    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
-    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_float_to_string), <float>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
-}
-extern fun "#fma"(arg0: float, arg1: float, arg2: float) -> float;
-fun "float::fma"(self: float, multiplicand: float, addend: float) -> float {
-    return <float>(<(float, float, float) -> float>(#fma)(<float>(self), <float>(multiplicand), <float>(addend)));
-}
-fun "#dynarray::push"(self: #dynarray, byte: #byte) -> void {
-    <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(1))));
-    let push_ptr: #ptr = <#ptr>(<#ll_array<#byte>>::#gep(<#ptr>(<#dynarray>(self).0), <int>(0), <int>(<#dynarray>(self).1)));
-    <int>{
-        exit <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(1)));
-    }
-    return <void>{
-        exit <void>(castfrom <#byte>(*push_ptr = <#byte>(byte)));
-    };
-}
-extern fun "#maxnum"(arg0: float, arg1: float) -> float;
-fun "float::max"(self: float, o: float) -> float {
-    return <float>(<(float, float) -> float>(#maxnum)(<float>(self), <float>(o)));
-}
-extern fun "#sin"(arg0: float) -> float;
-fun "float::sin"(self: float) -> float {
-    return <float>(<(float) -> float>(#sin)(<float>(self)));
-}
-extern fun "#sqrt"(arg0: float) -> float;
-fun "float::sqrt"(self: float) -> float {
-    return <float>(<(float) -> float>(#sqrt)(<float>(self)));
 }
