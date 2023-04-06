@@ -1086,10 +1086,10 @@ impl PLIRCodegen {
                     self.push_global(plir::HoistedStmt::IGlobal(id, s));
                 },
                 ast::Stmt::FitClassDecl(ty, methods) => {
-                    // FIXME: there's a few bugs that'll occur if ty is not primitive
+                    let ty = self.consume_type(ty)?;
                     let block = self.peek_block();
                     for m in methods {
-                        block.insert_unresolved_method(&plir::ty!(ty.clone()), m);
+                        block.insert_unresolved_method(&ty, m);
                     }
                 }
                 _ => eager_stmts.push(stmt),

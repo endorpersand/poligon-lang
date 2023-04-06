@@ -203,7 +203,7 @@ pub enum Stmt {
     IGlobal(String /* ident */, String /* value */),
 
     /// An intrinsic `fit class` declaration. This is part of intrinsic functionality.
-    FitClassDecl(String /* ident */, Vec<MethodDecl> /* methods */)
+    FitClassDecl(Located<Type> /* type */, Vec<MethodDecl> /* methods */)
 }
 
 impl Stmt {

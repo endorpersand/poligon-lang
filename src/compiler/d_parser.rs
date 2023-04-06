@@ -534,6 +534,11 @@ impl DParser {
                 }
             }
             Ok(Some(result))
+        } else if self.match_(token![<]).is_some() {
+            let ty = self.expect_type(verify)?;
+            self.expect(token![>])?;
+
+            Ok(Some(ty))
         } else {
             Ok(None)
         }

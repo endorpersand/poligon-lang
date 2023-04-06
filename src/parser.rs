@@ -1023,7 +1023,7 @@ impl Parser {
         if self.intrinsic_mode {
             self.expect(token![fit])?;
             self.expect(token![class])?;
-            let ident = self.expect_ident()?.0;
+            let ty = self.expect_type()?;
             self.expect(token!["{"])?;
                 let mut methods = vec![];
                 while let Some(m) = self.match_method_decl()? {
@@ -1031,7 +1031,7 @@ impl Parser {
                 }
             self.expect(token!["}"])?;
 
-            Ok(ast::Stmt::FitClassDecl(ident, methods))
+            Ok(ast::Stmt::FitClassDecl(ty, methods))
         } else {
             Err(ParseErr::NoIntrinsicStmts.at_range(self.peek_loc()))
         }
