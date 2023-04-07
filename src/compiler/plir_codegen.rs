@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 use crate::ast::{self, ReasgType, MutType};
 use crate::compiler::internals::C_INTRINSICS_PLIR;
@@ -797,23 +797,17 @@ impl Globals {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
-enum MaybeKnownType {
-    Known(plir::Type),
-    Unknown(String)
-}
-
 mod dsds {
     use std::error::Error;
     use std::fmt::Formatter;
     use std::hash::Hash;
+    use std::marker::PhantomData;
 
     use indexmap::{IndexSet, Equivalent};
 
-    use super::MaybeKnownType;
-
     /// Internal implementation of [`UnionFind`].
     /// This data structure only holds and manipulates indexes.
+    #[derive(Debug)]
     struct UnionFindInner {
         parents: Vec<usize>,
         sizes: Vec<usize>
@@ -834,9 +828,12 @@ mod dsds {
         }
 
         /// Add a new disjoint set to data structure.
-        fn make_set(&mut self) {
+        /// 
+        /// This function returns the new element that was added.
+        fn make_set(&mut self) -> usize {
             self.parents.push(self.parents.len());
             self.sizes.push(1);
+            self.parents.len()
         }
     
         /// Finds the root of this element's group.
@@ -860,22 +857,27 @@ mod dsds {
         /// 
         /// The group with the greater size (number of elements in its tree) becomes the root.
         /// 
+        /// This returns true if union was successful.
+        /// 
         /// This will panic if either element >= the `len` of this data structure
         /// (i.e. if either are not present).
-        fn union(&mut self, x: usize, y: usize) {
-            self.union_select(x, y, |_, _, _| Selector::Whatever);
+        fn union(&mut self, x: usize, y: usize) -> bool {
+            self.union_select(x, y, |_, _, _| Selector::Whatever)
         }
 
-        /// Merges the source group into the destination group, using the predicate to determine the root.
+        /// Merges the source group into the destination group of the two provided elements, 
+        /// using the predicate to determine the root.
         /// 
-        /// The predicate takes both roots and returns a [`Selector`] indicating which root becomes the root node
+        /// The predicate takes the two roots of the group and returns a [`Selector`] indicating which root becomes the root node
         /// of the entire group.
         /// * If the predicate returns Left or Right, that root becomes the root of the new group.
         /// * If the predicate returns Whatever, the root with the largest size becomes the root of the new group.
         /// 
+        /// This returns true if union was successful.
+        /// 
         /// This will panic if either element >= the `len` of this data structure
         /// (i.e. if either are not present).
-        fn union_select(&mut self, x: usize, y: usize, f: impl FnOnce(&mut UnionFindInner, usize, usize) -> Selector) {
+        fn union_select(&mut self, x: usize, y: usize, f: impl FnOnce(&mut UnionFindInner, usize, usize) -> Selector) -> bool {
             let mut xroot = self.find(x);
             let mut yroot = self.find(y);
     
@@ -892,15 +894,44 @@ mod dsds {
                 // merge y into x
                 self.parents[yroot] = xroot;
                 self.sizes[xroot] += self.sizes[yroot];
+                true
+            } else {
+                false
             }
         }
     }
 
+    /// Index type to obtain a reference to an item in the DSDS.
+    #[derive(Debug)]
+    pub struct Idx<T>(usize, PhantomData<T>);
+    impl<T> Clone for Idx<T> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone(), self.1.clone())
+        }
+    }
+    impl<T> Copy for Idx<T> {}
+    impl<T> PartialEq for Idx<T> {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0 && self.1 == other.1
+        }
+    }
+    impl<T> Eq for Idx<T> {}
+    impl<T> PartialOrd for Idx<T> {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl<T> Ord for Idx<T> {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.0.cmp(&other.0).then_with(|| self.1.cmp(&other.1))
+        }
+    }
     /// A disjoint-set data structure.
     /// 
     /// This structure stores a collection of disjoint sets, 
     /// allowing for creating new sets, merging sets, 
     /// and checking if two elements are of the same set.
+    #[derive(Debug)]
     pub struct UnionFind<T: Hash + Eq> {
         arena: IndexSet<T>,
         inner: UnionFindInner
@@ -908,7 +939,7 @@ mod dsds {
 
     impl<T: Hash + Eq> UnionFind<T> {
         /// Creates a new [`UnionFind`].
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self { arena: IndexSet::new(), inner: UnionFindInner::new() }
         }
 
@@ -919,82 +950,59 @@ mod dsds {
 
         /// Add a new element to the set if it does not already exist.
         /// 
-        /// This function returns whether a new element was successfully added.
-        pub fn make_set(&mut self, t: T) -> bool {
-            let success = self.arena.insert(t);
-            
-            if success {
-                self.inner.make_set();
-            }
+        /// This function returns the index of the set associated with the added node.
+        pub fn make_set(&mut self, t: T) -> Idx<T> {
+            let id = match self.arena.get_index_of(&t) {
+                Some(i) => i,
+                None => {
+                    self.arena.insert(t);
+                    self.inner.make_set()
+                }
+            };
+            Idx(id, PhantomData)
+        }
 
-            success
+        /// Gets the value associated with this index.
+        pub fn get_idx(&self, i: Idx<T>) -> &T {
+            self.arena.get_index(i.0).unwrap()
+        }
+        /// Gets the index associated with this value (or none if not present in set).
+        pub fn get_idx_of<Q>(&self, i: &Q) -> Option<Idx<T>>
+            where Q: ?Sized + Hash + Equivalent<T>
+        {
+            self.arena.get_index_of(i)
+                .map(|id| Idx(id, PhantomData))
         }
 
         /// Finds the root of this element's group.
-        /// 
-        /// This returns None if not present in the set.
-        pub fn find<Q>(&mut self, t: &Q) -> Option<&T>
-            where Q: ?Sized + Hash + Equivalent<T>
+        pub fn find(&mut self, t: Idx<T>) -> Idx<T>
         {
-            let i = self.arena.get_index_of(t)?;
-            self.arena.get_index(self.inner.find(i))
+            Idx(self.inner.find(t.0), PhantomData)
         }
-
-        /// Finds the root of each element's group, and the root's index.
-        /// 
-        /// This returns None if any element is not present in the set.
-        pub fn find_many<Q>(&mut self, ts: &[&Q]) -> Option<Vec<(usize, &T)>> 
-            where Q: ?Sized + Hash + Equivalent<T>
-        {
-            ts.iter()
-                .map(|&t| {
-                    let i = self.arena.get_index_of(t)?;
-                    let ir = self.inner.find(i);
-                    let tr = self.arena.get_index(ir)?;
-                    Some((ir, tr))
-                })
-                .collect::<Option<_>>()
-        }
-
 
         /// Merge the groups of the two provided elements. 
         /// 
         /// The group with the greater size (number of elements in its tree) becomes the root.
-        /// 
-        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
-        pub fn union<Q, R>(&mut self, x: &Q, y: &R) -> Result<(), ElementNotPresent>
-            where Q: ?Sized + Hash + Equivalent<T>,
-                  R: ?Sized + Hash + Equivalent<T>
-        {
-            let (i, j) = {
-                Option::zip(self.arena.get_index_of(x), self.arena.get_index_of(y))
-                    .ok_or(ElementNotPresent(()))
-            }?;
-    
-            self.inner.union(i, j);
-            Ok(())
+        /// This returns true if union was successful.
+        pub fn union(&mut self, x: Idx<T>, y: Idx<T>) -> bool {
+            self.inner.union(x.0, y.0)
         }
         
         /// Merges the source group into the destination group, using the predicate to determine the root.
         /// 
-        /// The predicate takes both roots and returns a bool indicating which root becomes the root node
+        /// The predicate takes both roots and returns a [`Selector`] indicating which root becomes the root node
         /// of the entire group.
-        /// * If the predicate returns false, the left root becomes the root of the new group.
-        /// * If the predicate returns true, the right root becomes the root of the new group.
+        /// * If the predicate returns Left or Right, that root becomes the root of the new group.
+        /// * If the predicate returns Whatever, the root with the largest size becomes the root of the new group.
         /// 
-        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
-        pub fn union_select<Q>(&mut self, x: &Q, y: &Q, f: impl FnOnce(&T, &T) -> Selector) -> Result<(), ElementNotPresent>
-            where Q: ?Sized + Hash + Equivalent<T>
+        /// This returns true if union was successful.
+        pub fn union_select(&mut self, x: Idx<T>, y: Idx<T>, f: impl FnOnce(&T, &T) -> Selector) -> bool
         {
-            let refs = self.find_many(&[x, y])
-                .ok_or(ElementNotPresent(()))?;
-            let [(i, xr), (j, yr)] = *Box::<[_; 2]>::try_from(refs)
-                .ok()
-                .expect("find many with 2 args should have returned 2 values");
-    
-            let which = f(xr, yr);
-            self.inner.union_select(i, j, |_, _, _| which);
-            Ok(())
+            self.inner.union_select(x.0, y.0, |_, xr, yr| {
+                let xr = self.arena.get_index(xr).unwrap();
+                let yr = self.arena.get_index(yr).unwrap();
+                f(xr, yr)
+            })
         }
 
         /// Merges the source group into the destination group, using the predicate to determine the root (or indicating a failure).
@@ -1004,24 +1012,17 @@ mod dsds {
         /// * If the predicate returns Some(false), the left root becomes the root of the new group.
         /// * If the predicate returns Some(true), the right root becomes the root of the new group.
         /// * If the predicate returns None, nothing changes in the groups and a [`UnionSelectFail`] error is thrown.
-        /// 
-        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
-        pub fn try_union_select<Q>(&mut self, x: &Q, y: &Q, f: impl FnOnce(&T, &T) -> Option<Selector>) -> Result<(), UnionFindErr>
-            where Q: ?Sized + Hash + Equivalent<T>
+        pub fn try_union_select(&mut self, x: Idx<T>, y: Idx<T>, f: impl FnOnce(&T, &T) -> Option<Selector>) -> Result<bool, UnionSelectFail>
         {
-            let refs = self.find_many(&[x, y])
-                .ok_or(ElementNotPresent(()))
-                .map_err(UnionFindErr::ElementNotPresent)?;
-            let [(i, xr), (j, yr)] = *Box::<[_; 2]>::try_from(refs)
-                .ok()
-                .expect("find many with 2 args should have returned 2 values");
+            let xr_idx = self.find(x);
+            let yr_idx = self.find(y);
+            let xr = self.get_idx(xr_idx);
+            let yr = self.get_idx(yr_idx);
     
-            let which = f(xr, yr)
-                .ok_or(UnionSelectFail(()))
-                .map_err(UnionFindErr::UnionSelectFail)?;
-            
-            self.inner.union_select(i, j, |_, _, _| which);
-            Ok(())
+            match f(xr, yr) {
+                Some(which) => Ok(self.inner.union_select(xr_idx.0, yr_idx.0, |_, _, _| which)),
+                None        => Err(UnionSelectFail(()))
+            }
         }
     }
 
@@ -1041,16 +1042,6 @@ mod dsds {
 
     /// Indicates that a value was accessed which is not contained within the set.
     #[derive(Debug)]
-    pub struct ElementNotPresent(());
-    impl std::fmt::Display for ElementNotPresent {
-        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "element does not exist in union-find data structure")
-        }
-    }
-    impl Error for ElementNotPresent {}
-    
-    /// Indicates that a value was accessed which is not contained within the set.
-    #[derive(Debug)]
     pub struct UnionSelectFail(());
     impl std::fmt::Display for UnionSelectFail {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -1058,43 +1049,178 @@ mod dsds {
         }
     }
     impl Error for UnionSelectFail {}
+}
 
-    /// Any error which occurred in the UnionFind operations.
-    #[derive(Debug)]
-    pub enum UnionFindErr {
-        ElementNotPresent(ElementNotPresent),
-        UnionSelectFail(UnionSelectFail)
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub enum MaybeType {
+    /// A type without type parameters (e.g. `string`, `int`).
+    Prim(String),
+    /// An unknown type variable (e.g. `T` in `option<T>`).
+    Unknown(String),
+    /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
+    Generic(String, Vec<MaybeType>),
+    /// A tuple of types (e.g. `[int, int, int]`).
+    Tuple(Vec<MaybeType>),
+    /// A function (e.g. `() -> int`, `str -> int`).
+    Fun {
+        /// The parameter types of this function type
+        params: Vec<MaybeType>, 
+        /// The return type
+        ret: Box<MaybeType>,
+        /// Whether this type has varargs at the end of its parameters
+        varargs: bool
     }
-    impl std::fmt::Display for UnionFindErr {
-        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "union find err: ")?;
-            match self {
-                UnionFindErr::ElementNotPresent(e) => e.fmt(f),
-                UnionFindErr::UnionSelectFail(e)   => e.fmt(f),
+}
+impl MaybeType {
+    /// Traverses through the entire tree by pre-order DFS.
+    fn walk<'t>(&'t self, mut f: impl FnMut(&'t MaybeType)) {
+        f(self);
+        match self {
+            MaybeType::Prim(_) => {},
+            MaybeType::Unknown(_) => {},
+            MaybeType::Generic(_, params) => {
+                params.iter().for_each(|p| p.walk(&mut f));
+            },
+            MaybeType::Tuple(params) => {
+                params.iter().for_each(|p| p.walk(&mut f));
+            },
+            MaybeType::Fun { params, ret, varargs: _ } => {
+                params.iter().for_each(|p| p.walk(&mut f));
+                ret.walk(f);
+            },
+        }
+    }
+    /// Traverses through the entire tree mutably by pre-order DFS.
+    /// 
+    /// The callback accepts a mutable node and should return the mutable node if not consumed.
+    /// If consumed, the callback should return None. This function will then stop traversing down the node
+    /// and continue traversing through the non-consumed tree.
+    /// 
+    /// This enables the user to obtain exclusive mutable references to several parts of the tree.
+    fn walk_mut<'t>(&'t mut self, mut f: impl FnMut(&'t mut MaybeType) -> Option<&'t mut MaybeType>) {
+        if let Some(root) = f(self) {
+            match root {
+                MaybeType::Prim(_) => {},
+                MaybeType::Unknown(_) => {},
+                MaybeType::Generic(_, params) => {
+                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
+                },
+                MaybeType::Tuple(params) => {
+                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
+                },
+                MaybeType::Fun { params, ret, varargs: _ } => {
+                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
+                    ret.walk_mut(f);
+                },
             }
         }
     }
-    impl Error for UnionFindErr {
-        fn source(&self) -> Option<&(dyn Error + 'static)> {
-            match self {
-                UnionFindErr::ElementNotPresent(e) => Some(e),
-                UnionFindErr::UnionSelectFail(e)   => Some(e),
-            }
+
+    fn get_unknowns(&mut self) -> Vec<&mut MaybeType> {
+        let mut unks = vec![];
+
+        self.walk_mut(|t| match t {
+            MaybeType::Unknown(_) => {
+                unks.push(t);
+                None
+            },
+            _ => Some(t)
+        });
+
+        unks
+    }
+    fn is_unknown(&self) -> bool {
+        match self {
+            MaybeType::Prim(_)    => false,
+            MaybeType::Unknown(_) => true,
+            MaybeType::Generic(_, t) => {
+                t.iter().any(MaybeType::is_unknown)
+            },
+            MaybeType::Tuple(t) => {
+                t.iter().any(MaybeType::is_unknown)
+            },
+            MaybeType::Fun { params, ret, varargs: _ } => {
+                ret.is_unknown() || params.iter().any(MaybeType::is_unknown)
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TypeResolver {
+    /// A DSDS of monotypes.
+    /// 
+    /// The top root of a group should always contain a non-unknown.
+    monos: dsds::UnionFind<MaybeType>
+}
+#[derive(Debug)]
+enum ConstraintErr {
+    /// Two * types were set equal, but they are known to be inequal
+    MonoNe,
+    /// Two generic types (A<..>, B<..>) were set equal, but their identifier is not equal
+    GenericNe,
+    /// Two types were set equal, but their kinds aren't equal
+    ShapeNe
+}
+impl TypeResolver {
+    fn new() -> TypeResolver {
+        Self {
+            monos: dsds::UnionFind::new()
         }
     }
 
-    impl UnionFind<MaybeKnownType> {
-        pub fn union_type<Q>(&mut self, x: &Q, y: &Q) -> Result<(), UnionFindErr> 
-            where Q: ?Sized + Hash + Equivalent<MaybeKnownType>
-        {
-            use MaybeKnownType::{Known, Unknown};
-            self.try_union_select(x, y, |xr, yr| match (xr, yr) {
-                (Known(_),   Known(_))   => None,
-                (Known(_),   Unknown(_)) => Some(Selector::Left),
-                (Unknown(_), Known(_))   => Some(Selector::Right),
-                (Unknown(_), Unknown(_)) => Some(Selector::Whatever),
-            })
+    fn add_constraint(&mut self, left: MaybeType, right: MaybeType) -> Result<(), ConstraintErr> {
+        match (left, right) {
+            (MaybeType::Unknown(l), r) => { self.set_unk_ty(l, r); },
+            (r, MaybeType::Unknown(l)) => { self.set_unk_ty(l, r); },
+            (l @ MaybeType::Prim(_), r @ MaybeType::Prim(_)) => { 
+                if l != r { Err(ConstraintErr::MonoNe)? }
+            },
+
+            (MaybeType::Generic(ai, ap), MaybeType::Generic(bi, bp)) => {
+                if ai != bi { Err(ConstraintErr::GenericNe)? }
+                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+
+                for (a, b) in std::iter::zip(ap, bp) {
+                    self.add_constraint(a, b)?;
+                }
+            },
+            (MaybeType::Tuple(ap), MaybeType::Tuple(bp)) => {
+                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+                
+                for (a, b) in std::iter::zip(ap, bp) {
+                    self.add_constraint(a, b)?;
+                }
+            },
+            (MaybeType::Fun { params: ap, ret: ar, varargs: av }, MaybeType::Fun { params: bp, ret: br, varargs: bv }) => {
+                if av != bv { Err(ConstraintErr::ShapeNe)? }
+                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+
+                self.add_constraint(*ar, *br)?;
+                for (a, b) in std::iter::zip(ap, bp) {
+                    self.add_constraint(a, b)?;
+                }
+            },
+            _ => Err(ConstraintErr::ShapeNe)?
         }
+
+        Ok(())
+    }
+
+    /// Sets an unknown type variable equal to another type.
+    /// 
+    /// This can also set two known primitive types together (erroring if not the same).
+    fn set_unk_ty(&mut self, unk: String, t: MaybeType) {
+        use MaybeType::Unknown;
+        // TODO: normalize types before insert
+        // if a root can be normalized, perform normalization
+        let left  = self.monos.make_set(MaybeType::Unknown(unk));
+        let right = self.monos.make_set(t);
+
+        self.monos.union_select(left, right, |_, r| match r {
+            Unknown(_) => dsds::Selector::Whatever,
+            _ => dsds::Selector::Right
+        });
     }
 }
 /// This struct does the actual conversion from AST to PLIR.
