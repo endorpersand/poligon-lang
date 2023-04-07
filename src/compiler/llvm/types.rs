@@ -1,4 +1,6 @@
-use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum};
+use std::fmt::{Display, Formatter};
+
+use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum, ArrayType, VectorType};
 
 use crate::compiler::LLVMCodegen;
 
@@ -7,7 +9,7 @@ pub(in crate::compiler) trait Concretize<'ctx> {
     fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum IntTypeS {
     #[allow(dead_code)]
     Bool,
@@ -29,8 +31,28 @@ impl<'ctx> Concretize<'ctx> for IntTypeS {
         }
     }
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+impl<'ctx> From<IntType<'ctx>> for IntTypeS {
+    fn from(value: IntType<'ctx>) -> Self {
+        match value.get_bit_width() {
+            1  => IntTypeS::Bool,
+            8  => IntTypeS::I8,
+            32 => IntTypeS::I32,
+            64 => IntTypeS::I64,
+            s  => unimplemented!("IntTypeS for size {s}")
+        }
+    }
+}
+impl Display for IntTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntTypeS::Bool => write!(f, "i1"),
+            IntTypeS::I8   => write!(f, "i8"),
+            IntTypeS::I32  => write!(f, "i32"),
+            IntTypeS::I64  => write!(f, "i64"),
+        }
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FloatTypeS;
 impl<'ctx> Concretize<'ctx> for FloatTypeS {
     type Type = FloatType<'ctx>;
@@ -39,8 +61,19 @@ impl<'ctx> Concretize<'ctx> for FloatTypeS {
         compiler.ctx.f64_type()
     }
 }
+impl<'ctx> From<FloatType<'ctx>> for FloatTypeS {
+    fn from(_: FloatType<'ctx>) -> Self {
+        // FIXME: obviously does not work for non-f64's
+        FloatTypeS
+    }
+}
+impl Display for FloatTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "f64")
+    }
+}
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PtrTypeS;
 impl<'ctx> Concretize<'ctx> for PtrTypeS {
     type Type = PointerType<'ctx>;
@@ -49,8 +82,18 @@ impl<'ctx> Concretize<'ctx> for PtrTypeS {
         compiler.ptr_type(Default::default())
     }
 }
+impl<'ctx> From<PointerType<'ctx>> for PtrTypeS {
+    fn from(_: PointerType<'ctx>) -> Self {
+        PtrTypeS
+    }
+}
+impl Display for PtrTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ptr")
+    }
+}
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct StructTypeS(String);
 impl<'ctx> Concretize<'ctx> for StructTypeS {
     type Type = StructType<'ctx>;
@@ -60,8 +103,75 @@ impl<'ctx> Concretize<'ctx> for StructTypeS {
             .unwrap_or_else(|| panic!("expected struct with name {}", self.0))
     }
 }
+impl<'ctx> From<StructType<'ctx>> for StructTypeS {
+    fn from(value: StructType<'ctx>) -> Self {
+        let name = value.get_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        StructTypeS(name)
+    }
+}
+impl Display for StructTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ArrayTypeS(Box<BasicTypeEnumS>, u32);
+impl<'ctx> Concretize<'ctx> for ArrayTypeS {
+    type Type = ArrayType<'ctx>;
+
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
+        let bv = self.0.as_concrete(compiler);
+        bv.array_type(self.1)
+    }
+}
+impl<'ctx> From<ArrayType<'ctx>> for ArrayTypeS {
+    fn from(value: ArrayType<'ctx>) -> Self {
+        let ty = value.get_element_type();
+        let len = value.len();
+
+        ArrayTypeS(Box::new(ty.into()), len)
+    }
+}
+impl Display for ArrayTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} x {}]", self.1, self.0)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct VectorTypeS(Box<BasicTypeEnumS>, u32);
+impl<'ctx> Concretize<'ctx> for VectorTypeS {
+    type Type = VectorType<'ctx>;
+
+    fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
+        match self.0.as_concrete(compiler) {
+            BasicTypeEnum::FloatType(t) => t.vec_type(self.1),
+            BasicTypeEnum::IntType(t) => t.vec_type(self.1),
+            BasicTypeEnum::PointerType(t) => t.vec_type(self.1),
+            _ => unimplemented!("this type doesn't have a vec version")
+        }
+    }
+}
+impl<'ctx> From<VectorType<'ctx>> for VectorTypeS {
+    fn from(value: VectorType<'ctx>) -> Self {
+        let ty = value.get_element_type();
+        let len = value.get_size();
+
+        VectorTypeS(Box::new(ty.into()), len)
+    }
+}
+impl Display for VectorTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{} x {}>", self.1, self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct VoidTypeS;
 impl<'ctx> Concretize<'ctx> for VoidTypeS {
     type Type = VoidType<'ctx>;
@@ -70,8 +180,18 @@ impl<'ctx> Concretize<'ctx> for VoidTypeS {
         compiler.ctx.void_type()
     }
 }
+impl<'ctx> From<VoidType<'ctx>> for VoidTypeS {
+    fn from(_: VoidType<'ctx>) -> Self {
+        VoidTypeS
+    }
+}
+impl Display for VoidTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "void")
+    }
+}
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FnTypeS {
     params: Vec<BasicTypeEnumS>, 
     ret: RetTypeS, 
@@ -97,26 +217,72 @@ impl<'ctx> Concretize<'ctx> for FnTypeS {
         self.ret.as_concrete(compiler).fn_type(&params, self.var_args)
     }
 }
+impl<'ctx> From<FunctionType<'ctx>> for FnTypeS {
+    fn from(value: FunctionType<'ctx>) -> Self {
+        let ret = match value.get_return_type() {
+            Some(t) => RetTypeS::BasicTypeEnumS(t.into()),
+            None => RetTypeS::VoidTypeS(VoidTypeS),
+        };
+        let params = value.get_param_types()
+            .into_iter()
+            .map(BasicTypeEnumS::from)
+            .collect();
+        let var_args = value.is_var_arg();
+
+        FnTypeS {
+            params,
+            ret,
+            var_args,
+        }
+    }
+}
+impl Display for FnTypeS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (", self.ret)?;
+        if let Some((last, rest)) = self.params.split_last() {
+            for p in rest {
+                write!(f, "{p}, ")?;
+            }
+            write!(f, "{last}")?;
+            if self.var_args {
+                write!(f, ", ..")?;
+            }
+        } else if self.var_args {
+            write!(f, "..")?
+        };
+        write!(f, ")")
+    }
+}
 
 macro_rules! enum_s {
-    ($name:ident => $into:ident: $($t:ident),*) => {
-        #[derive(Clone, PartialEq, Eq, Hash)]
-        pub enum $name {
+    ($EnumS:ident => $Enum:ident: $($t:ident),*) => {
+        #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+        pub enum $EnumS {
             $(
                 $t($t)
             ),*
         }
 
         $(
-            impl From<$t> for $name {
+            impl From<$t> for $EnumS {
                 fn from(value: $t) -> Self {
                     Self::$t(value)
                 }
             }
         )*
 
-        impl<'ctx> Concretize<'ctx> for $name {
-            type Type = $into<'ctx>;
+        impl Display for $EnumS {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $(
+                        Self::$t(t) => t.fmt(f)
+                    ),*
+                }
+            }
+        }
+
+        impl<'ctx> Concretize<'ctx> for $EnumS {
+            type Type = $Enum<'ctx>;
         
             fn as_concrete(&self, compiler: &LLVMCodegen<'ctx>) -> Self::Type {
                 match self {
@@ -128,6 +294,20 @@ macro_rules! enum_s {
         }
     }
 }
+macro_rules! into_enum_s {
+    ($EnumS:ident => $Enum:ident: $($TS:ident => $T:ident),*) => {
+        impl<'ctx> From<$Enum<'ctx>> for $EnumS {
+            fn from(value: $Enum<'ctx>) -> $EnumS {
+                match value {
+                    $(
+                        $Enum::$T(t) => Self::$TS(t.into())
+                    ),*
+                }
+            }
+        }
+    }
+}
+
 macro_rules! btes_to_rtes {
     ($($t:ident),*) => {
         $(
@@ -140,30 +320,42 @@ macro_rules! btes_to_rtes {
     }
 }
 
-enum_s!(BasicTypeEnumS => BasicTypeEnum: IntTypeS, FloatTypeS, PtrTypeS, StructTypeS);
+enum_s!(BasicTypeEnumS => BasicTypeEnum: IntTypeS, FloatTypeS, PtrTypeS, StructTypeS, ArrayTypeS, VectorTypeS);
+into_enum_s!(BasicTypeEnumS => BasicTypeEnum: 
+    IntTypeS    => IntType, 
+    FloatTypeS  => FloatType, 
+    PtrTypeS    => PointerType, 
+    StructTypeS => StructType,
+    ArrayTypeS  => ArrayType,
+    VectorTypeS => VectorType
+);
 btes_to_rtes!(IntTypeS, FloatTypeS, PtrTypeS, StructTypeS);
 
 enum_s!(RetTypeS => ReturnableType: BasicTypeEnumS, VoidTypeS);
+into_enum_s!(RetTypeS => ReturnableType:
+    BasicTypeEnumS => BasicTypeEnum,
+    VoidTypeS => VoidType
+);
 
 pub enum ReturnableType<'ctx> {
-    Basic(BasicTypeEnum<'ctx>),
-    Void(VoidType<'ctx>)
+    BasicTypeEnum(BasicTypeEnum<'ctx>),
+    VoidType(VoidType<'ctx>)
 }
 impl<'ctx> ReturnableType<'ctx> {
     pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
         match self {
-            ReturnableType::Basic(t) => t.fn_type(param_types, is_var_args),
-            ReturnableType::Void(t)  => t.fn_type(param_types, is_var_args),
+            ReturnableType::BasicTypeEnum(t) => t.fn_type(param_types, is_var_args),
+            ReturnableType::VoidType(t)  => t.fn_type(param_types, is_var_args),
         }
     }
 }
 impl<'ctx> From<BasicTypeEnum<'ctx>> for ReturnableType<'ctx> {
     fn from(value: BasicTypeEnum<'ctx>) -> Self {
-        ReturnableType::Basic(value)
+        ReturnableType::BasicTypeEnum(value)
     }
 }
 impl<'ctx> From<VoidType<'ctx>> for ReturnableType<'ctx> {
     fn from(value: VoidType<'ctx>) -> Self {
-        ReturnableType::Void(value)
+        ReturnableType::VoidType(value)
     }
 }

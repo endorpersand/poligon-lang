@@ -60,26 +60,19 @@ use lazy_static::lazy_static;
 
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
-pub enum CompileErr<'ctx> {
+pub enum CompileErr {
     #[allow(missing_docs)]
     IoErr(IoErr),
     #[allow(missing_docs)]
     Computed(String),
     #[allow(missing_docs)]
-    LLVMErr(LLVMErr<'ctx>)
+    LLVMErr(LLVMErr)
 }
 
 macro_rules! compile_err_impl_from {
     ($e:ident: $t:ty) => {
-        impl<'ctx> From<$t> for CompileErr<'ctx> {
-            fn from(value: $t) -> CompileErr<'ctx> {
-                Self::$e(value)
-            }
-        }
-    };
-    ($e:ident: $t:ident<$l:lifetime>) => {
-        impl<$l> From<$t<$l>> for CompileErr<$l> {
-            fn from(value: $t<$l>) -> CompileErr<$l> {
+        impl From<$t> for CompileErr {
+            fn from(value: $t) -> CompileErr {
                 Self::$e(value)
             }
         }
@@ -87,13 +80,13 @@ macro_rules! compile_err_impl_from {
 }
 
 compile_err_impl_from! { IoErr: IoErr }
-compile_err_impl_from! { LLVMErr: LLVMErr<'ctx> }
+compile_err_impl_from! { LLVMErr: LLVMErr }
 
-fn cast_e<'ctx, T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResult<'ctx, T> {
+fn cast_e<T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResult<T> {
     r.map_err(|e| CompileErr::Computed(e.full_msg(code)))
 }
 
-impl<'ctx> Display for CompileErr<'ctx> {
+impl Display for CompileErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CompileErr::IoErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
@@ -102,8 +95,18 @@ impl<'ctx> Display for CompileErr<'ctx> {
         }
     }
 }
+impl std::error::Error for CompileErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            CompileErr::IoErr(e) => Some(e),
+            CompileErr::Computed(_) => None,
+            CompileErr::LLVMErr(e) => Some(e),
+        }
+    }
+}
+
 /// A [`Result`] type for operations during the full compilation process.
-pub type CompileResult<'ctx, T> = Result<T, CompileErr<'ctx>>;
+pub type CompileResult<T> = Result<T, CompileErr>;
 
 /// Indicates the files where [`Compiler::write_to_disk`] should save its results to.
 pub enum GonSaveTo<'p> {
@@ -181,7 +184,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Create a new compiler. 
     /// 
     /// This includes the Poligon std library.
-    pub fn new(ctx: &'ctx Context, filename: &str) -> CompileResult<'ctx, Self> {
+    pub fn new(ctx: &'ctx Context, filename: &str) -> CompileResult<Self> {
         let mut compiler = Self::no_std(ctx, filename);
 
         for (dfile, bc_file) in &*STD_FILES {
@@ -202,14 +205,14 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<'ctx, DeclaredTypes> {
+    fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<DeclaredTypes> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
         let parser = DParser::new(lexed, self.declared_types.clone());
         let dt = cast_e(parser.unwrap_dtypes(), code)?;
         Ok(dt)
     }
 
-    fn update_values(&mut self, dtypes: DeclaredTypes, new_module: Module<'ctx>) -> CompileResult<'ctx, ()> {
+    fn update_values(&mut self, dtypes: DeclaredTypes, new_module: Module<'ctx>) -> CompileResult<()> {
         self.declared_types += dtypes;
 
         if let Some(f) = self.module.get_function("main") {
@@ -236,7 +239,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// In loading the file, type data is preserved in the compiler and the LLVM module
     /// that holds this Poligon file is linked to the compiler's module.
-    pub fn load_gon_file(&mut self, p: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+    pub fn load_gon_file(&mut self, p: impl AsRef<Path>) -> CompileResult<()> {
         let path = p.as_ref();
         let filename = path.file_name().and_then(OsStr::to_str);
         let code = fs::read_to_string(path)?;
@@ -249,7 +252,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// In loading the file, type data is preserved in the compiler and the LLVM module
     /// that holds this Poligon file is linked to the compiler's module.
-    pub fn load_gon_str(&mut self, code: &str, filename: Option<&str>) -> CompileResult<'ctx, ()> {
+    pub fn load_gon_str(&mut self, code: &str, filename: Option<&str>) -> CompileResult<()> {
         let (plir, dtypes) = self.generate_plir(code)?;
         self.set_filename(filename.unwrap_or("eval"));
         self.load_plir(&plir, dtypes)
@@ -259,7 +262,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// This function allows Poligon code to reference any declared classes and functions in the compiler.
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
-    pub fn generate_plir(&mut self, code: &str) -> CompileResult<'ctx, (plir::Program, DeclaredTypes)> {
+    pub fn generate_plir(&mut self, code: &str) -> CompileResult<(plir::Program, DeclaredTypes)> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
         let ast   = cast_e(parser::parse(lexed), code)?;
 
@@ -278,7 +281,7 @@ impl<'ctx> Compiler<'ctx> {
     /// This updates the compiler's LLVM module to include a compiled version of the PLIR code.
     /// 
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
-    pub fn load_plir(&mut self, plir: &plir::Program, dtypes: DeclaredTypes) -> CompileResult<'ctx, ()> {
+    pub fn load_plir(&mut self, plir: &plir::Program, dtypes: DeclaredTypes) -> CompileResult<()> {
         self.llvm_codegen.compile(plir)?;
 
         let module = self.llvm_codegen.pop_module();
@@ -292,7 +295,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Loads bitcode and type data into the compiler.
     /// 
     /// In loading these files, type data and the bitcode are linked in the compiler.
-    pub fn load_bc(&mut self, dfile: impl AsRef<Path>, bc_file: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+    pub fn load_bc(&mut self, dfile: impl AsRef<Path>, bc_file: impl AsRef<Path>) -> CompileResult<()> {
         let code = fs::read_to_string(dfile)?;
         
         let dtypes = self.get_declared_types_from_d(&code)?;
@@ -316,7 +319,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Writes the type data and module to disk.
-    pub fn write_to_disk(&self, write_to: GonSaveTo) -> CompileResult<'ctx, ()> {
+    pub fn write_to_disk(&self, write_to: GonSaveTo) -> CompileResult<()> {
         self.optimize_module();
         match write_to {
             GonSaveTo::SameLoc(path) => {
@@ -338,7 +341,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Writes the module as LLVM bytecode to disk.
-    pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<'ctx, ()> {
+    pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
         self.optimize_module();
         llvm_codegen::module_to_ll(&self.module, dest)
             .map_err(Into::into)
@@ -348,7 +351,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// # Safety
     /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
-    pub unsafe fn jit_run(&self) -> CompileResult<'ctx, std::process::ExitCode> {
+    pub unsafe fn jit_run(&self) -> CompileResult<std::process::ExitCode> {
         self.jit_run_raw().map(|t| std::process::ExitCode::from(t as u8))
     }
 
@@ -356,7 +359,7 @@ impl<'ctx> Compiler<'ctx> {
     /// 
     /// # Safety
     /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
-    unsafe fn jit_run_raw(&self) -> CompileResult<'ctx, std::ffi::c_int> {
+    unsafe fn jit_run_raw(&self) -> CompileResult<std::ffi::c_int> {
         self.optimize_module();
         let main = self.module.get_function("main").expect("Expected main function");
 

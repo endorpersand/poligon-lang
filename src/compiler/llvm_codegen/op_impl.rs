@@ -9,19 +9,19 @@ use crate::ast::op;
 use super::{GonValue, apply_bv, apply_bt};
 
 pub trait AsBV<'ctx> {
-    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>>;
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<BV<'ctx>>;
 }
 pub trait AsBVInfallible<'ctx> {
     fn into_bvi(self, c: &LLVMCodegen<'ctx>) -> BV<'ctx>;
 }
 
 impl<'ctx, V: AsBVInfallible<'ctx>> AsBV<'ctx> for V {
-    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>> {
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<BV<'ctx>> {
         Ok(self.into_bvi(c))
     }
 }
 impl<'ctx> AsBV<'ctx> for &plir::Expr {
-    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, BV<'ctx>> {
+    fn into_bv(self, c: &mut LLVMCodegen<'ctx>) -> LLVMResult<BV<'ctx>> {
         c.compile(self).and_then(|gv| gv.into_bv(c))
     }
 }
@@ -67,14 +67,14 @@ impl <'ctx, T: TruthBool<'ctx>> Truth<'ctx> for T {
     }
 }
 
-fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
-    Err(LLVMErr::CannotUnary(op, left.into().get_type()))
+fn cannot_unary<'ctx, T>(op: op::Unary, left: impl Into<BV<'ctx>>) -> LLVMResult<T> {
+    Err(LLVMErr::CannotUnary(op, left.into().get_type().into()))
 }
-fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
-    Err(LLVMErr::CannotBinary(op, left.into().get_type(), right.into().get_type()))
+fn cannot_binary<'ctx, T>(op: op::Binary, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<T> {
+    Err(LLVMErr::CannotBinary(op, left.into().get_type().into(), right.into().get_type().into()))
 }
-fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<'ctx, T> {
-    Err(LLVMErr::CannotCmp(op, left.into().get_type(), right.into().get_type()))
+fn cannot_cmp<'ctx, T>(op: op::Cmp, left: impl Into<BV<'ctx>>, right: impl Into<BV<'ctx>>) -> LLVMResult<T> {
+    Err(LLVMErr::CannotCmp(op, left.into().get_type().into(), right.into().get_type().into()))
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -114,7 +114,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 }
 
 impl<'ctx> Unary<'ctx> for BV<'ctx> {
-    type Output = LLVMResult<'ctx, BV<'ctx>>;
+    type Output = LLVMResult<BV<'ctx>>;
 
     fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
@@ -131,7 +131,7 @@ impl<'ctx> Unary<'ctx> for BV<'ctx> {
     }
 }
 impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
-    type Output = LLVMResult<'ctx, BV<'ctx>>;
+    type Output = LLVMResult<BV<'ctx>>;
 
     fn apply_binary(self, op: op::Binary, right: T, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
@@ -208,7 +208,7 @@ impl<'ctx, T: AsBV<'ctx>> Binary<'ctx, T> for BV<'ctx> {
     }
 }
 impl<'ctx, T: AsBV<'ctx>> Cmp<'ctx, T> for BV<'ctx> {
-    type Output = LLVMResult<'ctx, IntValue<'ctx>>;
+    type Output = LLVMResult<IntValue<'ctx>>;
 
     fn apply_cmp(self, op: op::Cmp, right: T, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         let rhs = right.into_bv(c)?;
@@ -239,7 +239,7 @@ impl<'ctx> Truth<'ctx> for BV<'ctx> {
 }
 
 impl<'ctx> Unary<'ctx> for FloatValue<'ctx> {
-    type Output = LLVMResult<'ctx, Self>;
+    type Output = LLVMResult<Self>;
 
     fn apply_unary(self, op: op::Unary, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
@@ -265,7 +265,7 @@ impl<'ctx> Unary<'ctx> for IntValue<'ctx> {
 }
 
 impl<'ctx> Binary<'ctx> for FloatValue<'ctx> {
-    type Output = LLVMResult<'ctx, Self>;
+    type Output = LLVMResult<Self>;
 
     fn apply_binary(self, op: op::Binary, right: FloatValue<'ctx>, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {
@@ -315,7 +315,7 @@ impl<'ctx> Binary<'ctx> for IntValue<'ctx> {
 }
 
 impl<'ctx> Binary<'ctx> for ArrayValue<'ctx> {
-    type Output = LLVMResult<'ctx, Self>;
+    type Output = LLVMResult<Self>;
 
     fn apply_binary(self, op: op::Binary, right: Self, c: &mut LLVMCodegen<'ctx>) -> Self::Output {
         match op {

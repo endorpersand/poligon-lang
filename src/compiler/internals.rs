@@ -457,7 +457,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Internal functions are currently defined in [`compiler::value::internals`].
     /// The type signature and identifier need to match exactly, or else defined internals may fail 
     /// or a segmentation fault may occur.
-    pub(crate) fn import_intrinsic(&self, s: &str) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
+    pub(crate) fn import_intrinsic(&self, s: &str) -> LLVMResult<FunctionValue<'ctx>> {
         // lookup intrinsic on HashMap
         let (alias, ty, mbody) = C_INTRINSICS_LLVM.get(s)
             .map(|(ident, ty, bbu)| (*ident, ty.as_concrete(self), bbu))

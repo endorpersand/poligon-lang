@@ -34,7 +34,7 @@ impl<'ctx> Builder2<'ctx> {
         &self, 
         ty: A,
         values: &[BasicValueEnum<'ctx>]
-    ) -> LLVMResult<'ctx, A::Value> 
+    ) -> LLVMResult<A::Value> 
         where A: BasicTypeT<'ctx>,
             A::Value: AggregateValue<'ctx>
     {

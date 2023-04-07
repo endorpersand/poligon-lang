@@ -63,7 +63,7 @@ macro_rules! fn_type {
 pub(in crate::compiler) use fn_type;
 
 use super::llvm::Builder2;
-use super::llvm::types::ReturnableType;
+use super::llvm::types::{ReturnableType, BasicTypeEnumS};
 use super::plir;
 
 
@@ -174,7 +174,7 @@ pub(crate) fn module_to_bc(module: &Module, p: impl AsRef<Path>) {
 /// 
 /// # Safety
 /// This is unsafe as it is a call to LLVM (not Rust).
-pub(crate) unsafe fn module_jit_run<'ctx>(module: &Module<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, std::ffi::c_int> {
+pub(crate) unsafe fn module_jit_run<'ctx>(module: &Module<'ctx>, fun: FunctionValue<'ctx>) -> LLVMResult<std::ffi::c_int> {
     let jit = module.create_jit_execution_engine(OptimizationLevel::Default)
         .map_err(LLVMErr::LLVMErr)?;
 
@@ -216,7 +216,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// 
     /// # Safety
     /// This is unsafe as it is a call to LLVM (not Rust).
-    pub unsafe fn jit_run(&self, fun: FunctionValue<'ctx>) -> LLVMResult<'ctx, std::process::ExitCode> {
+    pub unsafe fn jit_run(&self, fun: FunctionValue<'ctx>) -> LLVMResult<std::process::ExitCode> {
         module_jit_run(&self.module, fun).map(|t| std::process::ExitCode::from(t as u8))
     }
 
@@ -251,7 +251,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Registers extern funs and classes into the current module.
-    pub fn load_declared_types(&mut self, dtypes: &super::DeclaredTypes) -> LLVMResult<'ctx, ()> {
+    pub fn load_declared_types(&mut self, dtypes: &super::DeclaredTypes) -> LLVMResult<()> {
         for class in dtypes.types.values() {
             self.compile(class)?;
         }
@@ -284,7 +284,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Create an alloca instruction that can store a value of a given [`plir::Type`].
-    fn alloca(&mut self, ty: &plir::Type, ident: &str) -> LLVMResult<'ctx, PointerValue<'ctx>>
+    fn alloca(&mut self, ty: &plir::Type, ident: &str) -> LLVMResult<PointerValue<'ctx>>
     {
         let alloca = self.builder.build_alloca(self.get_layout(ty)?, ident);
         self.vars.insert(String::from(ident), alloca);
@@ -294,7 +294,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     fn get_ptr_opt(&mut self, ident: &str) -> Option<PointerValue<'ctx>> {
         self.vars.get(ident).copied()
     }
-    fn get_ptr(&mut self, ident: &str) -> LLVMResult<'ctx, PointerValue<'ctx>> {
+    fn get_ptr(&mut self, ident: &str) -> LLVMResult<PointerValue<'ctx>> {
         self.get_ptr_opt(ident)
             .ok_or_else(|| LLVMErr::UndefinedVar(String::from(ident)))
     }
@@ -327,7 +327,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// 
     /// This returns the GonValue of the block and the block branched to
     /// (for `break`, `continue`, and `exit` statements).
-    pub fn write_block(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>) -> LLVMResult<'ctx, (GonValue<'ctx>, Option<BasicBlock<'ctx>>)> {
+    pub fn write_block(&mut self, block: &plir::Block, exits: ExitPointers<'ctx>) -> LLVMResult<(GonValue<'ctx>, Option<BasicBlock<'ctx>>)> {
         use plir::ProcStmt;
 
         self.exit_pointers.push(exits);
@@ -414,7 +414,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Create a function value from the function's PLIR signature.
-    fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, (FunctionValue<'ctx>, FunctionType<'ctx>)> {
+    fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<(FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { private, ident, params, ret, varargs } = sig;
 
         let fun = match self.get_fn_by_plir_ident(ident) {
@@ -450,7 +450,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Import a function using the provided PLIR function signature.
-    fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<'ctx, FunctionValue<'ctx>> {
+    fn import(&mut self, sig: &plir::FunSignature) -> LLVMResult<FunctionValue<'ctx>> {
         // TODO: type check?
         let intrinsic = self.import_intrinsic(&sig.ident.as_llvm_ident())?;
 
@@ -475,7 +475,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Get the LLVM layout of a given PLIR type.
-    pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, BasicTypeEnum<'ctx>> {
+    pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> LLVMResult<BasicTypeEnum<'ctx>> {
         if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
             Ok(self.get_layout(t)?.array_type(0).into())
         } else {
@@ -488,7 +488,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Get the BasicTypeEnum for this PLIR type (or void if is void).
     /// 
     /// This is useful for function types returning.
-    fn get_layout_or_void(&self, ty: &plir::Type) -> LLVMResult<'ctx, ReturnableType<'ctx>> {
+    fn get_layout_or_void(&self, ty: &plir::Type) -> LLVMResult<ReturnableType<'ctx>> {
         use plir::{TypeRef, Type};
 
         if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
@@ -500,7 +500,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Determines whether this type is copy-by-reference through functions.
     /// Errors if type does not have an LLVM representation.
-    fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, bool> {
+    fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<bool> {
         use plir::{Type, TypeRef};
 
         let layout = self.get_layout(ty)?;
@@ -515,7 +515,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
     /// If a type is copy-by-reference, this type is LLVM `ptr`, otherwise it is its normal value.
-    fn get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<'ctx, BasicTypeEnum<'ctx>> {
+    fn get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<BasicTypeEnum<'ctx>> {
         if self.is_ref_layout(ty)? {
             Ok(self.ptr_type(Default::default()).into())
         } else {
@@ -524,7 +524,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Similar to [`Expr::write_ir`], except writing in a pointer if this value is copy-by-reference.
-    fn write_ref_value(&mut self, e: &plir::Expr) -> LLVMResult<'ctx, BasicValueEnum<'ctx>> {
+    fn write_ref_value(&mut self, e: &plir::Expr) -> LLVMResult<BasicValueEnum<'ctx>> {
         if self.is_ref_layout(&e.ty)? {
             e.write_ptr(self).map(Into::into)
         } else {
@@ -550,7 +550,7 @@ fn add_incoming<'a, 'ctx, B: BasicValue<'ctx>>(
 
 /// Errors that occur during compilation to LLVM.
 #[derive(Debug)]
-pub enum LLVMErr<'ctx> {
+pub enum LLVMErr {
     /// Variable was not declared.
     UndefinedVar(String),
     /// Function was not declared.
@@ -562,11 +562,11 @@ pub enum LLVMErr<'ctx> {
     /// The given PLIR type could not be resolved into a type in LLVM.
     UnresolvedType(plir::Type),
     /// The unary operator cannot be applied to this LLVM type.
-    CannotUnary(op::Unary, BasicTypeEnum<'ctx>),
+    CannotUnary(op::Unary, BasicTypeEnumS),
     /// The binary operator cannot be applied between these two LLVM types.
-    CannotBinary(op::Binary, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    CannotBinary(op::Binary, BasicTypeEnumS, BasicTypeEnumS),
     /// These two LLVM types can't be compared using the given operation.
-    CannotCmp(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+    CannotCmp(op::Cmp, BasicTypeEnumS, BasicTypeEnumS),
     /// Cannot perform a type cast from A to B
     CannotCast(plir::Type /* from */, plir::Type /* to */),
     /// Endpoint for LLVM (main function) could not be resolved.
@@ -581,9 +581,9 @@ pub enum LLVMErr<'ctx> {
     Generic(&'static str, String)
 }
 /// A [`Result`] type for operations in compilation to LLVM.
-pub type LLVMResult<'ctx, T> = Result<T, LLVMErr<'ctx>>;
+pub type LLVMResult<T> = Result<T, LLVMErr>;
 
-impl<'ctx> GonErr for LLVMErr<'ctx> {
+impl GonErr for LLVMErr {
     fn err_name(&self) -> &'static str {
         match self {
             | LLVMErr::UndefinedVar(_)
@@ -613,7 +613,7 @@ impl<'ctx> GonErr for LLVMErr<'ctx> {
     }
 }
 
-impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
+impl std::fmt::Display for LLVMErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LLVMErr::UndefinedVar(name)       => write!(f, "could not find variable '{name}'"),
@@ -633,7 +633,7 @@ impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
         }
     }
 }
-impl std::error::Error for LLVMErr<'_> {}
+impl std::error::Error for LLVMErr {}
 
 /// This trait is implemented for values that can be traversed in order to 
 /// create an LLVM representation or write values into the compiler.
@@ -646,11 +646,11 @@ pub trait TraverseIR<'ctx> {
 }
 // TODO: pub
 trait TraverseIRPtr<'ctx> {
-    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>>;
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<PointerValue<'ctx>>;
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Program {
-    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<FunctionValue<'ctx>>;
 
     /// To create a program from a script, we must determine the given `main` endpoint.
     /// 
@@ -776,7 +776,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> <Self as TraverseIR<'ctx>>::Return {
         use plir::ProcStmt;
@@ -802,7 +802,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::ProcStmt {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Expr {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::Expr { ty: expr_ty, expr } = self;
@@ -1162,7 +1162,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
-    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<PointerValue<'ctx>> {
         match &self.expr {
             plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
             plir::ExprType::Path(p) => p.write_ptr(compiler),
@@ -1179,7 +1179,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
     }
 }
 impl<'ctx> TraverseIR<'ctx> for Option<plir::Expr> {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         match self {
@@ -1190,7 +1190,7 @@ impl<'ctx> TraverseIR<'ctx> for Option<plir::Expr> {
 }
 
 impl<'ctx> TraverseIR<'ctx> for Literal {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let value = match *self {
@@ -1206,7 +1206,7 @@ impl<'ctx> TraverseIR<'ctx> for Literal {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Path {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         match self {
@@ -1226,7 +1226,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Path {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
-    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<PointerValue<'ctx>> {
         match self {
             plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
@@ -1269,7 +1269,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Index {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let Self { expr, index } = self;
@@ -1281,7 +1281,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Index {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
-    type Return = LLVMResult<'ctx, GonValue<'ctx>>;
+    type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let ptr = self.write_ptr(compiler)?;
@@ -1292,7 +1292,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
     }
 }
 impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
-    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<'ctx, PointerValue<'ctx>> {
+    fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<PointerValue<'ctx>> {
         // expr should always be a ptr
         self.expr.write_value(compiler)
             .map(|gv| {
@@ -1302,7 +1302,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::IDeref {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
-    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<FunctionValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         // TODO: remove when visibility is added
@@ -1315,7 +1315,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunSignature {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
-    type Return = LLVMResult<'ctx, FunctionValue<'ctx>>;
+    type Return = LLVMResult<FunctionValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
@@ -1356,7 +1356,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
 }
 
 impl<'ctx> TraverseIR<'ctx> for plir::Class {
-    type Return = LLVMResult<'ctx, ()>;
+    type Return = LLVMResult<()>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::Class { ty, fields } = self;

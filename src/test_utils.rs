@@ -108,7 +108,7 @@ impl Test<'_> {
             e.into().full_msg(self.code)
         )
     }
-    pub fn wrap_compile_err(&self, e: CompileErr<'_>) -> TestErr {
+    pub fn wrap_compile_err(&self, e: CompileErr) -> TestErr {
         match e {
             CompileErr::IoErr(e) => TestErr::IoErr(e),
             CompileErr::Computed(e) => TestErr::TestFailed(self.header.name.to_string(), e),
