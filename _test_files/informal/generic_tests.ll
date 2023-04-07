@@ -11,6 +11,8 @@ source_filename = "generic_tests.gon"
 @_tmpl_int_to_string = private unnamed_addr constant [3 x i8] c"%d\00", align 1
 @_tmpl_float_to_string = private unnamed_addr constant [4 x i8] c"%#f\00", align 1
 @_tmpl_char_to_string = private unnamed_addr constant [4 x i8] c"%lc\00", align 1
+@_tmpl_byte_to_string = private unnamed_addr constant [6 x i8] c"%#hhX\00", align 1
+@_tmpl_ptr_to_string = private unnamed_addr constant [9 x i8] c"ptr %#lX\00", align 1
 @throw_msg = private unnamed_addr constant [14 x i8] c"invalid slice\00", align 1
 @throw_msg.1 = private unnamed_addr constant [31 x i8] c"cannot take element from array\00", align 1
 @throw_msg.3 = private unnamed_addr constant [23 x i8] c"division by zero error\00", align 1
@@ -32,14 +34,23 @@ body:
 ; Function Attrs: nofree nounwind
 declare noundef i64 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define noalias ptr @"#ptr::null"() local_unnamed_addr #1 {
+define %string @"#ptr::to_string"(ptr %self) local_unnamed_addr {
 body:
-  ret ptr null
+  %0 = alloca ptr, align 8
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_ptr_to_string, ptr %self)
+  %deref = load ptr, ptr %0, align 8
+  %i_add = add i64 %1, 1
+  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
+  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
+  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
+  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
+  ret %string %5
 }
 
+declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
+
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string_chars @"string::chars"(ptr nocapture readonly %self) local_unnamed_addr #2 {
+define %string_chars @"string::chars"(ptr nocapture readonly %self) local_unnamed_addr #1 {
 body:
   %.unpack.unpack.i = load ptr, ptr %self, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack.i, 0
@@ -57,10 +68,10 @@ body:
 }
 
 ; Function Attrs: inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0)
-declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #3
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string_chars @"string_chars::new"(ptr nocapture readonly %str) local_unnamed_addr #2 {
+define %string_chars @"string_chars::new"(ptr nocapture readonly %str) local_unnamed_addr #1 {
 body:
   %.unpack.unpack = load ptr, ptr %str, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
@@ -122,7 +133,7 @@ declare i64 @fputwc(i32, ptr) local_unnamed_addr
 declare void @exit(i64) local_unnamed_addr
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define i64 @"string::len"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define i64 @"string::len"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %self.0.1 = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load = load i64, ptr %self.0.1, align 4
@@ -130,7 +141,7 @@ body:
 }
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define %string @"string::to_string"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define %string @"string::to_string"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %.unpack.unpack = load ptr, ptr %self, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
@@ -145,7 +156,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define %string @"string::add_string"(ptr nocapture readonly %self, ptr nocapture readonly %other) local_unnamed_addr #5 {
+define %string @"string::add_string"(ptr nocapture readonly %self, ptr nocapture readonly %other) local_unnamed_addr #4 {
 body:
   %self.0.1.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load.i = load i64, ptr %self.0.1.i, align 4
@@ -177,13 +188,13 @@ body:
 }
 
 ; Function Attrs: argmemonly mustprogress nocallback nofree nounwind willreturn
-declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #6
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #5
 
 ; Function Attrs: inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free")
-declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #7
+declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #6
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %"#dynarray" @"#dynarray::new"(i64 %cap) local_unnamed_addr #2 {
+define %"#dynarray" @"#dynarray::new"(i64 %cap) local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 %cap)
   %1 = insertvalue %"#dynarray" zeroinitializer, ptr %0, 0
@@ -193,7 +204,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define void @"#dynarray::extend"(ptr nocapture %self, ptr nocapture readonly %add_buf, i64 %add_len) local_unnamed_addr #5 {
+define void @"#dynarray::extend"(ptr nocapture %self, ptr nocapture readonly %add_buf, i64 %add_len) local_unnamed_addr #4 {
 body:
   %self.1 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %self.1.load = load i64, ptr %self.1, align 4
@@ -225,7 +236,7 @@ then.i:                                           ; preds = %body
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define void @"#dynarray::resize"(ptr nocapture %self, i64 %new_cap) local_unnamed_addr #5 {
+define void @"#dynarray::resize"(ptr nocapture %self, i64 %new_cap) local_unnamed_addr #4 {
 body:
   %self.2 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
   %self.2.load = load i64, ptr %self.2, align 4
@@ -304,12 +315,12 @@ else.i:                                           ; preds = %block8
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.smin.i64(i64, i64) #8
+declare i64 @llvm.smin.i64(i64, i64) #7
 
 declare i64 @mbtowc(ptr, ptr, i64) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define %"option<char>" @"option<char>::none"() local_unnamed_addr #1 {
+define %"option<char>" @"option<char>::none"() local_unnamed_addr #8 {
 body:
   ret %"option<char>" zeroinitializer
 }
@@ -322,7 +333,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"string::new"() local_unnamed_addr #2 {
+define %string @"string::new"() local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 0)
   %1 = insertvalue %"#dynarray" zeroinitializer, ptr %0, 0
@@ -333,12 +344,18 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %"option<char>" @"option<char>::some"(i32 %t) local_unnamed_addr #2 {
+define %"option<char>" @"option<char>::some"(i32 %t) local_unnamed_addr #1 {
 body:
   %0 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
   store i32 %t, ptr %0, align 4
   %1 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %0, 1
   ret %"option<char>" %1
+}
+
+; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
+define noalias ptr @"#ptr::null"() local_unnamed_addr #8 {
+body:
+  ret ptr null
 }
 
 define %string @"option<char>::to_string"(ptr nocapture readonly %self) local_unnamed_addr {
@@ -432,10 +449,8 @@ declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture) #10
 ; Function Attrs: argmemonly mustprogress nocallback nofree nosync nounwind willreturn
 declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture) #10
 
-declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
-
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
+define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 %len)
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %contents, i64 %len, i1 false)
@@ -500,8 +515,21 @@ merge:                                            ; preds = %body
   ret i32 %deref
 }
 
+define %string @"#byte::to_string"(i8 %self) local_unnamed_addr {
+body:
+  %0 = alloca ptr, align 8
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_byte_to_string, i8 %self)
+  %deref = load ptr, ptr %0, align 8
+  %i_add = add i64 %1, 1
+  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
+  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
+  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
+  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
+  ret %string %5
+}
+
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"bool::to_string"(i1 %self) local_unnamed_addr #2 {
+define %string @"bool::to_string"(i1 %self) local_unnamed_addr #1 {
 body:
   br i1 %self, label %then, label %else
 
@@ -568,7 +596,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.copysign.f64(double, double) #8
+declare double @llvm.copysign.f64(double, double) #7
 
 define double @"float::nexttoward"(double %self, double %twd) local_unnamed_addr {
 body:
@@ -594,7 +622,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.round.f64(double) #8
+declare double @llvm.round.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::trunc"(double %self) local_unnamed_addr #9 {
@@ -604,7 +632,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.trunc.f64(double) #8
+declare double @llvm.trunc.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::floor"(double %self) local_unnamed_addr #9 {
@@ -614,7 +642,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.floor.f64(double) #8
+declare double @llvm.floor.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::ceil"(double %self) local_unnamed_addr #9 {
@@ -624,7 +652,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.ceil.f64(double) #8
+declare double @llvm.ceil.f64(double) #7
 
 define double @"float::tgamma"(double %self) local_unnamed_addr {
 body:
@@ -776,7 +804,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.cos.f64(double) #8
+declare double @llvm.cos.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::sin"(double %self) local_unnamed_addr #9 {
@@ -786,7 +814,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.sin.f64(double) #8
+declare double @llvm.sin.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::powi"(double %self, i64 %exp) local_unnamed_addr #9 {
@@ -797,7 +825,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.pow.f64(double, double) #8
+declare double @llvm.pow.f64(double, double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::pow"(double %self, double %exp) local_unnamed_addr #9 {
@@ -832,7 +860,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.sqrt.f64(double) #8
+declare double @llvm.sqrt.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nounwind willreturn writeonly
 define double @"float::log1p"(double %self) local_unnamed_addr #11 {
@@ -852,7 +880,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log10.f64(double) #8
+declare double @llvm.log10.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::log2"(double %self) local_unnamed_addr #9 {
@@ -862,7 +890,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log2.f64(double) #8
+declare double @llvm.log2.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::log"(double %self) local_unnamed_addr #9 {
@@ -872,7 +900,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log.f64(double) #8
+declare double @llvm.log.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nounwind willreturn writeonly
 define double @"float::expm1"(double %self) local_unnamed_addr #11 {
@@ -892,7 +920,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.exp2.f64(double) #8
+declare double @llvm.exp2.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::exp"(double %self) local_unnamed_addr #9 {
@@ -902,7 +930,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.exp.f64(double) #8
+declare double @llvm.exp.f64(double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::min"(double %self, double %o) local_unnamed_addr #9 {
@@ -912,7 +940,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.minnum.f64(double, double) #8
+declare double @llvm.minnum.f64(double, double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::max"(double %self, double %o) local_unnamed_addr #9 {
@@ -922,7 +950,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.maxnum.f64(double, double) #8
+declare double @llvm.maxnum.f64(double, double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::fma"(double %self, double %multiplicand, double %addend) local_unnamed_addr #9 {
@@ -932,7 +960,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.fma.f64(double, double, double) #8
+declare double @llvm.fma.f64(double, double, double) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define double @"float::abs"(double %self) local_unnamed_addr #9 {
@@ -942,7 +970,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.fabs.f64(double) #8
+declare double @llvm.fabs.f64(double) #7
 
 define %string @"float::to_string"(double %self) local_unnamed_addr {
 body:
@@ -965,7 +993,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.cttz.i64(i64, i1 immarg) #8
+declare i64 @llvm.cttz.i64(i64, i1 immarg) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define i64 @"int::leading_zeroes"(i64 %self) local_unnamed_addr #9 {
@@ -975,7 +1003,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.ctlz.i64(i64, i1 immarg) #8
+declare i64 @llvm.ctlz.i64(i64, i1 immarg) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define i64 @"int::reverse_bytes"(i64 %self) local_unnamed_addr #9 {
@@ -985,7 +1013,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.bswap.i64(i64) #8
+declare i64 @llvm.bswap.i64(i64) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define i64 @"int::reverse_bits"(i64 %self) local_unnamed_addr #9 {
@@ -995,7 +1023,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.bitreverse.i64(i64) #8
+declare i64 @llvm.bitreverse.i64(i64) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define i64 @"int::count_ones"(i64 %self) local_unnamed_addr #9 {
@@ -1005,10 +1033,10 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.ctpop.i64(i64) #8
+declare i64 @llvm.ctpop.i64(i64) #7
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define i64 @"int::sign"(i64 %self) local_unnamed_addr #1 {
+define i64 @"int::sign"(i64 %self) local_unnamed_addr #8 {
 body:
   %i_lt.not = icmp ne i64 %self, 0
   %spec.select = sext i1 %i_lt.not to i64
@@ -1025,7 +1053,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.smax.i64(i64, i64) #8
+declare i64 @llvm.smax.i64(i64, i64) #7
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
 define i64 @"int::abs"(i64 %self) local_unnamed_addr #9 {
@@ -1035,7 +1063,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.abs.i64(i64, i1 immarg) #8
+declare i64 @llvm.abs.i64(i64, i1 immarg) #7
 
 define i64 @"int::idiv"(i64 %self, i64 %d) local_unnamed_addr {
 body:
@@ -1070,7 +1098,7 @@ body:
 declare ptr @setlocale(i64, ptr) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"list<int>::new"() local_unnamed_addr #2 {
+define %string @"list<int>::new"() local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 0)
   %1 = insertvalue %"#dynarray" zeroinitializer, ptr %0, 0
@@ -1177,7 +1205,7 @@ else.i.i18:                                       ; preds = %else.i16
 }
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define %"listiterator<int>" @"list<int>::iterator"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define %"listiterator<int>" @"list<int>::iterator"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %.unpack.unpack.i = load ptr, ptr %self, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack.i, 0
@@ -1231,7 +1259,7 @@ merge:                                            ; preds = %body, %"list<int>::
 }
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define i64 @"list<int>::len"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define i64 @"list<int>::len"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %self.0.1 = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load = load i64, ptr %self.0.1, align 4
@@ -1240,7 +1268,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define %"option<char>" @"option<int>::none"() local_unnamed_addr #1 {
+define %"option<char>" @"option<int>::none"() local_unnamed_addr #8 {
 body:
   ret %"option<char>" zeroinitializer
 }
@@ -1272,7 +1300,7 @@ and_true:                                         ; preds = %body
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %"option<char>" @"option<int>::some"(i64 %t) local_unnamed_addr #2 {
+define %"option<char>" @"option<int>::some"(i64 %t) local_unnamed_addr #1 {
 body:
   %0 = tail call dereferenceable_or_null(8) ptr @malloc(i64 8)
   store i64 %t, ptr %0, align 4
@@ -1281,7 +1309,7 @@ body:
 }
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define %"listiterator<int>" @"listiterator<int>::new"(ptr nocapture readonly %inner) local_unnamed_addr #4 {
+define %"listiterator<int>" @"listiterator<int>::new"(ptr nocapture readonly %inner) local_unnamed_addr #3 {
 body:
   %.unpack.unpack = load ptr, ptr %inner, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
@@ -1720,7 +1748,7 @@ post_for:                                         ; preds = %"listiterator<int>:
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define void @"list<int>::push"(ptr nocapture %self, i64 %e) local_unnamed_addr #5 {
+define void @"list<int>::push"(ptr nocapture %self, i64 %e) local_unnamed_addr #4 {
 body:
   %self.1.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %self.1.load.i = load i64, ptr %self.1.i, align 4
@@ -1860,7 +1888,7 @@ merge:                                            ; preds = %else, %"string::add
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"list<int>::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
+define %string @"list<int>::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #1 {
 body:
   %i_mul = shl i64 %len, 3
   %0 = tail call ptr @malloc(i64 %i_mul)
@@ -1874,29 +1902,47 @@ body:
 
 define i8 @main() local_unnamed_addr {
 body:
+  %0 = alloca ptr, align 8
+  %1 = alloca ptr, align 8
+  %2 = alloca ptr, align 8
   %a.i = alloca %string, align 8
-  %0 = tail call ptr @setlocale(i64 0, ptr nonnull @locale.6)
+  %3 = tail call ptr @setlocale(i64 0, ptr nonnull @locale.6)
   call void @llvm.lifetime.start.p0(i64 24, ptr %a.i)
-  %1 = tail call dereferenceable_or_null(40) ptr @malloc(i64 40)
-  store i64 1, ptr %1, align 1
-  %.sroa.215.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 8
-  store i64 2, ptr %.sroa.215.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.3.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 16
+  %4 = tail call dereferenceable_or_null(40) ptr @malloc(i64 40)
+  store i64 1, ptr %4, align 1
+  %.sroa.252.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 8
+  store i64 2, ptr %.sroa.252.0.self.0.load.i.i.sroa_idx.i, align 1
+  %.sroa.3.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 16
   store i64 3, ptr %.sroa.3.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.416.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 24
-  store i64 4, ptr %.sroa.416.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.5.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 32
+  %.sroa.453.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 24
+  store i64 4, ptr %.sroa.453.0.self.0.load.i.i.sroa_idx.i, align 1
+  %.sroa.5.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 32
   store i64 5, ptr %.sroa.5.0.self.0.load.i.i.sroa_idx.i, align 1
-  store ptr %1, ptr %a.i, align 8
+  store ptr %4, ptr %a.i, align 8
   %a.repack5.i = getelementptr inbounds %"#dynarray", ptr %a.i, i64 0, i32 1
   store i64 40, ptr %a.repack5.i, align 8
   %a.repack7.i = getelementptr inbounds %"#dynarray", ptr %a.i, i64 0, i32 2
   store i64 40, ptr %a.repack7.i, align 8
-  %2 = call %string @"list<int>::to_string"(ptr nonnull %a.i)
-  %3 = extractvalue %string %2, 0
-  %.elt9.i = extractvalue %"#dynarray" %3, 0
-  %.elt11.i = extractvalue %"#dynarray" %3, 1
-  %4 = tail call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %.elt11.i, ptr %.elt9.i)
+  %5 = call %string @"list<int>::to_string"(ptr nonnull %a.i)
+  %6 = extractvalue %string %5, 0
+  %.elt9.i = extractvalue %"#dynarray" %6, 0
+  %.elt11.i = extractvalue %"#dynarray" %6, 1
+  %7 = tail call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %.elt11.i, ptr %.elt9.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %2)
+  %8 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %2, ptr nonnull @_tmpl_byte_to_string, i8 127)
+  %deref.i.i = load ptr, ptr %2, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %2)
+  %9 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %8, ptr %deref.i.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %1)
+  %10 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %1, ptr nonnull @_tmpl_ptr_to_string, ptr nonnull %4)
+  %deref.i32.i = load ptr, ptr %1, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %1)
+  %11 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %10, ptr %deref.i32.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %0)
+  %12 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_int_to_string, i64 141)
+  %deref.i37.i = load ptr, ptr %0, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %0)
+  %13 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %12, ptr %deref.i37.i)
   call void @llvm.lifetime.end.p0(i64 24, ptr %a.i)
   ret i8 0
 }
@@ -1905,14 +1951,14 @@ body:
 declare void @llvm.memset.p0.i64(ptr nocapture writeonly, i8, i64, i1 immarg) #12
 
 attributes #0 = { nofree nounwind }
-attributes #1 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
-attributes #2 = { mustprogress nofree nounwind willreturn }
-attributes #3 = { inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) "alloc-family"="malloc" }
-attributes #4 = { argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn }
-attributes #5 = { mustprogress nounwind willreturn }
-attributes #6 = { argmemonly mustprogress nocallback nofree nounwind willreturn }
-attributes #7 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
-attributes #8 = { mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn }
+attributes #1 = { mustprogress nofree nounwind willreturn }
+attributes #2 = { inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) "alloc-family"="malloc" }
+attributes #3 = { argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn }
+attributes #4 = { mustprogress nounwind willreturn }
+attributes #5 = { argmemonly mustprogress nocallback nofree nounwind willreturn }
+attributes #6 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
+attributes #7 = { mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn }
+attributes #8 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
 attributes #9 = { mustprogress nofree nosync nounwind readnone willreturn }
 attributes #10 = { argmemonly mustprogress nocallback nofree nosync nounwind willreturn }
 attributes #11 = { mustprogress nofree nounwind willreturn writeonly }

@@ -4,9 +4,19 @@ class <list<int>> {
 fun <list<int>>::new() -> list<int> {
     return list<int> #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
 }
+extern fun "#malloc"(arg0: int) -> #ptr;
 fun main() -> void {
     let a: list<int> = <list<int>>([<int>(1), <int>(2), <int>(3), <int>(4), <int>(5)]);
-    return <void>(<(string) -> void>(print)(<string>(<(list<int>) -> string>(<list<int>>::to_string)(<list<int>>(a)))));
+    <void>(<(string) -> void>(print)(<string>(<(list<int>) -> string>(<list<int>>::to_string)(<list<int>>(a)))));
+    let b: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(8)));
+    <int>{
+        exit <int>(*b = <int>(9187201950435737471));
+    }
+    let c: #byte = <#byte>(*b);
+    <void>(<(string) -> void>(print)(<string>(<(#byte) -> string>(<#byte>::to_string)(<#byte>(c)))));
+    <void>(<(string) -> void>(print)(<string>(<(#ptr) -> string>(<#ptr>::to_string)(<#ptr>(<#dynarray>(<list<int>>(a).0).0)))));
+    let e: int = <int>(<int>(castfrom <#byte>(c)) + <int>(14));
+    return <void>(<(string) -> void>(print)(<string>(<(int) -> string>(<int>::to_string)(<int>(e)))));
 }
 class <listiterator<int>> {
     inner: list<int>,
@@ -63,7 +73,6 @@ fun <option<int>>::get(self: option<int>) -> int {
         throw "no value present";
     });
 }
-extern fun "#malloc"(arg0: int) -> #ptr;
 fun <option<int>>::some(t: int) -> option<int> {
     let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<int>::size_of())));
     <int>{

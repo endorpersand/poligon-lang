@@ -161,4 +161,13 @@ fit class list<int> {
 fun main() {
     let a = [1, 2, 3, 4, 5];
     print(a);
+
+    let b = #malloc(8);
+    *b = 9187201950435737471;
+    let c: #byte = *b;
+    print(c);
+    print(a.inner.buf);
+
+    let e = c + 14;
+    print(e);
 }
