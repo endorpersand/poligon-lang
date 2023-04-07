@@ -789,6 +789,306 @@ impl Globals {
     }
 }
 
+#[derive(PartialEq, Eq, Hash)]
+enum MaybeKnownType {
+    Known(plir::Type),
+    Unknown(String)
+}
+
+mod dsds {
+    use std::error::Error;
+    use std::fmt::Formatter;
+    use std::hash::Hash;
+
+    use indexmap::{IndexSet, Equivalent};
+
+    use super::MaybeKnownType;
+
+    /// Internal implementation of [`UnionFind`].
+    /// This data structure only holds and manipulates indexes.
+    struct UnionFindInner {
+        parents: Vec<usize>,
+        sizes: Vec<usize>
+    }
+    
+    impl UnionFindInner {
+        /// Create a new disjoint-set data structure.
+        fn new() -> Self {
+            Self {
+                parents: vec![],
+                sizes: vec![]
+            }
+        }
+    
+        /// Gets the current size of the data structure
+        fn len(&self) -> usize {
+            self.parents.len()
+        }
+
+        /// Add a new disjoint set to data structure.
+        fn make_set(&mut self) {
+            self.parents.push(self.parents.len());
+            self.sizes.push(1);
+        }
+    
+        /// Finds the root of this element's group.
+        /// 
+        /// This will panic if the element >= the `len` of this data structure 
+        /// (i.e., if it is not present).
+        fn find(&mut self, t: usize) -> usize {
+            let mut current = t;
+            let mut parent = self.parents[current];
+
+            while current != parent {
+                current = parent;
+                parent = self.parents[parent];
+                self.parents[current] = self.parents[parent];
+            }
+
+            current
+        }
+        
+        /// Merge the groups of the two provided elements. 
+        /// 
+        /// The group with the greater size (number of elements in its tree) becomes the root.
+        /// 
+        /// This will panic if either element >= the `len` of this data structure
+        /// (i.e. if either are not present).
+        fn union(&mut self, x: usize, y: usize) {
+            self.union_select(x, y, |_, _, _| Selector::Whatever);
+        }
+
+        /// Merges the source group into the destination group, using the predicate to determine the root.
+        /// 
+        /// The predicate takes both roots and returns a [`Selector`] indicating which root becomes the root node
+        /// of the entire group.
+        /// * If the predicate returns Left or Right, that root becomes the root of the new group.
+        /// * If the predicate returns Whatever, the root with the largest size becomes the root of the new group.
+        /// 
+        /// This will panic if either element >= the `len` of this data structure
+        /// (i.e. if either are not present).
+        fn union_select(&mut self, x: usize, y: usize, f: impl FnOnce(&mut UnionFindInner, usize, usize) -> Selector) {
+            let mut xroot = self.find(x);
+            let mut yroot = self.find(y);
+    
+            if xroot != yroot {
+                let (xsize, ysize) = (self.sizes[xroot], self.sizes[yroot]);
+                let f = |this, xr, yr| match f(this, xr, yr) {
+                    Selector::Whatever => (xsize < ysize).into(),
+                    s => s
+                };
+                if let Selector::Right = f(self, xroot, yroot) {
+                    (xroot, yroot) = (yroot, xroot);
+                }
+
+                // merge y into x
+                self.parents[yroot] = xroot;
+                self.sizes[xroot] += self.sizes[yroot];
+            }
+        }
+    }
+
+    /// A disjoint-set data structure.
+    /// 
+    /// This structure stores a collection of disjoint sets, 
+    /// allowing for creating new sets, merging sets, 
+    /// and checking if two elements are of the same set.
+    pub struct UnionFind<T: Hash + Eq> {
+        arena: IndexSet<T>,
+        inner: UnionFindInner
+    }
+
+    impl<T: Hash + Eq> UnionFind<T> {
+        /// Creates a new [`UnionFind`].
+        fn new() -> Self {
+            Self { arena: IndexSet::new(), inner: UnionFindInner::new() }
+        }
+
+        /// Gets the number of elements in the set.
+        pub fn len(&self) -> usize {
+            self.arena.len()
+        }
+
+        /// Add a new element to the set if it does not already exist.
+        /// 
+        /// This function returns whether a new element was successfully added.
+        pub fn make_set(&mut self, t: T) -> bool {
+            let success = self.arena.insert(t);
+            
+            if success {
+                self.inner.make_set();
+            }
+
+            success
+        }
+
+        /// Finds the root of this element's group.
+        /// 
+        /// This returns None if not present in the set.
+        pub fn find<Q>(&mut self, t: &Q) -> Option<&T>
+            where Q: ?Sized + Hash + Equivalent<T>
+        {
+            let i = self.arena.get_index_of(t)?;
+            self.arena.get_index(self.inner.find(i))
+        }
+
+        /// Finds the root of each element's group, and the root's index.
+        /// 
+        /// This returns None if any element is not present in the set.
+        pub fn find_many<Q>(&mut self, ts: &[&Q]) -> Option<Vec<(usize, &T)>> 
+            where Q: ?Sized + Hash + Equivalent<T>
+        {
+            ts.iter()
+                .map(|&t| {
+                    let i = self.arena.get_index_of(t)?;
+                    let ir = self.inner.find(i);
+                    let tr = self.arena.get_index(ir)?;
+                    Some((ir, tr))
+                })
+                .collect::<Option<_>>()
+        }
+
+
+        /// Merge the groups of the two provided elements. 
+        /// 
+        /// The group with the greater size (number of elements in its tree) becomes the root.
+        /// 
+        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
+        pub fn union<Q, R>(&mut self, x: &Q, y: &R) -> Result<(), ElementNotPresent>
+            where Q: ?Sized + Hash + Equivalent<T>,
+                  R: ?Sized + Hash + Equivalent<T>
+        {
+            let (i, j) = {
+                Option::zip(self.arena.get_index_of(x), self.arena.get_index_of(y))
+                    .ok_or(ElementNotPresent(()))
+            }?;
+    
+            self.inner.union(i, j);
+            Ok(())
+        }
+        
+        /// Merges the source group into the destination group, using the predicate to determine the root.
+        /// 
+        /// The predicate takes both roots and returns a bool indicating which root becomes the root node
+        /// of the entire group.
+        /// * If the predicate returns false, the left root becomes the root of the new group.
+        /// * If the predicate returns true, the right root becomes the root of the new group.
+        /// 
+        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
+        pub fn union_select<Q>(&mut self, x: &Q, y: &Q, f: impl FnOnce(&T, &T) -> Selector) -> Result<(), ElementNotPresent>
+            where Q: ?Sized + Hash + Equivalent<T>
+        {
+            let refs = self.find_many(&[x, y])
+                .ok_or(ElementNotPresent(()))?;
+            let [(i, xr), (j, yr)] = *Box::<[_; 2]>::try_from(refs)
+                .ok()
+                .expect("find many with 2 args should have returned 2 values");
+    
+            let which = f(xr, yr);
+            self.inner.union_select(i, j, |_, _, _| which);
+            Ok(())
+        }
+
+        /// Merges the source group into the destination group, using the predicate to determine the root (or indicating a failure).
+        /// 
+        /// The predicate takes both roots and returns a bool indicating which root becomes the root node
+        /// of the entire group.
+        /// * If the predicate returns Some(false), the left root becomes the root of the new group.
+        /// * If the predicate returns Some(true), the right root becomes the root of the new group.
+        /// * If the predicate returns None, nothing changes in the groups and a [`UnionSelectFail`] error is thrown.
+        /// 
+        /// This returns a [`ElementNotPresent`] error if either element is not present in the set.
+        pub fn try_union_select<Q>(&mut self, x: &Q, y: &Q, f: impl FnOnce(&T, &T) -> Option<Selector>) -> Result<(), UnionFindErr>
+            where Q: ?Sized + Hash + Equivalent<T>
+        {
+            let refs = self.find_many(&[x, y])
+                .ok_or(ElementNotPresent(()))
+                .map_err(UnionFindErr::ElementNotPresent)?;
+            let [(i, xr), (j, yr)] = *Box::<[_; 2]>::try_from(refs)
+                .ok()
+                .expect("find many with 2 args should have returned 2 values");
+    
+            let which = f(xr, yr)
+                .ok_or(UnionSelectFail(()))
+                .map_err(UnionFindErr::UnionSelectFail)?;
+            
+            self.inner.union_select(i, j, |_, _, _| which);
+            Ok(())
+        }
+    }
+
+    /// A type which holds the possible options for [`UnionFind::union_select`] and related functions.
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum Selector {
+        Left, Right, Whatever
+    }
+    impl From<bool> for Selector {
+        fn from(value: bool) -> Self {
+            match value {
+                false => Selector::Left,
+                true  => Selector::Right,
+            }
+        }
+    }
+
+    /// Indicates that a value was accessed which is not contained within the set.
+    #[derive(Debug)]
+    pub struct ElementNotPresent(());
+    impl std::fmt::Display for ElementNotPresent {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "element does not exist in union-find data structure")
+        }
+    }
+    impl Error for ElementNotPresent {}
+    
+    /// Indicates that a value was accessed which is not contained within the set.
+    #[derive(Debug)]
+    pub struct UnionSelectFail(());
+    impl std::fmt::Display for UnionSelectFail {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "try_union_select predicate returned None")
+        }
+    }
+    impl Error for UnionSelectFail {}
+
+    /// Any error which occurred in the UnionFind operations.
+    #[derive(Debug)]
+    pub enum UnionFindErr {
+        ElementNotPresent(ElementNotPresent),
+        UnionSelectFail(UnionSelectFail)
+    }
+    impl std::fmt::Display for UnionFindErr {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "union find err: ")?;
+            match self {
+                UnionFindErr::ElementNotPresent(e) => e.fmt(f),
+                UnionFindErr::UnionSelectFail(e)   => e.fmt(f),
+            }
+        }
+    }
+    impl Error for UnionFindErr {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            match self {
+                UnionFindErr::ElementNotPresent(e) => Some(e),
+                UnionFindErr::UnionSelectFail(e)   => Some(e),
+            }
+        }
+    }
+
+    impl UnionFind<MaybeKnownType> {
+        pub fn union_type<Q>(&mut self, x: &Q, y: &Q) -> Result<(), UnionFindErr> 
+            where Q: ?Sized + Hash + Equivalent<MaybeKnownType>
+        {
+            use MaybeKnownType::{Known, Unknown};
+            self.try_union_select(x, y, |xr, yr| match (xr, yr) {
+                (Known(_),   Known(_))   => None,
+                (Known(_),   Unknown(_)) => Some(Selector::Left),
+                (Unknown(_), Known(_))   => Some(Selector::Right),
+                (Unknown(_), Unknown(_)) => Some(Selector::Whatever),
+            })
+        }
+    }
+}
 /// This struct does the actual conversion from AST to PLIR.
 /// 
 /// # Usage
