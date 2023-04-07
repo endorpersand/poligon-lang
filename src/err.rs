@@ -10,7 +10,7 @@
 //! 
 //! [`LexErr`]: crate::lexer::LexErr
 
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
@@ -25,22 +25,24 @@ pub trait GonErr: Display + Sized {
 
     /// Designate that this error occurred at a specific position
     fn at(self, p: Cursor) -> FullGonErr<Self> {
-        FullGonErr::new(self, ErrPos::from_point(p))
+        FullGonErr::new(self, vec![ErrPos::from_point(p)])
     }
     
     /// Designate that this error occurred at a few specific positions
     fn at_points(self, pts: &[Cursor]) -> FullGonErr<Self> {
-        FullGonErr::new(self, ErrPos::from_points(pts))
+        let pts = pts.iter()
+            .map(|&p| ErrPos::from_point(p));
+        FullGonErr::new(self, pts)
     }
     
     /// Designate that this error occurred within a range of positions
     fn at_range(self, range: impl RangeBounds<Cursor>) -> FullGonErr<Self> {
-        FullGonErr::new(self, ErrPos::from_range(range))
+        FullGonErr::new(self, vec![ErrPos::from_range(range)])
     }
 
     /// Designate that this error occurred at an unknown position in the code
     fn at_unknown(self) -> FullGonErr<Self> {
-        FullGonErr::new(self, ErrPos::Unknown)
+        FullGonErr::new(self, vec![])
     }
 }
 
@@ -61,7 +63,7 @@ impl<E: GonErr> From<E> for FullGonErr<E> {
 #[derive(PartialEq, Eq, Debug)]
 pub struct FullGonErr<E: GonErr> {
     pub(crate) err: E,
-    position: ErrPos
+    pos: BTreeSet<ErrPos>
 }
 
 /// Indicates a specific character in given code.
@@ -75,33 +77,18 @@ enum ErrPos {
     /// Error occurred at a specific point
     Point(Cursor),
 
-    /// Error occurred at a few specific points
-    Points(Vec<Cursor>),
-
     /// Error occurred at an inclusive range of points
     Range(CursorRange),
 
     /// Error occurred at an range of points, going to the end
-    RangeFrom(RangeFrom<Cursor>),
-
-    /// Error occurred somewhere, unknown where
-    Unknown
+    RangeFrom(RangeFrom<Cursor>)
 }
 
 impl ErrPos {
     pub fn from_point(p: Cursor) -> Self {
         Self::Point(p)
     }
-    pub fn from_points(pts: &[Cursor]) -> Self {
-        if let [pt] = pts {
-            Self::Point(*pt)
-        } else {
-            let mut vec: Vec<_> = pts.into();
-            vec.sort();
 
-            Self::Points(vec)
-        }
-    }
     pub fn from_range(range: impl RangeBounds<Cursor>) -> Self {
         let start = match range.start_bound() {
             Bound::Included(p) | Bound::Excluded(p) => *p,
@@ -118,6 +105,61 @@ impl ErrPos {
             },
             Bound::Unbounded => ErrPos::RangeFrom(start..),
         }
+    }
+
+    fn position(&self) -> String {
+        match self {
+            ErrPos::Point((lno, cno)) => format!("{}:{}", lno + 1, cno + 1),
+
+            ErrPos::Range(ri) => {
+                let (start_lno, start_cno) = ri.start();
+                let (end_lno, end_cno) = ri.end();
+                format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
+            },
+            
+            ErrPos::RangeFrom(RangeFrom { start }) => {
+                let (start_lno, start_cno) = start;
+                format!("{}:{}-..", start_lno + 1, start_cno + 1)
+            },
+        }
+    }
+
+    fn display_pointer(&self, src: &str) -> Vec<String> {
+        match self {
+            ErrPos::Point(p)     => ptr_point(src, *p).into(),
+            ErrPos::Range(r)     => ptrs_range(src, r),
+            ErrPos::RangeFrom(r) => ptrs_range(src, r),
+        }
+    }
+}
+
+impl PartialOrd for ErrPos {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ErrPos {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
+            match pos {
+                ErrPos::Point(p)     => (*p,         Some(*p)),
+                ErrPos::Range(r)     => (*r.start(), Some(*r.end())),
+                ErrPos::RangeFrom(r) => (r.start,    None),
+            }
+        }
+
+        let (lstart, lend) = key(self);
+        let (rstart, rend) = key(other);
+        
+        // none last
+        lstart.cmp(&rstart).then_with(|| match (lend, rend) {
+            (Some(l), Some(r)) => l.cmp(&r),
+            (Some(_), None)    => Ordering::Less,
+            (None, Some(_))    => Ordering::Greater,
+            (None, None)       => Ordering::Equal,
+        })
     }
 }
 /// Get line from original text.
@@ -196,37 +238,20 @@ fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Cursor>) -> Vec<String> {
 }
 
 impl<E: GonErr> FullGonErr<E> {
-    fn new(e: E, err_pos: ErrPos) -> Self {
-        Self { err: e, position: err_pos }
+    fn new(e: E, positions: impl IntoIterator<Item=ErrPos>) -> Self {
+        Self { err: e, pos: positions.into_iter().collect() }
     }
 
     /// Get a String designating where the error occurred 
     /// and the message associated with the error.
     pub fn short_msg(&self) -> String {
-        let line_fmt = match &self.position {
-            ErrPos::Point((lno, cno)) => format!("{}:{}", lno + 1, cno + 1),
+        let line_fmt = self.pos.iter()
+            .map(ErrPos::position)
+            .collect::<Vec<_>>()
+            .join(", ");
 
-            ErrPos::Points(pts) => pts.iter()
-                .map(|(lno, cno)| format!("{}:{}", lno + 1, cno + 1))
-                .collect::<Vec<_>>()
-                .join(", "),
-
-            ErrPos::Range(ri) => {
-                let (start_lno, start_cno) = ri.start();
-                let (end_lno, end_cno) = ri.end();
-                format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
-            },
-            
-            ErrPos::RangeFrom(RangeFrom { start }) => {
-                let (start_lno, start_cno) = start;
-                format!("{}:{}-..", start_lno + 1, start_cno + 1)
-            },
-
-            ErrPos::Unknown => String::new()
-        };
-
-        if !line_fmt.is_empty() {
-            format!("{} :: {}: {}", line_fmt, self.err.err_name(), self.err)
+        if !line_fmt.trim().is_empty() {
+            format!("{} :: {}: {}", line_fmt.trim(), self.err.err_name(), self.err)
         } else {
             format!("{}: {}", self.err.err_name(), self.err)
         }
@@ -235,38 +260,11 @@ impl<E: GonErr> FullGonErr<E> {
     /// Get a String designating where the error occurred,
     /// the message associated with the error,
     /// and a pointer to what happened at the line to cause the error.
-    pub fn full_msg(&self, orig_txt: &str) -> String {
+    pub fn full_msg(&self, src: &str) -> String {
         let mut lines = vec![self.short_msg(), String::new()];
         
-        match &self.position {
-            ErrPos::Point(p) => {
-                lines.extend(ptr_point(orig_txt, *p));
-            },
-            ErrPos::Points(pts) => {
-                let mut lmap: HashMap<_, Vec<_>> = HashMap::new();
-
-                for (lno, cno) in pts {
-                    lmap.entry(*lno).or_default().push(*cno);
-                }
-
-                let mut linemaps: Vec<_> = lmap.into_iter()
-                    .collect();
-                linemaps.sort();
-
-                for (lno, cnos) in linemaps {
-                    let code = get_line(orig_txt, lno);
-                    lines.push(code);
-
-                    let mut ptrs = vec![' '; *cnos.iter().max().unwrap() + 1];
-                    for i in cnos {
-                        ptrs[i] = '^';
-                    }
-                    lines.push(ptrs.into_iter().collect());
-                }
-            },
-            ErrPos::Range(r) => lines.extend(ptrs_range(orig_txt, r)),
-            ErrPos::RangeFrom(r) => lines.extend(ptrs_range(orig_txt, r)),
-            ErrPos::Unknown => { lines.pop(); }
+        for p in &self.pos {
+            lines.extend(p.display_pointer(src));
         }
 
         lines.join("\n")
@@ -276,13 +274,25 @@ impl<E: GonErr> FullGonErr<E> {
     pub fn map<F: GonErr>(self, f: impl FnOnce(E) -> F) -> FullGonErr<F> {
         FullGonErr {
             err: f(self.err),
-            position: self.position
+            pos: self.pos
         }
     }
 
     /// Cast the inner error to another error.
     pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
         self.map(F::from)
+    }
+
+    /// Designate that this error also occurred at a specific position
+    pub fn and_at(mut self, p: Cursor) -> Self {
+        self.pos.insert(ErrPos::from_point(p));
+        self
+    }
+    
+    /// Designate that this error also occurred within a range of positions
+    pub fn and_at_range(mut self, range: impl RangeBounds<Cursor>) -> Self {
+        self.pos.insert(ErrPos::from_range(range));
+        self
     }
 }
 
