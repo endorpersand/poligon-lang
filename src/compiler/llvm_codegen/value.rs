@@ -99,12 +99,19 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// - anything to bool
     pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<'ctx, GonValue<'ctx>> {
         use plir::{Type, TypeRef};
-
+        
         match (src.as_ref(), dest.as_ref()) {
             (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT)) => {
                 let _float = self.get_layout(dest)?.into_float_type();
                 let GonValue::Basic(bv) = v else { unreachable!() };
                 let val = self.builder.build_signed_int_to_float(bv.into_int_value(), _float, "cast");
+                
+                Ok(GonValue::Basic(val.into()))
+            },
+            (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT)) => {
+                let _int = self.get_layout(dest)?.into_int_type();
+                let GonValue::Basic(bv) = v else { unreachable!() };
+                let val = self.builder.build_float_to_signed_int(bv.into_float_value(), _int, "cast");
                 
                 Ok(GonValue::Basic(val.into()))
             },

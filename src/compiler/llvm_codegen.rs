@@ -568,7 +568,7 @@ pub enum LLVMErr<'ctx> {
     /// These two LLVM types can't be compared using the given operation.
     CannotCmp(op::Cmp, BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
     /// Cannot perform a type cast from A to B
-    CannotCast(plir::Type, plir::Type),
+    CannotCast(plir::Type /* from */, plir::Type /* to */),
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
     /// Endpoint for LLVM (main function) had invalid parameters.
@@ -624,7 +624,7 @@ impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
             LLVMErr::CannotUnary(op, t1)      => write!(f, "cannot apply '{op}' to {t1}"),
             LLVMErr::CannotBinary(op, t1, t2) => write!(f, "cannot apply '{op}' to {t1} and {t2}"),
             LLVMErr::CannotCmp(op, t1, t2)    => write!(f, "cannot compare '{op}' between {t1} and {t2}"),
-            LLVMErr::CannotCast(t1, t2)       => write!(f, "cannot perform type cast from '{t1}' to {t2}"),
+            LLVMErr::CannotCast(t1, t2)       => write!(f, "cannot perform type cast from {t1} to {t2}"),
             LLVMErr::StructIndexOOB(i)        => write!(f, "cannot index struct, does not have field {i}"),
             LLVMErr::CannotDetermineMain      => write!(f, "could not determine entry point"),
             LLVMErr::InvalidMain              => write!(f, "expected main to be of type {}", plir::ty!(() -> plir::ty!(plir::Type::S_VOID))),

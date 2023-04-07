@@ -57,19 +57,19 @@ type HomoResult<T> = Result<T, T>;
 struct Cast<'a> {
     src: Located<Expr>,
     dest: &'a Type,
-    ct: CastType
+    cf: CastFlags
 }
 impl<'a> Cast<'a> {
     fn can_cast(&self, cg: &mut super::PLIRCodegen) -> PLIRResult<bool> {
-        use CastType::*;
         use TypeRef::*;
 
-        let result = match (self.src.ty.as_ref(), self.dest.as_ref(), self.ct) {
-            (l, r, _) if l == r => true,
-            (Prim(Type::S_INT),  Prim(Type::S_FLOAT), Any | Decl | FunDecl | Call) => true,
-            (_, Prim(Type::S_STR), Any | Decl | FunDecl | Call) => {
+        let result = match (self.src.ty.as_ref(), self.dest.as_ref()) {
+            (l, r) if l == r => true,
+            (Prim(Type::S_INT), Prim(Type::S_FLOAT)) => self.cf.allows(CastFlags::NumWiden),
+            (Prim(Type::S_FLOAT), Prim(Type::S_INT)) => self.cf.allows(CastFlags::NumNarrow),
+            (_, Prim(Type::S_STR)) if self.cf.allows(CastFlags::Stringify) => {
                 // Load src class
-                let cls = cg.get_class(Located::new(&self.src.ty, self.src.1.clone()))?;
+                let cls = cg.get_class(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
                     cg.get_var_type(&met_ident)?
@@ -82,8 +82,8 @@ impl<'a> Cast<'a> {
                     false
                 }
             },
-            (_, Prim(Type::S_BOOL), Any) => true,
-            (_, Prim(Type::S_VOID), Any | FunDecl) => true,
+            (_, Prim(Type::S_BOOL)) => self.cf.allows(CastFlags::Truth),
+            (_, Prim(Type::S_VOID)) => self.cf.allows(CastFlags::Void),
             _ => false
         };
 
@@ -125,9 +125,40 @@ impl<'a> Cast<'a> {
         Ok(result)
     }
 }
+
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum CastType {
-    Any, Decl, FunDecl, Call
+pub struct CastFlags(u8);
+
+#[allow(non_upper_case_globals)]
+impl CastFlags {
+    /// A cast which casts numeric types to be cast into wider types losslessly (e.g. int -> float)
+    pub const NumWiden:  CastFlags = CastFlags(1 << 0);
+    /// A cast which casts numeric types to be cast into narrower types lossily (e.g. float -> int)
+    pub const NumNarrow: CastFlags = CastFlags(1 << 1);
+    /// A cast which casts any type to bool
+    pub const Truth:     CastFlags = CastFlags(1 << 2);
+    /// A cast which casts any stringifiable type to string
+    pub const Stringify: CastFlags = CastFlags(1 << 3);
+    /// A cast which casts any type to void
+    pub const Void:      CastFlags = CastFlags(1 << 4);
+    
+    /// Accept all implicit casts. 
+    /// These casts are lossless and therefore will not cause problems if implicitly occurring.
+    pub const Implicit:  CastFlags = CastFlags(CastFlags::NumWiden.0);
+    /// Casts that can occur in slots where a type is known (e.g. declarations, function declarations, call expressions).
+    /// Like Implicit, but allows Stringify.
+    pub const Decl:      CastFlags = CastFlags(CastFlags::NumWiden.0 | CastFlags::Stringify.0);
+
+    pub fn allows(self, sub: CastFlags) -> bool {
+        self.0 & sub.0 == sub.0
+    }
+}
+impl std::ops::BitOr for CastFlags {
+    type Output = CastFlags;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
 }
 
 trait ResultIntoInner {
@@ -147,16 +178,12 @@ impl<T> ResultIntoInner for HomoResult<T> {
 }
 
 impl super::PLIRCodegen {
-    /// Try to cast the expression to the given type, returning the expression if it fails.
-    pub(super) fn apply_cast(&mut self, src: Located<Expr>, dest: &Type) -> PLIRResult<HomoResult<Located<Expr>>> {
-        self.apply_special_cast(src, dest, CastType::Any)
+    pub(super) fn apply_cast(&mut self, src: Located<Expr>, dest: &Type, cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> {
+        Cast { src, dest, cf }.apply_cast(self)
     }
-    pub(super) fn apply_special_cast(&mut self, src: Located<Expr>, dest: &Type, ct: CastType) -> PLIRResult<HomoResult<Located<Expr>>> {
-        Cast { src, dest, ct }.apply_cast(self)
-    }
-    fn apply_cast2(&mut self, (left, right): (Located<Expr>, Located<Expr>), dest: &Type) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
-        let cast1 = Cast { src: left, dest, ct: CastType::Any };
-        let cast2 = Cast { src: right, dest, ct: CastType::Any };
+    fn apply_cast2(&mut self, (left, right): (Located<Expr>, Located<Expr>), dest: &Type, cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+        let cast1 = Cast { src: left, dest, cf };
+        let cast2 = Cast { src: right, dest, cf };
 
         let result = if cast1.can_cast(self)? && cast2.can_cast(self)? {
             Ok(cast1.apply_cast(self)?.ok().zip(cast2.apply_cast(self)?.ok()).unwrap())
@@ -168,8 +195,8 @@ impl super::PLIRCodegen {
     }
 
     /// Try casting the expression to one of the given types until successful.
-    fn cast_chain(&mut self, src: Located<Expr>, tys: &[Type]) -> PLIRResult<HomoResult<Located<Expr>>> {
-        let mut cast = Cast { src, dest: &ty!(Type::S_NEVER), ct: CastType::Any };
+    fn cast_chain(&mut self, src: Located<Expr>, tys: &[Type], cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> {
+        let mut cast = Cast { src, dest: &ty!(Type::S_NEVER), cf };
         for dest in tys {
             cast.dest = dest;
 
@@ -182,9 +209,9 @@ impl super::PLIRCodegen {
     }
 
     /// Try casting the expression to one of the given types until successful.
-    fn cast_chain2(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: &[Type]) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
-        let mut cast1 = Cast { src: left,  dest: &ty!(Type::S_NEVER), ct: CastType::Any };
-        let mut cast2 = Cast { src: right, dest: &ty!(Type::S_NEVER), ct: CastType::Any };
+    fn cast_chain2(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: &[Type], cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+        let mut cast1 = Cast { src: left,  dest: &ty!(Type::S_NEVER), cf };
+        let mut cast2 = Cast { src: right, dest: &ty!(Type::S_NEVER), cf };
 
         for dest in tys {
             cast1.dest = dest;
@@ -225,13 +252,13 @@ impl super::PLIRCodegen {
         // Check for any valid casts that can be applied here:
         let Located(cast, left_range) = match op {
             op::Unary::Plus => {
-                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
+                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], CastFlags::Implicit)?.into_inner()
             },
             op::Unary::Minus => {
-                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
+                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], CastFlags::Implicit)?.into_inner()
             },
             op::Unary::LogNot => {
-                self.apply_cast(e, &ty!(Type::S_BOOL))?.into_inner()
+                self.apply_cast(e, &ty!(Type::S_BOOL), CastFlags::Truth)?.into_inner()
             },
             op::Unary::BitNot => e,
         };
@@ -313,30 +340,49 @@ impl super::PLIRCodegen {
                     ty!(Type::S_INT),
                     ty!(Type::S_FLOAT)
                 ];
-                match self.cast_chain2((left, right), types)? {
+                match self.cast_chain2((left, right), types, CastFlags::Implicit)? {
                     Ok(exprs) => exprs,
-                    Err((l, r)) => match (l.ty.as_ref(), r.ty.as_ref()) {
-                        (TypeRef::Prim(Type::S_STR | Type::S_CHAR), _) => {
-                            self.apply_cast2((l, r), &ty!(Type::S_STR))?.into_inner()
-                        },
-                        (_, TypeRef::Prim(Type::S_STR | Type::S_CHAR)) => {
-                            self.apply_cast2((l, r), &ty!(Type::S_STR))?.into_inner()
-                        },
-                        _ => (l, r)
+                    Err((l, r)) => {
+                        let cf = CastFlags::Implicit | CastFlags::Stringify;
+                        match (l.ty.as_ref(), r.ty.as_ref()) {
+                            (TypeRef::Prim(Type::S_STR | Type::S_CHAR), _) => {
+                                self.apply_cast2((l, r), &ty!(Type::S_STR), cf)?.into_inner()
+                            },
+                            (_, TypeRef::Prim(Type::S_STR | Type::S_CHAR)) => {
+                                self.apply_cast2((l, r), &ty!(Type::S_STR), cf)?.into_inner()
+                            },
+                            _ => (l, r)
+                        }
                     },
                 }
             },
             op::Binary::Sub => {
-                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
+                self.cast_chain2(
+                    (left, right), 
+                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    CastFlags::Implicit
+                )?.into_inner()
             },
             op::Binary::Mul => {
-                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
+                self.cast_chain2(
+                    (left, right), 
+                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    CastFlags::Implicit
+                )?.into_inner()
             },
             op::Binary::Div => {
-                self.apply_cast2((left, right), &ty!(Type::S_FLOAT))?.into_inner()
+                self.apply_cast2(
+                    (left, right), 
+                    &ty!(Type::S_FLOAT), 
+                    CastFlags::Implicit
+                )?.into_inner()
             },
             op::Binary::Mod => {
-                self.cast_chain2((left, right), &[ty!(Type::S_INT), ty!(Type::S_FLOAT)])?.into_inner()
+                self.cast_chain2(
+                    (left, right), 
+                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    CastFlags::Implicit
+                )?.into_inner()
             },
             op::Binary::Shl    => (left, right),
             op::Binary::Shr    => (left, right),
@@ -385,15 +431,17 @@ impl super::PLIRCodegen {
 
     pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
         // Check for any valid casts that can be applied here:
-        let lcast = self.apply_cast(left, &ty!(Type::S_STR))?.into_inner();
+        let lcast = self.apply_cast(left, &ty!(Type::S_STR), CastFlags::Implicit)?.into_inner();
     
         let icast = match lcast.ty.as_ref() {
             | TypeRef::Prim(Type::S_STR)
             | TypeRef::Generic(Type::S_LIST, _)
             | TypeRef::Tuple(_)
-            => self.apply_cast(index, &ty!(Type::S_INT))?.into_inner(),
+            => self.apply_cast(index, &ty!(Type::S_INT), CastFlags::Implicit)?.into_inner(),
             
-            TypeRef::Generic(Type::S_DICT, [k, _]) => self.apply_cast(index, k)?.into_inner(),
+            TypeRef::Generic(Type::S_DICT, [k, _]) => {
+                self.apply_cast(index, k, CastFlags::Implicit)?.into_inner()
+            },
             
             _ => return Err(OpErr::CannotIndex(lcast.0.ty).at_range(lcast.1).into())
         }.0;

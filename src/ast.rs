@@ -68,6 +68,11 @@ impl<T> Located<T> {
         Box::new(Located(t, loc))
     }
 
+    /// Similar to [`Option::as_ref`].
+    pub fn as_ref(&self) -> Located<&T> {
+        Located::new(&self.0, self.range())
+    }
+    
     /// Map a Located with a given type to a Located of another type.
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
         let Located(node, loc) = self;
