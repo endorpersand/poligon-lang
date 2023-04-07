@@ -916,40 +916,33 @@ impl PLIRCodegen {
     {
         use indexmap::map::Entry;
 
-        // mi is 0 to len
-        let mi = self.blocks.iter().rev()
-            .chain(std::iter::once(&self.program))
-            .enumerate()
-            .find_map(|(i, ib)| ib.unres_values.contains_key(&*ident.as_fun_ident()).then_some(i));
+        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_values.contains_key(&*ident.as_fun_ident())) {
+            self.execute_upwards(idx, |this| -> PLIRResult<_> {
+                let fid = ident.as_fun_ident().into_owned();
+                let Entry::Occupied(entry) = this.peek_block().unres_values.entry(fid) else {
+                    unreachable!()
+                };
+    
+                match entry.get() {
+                    UnresolvedValue::ExternFun(_, _) => {
+                        let UnresolvedValue::ExternFun(id, fs) = entry.remove() else { unreachable!() };
+                        
+                        let fs = this.consume_fun_sig(id, fs)?;
+                        this.push_global(fs)?;
+                    },
+                    UnresolvedValue::Fun(_, _) => {
+                        let (k, UnresolvedValue::Fun(id, fd)) = entry.remove_entry() else { unreachable!() };
+                        let ast::FunDecl { sig, block } = fd;
+    
+                        let sig = this.consume_fun_sig(id, sig)?;
+                        this.peek_block().unres_values.insert(k, UnresolvedValue::FunBlock(sig, block));
+                    },
+                    UnresolvedValue::FunBlock(_, _) => {},
+                    UnresolvedValue::Import(_) => todo!(),
+                }
 
-        if let Some(i) = mi {
-            // repivot peek block to point to the unresolved item
-            let storage = self.blocks.split_off(self.blocks.len() - i);
-            let fid = ident.as_fun_ident().into_owned();
-            let Entry::Occupied(entry) = self.peek_block().unres_values.entry(fid) else {
-                unreachable!()
-            };
-
-            match entry.get() {
-                UnresolvedValue::ExternFun(_, _) => {
-                    let UnresolvedValue::ExternFun(id, fs) = entry.remove() else { unreachable!() };
-                    
-                    let fs = self.consume_fun_sig(id, fs)?;
-                    self.push_global(fs)?;
-                },
-                UnresolvedValue::Fun(_, _) => {
-                    let (k, UnresolvedValue::Fun(id, fd)) = entry.remove_entry() else { unreachable!() };
-                    let ast::FunDecl { sig, block } = fd;
-
-                    let sig = self.consume_fun_sig(id, sig)?;
-                    self.peek_block().unres_values.insert(k, UnresolvedValue::FunBlock(sig, block));
-                },
-                UnresolvedValue::FunBlock(_, _) => {},
-                UnresolvedValue::Import(_) => todo!(),
-            }
-
-            // revert peek block after
-            self.blocks.extend(storage);
+                Ok(())
+            })?;
         }
 
         if let Some(t) = C_INTRINSICS_PLIR.get(&*ident.as_fun_ident().as_llvm_ident()) {
@@ -980,33 +973,25 @@ impl PLIRCodegen {
         use indexmap::map::Entry;
 
         let ident = ty.short_ident();
-        // mi is 0 to len
-        let mi = self.blocks.iter().rev()
-            .chain(std::iter::once(&self.program))
-            .enumerate()
-            .find_map(|(i, ib)| ib.unres_types.contains_key(ident).then_some(i));
-
-        if let Some(i) = mi {
-            // repivot peek block to point to the unresolved item
-            let storage = self.blocks.split_off(self.blocks.len() - i);
-
-            // for generic types, we want to skip resolving a second time
-            if !self.peek_block().types.contains_key(*ty) {
-                let Entry::Occupied(entry) = self.peek_block().unres_types.entry(ident.to_string()) else {
-                    unreachable!()
-                };
-    
-                match entry.get() {
-                    UnresolvedType::Class(_) => {
-                        let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                        self.consume_cls(cls)?;
-                    },
-                    UnresolvedType::Import(_) => todo!(),
+        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(ident)) {
+            self.execute_upwards(idx, |this| -> PLIRResult<_> {
+                // for generic types, we want to skip resolving a second time
+                if !this.peek_block().types.contains_key(*ty) {
+                    let Entry::Occupied(entry) = this.peek_block().unres_types.entry(ident.to_string()) else {
+                        unreachable!()
+                    };
+        
+                    match entry.get() {
+                        UnresolvedType::Class(_) => {
+                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                            this.consume_cls(cls)?;
+                        },
+                        UnresolvedType::Import(_) => todo!(),
+                    }
                 }
-            }
 
-            // revert peek block after
-            self.blocks.extend(storage);
+                Ok(())
+            })?;
         }
 
         // instantiate generic:
