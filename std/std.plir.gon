@@ -122,9 +122,7 @@ fun <string>::new() -> string {
 fun <char>::to_string(self: char) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
     let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
 fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
     return <#ptr>(if <bool>(<int>(<#dynarray>(self).1) >= <int>(sub_len)) <#ptr>{
@@ -342,9 +340,7 @@ fun <float>::abs(self: float) -> float {
 fun <float>::to_string(self: float) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
     let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_float_to_string), <float>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
 extern fun "#cttz"(arg0: int, arg1: bool) -> int;
 fun <int>::trailing_zeroes(self: int) -> int {
@@ -397,7 +393,5 @@ fun <int>::idiv(self: int, d: int) -> int {
 fun <int>::to_string(self: int) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
     let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_int_to_string), <int>(self)));
-    let buf: #ptr = <#ptr>(*buf_ptr);
-    let cap: int = <int>(<int>(len) + <int>(1));
-    return string #{#dynarray #{<#ptr>(buf), <int>(len), <int>(cap)}};
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
