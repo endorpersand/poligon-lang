@@ -2,6 +2,8 @@ global _tmpl_print = "%.*s\n\0";
 global _tmpl_int_to_string = "%d\0";
 global _tmpl_float_to_string = "%#f\0";
 global _tmpl_char_to_string = "%lc\0";
+global _tmpl_byte_to_string = "%#hhx\0";
+global _tmpl_ptr_to_string = "ptr %#lx\0";
 class "#dynarray" {
     buf: #ptr,
     len: int,
@@ -14,9 +16,11 @@ extern fun "#printf"(arg0: #ptr, ..) -> int;
 fun print(s: string) -> void {
     return <void>(castfrom <int>(<(#ptr, ..) -> int>(#printf)(<#ptr>(_tmpl_print), <int>(<#dynarray>(<string>(s).0).1), <#ptr>(<#dynarray>(<string>(s).0).0))));
 }
-extern fun "#ptrnull"() -> #ptr;
-fun <#ptr>::null() -> #ptr {
-    return <#ptr>(<() -> #ptr>(#ptrnull)());
+extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
+fun <#ptr>::to_string(self: #ptr) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_ptr_to_string), <#ptr>(self)));
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
 class string_chars {
     str: string,
@@ -115,7 +119,6 @@ fun <option<char>>::to_string(self: option<char>) -> string {
 fun <string>::new() -> string {
     return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
 }
-extern fun "#asprintf"(arg0: #ptr, arg1: #ptr, ..) -> int;
 fun <char>::to_string(self: char) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
     let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
@@ -148,6 +151,15 @@ fun <string>::from_raw(contents: #ptr, len: int) -> string {
     let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(len)));
     <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
     return string #{<#dynarray>(inner)};
+}
+extern fun "#ptrnull"() -> #ptr;
+fun <#ptr>::null() -> #ptr {
+    return <#ptr>(<() -> #ptr>(#ptrnull)());
+}
+fun <#byte>::to_string(self: #byte) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_byte_to_string), <#byte>(self)));
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
 fun <bool>::to_string(self: bool) -> string {
     return <string>(if <bool>(self) <string>{

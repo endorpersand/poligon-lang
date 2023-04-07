@@ -242,9 +242,11 @@ fun print(s: string) {
     #printf(_tmpl_print, s.inner.len, s.inner.buf);
 }
 
-global _tmpl_int_to_string = "%d\0";
+global _tmpl_int_to_string   = "%d\0";
 global _tmpl_float_to_string = "%#f\0";
-global _tmpl_char_to_string = "%lc\0";
+global _tmpl_char_to_string  = "%lc\0";
+global _tmpl_byte_to_string  = "%#hhx\0";
+global _tmpl_ptr_to_string   = "ptr %#lx\0";
 
 fit class int {
     fun self.to_string() -> string {
@@ -463,8 +465,36 @@ fit class bool {
     }
 }
 
+fit class #byte {
+    fun self.to_string() -> string {
+        let buf_ptr = #ptr::#alloca();
+        let len = #asprintf(buf_ptr, _tmpl_byte_to_string, self);
+
+        string #{
+            inner: #dynarray #{ 
+                buf: *buf_ptr, 
+                len, 
+                cap: len + 1 
+            }
+        };
+    }
+}
+
 fit class #ptr {
     fun ::null() -> #ptr {
         #ptrnull();
+    }
+
+    fun self.to_string() -> string {
+        let buf_ptr = #ptr::#alloca();
+        let len = #asprintf(buf_ptr, _tmpl_ptr_to_string, self);
+
+        string #{
+            inner: #dynarray #{ 
+                buf: *buf_ptr, 
+                len, 
+                cap: len + 1 
+            }
+        };
     }
 }

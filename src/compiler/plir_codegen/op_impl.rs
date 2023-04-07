@@ -60,24 +60,22 @@ struct Cast<'a> {
     dest: &'a Type,
     cf: CastFlags
 }
+
 impl<'a> Cast<'a> {
     fn can_cast(&self, cg: &mut super::PLIRCodegen) -> PLIRResult<bool> {
         use TypeRef::*;
 
         let result = match (self.src.ty.as_ref(), self.dest.as_ref()) {
             (l, r) if l == r => true,
-            (Prim(Type::S_INT), Prim(Type::S_FLOAT)) => self.cf.allows(CastFlags::NumWiden),
-            (Prim(Type::S_FLOAT), Prim(Type::S_INT)) => self.cf.allows(CastFlags::NumNarrow),
             (_, Prim(Type::S_STR)) if self.cf.allows(CastFlags::Stringify) => {
                 // Load src class
                 let cls = cg.get_class(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
                     cg.get_var_type(&met_ident)?
-                        .filter(|&t| match t.as_ref() {
-                            Fun([p1], ret, false) => p1 == &self.src.ty && ret == self.dest,
-                            _ => false
-                        })
+                        .filter(|&t| matches!( t.as_ref(), 
+                            Fun([p1], ret, false) if p1 == &self.src.ty && ret == self.dest
+                        ))
                         .is_some()
                 } else {
                     false
@@ -85,6 +83,13 @@ impl<'a> Cast<'a> {
             },
             (_, Prim(Type::S_BOOL)) => self.cf.allows(CastFlags::Truth),
             (_, Prim(Type::S_VOID)) => self.cf.allows(CastFlags::Void),
+            (_, _) if NumType(&self.src.ty).is_numeric() && NumType(self.dest).is_numeric() => {
+                let l = NumType(&self.src.ty);
+                let r = NumType(self.dest);
+
+                (l < r && self.cf.allows(CastFlags::NumWiden))
+                || (l > r && self.cf.allows(CastFlags::NumNarrow))
+            }
             _ => false
         };
 
@@ -196,7 +201,9 @@ impl super::PLIRCodegen {
     }
 
     /// Try casting the expression to one of the given types until successful.
-    fn cast_chain(&mut self, src: Located<Expr>, tys: &[Type], cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> {
+    fn cast_chain<'a, I>(&mut self, src: Located<Expr>, tys: I, cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> 
+        where I: IntoIterator<Item=&'a Type>
+    {
         let mut cast = Cast { src, dest: &ty!(Type::S_NEVER), cf };
         for dest in tys {
             cast.dest = dest;
@@ -210,7 +217,9 @@ impl super::PLIRCodegen {
     }
 
     /// Try casting the expression to one of the given types until successful.
-    fn cast_chain2(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: &[Type], cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+    fn cast_chain2<'a, I>(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: I, cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> 
+        where I: IntoIterator<Item=&'a Type>
+    {
         let mut cast1 = Cast { src: left,  dest: &ty!(Type::S_NEVER), cf };
         let mut cast2 = Cast { src: right, dest: &ty!(Type::S_NEVER), cf };
 
@@ -253,15 +262,17 @@ impl super::PLIRCodegen {
         // Check for any valid casts that can be applied here:
         let Located(cast, left_range) = match op {
             op::Unary::Plus => {
-                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], CastFlags::Implicit)?.into_inner()
+                self.cast_chain(e, NumType::order(), CastFlags::Implicit)?.into_inner()
             },
             op::Unary::Minus => {
-                self.cast_chain(e, &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], CastFlags::Implicit)?.into_inner()
+                self.cast_chain(e, NumType::order(), CastFlags::Implicit)?.into_inner()
             },
             op::Unary::LogNot => {
                 self.apply_cast(e, &ty!(Type::S_BOOL), CastFlags::Truth)?.into_inner()
             },
-            op::Unary::BitNot => e,
+            op::Unary::BitNot => {
+                self.cast_chain(e, NumType::int_order(), CastFlags::Implicit)?.into_inner()
+            },
         };
     
         // Type check and compute resulting expr type:
@@ -269,10 +280,11 @@ impl super::PLIRCodegen {
             let ty = cast.ty.clone();
     
             match (op, ty.as_ref()) {
-                (op::Unary::Plus,   TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
-                (op::Unary::Minus,  TypeRef::Prim(Type::S_INT | Type::S_FLOAT)) => ty,
-                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
-                (op::Unary::BitNot, TypeRef::Prim(Type::S_INT)) => ty,
+                (op::Unary::Plus,  _) if NumType(&ty).is_numeric()  => ty,
+                (op::Unary::Minus, _) if NumType(&ty).is_numeric()  => ty,
+                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL))    => ty,
+                (op::Unary::BitNot, TypeRef::Prim(Type::S_BOOL))    => ty,
+                (op::Unary::BitNot, _) if NumType(&ty).is_integer() => ty,
                 (op, _) => {
                     let fun = self.find_unary_method(op, Located::new(&ty, left_range))?
                         .ok_or_else(|| {
@@ -337,11 +349,7 @@ impl super::PLIRCodegen {
         // Check for any valid casts that can be applied here:
         let (lcast, rcast) = match op {
             op::Binary::Add => {
-                let types = &[
-                    ty!(Type::S_INT),
-                    ty!(Type::S_FLOAT)
-                ];
-                match self.cast_chain2((left, right), types, CastFlags::Implicit)? {
+                match self.cast_chain2((left, right), NumType::order(), CastFlags::Implicit)? {
                     Ok(exprs) => exprs,
                     Err((l, r)) => {
                         let cf = CastFlags::Implicit | CastFlags::Stringify;
@@ -360,36 +368,78 @@ impl super::PLIRCodegen {
             op::Binary::Sub => {
                 self.cast_chain2(
                     (left, right), 
-                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    NumType::order(), 
                     CastFlags::Implicit
                 )?.into_inner()
             },
             op::Binary::Mul => {
                 self.cast_chain2(
                     (left, right), 
-                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    NumType::order(), 
                     CastFlags::Implicit
                 )?.into_inner()
             },
             op::Binary::Div => {
-                self.apply_cast2(
+                self.cast_chain2(
                     (left, right), 
-                    &ty!(Type::S_FLOAT), 
+                    NumType::float_order(), 
                     CastFlags::Implicit
                 )?.into_inner()
             },
             op::Binary::Mod => {
                 self.cast_chain2(
                     (left, right), 
-                    &[ty!(Type::S_INT), ty!(Type::S_FLOAT)], 
+                    NumType::order(), 
                     CastFlags::Implicit
                 )?.into_inner()
             },
-            op::Binary::Shl    => (left, right),
-            op::Binary::Shr    => (left, right),
-            op::Binary::BitOr  => (left, right),
-            op::Binary::BitAnd => (left, right),
-            op::Binary::BitXor => (left, right),
+            op::Binary::Shl => {
+                self.cast_chain2(
+                    (left, right), 
+                    NumType::int_order(), 
+                    CastFlags::Implicit
+                )?.into_inner()
+            },
+            op::Binary::Shr => {
+                self.cast_chain2(
+                    (left, right), 
+                    NumType::int_order(), 
+                    CastFlags::Implicit
+                )?.into_inner()
+            },
+            op::Binary::BitOr  => {
+                let _bool = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&_bool];
+                bittypes.extend(NumType::int_order());
+
+                self.cast_chain2(
+                    (left, right), 
+                    bittypes, 
+                    CastFlags::Implicit
+                )?.into_inner()
+            },
+            op::Binary::BitAnd => {
+                let _bool = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&_bool];
+                bittypes.extend(NumType::int_order());
+
+                self.cast_chain2(
+                    (left, right), 
+                    bittypes, 
+                    CastFlags::Implicit
+                )?.into_inner()
+            },
+            op::Binary::BitXor => {
+                let _bool = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&_bool];
+                bittypes.extend(NumType::int_order());
+
+                self.cast_chain2(
+                    (left, right), 
+                    bittypes, 
+                    CastFlags::Implicit
+                )?.into_inner()
+            },
             op::Binary::LogAnd => (left, right),
             op::Binary::LogOr  => (left, right),
         };
@@ -400,20 +450,23 @@ impl super::PLIRCodegen {
             let right = &rcast.ty;
             match (op, left.as_ref(), right.as_ref()) {
                 // numeric operators:
-                (op::Binary::Add, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-                (op::Binary::Sub, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-                (op::Binary::Mul, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
-                (op::Binary::Div, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => ty!(Type::S_FLOAT),
-                (op::Binary::Mod, l @ TypeRef::Prim(Type::S_INT | Type::S_FLOAT), r) if l == r => left,
+                (op::Binary::Add, l, r) if NumType(&left).is_numeric() && l == r => left,
+                (op::Binary::Sub, l, r) if NumType(&left).is_numeric() && l == r => left,
+                (op::Binary::Mul, l, r) if NumType(&left).is_numeric() && l == r => left,
+                (op::Binary::Div, l, r) if NumType(&left).is_floating() && l == r => left,
+                (op::Binary::Mod, l, r) if NumType(&left).is_numeric() && l == r => left,
                 // bitwise operators:
-                (op::Binary::Shl, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
-                (op::Binary::Shr, TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_INT)) => left,
-                (op::Binary::BitOr,  l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
-                (op::Binary::BitAnd, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
-                (op::Binary::BitXor, l @ TypeRef::Prim(Type::S_INT | Type::S_BOOL), r) if l == r => left,
+                (op::Binary::Shl, l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::Shr, l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::BitOr,  TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
+                (op::Binary::BitAnd, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
+                (op::Binary::BitXor, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
+                (op::Binary::BitOr,  l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::BitAnd, l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::BitXor, l, r) if NumType(&left).is_integer() && l == r => left,
                 // logical operators:
                 (op::Binary::LogAnd, l, r) if l == r => left,
-                (op::Binary::LogOr, l, r) if l == r => left,
+                (op::Binary::LogOr, l, r)  if l == r => left,
                 (op, _, _) => {
                     let fun = self.find_binary_method(op, Located::new(&left, lcast.1), right)?
                         .ok_or_else(|| {

@@ -94,11 +94,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Cast a GonValue to another type.
     /// 
     /// The only successful casts here: 
-    /// - int to float
+    /// - int to int
+    /// - float to float
+    /// - float to int
     /// - anything to unit
     /// - anything to bool
     pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<GonValue<'ctx>> {
-        use plir::{Type, TypeRef};
+        use plir::{Type, NumType, TypeRef};
         
         match (src.as_ref(), dest.as_ref()) {
             (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT)) => {
@@ -117,6 +119,36 @@ impl<'ctx> LLVMCodegen<'ctx> {
             },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Basic(self.truth(v).into())),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
+            (_, _) if NumType(src).is_numeric() && NumType(dest).is_numeric() => {
+                let nsrc  = NumType(src);
+                let ndest = NumType(dest);
+
+                let GonValue::Basic(srcv) = v else { unreachable!() };
+                let dest_layout = self.get_layout(dest)?;
+                let result = match (nsrc.encoding().unwrap(), ndest.encoding().unwrap()) {
+                    ((false, a), (false, b)) if a < b => {
+                        self.builder.build_int_s_extend(srcv.into_int_value(), dest_layout.into_int_type(), "").into()
+                    },
+                    ((false, _), (false, _)) => {
+                        self.builder.build_int_truncate(srcv.into_int_value(), dest_layout.into_int_type(), "").into()
+                    },
+                    ((false, _), (true, _)) => {
+                        self.builder.build_signed_int_to_float(srcv.into_int_value(), dest_layout.into_float_type(), "").into()
+                    },
+                    ((true, _), (false, _)) => {
+                        // check for poison
+                        self.builder.build_float_to_signed_int(srcv.into_float_value(), dest_layout.into_int_type(), "").into()
+                    },
+                    ((true, a), (true, b)) if a < b => {
+                        self.builder.build_float_ext(srcv.into_float_value(), dest_layout.into_float_type(), "").into()
+                    },
+                    ((true, _), (true, _)) => {
+                        self.builder.build_float_trunc(srcv.into_float_value(), dest_layout.into_float_type(), "").into()
+                    }
+                };
+
+                Ok(GonValue::Basic(result))
+            }
             _ => Err(LLVMErr::CannotCast(src.clone(), dest.clone()))
         }
     }

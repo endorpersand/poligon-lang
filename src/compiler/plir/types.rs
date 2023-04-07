@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
 
 use crate::ast;
 use crate::compiler::plir_codegen::OpErr;
@@ -61,6 +62,18 @@ impl FunType {
             ret: (*self.ret).clone(),
         }
     }
+
+    pub(crate) fn as_ref(&self) -> TypeRef {
+        TypeRef::Fun(&self.params, &self.ret, self.varargs)
+    }
+
+    /// Removes the first parameter of the function.
+    /// 
+    /// This is useful for removing the referent in method types.
+    pub fn pop_front(&mut self) {
+        self.params.remove(0);
+    }
+
 }
 
 impl TryFrom<Type> for FunType {
@@ -273,16 +286,53 @@ impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
     fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
 }
 
-impl FunType {
-    pub(crate) fn as_ref(&self) -> TypeRef {
-        TypeRef::Fun(&self.params, &self.ret, self.varargs)
+/// Wrapper to test if a type is numeric.
+#[derive(PartialEq, Eq)]
+pub(crate) struct NumType<'a>(pub &'a Type);
+lazy_static! {
+    static ref NUM_TYPE_ORDER: IndexMap<Type, (bool /* float? */, usize /* size */)> = {
+        let mut m = IndexMap::new();
+
+        m.insert(ty!("#byte"),       (false, 8));
+        m.insert(ty!(Type::S_INT),   (false, 64));
+        m.insert(ty!(Type::S_FLOAT), (true,  64));
+        
+        m
+    };
+}
+impl<'a> NumType<'a> {
+    pub fn encoding(&self) -> Option<(bool /* float? */, usize /* size */)> {
+        NUM_TYPE_ORDER.get(self.0).copied()
     }
 
-    /// Removes the first parameter of the function.
-    /// 
-    /// This is useful for removing the referent in method types.
-    pub fn pop_front(&mut self) {
-        self.params.remove(0);
+    pub fn is_numeric(&self) -> bool {
+        NUM_TYPE_ORDER.contains_key(self.0)
+    }
+    pub fn is_integer(&self) -> bool {
+        matches!(self.encoding(), Some((false, _)))
+    }
+    pub fn is_floating(&self) -> bool {
+        matches!(self.encoding(), Some((true, _)))
+    }
+
+    pub fn order() -> Vec<&'a Type> {
+        NUM_TYPE_ORDER.keys().collect()
+    }
+    pub fn int_order() -> Vec<&'a Type> {
+        NUM_TYPE_ORDER.iter()
+            .filter_map(|(t, (is_float, _))| (!is_float).then_some(t))
+            .collect()
+    }
+    pub fn float_order() -> Vec<&'a Type> {
+        NUM_TYPE_ORDER.iter()
+            .filter_map(|(t, (is_float, _))| is_float.then_some(t))
+            .collect()
+    }
+}
+impl<'a> PartialOrd for NumType<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Option::zip(self.encoding(), other.encoding())
+            .map(|(a, b)| a.cmp(&b))
     }
 }
 

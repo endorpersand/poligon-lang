@@ -15,7 +15,7 @@ class <option<char>> {
     value: #ptr
 }
 extern fun print(arg0: string) -> void;
-extern fun <#ptr>::null() -> #ptr;
+extern fun <#ptr>::to_string(arg0: #ptr) -> string;
 extern fun <string>::chars(arg0: string) -> string_chars;
 extern fun <string>::slice_bytes(arg0: string, arg1: int, arg2: int) -> string;
 extern fun <string_chars>::new(arg0: string) -> string_chars;
@@ -33,6 +33,8 @@ extern fun <#dynarray>::take(arg0: #dynarray, arg1: int) -> #ptr;
 extern fun <#dynarray>::new(arg0: int) -> #dynarray;
 extern fun <option<char>>::get(arg0: option<char>) -> char;
 extern fun <string>::from_raw(arg0: #ptr, arg1: int) -> string;
+extern fun <#ptr>::null() -> #ptr;
+extern fun <#byte>::to_string(arg0: #byte) -> string;
 extern fun <bool>::to_string(arg0: bool) -> string;
 extern fun <int>::min(arg0: int, arg1: int) -> int;
 extern fun <float>::isnan(arg0: float) -> bool;

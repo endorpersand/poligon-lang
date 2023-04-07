@@ -10,6 +10,8 @@ source_filename = "std.gon"
 @_tmpl_int_to_string = private unnamed_addr constant [3 x i8] c"%d\00", align 1
 @_tmpl_float_to_string = private unnamed_addr constant [4 x i8] c"%#f\00", align 1
 @_tmpl_char_to_string = private unnamed_addr constant [4 x i8] c"%lc\00", align 1
+@_tmpl_byte_to_string = private unnamed_addr constant [6 x i8] c"%#hhx\00", align 1
+@_tmpl_ptr_to_string = private unnamed_addr constant [9 x i8] c"ptr %#lx\00", align 1
 @throw_msg = private unnamed_addr constant [14 x i8] c"invalid slice\00", align 1
 @_write = private unnamed_addr constant [2 x i8] c"w\00", align 1
 @throw_msg.1 = private unnamed_addr constant [31 x i8] c"cannot take element from array\00", align 1
@@ -30,14 +32,23 @@ body:
 ; Function Attrs: nofree nounwind
 declare noundef i64 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define noalias ptr @"#ptr::null"() local_unnamed_addr #1 {
+define %string @"#ptr::to_string"(ptr %self) local_unnamed_addr {
 body:
-  ret ptr null
+  %0 = alloca ptr, align 8
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_ptr_to_string, ptr %self)
+  %deref = load ptr, ptr %0, align 8
+  %i_add = add i64 %1, 1
+  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
+  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
+  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
+  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
+  ret %string %5
 }
 
+declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
+
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string_chars @"string::chars"(ptr nocapture readonly %self) local_unnamed_addr #2 {
+define %string_chars @"string::chars"(ptr nocapture readonly %self) local_unnamed_addr #1 {
 body:
   %.unpack.unpack.i = load ptr, ptr %self, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack.i, 0
@@ -55,7 +66,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string_chars @"string_chars::new"(ptr nocapture readonly %str) local_unnamed_addr #2 {
+define %string_chars @"string_chars::new"(ptr nocapture readonly %str) local_unnamed_addr #1 {
 body:
   %.unpack.unpack = load ptr, ptr %str, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
@@ -73,7 +84,7 @@ body:
 }
 
 ; Function Attrs: inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0)
-declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #3
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
 
 define %string @"string::slice_bytes"(ptr nocapture readonly %self, i64 %start, i64 %end) local_unnamed_addr {
 body:
@@ -117,7 +128,7 @@ declare i64 @fputwc(i32, ptr) local_unnamed_addr
 declare void @exit(i64) local_unnamed_addr
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define i64 @"string::len"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define i64 @"string::len"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %self.0.1 = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load = load i64, ptr %self.0.1, align 4
@@ -125,7 +136,7 @@ body:
 }
 
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
-define %string @"string::to_string"(ptr nocapture readonly %self) local_unnamed_addr #4 {
+define %string @"string::to_string"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
   %.unpack.unpack = load ptr, ptr %self, align 8
   %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
@@ -140,7 +151,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define %string @"string::add_string"(ptr nocapture readonly %self, ptr nocapture readonly %other) local_unnamed_addr #5 {
+define %string @"string::add_string"(ptr nocapture readonly %self, ptr nocapture readonly %other) local_unnamed_addr #4 {
 body:
   %self.0.1.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load.i = load i64, ptr %self.0.1.i, align 4
@@ -172,7 +183,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %"#dynarray" @"#dynarray::new"(i64 %cap) local_unnamed_addr #2 {
+define %"#dynarray" @"#dynarray::new"(i64 %cap) local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 %cap)
   %1 = insertvalue %"#dynarray" zeroinitializer, ptr %0, 0
@@ -182,7 +193,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define void @"#dynarray::extend"(ptr nocapture %self, ptr nocapture readonly %add_buf, i64 %add_len) local_unnamed_addr #5 {
+define void @"#dynarray::extend"(ptr nocapture %self, ptr nocapture readonly %add_buf, i64 %add_len) local_unnamed_addr #4 {
 body:
   %self.1 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %self.1.load = load i64, ptr %self.1, align 4
@@ -214,7 +225,7 @@ then.i:                                           ; preds = %body
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define void @"#dynarray::resize"(ptr nocapture %self, i64 %new_cap) local_unnamed_addr #5 {
+define void @"#dynarray::resize"(ptr nocapture %self, i64 %new_cap) local_unnamed_addr #4 {
 body:
   %self.2 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
   %self.2.load = load i64, ptr %self.2, align 4
@@ -237,7 +248,7 @@ merge:                                            ; preds = %body, %then
 }
 
 ; Function Attrs: inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free")
-declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #6
+declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #5
 
 define %"option<char>" @"string_chars::next"(ptr nocapture %self) local_unnamed_addr {
 body:
@@ -296,7 +307,7 @@ else.i:                                           ; preds = %block8
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define %"option<char>" @"option<char>::none"() local_unnamed_addr #1 {
+define %"option<char>" @"option<char>::none"() local_unnamed_addr #6 {
 body:
   ret %"option<char>" zeroinitializer
 }
@@ -311,7 +322,7 @@ body:
 declare i64 @mbtowc(ptr, ptr, i64) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"string::new"() local_unnamed_addr #2 {
+define %string @"string::new"() local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 0)
   %1 = insertvalue %"#dynarray" zeroinitializer, ptr %0, 0
@@ -322,7 +333,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %"option<char>" @"option<char>::some"(i32 %t) local_unnamed_addr #2 {
+define %"option<char>" @"option<char>::some"(i32 %t) local_unnamed_addr #1 {
 body:
   %0 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
   store i32 %t, ptr %0, align 4
@@ -332,6 +343,12 @@ body:
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
 declare i64 @llvm.smin.i64(i64, i64) #8
+
+; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
+define noalias ptr @"#ptr::null"() local_unnamed_addr #6 {
+body:
+  ret ptr null
+}
 
 define %string @"option<char>::to_string"(ptr nocapture readonly %self) local_unnamed_addr {
 body:
@@ -468,7 +485,7 @@ merge:                                            ; preds = %else, %"string::add
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #2 {
+define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #1 {
 body:
   %0 = tail call ptr @malloc(i64 %len)
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %contents, i64 %len, i1 false)
@@ -491,8 +508,6 @@ body:
   %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
   ret %string %5
 }
-
-declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
 
 define ptr @"#dynarray::take"(ptr nocapture %self, i64 %sub_len) local_unnamed_addr {
 body:
@@ -535,8 +550,21 @@ merge:                                            ; preds = %body
   ret i32 %deref
 }
 
+define %string @"#byte::to_string"(i8 %self) local_unnamed_addr {
+body:
+  %0 = alloca ptr, align 8
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_byte_to_string, i8 %self)
+  %deref = load ptr, ptr %0, align 8
+  %i_add = add i64 %1, 1
+  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
+  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
+  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
+  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
+  ret %string %5
+}
+
 ; Function Attrs: mustprogress nofree nounwind willreturn
-define %string @"bool::to_string"(i1 %self) local_unnamed_addr #2 {
+define %string @"bool::to_string"(i1 %self) local_unnamed_addr #1 {
 body:
   br i1 %self, label %then, label %else
 
@@ -1040,7 +1068,7 @@ body:
 declare i64 @llvm.ctpop.i64(i64) #8
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define i64 @"int::sign"(i64 %self) local_unnamed_addr #1 {
+define i64 @"int::sign"(i64 %self) local_unnamed_addr #6 {
 body:
   %i_lt.not = icmp ne i64 %self, 0
   %spec.select = sext i1 %i_lt.not to i64
@@ -1126,12 +1154,12 @@ declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture) #11
 declare void @llvm.memset.p0.i64(ptr nocapture writeonly, i8, i64, i1 immarg) #12
 
 attributes #0 = { nofree nounwind }
-attributes #1 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
-attributes #2 = { mustprogress nofree nounwind willreturn }
-attributes #3 = { inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) "alloc-family"="malloc" }
-attributes #4 = { argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn }
-attributes #5 = { mustprogress nounwind willreturn }
-attributes #6 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
+attributes #1 = { mustprogress nofree nounwind willreturn }
+attributes #2 = { inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) "alloc-family"="malloc" }
+attributes #3 = { argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn }
+attributes #4 = { mustprogress nounwind willreturn }
+attributes #5 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
+attributes #6 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
 attributes #7 = { mustprogress nofree nosync nounwind readnone willreturn }
 attributes #8 = { mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn }
 attributes #9 = { mustprogress nofree nounwind willreturn writeonly }

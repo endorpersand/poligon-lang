@@ -17,7 +17,7 @@ use crate::ast::{op, self};
 pub use crate::ast::Located;
 use crate::err::GonErr;
 pub use types::*;
-pub(crate) use types::ty;
+pub(crate) use types::{ty, NumType};
 
 /// A complete program.
 /// 
