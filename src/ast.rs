@@ -118,7 +118,7 @@ impl<T, E> Located<Result<T, E>> {
 ///      print(i);
 ///  }
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Program(pub Vec<Located<Stmt>>);
 
 /// An enclosed scope with a list of statements.
@@ -136,7 +136,7 @@ pub struct Program(pub Vec<Located<Stmt>>);
 ///     a + b;
 /// }
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block(pub Vec<Located<Stmt>>);
 
 impl Block {
@@ -149,7 +149,7 @@ impl Block {
 }
 
 /// A statement.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Stmt {
     /// A variable declaration with a value initializer.
     /// 
@@ -247,7 +247,7 @@ impl Stmt {
 /// // with patterns:
 /// let [mut x, y, z] = [1, 2, 3];
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Decl {
     /// Whether the variable can be reassigned later
     pub rt: ReasgType,
@@ -357,7 +357,7 @@ pub struct FunSignature {
 ///     n * 2;
 /// }
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
@@ -366,7 +366,7 @@ pub struct FunDecl {
 }
 
 /// An expression.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     /// Variable access.
     Ident(String),
@@ -508,7 +508,7 @@ pub enum Expr {
 /// "abc" // string
 /// true  // bool
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     #[allow(missing_docs)] Int(isize),
     #[allow(missing_docs)] Float(f64),
@@ -531,6 +531,21 @@ impl Literal {
     }
 }
 
+impl PartialEq for Literal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(l0), Self::Int(r0))     => l0 == r0,
+            // since this is an AST, we want the EXACT values of floats to be the same
+            // hence, we can compare the bits
+            (Self::Float(l0), Self::Float(r0)) => l0.to_bits() == r0.to_bits(),
+            (Self::Char(l0), Self::Char(r0))   => l0 == r0,
+            (Self::Str(l0), Self::Str(r0))     => l0 == r0,
+            (Self::Bool(l0), Self::Bool(r0))   => l0 == r0,
+            _ => false,
+        }
+    }
+}
+impl Eq for Literal {}
 /// A path, which accesses attributes from an expression.
 /// 
 /// # Syntax
@@ -543,7 +558,7 @@ impl Literal {
 /// a.b
 /// a.b.c.d.e
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Path {
     /// The expression to access an attribute of
     pub obj: LocatedBox<Expr>,
@@ -564,7 +579,7 @@ pub struct Path {
 /// a.b
 /// a.b.c.d.e
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StaticPath {
     /// The type to access an attribute of
     pub ty: Located<Type>,
@@ -585,7 +600,7 @@ pub struct StaticPath {
 /// lst[0]
 /// dct["hello"]
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Index {
     /// The expression to index
     pub expr: LocatedBox<Expr>,
@@ -599,13 +614,13 @@ pub struct Index {
 /// ```text
 /// *ptr
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IDeref(pub LocatedBox<Expr>);
 
 /// A unit to assign to.
 /// 
 /// See [`Expr::Assign`].
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
@@ -627,7 +642,7 @@ pub struct DeclUnit(pub String, pub MutType);
 /// 
 /// This is used in [declarations][`Decl`] and [assignments][`Expr::Assign`], 
 /// and can be unpacked to perform the needed declaration or assignment.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Pat<T> {
     /// An indivisible unit. This can be directly assigned to.
     // This should be used as LocatedPat<T>, in which case, the unit has a provided range.

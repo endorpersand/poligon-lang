@@ -319,7 +319,7 @@ pub(crate) use ty;
 /// this struct does not contain the class's methods.
 /// 
 /// Those methods are redefined as functions in PLIR codegen.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Class {
     /// The associated [`Type`] of this class
     pub ty: Type,
@@ -331,7 +331,7 @@ pub struct Class {
 ///
 /// This corresponds to [`ast::FieldDecl`].
 /// Unlike `ast::FieldDecl`, the field's name is omitted (and has been moved to [`Class`]).
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     /// Whether the field can be reassigned later
     pub rt: ast::ReasgType,

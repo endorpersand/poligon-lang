@@ -22,7 +22,7 @@ pub(crate) use types::ty;
 /// A complete program.
 /// 
 /// This struct corresponds to [`ast::Program`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Program(pub Vec<HoistedStmt>, pub Vec<ProcStmt>);
 
 /// An enclosed scope with a list of statements.
@@ -38,7 +38,7 @@ pub struct Program(pub Vec<HoistedStmt>, pub Vec<ProcStmt>);
 ///     exit a + b;
 /// }
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Block(pub Type, pub Vec<ProcStmt>);
 
 impl Default for Block {
@@ -59,7 +59,7 @@ mod stmt {
     /// For example, all function signatures are resolved before function bodies.
     /// This quality of hoisted statements mean that a list of hoisted statements 
     /// is not necessarily evaluated in order.
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub enum HoistedStmt {
 
         /// A function declaration with a defined body.
@@ -90,7 +90,7 @@ mod stmt {
     /// See also [`HoistedStmt`].
     /// 
     /// A list of procedural statements can simply be evaluated in order.
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub enum ProcStmt {
         /// A variable declaration with a value initializer.
         /// 
@@ -216,7 +216,7 @@ use super::plir_codegen::{PLIRErr, PLIRResult};
 /// const mut d: int = <int>4;
 /// let e: int = <int>5;
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Decl {
     /// Whether the variable can be reassigned later
     pub rt: ast::ReasgType,
@@ -397,7 +397,7 @@ impl FunSignature {
 ///     return <int>(<int>n * <int>2);
 /// }
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
@@ -410,7 +410,7 @@ pub struct FunDecl {
 /// This does not correspond exactly to [`ast::Expr`]. 
 /// Instead, [`ExprType`] corresponds to [`ast::Expr`] 
 /// and this struct provides the expression's type information.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Expr {
     /// Value type of the expression
     pub ty: Type,
@@ -454,7 +454,7 @@ impl Expr {
 /// This corresponds to [`ast::Expr`], however cannot be used in the PLIR AST directly.
 /// 
 /// See [`plir::Expr`][`Expr`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ExprType {
     /// Variable access.
     Ident(String),
@@ -608,7 +608,7 @@ pub enum ExprType {
 /// This struct corresponds to [`ast::Path`],
 /// with an additional type parameter in the attributes to
 /// indicate the type of the access.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Path {
     /// A static path (Type::attr)
     /// 
@@ -697,7 +697,7 @@ impl From<Path> for Expr {
 /// (<list<unk>> lst)[<int>0]
 /// (<dict<string, unk>> dct)[<string>"hello"]
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Index {
     /// The expression to index
     pub expr: Box<Expr>,
@@ -712,7 +712,7 @@ pub struct Index {
 /// ```text
 /// <int>*(<#ptr> ptr)
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct IDeref {
     /// Value being dereferenced
     pub expr: Box<Expr>,
@@ -736,7 +736,7 @@ pub enum Split {
 /// A unit to assign to.
 /// 
 /// This corresponds to [`ast::AsgUnit`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AsgUnit {
     #[allow(missing_docs)] Ident(String),
     #[allow(missing_docs)] Path(Path),
