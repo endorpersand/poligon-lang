@@ -334,6 +334,7 @@ struct InsertBlock {
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
 
+    generic_types: HashMap<String, ast::Class>,
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
     /// a type.
@@ -351,7 +352,8 @@ impl InsertBlock {
             types: HashMap::new(),
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
-            unres_types: IndexMap::new(),
+            unres_types:  IndexMap::new(),
+            generic_types: HashMap::new(),
             expected_ty
         }
     }
@@ -377,6 +379,7 @@ impl InsertBlock {
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
+            generic_types: HashMap::new(),
             expected_ty: None
         }
     }
@@ -867,8 +870,8 @@ impl PLIRCodegen {
         );
 
         let InsertBlock {block, mut exits, unres_values, unres_types, .. } = self.program;
-        debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
-        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
+        debug_assert!(unres_values.is_empty(), "there was an unresolved value in program");
+        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program");
 
         match exits.pop() {
             None => Ok(()),
@@ -994,15 +997,9 @@ impl PLIRCodegen {
                 };
     
                 match entry.get() {
-                    UnresolvedType::Class(cls) => {
-                        let cls = if cls.generics.is_empty() {
-                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                            cls
-                        } else {
-                            cls.clone()
-                        };
-    
-                        self.consume_cls(cls, ty)?;
+                    UnresolvedType::Class(_) => {
+                        let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                        self.consume_cls(cls)?;
                     },
                     UnresolvedType::Import(_) => todo!(),
                 }
@@ -1010,6 +1007,20 @@ impl PLIRCodegen {
 
             // revert peek block after
             self.blocks.extend(storage);
+        }
+
+        // instantiate generic:
+        if let plir::TypeRef::Generic(id, _) = ty.0.as_ref() {
+            if let Some(idx) = self.find_scoped_index(|ib| ib.generic_types.contains_key(id)) {
+                self.execute_upwards(idx, |this| {
+                    if !this.peek_block().types.contains_key(*ty) {
+                        let gcls = this.peek_block().generic_types[id].clone();
+                        this.instantiate_generic_cls(gcls, ty)
+                    } else {
+                        Ok(())
+                    }
+                })?;
+            }
         }
 
         Ok(())
@@ -1020,6 +1031,24 @@ impl PLIRCodegen {
         self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
             .find_map(f)
+    }
+
+    /// Find the insert block matching the predicate, starting from the deepest scope and scaling out.
+    fn find_scoped_index<'a>(&'a self, mut pred: impl FnMut(&'a InsertBlock) -> bool) -> Option<usize> {
+        self.blocks.iter().rev()
+            .chain(std::iter::once(&self.program))
+            .enumerate()
+            .find(|(_, t)| pred(t))
+            .map(|(i, _)| i)
+    }
+
+    /// Temporarily move into a higher scope for the runtime of the closure.
+    fn execute_upwards<T>(&mut self, steps: usize, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
+        let storage = self.blocks.split_off(self.blocks.len() - steps);
+        let result = f(self);
+        self.blocks.extend(storage);
+
+        result
     }
 
     /// Gets the type of the identifier, returning None if not present.
@@ -1158,6 +1187,9 @@ impl PLIRCodegen {
             }
         }
 
+        // in inner, we can drop because unused.
+        // however, we also need to typecheck & compile check unused areas,
+        // so we cannot optimize by dropping unused values/types
         let mut unres_values = &mut self.peek_block().unres_values;
         while let Some(ident) = unres_values.keys().next() {
             match unres_values.remove(&ident.clone()).unwrap() {
@@ -1182,8 +1214,7 @@ impl PLIRCodegen {
         let mut unres_types = &mut self.peek_block().unres_types;
         while let Some(ident) = unres_types.keys().next() {
             match unres_types.remove(&ident.clone()).unwrap() {
-                // TODO: generic class resolution
-                UnresolvedType::Class(_) => { },
+                UnresolvedType::Class(cls) => self.consume_cls(cls)?,
                 UnresolvedType::Import(_) => todo!(),
             }
             unres_types = &mut self.peek_block().unres_types;
@@ -1245,7 +1276,8 @@ impl PLIRCodegen {
             mut block, last_stmt_loc, 
             exits, final_exit, 
             vars: _, types: _, type_aliases: _,
-            unres_values, unres_types, expected_ty
+            unres_values, unres_types, generic_types: _,
+            expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
@@ -1580,7 +1612,7 @@ impl PLIRCodegen {
             .map(|(ty, _)| ty)
     }
 
-    pub(super) fn register_cls(
+    pub(super) fn register_concrete_cls(
         &mut self, cls: plir::Class, 
         methods: impl IntoIterator<Item=ast::MethodDecl>
     ) -> PLIRResult<()> {
@@ -1594,13 +1626,36 @@ impl PLIRCodegen {
         self.push_global(cls)
     }
 
+    pub(super) fn instantiate_generic_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
+        if cls.generics.len() != ty.generic_args().len() {
+            Err(PLIRErr::WrongTypeArity(cls.generics.len(), ty.generic_args().len()).at_range(ty.range()))?
+        };
+
+        let ast::Class { ident: _, generics: _, fields, methods } = cls;
+
+        #[allow(clippy::explicit_auto_deref)]
+        let fields = self.with_generic_aliases(*ty, |this| {
+            fields.into_iter()
+                .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
+                    this.consume_type(ty).map(|ty| {
+                        (ident, plir::Field { rt, mt, ty })
+                    })
+                })
+                .collect::<Result<_, _>>()
+        })?;
+    
+        let cls = plir::Class { ty: ty.0.clone(), fields };
+        self.register_concrete_cls(cls, methods)
+    }
+
+    /// If this type is a generic type, it accesses the generic definition 
+    /// and returns the defined type parameters.
+    /// 
+    /// This will not allocate.
     fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
         match ty {
             plir::Type::Generic(id, _) => {
-                let mgcls = self.find_scoped(|ib| match ib.unres_types.get(id) {
-                    Some(UnresolvedType::Class(cls)) => Some(cls),
-                    _ => None
-                });
+                let mgcls = self.find_scoped(|ib| ib.generic_types.get(id));
 
                 match mgcls {
                     Some(gcls) => Cow::from(&gcls.generics),
@@ -1629,30 +1684,26 @@ impl PLIRCodegen {
         result
     }
 
-    fn consume_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
-        let ast::Class { ident: _, generics, fields, methods } = cls;
-        let Located(ty, tyrange) = ty;
+    fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
+        if cls.generics.is_empty() {
+            // concrete type
+            let ast::Class { ident, generics: _, fields, methods } = cls;
 
-        // verify that types are aligned:
-        match (generics.len(), ty.generic_args().len()) {
-            (a, b) if a == b => Ok(()),
-            (a, b) => Err(PLIRErr::WrongTypeArity(a, b).at_range(tyrange))
-        }?;
-
-        let fields = self.with_generic_aliases(ty, |this| {
-            fields.into_iter()
+            let fields = fields.into_iter()
                 .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
-                    this.consume_type(ty).map(|ty| {
+                    self.consume_type(ty).map(|ty| {
                         (ident, plir::Field { rt, mt, ty })
                     })
                 })
-                .collect::<Result<_, _>>()
-        })?;
+                .collect::<Result<_, _>>()?;
         
-        let cls = plir::Class { ty: ty.clone(), fields };
-        self.register_cls(cls, methods)?;
-        
-        Ok(())
+            let cls = plir::Class { ty: plir::ty!(ident), fields };
+            self.register_concrete_cls(cls, methods)
+        } else {
+            // generic type
+            self.peek_block().generic_types.insert(cls.ident.to_string(), cls);
+            Ok(())
+        }
     }
 
     fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {

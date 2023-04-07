@@ -1,0 +1,129 @@
+class <list<int>> {
+    inner: #dynarray
+}
+fun <list<int>>::new() -> list<int> {
+    return list<int> #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+}
+fun main() -> void {
+    let a: list<int> = <list<int>>([<int>(1), <int>(2), <int>(3), <int>(4), <int>(5)]);
+    return <void>(<(string) -> void>(print)(<string>(<(list<int>) -> string>(<list<int>>::to_string)(<list<int>>(a)))));
+}
+class <listiterator<int>> {
+    inner: list<int>,
+    i: int
+}
+class <option<int>> {
+    present: bool,
+    value: #ptr
+}
+fun <list<int>>::sum(self: list<int>) -> int {
+    let result: int = <int>(0);
+    <void>(for <int>(el) in <listiterator<int>>(<() -> listiterator<int>>(<list<int>>(self).iterator)()) <int>{
+        exit <int>{
+            exit <int>(result = <int>(<int>(result) + <int>(el)));
+        };
+    })
+    return <int>(result);
+}
+fun <list<int>>::to_string(self: list<int>) -> string {
+    return <string>(if <bool>(<int>(<() -> int>(<list<int>>(self).len)()) == <int>(0)) <string>{
+        exit <string>("[]");
+    } else <string>{
+        let result: string = <string>("[");
+        let it: listiterator<int> = <listiterator<int>>(<() -> listiterator<int>>(<list<int>>(self).iterator)());
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(<(int) -> string>(<int>::to_string)(<int>(<() -> int>(<option<int>>(<() -> option<int>>(<listiterator<int>>(it).next)()).get)()))))));
+        }
+        <void>(for <int>(e) in <listiterator<int>>(it) <string>{
+            exit <string>{
+                exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(", "))), <string>(<(int) -> string>(<int>::to_string)(<int>(e))))));
+            };
+        })
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>("]"))));
+        }
+        exit <string>(result);
+    });
+}
+fun <listiterator<int>>::next(self: listiterator<int>) -> option<int> {
+    return <option<int>>(if <bool>(<int>(<listiterator<int>>(self).1) >= <int>(<() -> int>(<list<int>>(<listiterator<int>>(self).0).len)())) <option<int>>{
+        exit <option<int>>(<() -> option<int>>(<option<int>>::none)());
+    } else <option<int>>{
+        let t: option<int> = <option<int>>(<(int) -> option<int>>(<option<int>>::some)(<int>(<(int) -> int>(<list<int>>(<listiterator<int>>(self).0).get)(<int>(<listiterator<int>>(self).1)))));
+        <int>{
+            exit <int>(<listiterator<int>>(self).1 = <int>(<int>(<listiterator<int>>(self).1) + <int>(1)));
+        }
+        exit <option<int>>(t);
+    });
+}
+fun <option<int>>::get(self: option<int>) -> int {
+    return <int>(if <bool>(<option<int>>(self).0) <int>{
+        exit <int>(*<option<int>>(self).1);
+    } else <never>{
+        throw "no value present";
+    });
+}
+extern fun "#malloc"(arg0: int) -> #ptr;
+fun <option<int>>::some(t: int) -> option<int> {
+    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<int>::size_of())));
+    <int>{
+        exit <int>(*value = <int>(t));
+    }
+    return option<int> #{<bool>(true), <#ptr>(value)};
+}
+fun <list<int>>::len(self: list<int>) -> int {
+    return <int>(<(int) -> int>(<int>(<#dynarray>(<list<int>>(self).0).1).idiv)(<int>(<int>::size_of())));
+}
+fun <list<int>>::get(self: list<int>, i: int) -> int {
+    return <int>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<int>>(self).len)()))) <int>{
+        exit <int>(*<int>::#gep(<#ptr>(<#dynarray>(<list<int>>(self).0).0), <int>(i)));
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <list<int>>::iterator(self: list<int>) -> listiterator<int> {
+    return <listiterator<int>>(<(list<int>) -> listiterator<int>>(<listiterator<int>>::new)(<list<int>>(self)));
+}
+fun <list<int>>::set(self: list<int>, i: int, t: int) -> void {
+    return <void>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<int>>(self).len)()))) <void>{
+        exit <void>{
+            exit <void>(castfrom <int>(*<int>::#gep(<#ptr>(<#dynarray>(<list<int>>(self).0).0), <int>(i)) = <int>(t)));
+        };
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <listiterator<int>>::new(inner: list<int>) -> listiterator<int> {
+    return listiterator<int> #{<list<int>>(inner), <int>(0)};
+}
+fun <option<int>>::none() -> option<int> {
+    return option<int> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
+}
+fun <list<int>>::extend(self: list<int>, lst: list<int>) -> void {
+    return <void>(for <int>(e) in <listiterator<int>>(<() -> listiterator<int>>(<list<int>>(lst).iterator)()) <void>{
+        exit <void>(<(int) -> void>(<list<int>>(self).push)(<int>(e)));
+    });
+}
+fun <list<int>>::pop(self: list<int>) -> int {
+    return <int>(*<(int) -> #ptr>(<#dynarray>(<list<int>>(self).0).take)(<int>(<int>::size_of())));
+}
+fun <list<int>>::push(self: list<int>, e: int) -> void {
+    let buf: #ptr = <#ptr>(<int>::#alloca());
+    <int>{
+        exit <int>(*buf = <int>(e));
+    }
+    return <void>(<(#ptr, int) -> void>(<#dynarray>(<list<int>>(self).0).extend)(<#ptr>(buf), <int>(<int>::size_of())));
+}
+fun <option<int>>::to_string(self: option<int>) -> string {
+    return <string>(if <bool>(<option<int>>(self).0) <string>{
+        let value: int = <int>(*<option<int>>(self).1);
+        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(<(int) -> string>(<int>::to_string)(<int>(value))))), <string>(")")));
+    } else <string>{
+        exit <string>("none");
+    });
+}
+fun <list<int>>::from_raw(contents: #ptr, len: int) -> list<int> {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(<int>(len) * <int>(<int>::size_of()))));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(<int>(len) * <int>(<int>::size_of()))));
+    return list<int> #{<#dynarray>(inner)};
+}
