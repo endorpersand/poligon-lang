@@ -337,6 +337,15 @@ pub mod err {
                     }
                 }
             }
+            impl std::error::Error for RuntimeErr {
+                fn cause(&self) -> Option<&dyn std::error::Error> {
+                    match self {
+                        $(
+                            Self::$e(e) => Some(e)
+                        ),*
+                    }
+                }
+            }
         }
     }
 
@@ -402,6 +411,7 @@ pub mod err {
             }
         }
     }
+    impl std::error::Error for TypeErr {}
 
     /// An error caused by invalid value arguments
     #[derive(Debug)]
@@ -451,6 +461,7 @@ pub mod err {
             }
         }
     }
+    impl std::error::Error for ValueErr {}
 
     /// An error caused by variable name conflicts
     #[derive(Debug)]
@@ -481,6 +492,7 @@ pub mod err {
             }
         }
     }
+    impl std::error::Error for NameErr {}
 
     /// An error caused because the feature is unimplemented
     #[derive(Debug)]
@@ -506,6 +518,7 @@ pub mod err {
             }
         }
     }
+    impl std::error::Error for FeatureErr {}
 
     impl GonErr for IoErr {
         fn err_name(&self) -> &'static str {

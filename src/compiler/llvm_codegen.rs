@@ -633,6 +633,8 @@ impl<'ctx> std::fmt::Display for LLVMErr<'ctx> {
         }
     }
 }
+impl std::error::Error for LLVMErr<'_> {}
+
 /// This trait is implemented for values that can be traversed in order to 
 /// create an LLVM representation or write values into the compiler.
 pub trait TraverseIR<'ctx> {

@@ -122,6 +122,7 @@ impl std::fmt::Display for LexErr {
         }
     }
 }
+impl std::error::Error for LexErr {}
 
 /// Enclose quotes around a character
 /// 

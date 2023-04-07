@@ -88,6 +88,7 @@ impl std::fmt::Display for ResolveErr {
         }
     }
 }
+impl std::error::Error for ResolveErr {}
 
 type FullResolveErr = FullGonErr<ResolveErr>;
 /// A [`Result`] type for operations in the static resolution process.

@@ -163,6 +163,15 @@ impl std::fmt::Display for ParseErr {
         }
     }
 }
+impl std::error::Error for ParseErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            ParseErr::AsgPatErr(t) => Some(t),
+            _ => None
+        }
+    }
+}
+
 /// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullParseErr>;
 type FullParseErr = FullGonErr<ParseErr>;

@@ -11,7 +11,7 @@
 //! [`LexErr`]: crate::lexer::LexErr
 
 use std::collections::BTreeSet;
-use std::fmt::Display;
+use std::error::Error;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
 /// Errors that can be printed by the Poligon interpreter.
@@ -19,7 +19,7 @@ use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 /// This trait requires that the struct provides the name of the error type and the message of the error (in Display).
 /// Implementing these enables functionality to designate *where* an error occurred and to produce 
 /// a formatted error message.
-pub trait GonErr: Display + Sized {
+pub trait GonErr: Error + Sized {
     /// The name of the error type (e.g. `syntax error`, `runtime error`)
     fn err_name(&self) -> &'static str;
 

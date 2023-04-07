@@ -52,6 +52,7 @@ impl std::fmt::Display for OpErr {
         }
     }
 }
+impl std::error::Error for OpErr {}
 
 type HomoResult<T> = Result<T, T>;
 struct Cast<'a> {

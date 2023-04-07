@@ -82,6 +82,14 @@ impl GonErr for DParseErr {
         }
     }
 }
+impl std::error::Error for DParseErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            DParseErr::PLIRErr(e) => Some(e),
+            _ => None
+        }
+    }
+}
 
 impl std::fmt::Display for DParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

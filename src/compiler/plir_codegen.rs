@@ -166,6 +166,14 @@ impl std::fmt::Display for PLIRErr {
         }
     }
 }
+impl std::error::Error for PLIRErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            PLIRErr::OpErr(e) => Some(e),
+            _ => None
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 enum BlockExit {

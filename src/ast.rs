@@ -692,6 +692,7 @@ impl std::fmt::Display for PatErr {
         }
     }
 }
+impl std::error::Error for PatErr {}
 
 impl TryFrom<Located<Expr>> for Located<AsgUnit> {
     type Error = FullPatErr;

@@ -42,6 +42,7 @@ impl std::fmt::Display for RvErr {
         }
     }
 }
+impl std::error::Error for RvErr {}
 
 impl From<BorrowMutError> for RvErr {
     fn from(_: BorrowMutError) -> Self {
