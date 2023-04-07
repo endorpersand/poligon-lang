@@ -83,9 +83,9 @@ impl<'a> Cast<'a> {
             },
             (_, Prim(Type::S_BOOL)) => self.cf.allows(CastFlags::Truth),
             (_, Prim(Type::S_VOID)) => self.cf.allows(CastFlags::Void),
-            (_, _) if NumType(&self.src.ty).is_numeric() && NumType(self.dest).is_numeric() => {
-                let l = NumType(&self.src.ty);
-                let r = NumType(self.dest);
+            (_, _) if self.src.ty.is_numeric() && self.dest.is_numeric() => {
+                let l = NumType::new(&self.src.ty).unwrap();
+                let r = NumType::new(self.dest).unwrap();
 
                 (l < r && self.cf.allows(CastFlags::NumWiden))
                 || (l > r && self.cf.allows(CastFlags::NumNarrow))
@@ -280,11 +280,11 @@ impl super::PLIRCodegen {
             let ty = cast.ty.clone();
     
             match (op, ty.as_ref()) {
-                (op::Unary::Plus,  _) if NumType(&ty).is_numeric()  => ty,
-                (op::Unary::Minus, _) if NumType(&ty).is_numeric()  => ty,
-                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL))    => ty,
-                (op::Unary::BitNot, TypeRef::Prim(Type::S_BOOL))    => ty,
-                (op::Unary::BitNot, _) if NumType(&ty).is_integer() => ty,
+                (op::Unary::Plus,  _) if ty.is_numeric() => ty,
+                (op::Unary::Minus, _) if ty.is_numeric() => ty,
+                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
+                (op::Unary::BitNot, TypeRef::Prim(Type::S_BOOL)) => ty,
+                (op::Unary::BitNot, _) if ty.is_int_like() => ty,
                 (op, _) => {
                     let fun = self.find_unary_method(op, Located::new(&ty, left_range))?
                         .ok_or_else(|| {
@@ -450,20 +450,20 @@ impl super::PLIRCodegen {
             let right = &rcast.ty;
             match (op, left.as_ref(), right.as_ref()) {
                 // numeric operators:
-                (op::Binary::Add, l, r) if NumType(&left).is_numeric() && l == r => left,
-                (op::Binary::Sub, l, r) if NumType(&left).is_numeric() && l == r => left,
-                (op::Binary::Mul, l, r) if NumType(&left).is_numeric() && l == r => left,
-                (op::Binary::Div, l, r) if NumType(&left).is_floating() && l == r => left,
-                (op::Binary::Mod, l, r) if NumType(&left).is_numeric() && l == r => left,
+                (op::Binary::Add, l, r) if left.is_numeric() && l == r => left,
+                (op::Binary::Sub, l, r) if left.is_numeric() && l == r => left,
+                (op::Binary::Mul, l, r) if left.is_numeric() && l == r => left,
+                (op::Binary::Div, l, r) if left.is_float_like() && l == r => left,
+                (op::Binary::Mod, l, r) if left.is_numeric() && l == r => left,
                 // bitwise operators:
-                (op::Binary::Shl, l, r) if NumType(&left).is_integer() && l == r => left,
-                (op::Binary::Shr, l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::Shl, l, r) if left.is_int_like() && l == r => left,
+                (op::Binary::Shr, l, r) if left.is_int_like() && l == r => left,
                 (op::Binary::BitOr,  TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
                 (op::Binary::BitAnd, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
                 (op::Binary::BitXor, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
-                (op::Binary::BitOr,  l, r) if NumType(&left).is_integer() && l == r => left,
-                (op::Binary::BitAnd, l, r) if NumType(&left).is_integer() && l == r => left,
-                (op::Binary::BitXor, l, r) if NumType(&left).is_integer() && l == r => left,
+                (op::Binary::BitOr,  l, r) if left.is_int_like() && l == r => left,
+                (op::Binary::BitAnd, l, r) if left.is_int_like() && l == r => left,
+                (op::Binary::BitXor, l, r) if left.is_int_like() && l == r => left,
                 // logical operators:
                 (op::Binary::LogAnd, l, r) if l == r => left,
                 (op::Binary::LogOr, l, r)  if l == r => left,

@@ -145,9 +145,23 @@ impl Type {
         matches!(self.as_ref(), TypeRef::Prim(Type::S_NEVER))
     }
     
-    /// Test if this type is a numeric type (`int`, `float`).
+    /// Test if this type is a numeric type (e.g., `int`, `float`).
     pub fn is_numeric(&self) -> bool {
-        matches!(self.as_ref(), TypeRef::Prim(Type::S_INT) | TypeRef::Prim(Type::S_FLOAT))
+        NumType::new(self).is_some()
+    }
+    /// Test if this type is an int type (e.g., `int`, `float`).
+    pub fn is_int_like(&self) -> bool {
+        match NumType::new(self) {
+            Some(t) => t.is_int_like(),
+            None => false,
+        }
+    }
+    /// Test if this type is a float type (e.g., `int`, `float`).
+    pub fn is_float_like(&self) -> bool {
+        match NumType::new(self) {
+            Some(t) => t.is_float_like(),
+            None => false,
+        }
     }
 
     /// Given some types, merge them into what type it could be.
@@ -286,53 +300,47 @@ impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
     fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
 }
 
-/// Wrapper to test if a type is numeric.
-#[derive(PartialEq, Eq)]
-pub(crate) struct NumType<'a>(pub &'a Type);
+/// Helper type which generalizes numerics into categories.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub(crate) struct NumType {
+    pub floating: bool,
+    pub bit_len: usize
+}
 lazy_static! {
-    static ref NUM_TYPE_ORDER: IndexMap<Type, (bool /* float? */, usize /* size */)> = {
+    static ref NUM_TYPE_ORDER: IndexMap<Type, NumType> = {
         let mut m = IndexMap::new();
 
-        m.insert(ty!("#byte"),       (false, 8));
-        m.insert(ty!(Type::S_INT),   (false, 64));
-        m.insert(ty!(Type::S_FLOAT), (true,  64));
+        m.insert(ty!("#byte"),       NumType { floating: false, bit_len: 8  });
+        m.insert(ty!(Type::S_INT),   NumType { floating: false, bit_len: 64 });
+        m.insert(ty!(Type::S_FLOAT), NumType { floating: true,  bit_len: 64 });
         
         m
     };
 }
-impl<'a> NumType<'a> {
-    pub fn encoding(&self) -> Option<(bool /* float? */, usize /* size */)> {
-        NUM_TYPE_ORDER.get(self.0).copied()
+impl NumType {
+    pub fn new(ty: &Type) -> Option<Self> {
+        NUM_TYPE_ORDER.get(ty).copied()
     }
 
-    pub fn is_numeric(&self) -> bool {
-        NUM_TYPE_ORDER.contains_key(self.0)
+    pub fn is_int_like(&self) -> bool {
+        !self.floating
     }
-    pub fn is_integer(&self) -> bool {
-        matches!(self.encoding(), Some((false, _)))
-    }
-    pub fn is_floating(&self) -> bool {
-        matches!(self.encoding(), Some((true, _)))
+    pub fn is_float_like(&self) -> bool {
+        self.floating
     }
 
-    pub fn order() -> Vec<&'a Type> {
+    pub fn order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.keys().collect()
     }
-    pub fn int_order() -> Vec<&'a Type> {
+    pub fn int_order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.iter()
-            .filter_map(|(t, (is_float, _))| (!is_float).then_some(t))
+            .filter_map(|(pt, nt)| nt.is_int_like().then_some(pt))
             .collect()
     }
-    pub fn float_order() -> Vec<&'a Type> {
+    pub fn float_order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.iter()
-            .filter_map(|(t, (is_float, _))| is_float.then_some(t))
+            .filter_map(|(t, nt)| nt.is_float_like().then_some(t))
             .collect()
-    }
-}
-impl<'a> PartialOrd for NumType<'a> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Option::zip(self.encoding(), other.encoding())
-            .map(|(a, b)| a.cmp(&b))
     }
 }
 

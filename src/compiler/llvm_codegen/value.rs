@@ -119,31 +119,39 @@ impl<'ctx> LLVMCodegen<'ctx> {
             },
             (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Basic(self.truth(v).into())),
             (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
-            (_, _) if NumType(src).is_numeric() && NumType(dest).is_numeric() => {
-                let nsrc  = NumType(src);
-                let ndest = NumType(dest);
+            (_, _) if src.is_numeric() && dest.is_numeric() => {
+                let nsrc  = NumType::new(src).unwrap();
+                let ndest = NumType::new(dest).unwrap();
 
                 let GonValue::Basic(srcv) = v else { unreachable!() };
                 let dest_layout = self.get_layout(dest)?;
-                let result = match (nsrc.encoding().unwrap(), ndest.encoding().unwrap()) {
-                    ((false, a), (false, b)) if a < b => {
-                        self.builder.build_int_s_extend(srcv.into_int_value(), dest_layout.into_int_type(), "").into()
+                let result = match (nsrc, ndest) {
+                    (NumType { floating: false, bit_len: a }, NumType { floating: false, bit_len: b }) => {
+                        let srcv = srcv.into_int_value();
+                        let dest_layout = dest_layout.into_int_type();
+
+                        if a < b {
+                            self.builder.build_int_s_extend(srcv, dest_layout, "").into()
+                        } else {
+                            self.builder.build_int_truncate(srcv, dest_layout, "").into()
+                        }
                     },
-                    ((false, _), (false, _)) => {
-                        self.builder.build_int_truncate(srcv.into_int_value(), dest_layout.into_int_type(), "").into()
-                    },
-                    ((false, _), (true, _)) => {
+                    (NumType { floating: false, bit_len: _ }, NumType { floating: true, bit_len: _ }) => {
                         self.builder.build_signed_int_to_float(srcv.into_int_value(), dest_layout.into_float_type(), "").into()
                     },
-                    ((true, _), (false, _)) => {
+                    (NumType { floating: true, bit_len: _ }, NumType { floating: false, bit_len: _ }) => {
                         // check for poison
                         self.builder.build_float_to_signed_int(srcv.into_float_value(), dest_layout.into_int_type(), "").into()
                     },
-                    ((true, a), (true, b)) if a < b => {
-                        self.builder.build_float_ext(srcv.into_float_value(), dest_layout.into_float_type(), "").into()
-                    },
-                    ((true, _), (true, _)) => {
-                        self.builder.build_float_trunc(srcv.into_float_value(), dest_layout.into_float_type(), "").into()
+                    (NumType { floating: true, bit_len: a }, NumType { floating: true, bit_len: b }) => {
+                        let srcv = srcv.into_float_value();
+                        let dest_layout = dest_layout.into_float_type();
+
+                        if a < b {
+                            self.builder.build_float_ext(srcv, dest_layout, "").into()
+                        } else {
+                            self.builder.build_float_trunc(srcv, dest_layout, "").into()
+                        }
                     }
                 };
 
