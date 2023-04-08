@@ -1,5 +1,6 @@
 import intrinsic;
 
+// TODO: unify #dynarray and list<T> when generics are more stable
 class #dynarray {
     buf: #ptr,
     len: int,
@@ -173,9 +174,9 @@ class list<T> {
             let result = "[";
             let it = self.iterator();
 
-            result = result + it.get();
+            result = result + it.next().get();
             for e in it {
-                result = ", " + e;
+                result = result + ", " + e;
             }
             result = result + "]";
 
