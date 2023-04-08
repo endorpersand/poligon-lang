@@ -92,26 +92,18 @@ impl<'ctx> ExitPointers<'ctx> {
 }
 
 pub(super) struct TypeLayouts<V> {
-    alias: HashMap<String, plir::Type>,
     layouts: HashMap<plir::Type, V>
 }
 impl<V> TypeLayouts<V> {
     fn new() -> Self {
-        TypeLayouts { alias: HashMap::new(), layouts: HashMap::new() }
+        TypeLayouts { layouts: HashMap::new() }
     }
 
     fn get_by_type(&self, ty: &plir::Type) -> Option<&V> {
         self.layouts.get(ty)
     }
-    
-    #[allow(unused)]
-    fn get_by_ident(&self, id: &str) -> Option<&V> {
-        self.alias.get(id)
-            .and_then(|ty| self.get_by_type(ty))
-    }
 
-    fn insert(&mut self, ty: plir::Type, id: String, v: V) {
-        self.alias.insert(id, ty.clone());
+    fn insert(&mut self, ty: plir::Type, v: V) {
         self.layouts.insert(ty, v);
     }
 }
@@ -131,28 +123,10 @@ impl<'ctx> TypeLayouts<BasicTypeEnum<'ctx>> {
             ("#byte",       ctx.i8_type().into()),
             (Type::S_VOID,  ctx.struct_type(&[], false).into()),
         ] {
-            layouts.insert(plir::ty!(id), id.to_string(), layout);
+            layouts.insert(plir::ty!(id), layout);
         }
 
         layouts
-    }
-
-    #[allow(unused)]
-    fn lookup_name<'a>(&'a self, ty: &'a plir::Type) -> Option<Cow<'a, str>> {
-        let layout = self.layouts.get(ty)?;
-        
-        let name = if let BasicTypeEnum::StructType(st) = layout {
-            let name_ref = st.get_name()
-                .unwrap()
-                .to_str()
-                .unwrap();
-
-            Cow::from(name_ref)
-        } else {
-            ty.ident()
-        };
-
-        self.alias.contains_key(&*name).then_some(name)
     }
 }
 
@@ -470,8 +444,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Define a type for the compiler to track.
-    fn define_type(&mut self, ty: plir::Type, id: &str, layout: impl BasicType<'ctx>) {
-        self.layouts.insert(ty, id.to_string(), layout.as_basic_type_enum());
+    fn define_type(&mut self, ty: plir::Type, layout: impl BasicType<'ctx>) {
+        self.layouts.insert(ty, layout.as_basic_type_enum());
     }
 
     /// Get the LLVM layout of a given PLIR type.
@@ -1380,11 +1354,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
         let struct_ty = compiler.ctx.opaque_struct_type(&ty.ident());
         struct_ty.set_body(&fields, false);
 
-        let struct_name = struct_ty.get_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
-        compiler.define_type(ty.clone(), struct_name, struct_ty);
+        compiler.define_type(ty.clone(), struct_ty);
 
         Ok(())
     }
