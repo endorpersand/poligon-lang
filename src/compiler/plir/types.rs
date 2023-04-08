@@ -13,9 +13,6 @@ pub trait TypeUnit: Borrow<Self::Ref> {
     /// Reference type for parametrized [TypeRef]
     type Ref: ?Sized + ToOwned<Owned=Self> + PartialEq;
 }
-impl TypeUnit for String {
-    type Ref = str;
-}
 
 /// A type expression.
 /// 
@@ -45,12 +42,19 @@ pub struct FunType<U: TypeUnit = String> {
     pub varargs: bool
 }
 
+/// A known type unit.
+pub type KTypeUnit = String;
+impl TypeUnit for KTypeUnit {
+    type Ref = str;
+}
+/// A type expression whose type is fully known
+pub type KnownType = Type<KTypeUnit>;
 
 /// Unit type which includes the possibility of an unknown type variable.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum MTypeUnit {
     /// Primitive type which is known
-    Known(String),
+    Known(KTypeUnit),
     /// Unknown type variable
     Unk(usize)
 }
@@ -59,11 +63,17 @@ impl TypeUnit for MTypeUnit {
 }
 /// A type expression which can include an unknown type variable.
 pub type MaybeType = Type<MTypeUnit>;
-/// A known type unit.
-pub type KTypeUnit = String;
-/// A type expression whose type is fully known
-pub type KnownType = Type<KTypeUnit>;
 
+impl From<KTypeUnit> for MTypeUnit {
+    fn from(value: KTypeUnit) -> Self {
+        MTypeUnit::Known(value)
+    }
+}
+impl From<KnownType> for MaybeType {
+    fn from(value: KnownType) -> Self {
+        value.map(MTypeUnit::from)
+    }
+}
 impl<U: TypeUnit> FunType<U> {
     /// Constructs a new function type.
     pub fn new(params: Vec<Type<U>>, ret: Type<U>, varargs: bool) -> Self {
@@ -79,6 +89,25 @@ impl<U: TypeUnit> FunType<U> {
 
     pub(crate) fn as_ref(&self) -> TypeRef<U> {
         TypeRef::Fun(&self.params, &self.ret, self.varargs)
+    }
+
+    pub(crate) fn try_map<V: TypeUnit, E>(self, mut f: impl FnMut(U) -> Result<V, E>) -> Result<FunType<V>, E> {
+        let FunType { params, ret, varargs } = self;
+        
+        let params = params.into_iter()
+            .map(|t| t.try_map(&mut f))
+            .collect::<Result<_, _>>()?;
+        
+        let ret = ret.try_map(&mut f)
+            .map(Box::new)?;
+
+        Ok(FunType { params, ret, varargs })
+    }
+
+    #[allow(unused)]
+    pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> FunType<V> {
+        self.try_map::<V, std::convert::Infallible>(|u| Ok(f(u)))
+            .unwrap_or_else(|e| match e {})
     }
 }
 impl FunType {
@@ -122,15 +151,44 @@ pub(crate) enum TypeRef<'a, U: TypeUnit = String> {
     Tuple(&'a [Type<U>]),
     Fun(&'a [Type<U>], &'a Type<U>, bool)
 }
-impl<U: TypeUnit + Clone> TypeRef<'_, U> {
+impl<U: TypeUnit> TypeRef<'_, U> {
     #[allow(unused)]
-    pub(crate) fn to_owned(self) -> Type<U> {
-        match self {
-            TypeRef::Prim(ident) => Type::Prim(ident.to_owned()),
-            TypeRef::Generic(ident, params) => Type::Generic(ident.to_owned(), Vec::from(params)),
-            TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys)),
-            TypeRef::Fun(params, ret, var_args) => Type::fun_type(Vec::from(params), ret.clone(), var_args),
-        }
+    pub(crate) fn to_owned(self) -> Type<U> 
+        where U: Clone
+    {
+        self.map_owned(U::Ref::to_owned)
+    }
+
+    pub(crate) fn try_map_owned<V: TypeUnit, E>(self, mut f: impl FnMut(&U::Ref) -> Result<V, E>) -> Result<Type<V>, E> {
+        let result = match self {
+            TypeRef::Prim(id) => Type::Prim(f(id)?),
+            TypeRef::Generic(id, params) => {
+                let params = params.iter()
+                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .collect::<Result<_, _>>()?;
+                Type::Generic(id.to_owned(), params)
+            },
+            TypeRef::Tuple(params) => {
+                let params = params.iter()
+                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .collect::<Result<_, _>>()?;
+                Type::Tuple(params)
+            },
+            TypeRef::Fun(params, ret, varargs) => {
+                let params = params.iter()
+                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .collect::<Result<_, _>>()?;
+                let ret = ret.as_ref().try_map_owned(&mut f)?;
+                Type::Fun(FunType { params, ret: Box::new(ret), varargs })
+            },
+        };
+
+        Ok(result)
+    }
+
+    pub(crate) fn map_owned<V: TypeUnit>(self, mut f: impl FnMut(&U::Ref) -> V) -> Type<V> {
+        self.try_map_owned::<V, std::convert::Infallible>(|u| Ok(f(u)))
+            .unwrap_or_else(|e| match e {})
     }
 }
 impl<U: TypeUnit> Clone for TypeRef<'_, U> {
@@ -170,6 +228,34 @@ impl<U: TypeUnit> Type<U> {
             Type::Tuple(params) => TypeRef::Tuple(params),
             Type::Fun(ft) => ft.as_ref()
         }
+    }
+
+    pub(crate) fn try_map<V: TypeUnit, E>(self, mut f: impl FnMut(U) -> Result<V, E>) -> Result<Type<V>, E> {
+        let result = match self {
+            Type::Prim(id) => Type::Prim(f(id)?),
+            Type::Generic(id, params) => {
+                let params = params.into_iter()
+                    .map(|t| t.try_map(&mut f))
+                    .collect::<Result<_, _>>()?;
+                Type::Generic(id, params)
+            },
+            Type::Tuple(params) => {
+                let params = params.into_iter()
+                    .map(|t| t.try_map(&mut f))
+                    .collect::<Result<_, _>>()?;
+                Type::Tuple(params)
+            },
+            Type::Fun(fun) => {
+                Type::Fun(fun.try_map(&mut f)?)
+            },
+        };
+
+        Ok(result)
+    }
+
+    pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> Type<V> {
+        self.try_map::<V, std::convert::Infallible>(|u| Ok(f(u)))
+            .unwrap_or_else(|e| match e {})
     }
 }
 impl KnownType {
