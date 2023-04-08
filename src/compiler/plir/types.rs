@@ -17,15 +17,19 @@ impl TypeUnit for String {
     type Ref = str;
 }
 
+/// Unit type which includes the possibility of an unknown type variable.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum MaybeTypeUnit {
+pub enum MTypeUnit {
+    /// Primitive type which is known
     Known(String),
-    Unknown(usize)
+    /// Unknown type variable
+    Unk(usize)
 }
-impl TypeUnit for MaybeTypeUnit {
-    type Ref = MaybeTypeUnit;
+impl TypeUnit for MTypeUnit {
+    type Ref = MTypeUnit;
 }
-pub type MaybeType = Type<MaybeTypeUnit>;
+/// A type expression which can include an unknown type variable.
+pub type MaybeType = Type<MTypeUnit>;
 
 /// A type expression.
 /// 

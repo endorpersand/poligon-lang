@@ -1072,10 +1072,10 @@ impl TypeResolver {
 
     fn normalize_unk(&mut self, ty: plir::MaybeType) -> plir::MaybeType {
         use plir::Type::Prim;
-        use plir::MaybeTypeUnit::Unknown;
+        use plir::MTypeUnit::Unk;
 
         match ty {
-            Prim(Unknown(_)) => {
+            Prim(Unk(_)) => {
                 let id = self.monos.make_set(ty);
                 let root = self.monos.find(id);
                 self.monos.get_idx(root).clone()
@@ -1086,15 +1086,15 @@ impl TypeResolver {
 
     fn add_constraint(&mut self, left: plir::MaybeType, right: plir::MaybeType) -> Result<(), ConstraintErr> {
         use plir::MaybeType;
-        use plir::MaybeTypeUnit::Unknown;
+        use plir::MTypeUnit::Unk;
         use plir::FunType;
 
         let left = self.normalize_unk(left);
         let right = self.normalize_unk(right);
 
         match (left, right) {
-            (MaybeType::Prim(Unknown(l)), r) => { self.set_unk_ty(l, r); },
-            (r, MaybeType::Prim(Unknown(l))) => { self.set_unk_ty(l, r); },
+            (MaybeType::Prim(Unk(l)), r) => { self.set_unk_ty(l, r); },
+            (r, MaybeType::Prim(Unk(l))) => { self.set_unk_ty(l, r); },
             (l @ MaybeType::Prim(_), r @ MaybeType::Prim(_)) => { 
                 if l != r { Err(ConstraintErr::MonoNe)? }
             },
@@ -1132,15 +1132,15 @@ impl TypeResolver {
     /// Sets an unknown type variable equal to another type.
     fn set_unk_ty(&mut self, unk: usize, t: plir::MaybeType) {
         use plir::Type::Prim;
-        use plir::MaybeTypeUnit::Unknown;
+        use plir::MTypeUnit::Unk;
 
-        let left  = self.monos.make_set(Prim(Unknown(unk)));
+        let left  = self.monos.make_set(Prim(Unk(unk)));
         let right = self.monos.make_set(t);
 
         self.monos.union_select(left, right, |l, r| {
-            debug_assert!(matches!(l, Prim(Unknown(_))), "{l:?} should have been normalized before set_unk_ty call");
+            debug_assert!(matches!(l, Prim(Unk(_))), "{l:?} should have been normalized before set_unk_ty call");
             match r {
-                Prim(Unknown(_)) => dsds::Selector::Whatever,
+                Prim(Unk(_)) => dsds::Selector::Whatever,
                 _ => dsds::Selector::Right,
             }
         });
