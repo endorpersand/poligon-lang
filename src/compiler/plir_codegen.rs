@@ -1047,107 +1047,12 @@ mod dsds {
     impl Error for UnionSelectFail {}
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum MaybeType {
-    /// A type without type parameters (e.g. `string`, `int`).
-    Prim(String),
-    /// An unknown type variable (e.g. `T` in `option<T>`).
-    Unknown(String),
-    /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
-    Generic(String, Vec<MaybeType>),
-    /// A tuple of types (e.g. `[int, int, int]`).
-    Tuple(Vec<MaybeType>),
-    /// A function (e.g. `() -> int`, `str -> int`).
-    Fun {
-        /// The parameter types of this function type
-        params: Vec<MaybeType>, 
-        /// The return type
-        ret: Box<MaybeType>,
-        /// Whether this type has varargs at the end of its parameters
-        varargs: bool
-    }
-}
-impl MaybeType {
-    /// Traverses through the entire tree by pre-order DFS.
-    fn walk<'t>(&'t self, mut f: impl FnMut(&'t MaybeType)) {
-        f(self);
-        match self {
-            MaybeType::Prim(_) => {},
-            MaybeType::Unknown(_) => {},
-            MaybeType::Generic(_, params) => {
-                params.iter().for_each(|p| p.walk(&mut f));
-            },
-            MaybeType::Tuple(params) => {
-                params.iter().for_each(|p| p.walk(&mut f));
-            },
-            MaybeType::Fun { params, ret, varargs: _ } => {
-                params.iter().for_each(|p| p.walk(&mut f));
-                ret.walk(f);
-            },
-        }
-    }
-    /// Traverses through the entire tree mutably by pre-order DFS.
-    /// 
-    /// The callback accepts a mutable node and should return the mutable node if not consumed.
-    /// If consumed, the callback should return None. This function will then stop traversing down the node
-    /// and continue traversing through the non-consumed tree.
-    /// 
-    /// This enables the user to obtain exclusive mutable references to several parts of the tree.
-    fn walk_mut<'t>(&'t mut self, mut f: impl FnMut(&'t mut MaybeType) -> Option<&'t mut MaybeType>) {
-        if let Some(root) = f(self) {
-            match root {
-                MaybeType::Prim(_) => {},
-                MaybeType::Unknown(_) => {},
-                MaybeType::Generic(_, params) => {
-                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
-                },
-                MaybeType::Tuple(params) => {
-                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
-                },
-                MaybeType::Fun { params, ret, varargs: _ } => {
-                    params.iter_mut().for_each(|p| p.walk_mut(&mut f));
-                    ret.walk_mut(f);
-                },
-            }
-        }
-    }
-
-    fn get_unknowns(&mut self) -> Vec<&mut MaybeType> {
-        let mut unks = vec![];
-
-        self.walk_mut(|t| match t {
-            MaybeType::Unknown(_) => {
-                unks.push(t);
-                None
-            },
-            _ => Some(t)
-        });
-
-        unks
-    }
-    fn is_unknown(&self) -> bool {
-        match self {
-            MaybeType::Prim(_)    => false,
-            MaybeType::Unknown(_) => true,
-            MaybeType::Generic(_, t) => {
-                t.iter().any(MaybeType::is_unknown)
-            },
-            MaybeType::Tuple(t) => {
-                t.iter().any(MaybeType::is_unknown)
-            },
-            MaybeType::Fun { params, ret, varargs: _ } => {
-                ret.is_unknown() || params.iter().any(MaybeType::is_unknown)
-            },
-        }
-    }
-}
-
 #[derive(Debug)]
 struct TypeResolver {
     /// A DSDS of monotypes.
     /// 
     /// The top root of a group should always contain a non-unknown.
-    monos: dsds::UnionFind<MaybeType>
+    monos: dsds::UnionFind<plir::MaybeType>
 }
 #[derive(Debug)]
 enum ConstraintErr {
@@ -1165,9 +1070,12 @@ impl TypeResolver {
         }
     }
 
-    fn normalize_unk(&mut self, ty: MaybeType) -> MaybeType {
+    fn normalize_unk(&mut self, ty: plir::MaybeType) -> plir::MaybeType {
+        use plir::Type::Prim;
+        use plir::MaybeTypeUnit::Unknown;
+
         match ty {
-            MaybeType::Unknown(_) => {
+            Prim(Unknown(_)) => {
                 let id = self.monos.make_set(ty);
                 let root = self.monos.find(id);
                 self.monos.get_idx(root).clone()
@@ -1176,13 +1084,17 @@ impl TypeResolver {
         }
     }
 
-    fn add_constraint(&mut self, left: MaybeType, right: MaybeType) -> Result<(), ConstraintErr> {
+    fn add_constraint(&mut self, left: plir::MaybeType, right: plir::MaybeType) -> Result<(), ConstraintErr> {
+        use plir::MaybeType;
+        use plir::MaybeTypeUnit::Unknown;
+        use plir::FunType;
+
         let left = self.normalize_unk(left);
         let right = self.normalize_unk(right);
 
         match (left, right) {
-            (MaybeType::Unknown(l), r) => { self.set_unk_ty(l, r); },
-            (r, MaybeType::Unknown(l)) => { self.set_unk_ty(l, r); },
+            (MaybeType::Prim(Unknown(l)), r) => { self.set_unk_ty(l, r); },
+            (r, MaybeType::Prim(Unknown(l))) => { self.set_unk_ty(l, r); },
             (l @ MaybeType::Prim(_), r @ MaybeType::Prim(_)) => { 
                 if l != r { Err(ConstraintErr::MonoNe)? }
             },
@@ -1202,7 +1114,7 @@ impl TypeResolver {
                     self.add_constraint(a, b)?;
                 }
             },
-            (MaybeType::Fun { params: ap, ret: ar, varargs: av }, MaybeType::Fun { params: bp, ret: br, varargs: bv }) => {
+            (MaybeType::Fun(FunType { params: ap, ret: ar, varargs: av }), MaybeType::Fun(FunType { params: bp, ret: br, varargs: bv })) => {
                 if av != bv { Err(ConstraintErr::ShapeNe)? }
                 if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
 
@@ -1218,16 +1130,17 @@ impl TypeResolver {
     }
 
     /// Sets an unknown type variable equal to another type.
-    fn set_unk_ty(&mut self, unk: String, t: MaybeType) {
-        use MaybeType::Unknown;
+    fn set_unk_ty(&mut self, unk: usize, t: plir::MaybeType) {
+        use plir::Type::Prim;
+        use plir::MaybeTypeUnit::Unknown;
 
-        let left  = self.monos.make_set(MaybeType::Unknown(unk));
+        let left  = self.monos.make_set(Prim(Unknown(unk)));
         let right = self.monos.make_set(t);
 
         self.monos.union_select(left, right, |l, r| {
-            debug_assert!(matches!(l, Unknown(_)), "{l:?} should have been normalized before set_unk_ty call");
+            debug_assert!(matches!(l, Prim(Unknown(_))), "{l:?} should have been normalized before set_unk_ty call");
             match r {
-                Unknown(_) => dsds::Selector::Whatever,
+                Prim(Unknown(_)) => dsds::Selector::Whatever,
                 _ => dsds::Selector::Right,
             }
         });

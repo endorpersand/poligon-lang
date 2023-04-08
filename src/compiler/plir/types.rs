@@ -17,6 +17,16 @@ impl TypeUnit for String {
     type Ref = str;
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub enum MaybeTypeUnit {
+    Known(String),
+    Unknown(usize)
+}
+impl TypeUnit for MaybeTypeUnit {
+    type Ref = MaybeTypeUnit;
+}
+pub type MaybeType = Type<MaybeTypeUnit>;
+
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
