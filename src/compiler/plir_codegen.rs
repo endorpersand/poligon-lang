@@ -902,7 +902,7 @@ mod dsds {
     pub struct Idx<T>(usize, PhantomData<T>);
     impl<T> Clone for Idx<T> {
         fn clone(&self) -> Self {
-            Self(self.0.clone(), self.1.clone())
+            *self
         }
     }
     impl<T> Copy for Idx<T> {}
