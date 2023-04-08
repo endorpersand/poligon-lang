@@ -1165,7 +1165,21 @@ impl TypeResolver {
         }
     }
 
+    fn normalize_unk(&mut self, ty: MaybeType) -> MaybeType {
+        match ty {
+            MaybeType::Unknown(_) => {
+                let id = self.monos.make_set(ty);
+                let root = self.monos.find(id);
+                self.monos.get_idx(root).clone()
+            },
+            _ => ty
+        }
+    }
+
     fn add_constraint(&mut self, left: MaybeType, right: MaybeType) -> Result<(), ConstraintErr> {
+        let left = self.normalize_unk(left);
+        let right = self.normalize_unk(right);
+
         match (left, right) {
             (MaybeType::Unknown(l), r) => { self.set_unk_ty(l, r); },
             (r, MaybeType::Unknown(l)) => { self.set_unk_ty(l, r); },
@@ -1204,18 +1218,18 @@ impl TypeResolver {
     }
 
     /// Sets an unknown type variable equal to another type.
-    /// 
-    /// This can also set two known primitive types together (erroring if not the same).
     fn set_unk_ty(&mut self, unk: String, t: MaybeType) {
         use MaybeType::Unknown;
-        // TODO: normalize types before insert
-        // if a root can be normalized, perform normalization
+
         let left  = self.monos.make_set(MaybeType::Unknown(unk));
         let right = self.monos.make_set(t);
 
-        self.monos.union_select(left, right, |_, r| match r {
-            Unknown(_) => dsds::Selector::Whatever,
-            _ => dsds::Selector::Right
+        self.monos.union_select(left, right, |l, r| {
+            debug_assert!(matches!(l, Unknown(_)), "{l:?} should have been normalized before set_unk_ty call");
+            match r {
+                Unknown(_) => dsds::Selector::Whatever,
+                _ => dsds::Selector::Right,
+            }
         });
     }
 }
