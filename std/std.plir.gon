@@ -96,14 +96,15 @@ fun <option<char>>::some(t: char) -> option<char> {
 extern fun "#free"(arg0: #ptr) -> void;
 fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
     return <void>(if <bool>(<int>(<#dynarray>(self).2) < <int>(new_cap)) <void>{
+        let cap: int = <int>(<(int) -> int>(<int>(new_cap).max)(<int>(<int>(<#dynarray>(self).2) * <int>(2))));
         let old_buf: #ptr = <#ptr>(<#dynarray>(self).0);
-        let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(new_cap)));
+        let new_buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(cap)));
         <#ptr>(<(#ptr, #ptr, int) -> #ptr>(#memcpy)(<#ptr>(new_buf), <#ptr>(old_buf), <int>(<#dynarray>(self).1)));
         <#ptr>{
             exit <#ptr>(<#dynarray>(self).0 = <#ptr>(new_buf));
         }
         <int>{
-            exit <int>(<#dynarray>(self).2 = <int>(new_cap));
+            exit <int>(<#dynarray>(self).2 = <int>(cap));
         }
         exit <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
     });
@@ -116,8 +117,9 @@ fun <option<char>>::to_string(self: option<char>) -> string {
         exit <string>("none");
     });
 }
-fun <string>::new() -> string {
-    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+extern fun "#smax"(arg0: int, arg1: int) -> int;
+fun <int>::max(self: int, o: int) -> int {
+    return <int>(<(int, int) -> int>(#smax)(<int>(self), <int>(o)));
 }
 fun <char>::to_string(self: char) -> string {
     let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
@@ -374,9 +376,8 @@ fun <int>::sign(self: int) -> int {
 fun <option<char>>::none() -> option<char> {
     return option<char> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
 }
-extern fun "#smax"(arg0: int, arg1: int) -> int;
-fun <int>::max(self: int, o: int) -> int {
-    return <int>(<(int, int) -> int>(#smax)(<int>(self), <int>(o)));
+fun <string>::new() -> string {
+    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
 }
 extern fun "#abs"(arg0: int, arg1: bool) -> int;
 fun <int>::abs(self: int) -> int {

@@ -15,11 +15,13 @@ class #dynarray {
 
     fun self.resize(new_cap: int) {
         if self.cap < new_cap {
+            let cap = new_cap.max(self.cap * 2);
+
             let old_buf = self.buf;
-            let new_buf = #malloc(new_cap);
+            let new_buf = #malloc(cap);
             #memcpy(new_buf, old_buf, self.len);
             self.buf = new_buf;
-            self.cap = new_cap;
+            self.cap = cap;
             #free(old_buf);
         }
     }
