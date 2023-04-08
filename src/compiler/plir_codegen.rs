@@ -271,8 +271,8 @@ fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, 
 
 #[derive(Debug)]
 enum UnresolvedValue {
-    ExternFun(plir::FunIdent, ast::FunSignature),
-    Fun(plir::FunIdent, ast::FunDecl),
+    ExternFun(PreinitFun, ast::FunSignature),
+    Fun(PreinitFun, ast::FunDecl),
     FunBlock(plir::FunSignature, Located<Rc<ast::Block>>),
     Import(ast::StaticPath)
 }
@@ -297,10 +297,10 @@ impl Unresolved for UnresolvedValue {
 
     fn resolution_ident(&self) -> Cow<plir::FunIdent> {
         match self {
-            UnresolvedValue::ExternFun(id, _) => Cow::Borrowed(id),
-            UnresolvedValue::Fun(id, _)       => Cow::Borrowed(id),
-            UnresolvedValue::FunBlock(fs, _)  => Cow::Borrowed(&fs.ident),
-            UnresolvedValue::Import(mp)       => Cow::Owned(plir::FunIdent::new_simple(&mp.attr)),
+            UnresolvedValue::ExternFun(pi, _)  => Cow::Borrowed(&pi.id),
+            UnresolvedValue::Fun(pi, _)        => Cow::Borrowed(&pi.id),
+            UnresolvedValue::FunBlock(fs, _)   => Cow::Borrowed(&fs.ident),
+            UnresolvedValue::Import(mp)        => Cow::Owned(plir::FunIdent::new_simple(&mp.attr)),
         }
     }
 
@@ -321,6 +321,15 @@ impl Unresolved for UnresolvedType {
     fn block_map(block: &mut InsertBlock) -> &mut IndexMap<String, Self> {
         &mut block.unres_types
     }
+}
+#[derive(Debug)]
+struct PreinitFun {
+    /// The function identifier for the function.
+    /// The original identifier is dropped.
+    id: plir::FunIdent,
+    /// Any params that already were initialized.
+    /// These are included at the beginning of the parameter list.
+    params: Vec<plir::Param>
 }
 
 #[derive(Debug)]
@@ -525,44 +534,31 @@ impl InsertBlock {
 
     fn insert_unresolved_method(&mut self, ty: &plir::Type, method: ast::MethodDecl) {
         let ast::MethodDecl {
-            sig: ast::MethodSignature { referent, is_static, name: method_name, generics, mut params, ret }, 
+            sig: ast::MethodSignature { referent, is_static, name: method_name, generics, params, ret }, 
             block 
         } = method;
 
-        fn as_ast_ty(t: &plir::Type) -> ast::Type {
-            match t {
-                plir::Type::Prim(n) => ast::Type(n.clone(), vec![]),
-                plir::Type::Generic(n, p) => {
-                    let p = p.iter()
-                        .map(as_ast_ty)
-                        .map(|t| Located::new(t, (0, 0) ..= (0, 0)))
-                        .collect();
-                    ast::Type(n.clone(), p)
-                },
-                plir::Type::Tuple(_) => todo!(),
-                plir::Type::Fun(_) => todo!(),
-            }
-        }
-
+        let mut preinit_params = vec![];
         if !is_static {
             let this = referent.unwrap_or_else(|| String::from("#unused"));
-            params.insert(0, ast::Param { 
-                rt: Default::default(), 
-                mt: Default::default(), 
-                ident: this, 
-                // since this is synthesized, there's no real cursor,
-                // so just assign an arbitary one
-                ty: Some(Located::new(as_ast_ty(ty), (0, 0) ..= (0, 0)))
-            });
-        } else {
-            // TODO, use this ident
+            let param = plir::Param {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: this,
+                ty: ty.clone()
+            };
+            preinit_params.push(param);
         };
         
         let metref = plir::FunIdent::new_static(ty, &method_name);
         let sig = ast::FunSignature { ident: String::from("#unnamed"), generics, params, varargs: false, ret };
         let decl = ast::FunDecl { sig, block };
 
-        self.insert_unresolved(UnresolvedValue::Fun(metref.clone(), decl));
+        let preinit = PreinitFun {
+            id: metref.clone(),
+            params: preinit_params,
+        };
+        self.insert_unresolved(UnresolvedValue::Fun(preinit, decl));
 
         if let Some(c) = self.types.get_mut(ty) {
             c.insert_method(method_name, metref);
@@ -1359,16 +1355,16 @@ impl PLIRCodegen {
     
                 match entry.get() {
                     UnresolvedValue::ExternFun(_, _) => {
-                        let UnresolvedValue::ExternFun(id, fs) = entry.remove() else { unreachable!() };
+                        let UnresolvedValue::ExternFun(pi, fs) = entry.remove() else { unreachable!() };
                         
-                        let fs = this.consume_fun_sig(id, fs)?;
+                        let fs = this.consume_fun_sig(pi, fs)?;
                         this.push_global(fs)?;
                     },
                     UnresolvedValue::Fun(_, _) => {
-                        let (k, UnresolvedValue::Fun(id, fd)) = entry.remove_entry() else { unreachable!() };
+                        let (k, UnresolvedValue::Fun(pi, fd)) = entry.remove_entry() else { unreachable!() };
                         let ast::FunDecl { sig, block } = fd;
     
-                        let sig = this.consume_fun_sig(id, sig)?;
+                        let sig = this.consume_fun_sig(pi, sig)?;
                         this.peek_block().unres_values.insert(k, UnresolvedValue::FunBlock(sig, block));
                     },
                     UnresolvedValue::FunBlock(_, _) => {},
@@ -1384,18 +1380,10 @@ impl PLIRCodegen {
             // register the intrinsic on the top level
             // if it hasn't been registered
 
-            self.push_global(plir::FunSignature {
-                private: true,
-                ident: ident.as_fun_ident().into_owned(),
-                params: t.params.iter().enumerate().map(|(i, t)| plir::Param {
-                    rt: Default::default(),
-                    mt: Default::default(),
-                    ident: format!("arg{i}"),
-                    ty: t.clone(),
-                }).collect(),
-                varargs: t.varargs,
-                ret: (*t.ret).clone(),
-            })?;
+            let mut fs = t.extern_fun_sig(ident.as_fun_ident().into_owned());
+            fs.private = true;
+            self.push_global(fs)?;
+
             self.declare(ident, plir::Type::Fun(t.clone()));
         }
 
@@ -1570,12 +1558,18 @@ impl PLIRCodegen {
         for stmt in stmts {
             match stmt.0 {
                 ast::Stmt::FunDecl(fd) => {
-                    let ident = plir::FunIdent::new_simple(&fd.sig.ident);
-                    self.peek_block().insert_unresolved(UnresolvedValue::Fun(ident, fd));
+                    let pi = PreinitFun {
+                        id: plir::FunIdent::new_simple(&fd.sig.ident),
+                        params: vec![]
+                    };
+                    self.peek_block().insert_unresolved(UnresolvedValue::Fun(pi, fd));
                 },
                 ast::Stmt::ExternFunDecl(fs) => {
-                    let ident = plir::FunIdent::new_simple(&fs.ident);
-                    self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(ident, fs));
+                    let pi = PreinitFun {
+                        id: plir::FunIdent::new_simple(&fs.ident),
+                        params: vec![]
+                    };
+                    self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(pi, fs));
                     }
                 ast::Stmt::ClassDecl(cls) => {
                     self.peek_block().insert_unresolved(UnresolvedType::Class(cls));
@@ -1941,14 +1935,14 @@ impl PLIRCodegen {
     }
 
     /// Consume a function signature and convert it into a PLIR function signature.
-    fn consume_fun_sig(&mut self, new_id: plir::FunIdent, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
+    fn consume_fun_sig(&mut self, pi: PreinitFun, sig: ast::FunSignature) -> PLIRResult<plir::FunSignature> {
         let ast::FunSignature { ident: _, generics, params, varargs, ret } = sig;
+        let PreinitFun { id: new_id, params: mut new_params } = pi;
         debug_assert!(generics.is_empty(), "todo: generic funs");
         
         let (params, ret): (Vec<_>, _) = self.with_generic_aliases(&new_id.resolution_type(), |this| -> PLIRResult<_> {
             let new_params = params.into_iter()
-                .map(|p| -> PLIRResult<_> {
-                    let ast::Param { rt, mt, ident, ty } = p;
+                .map(| ast::Param { rt, mt, ident, ty } | -> PLIRResult<_> {
                     let ty = match ty {
                         Some(t) => this.consume_type(t)?,
                         None => plir::ty!(plir::Type::S_UNK),
@@ -1965,8 +1959,15 @@ impl PLIRCodegen {
 
             Ok((new_params, ret))
         })?;
+        new_params.extend(params);
 
-        let fs = plir::FunSignature { private: !self.blocks.is_empty(), ident: new_id, params, ret, varargs };
+        let fs = plir::FunSignature {
+            private: !self.blocks.is_empty(), 
+            ident: new_id, 
+            params: new_params, 
+            ret, 
+            varargs 
+        };
         self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
         Ok(fs)
     }
