@@ -11,8 +11,8 @@ source_filename = "generic_tests.gon"
 @_tmpl_int_to_string = private unnamed_addr constant [3 x i8] c"%d\00", align 1
 @_tmpl_float_to_string = private unnamed_addr constant [4 x i8] c"%#f\00", align 1
 @_tmpl_char_to_string = private unnamed_addr constant [4 x i8] c"%lc\00", align 1
-@_tmpl_byte_to_string = private unnamed_addr constant [6 x i8] c"%#hhX\00", align 1
-@_tmpl_ptr_to_string = private unnamed_addr constant [9 x i8] c"ptr %#lX\00", align 1
+@_tmpl_byte_to_string = private unnamed_addr constant [6 x i8] c"%#hhx\00", align 1
+@_tmpl_ptr_to_string = private unnamed_addr constant [9 x i8] c"ptr %#lx\00", align 1
 @throw_msg = private unnamed_addr constant [14 x i8] c"invalid slice\00", align 1
 @throw_msg.1 = private unnamed_addr constant [31 x i8] c"cannot take element from array\00", align 1
 @throw_msg.3 = private unnamed_addr constant [23 x i8] c"division by zero error\00", align 1
@@ -36,15 +36,15 @@ declare noundef i64 @printf(ptr nocapture noundef readonly, ...) local_unnamed_a
 
 define %string @"#ptr::to_string"(ptr %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_ptr_to_string, ptr %self)
-  %deref = load ptr, ptr %0, align 8
-  %i_add = add i64 %1, 1
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+  %alloca.ptr = alloca ptr, align 8
+  %0 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr, ptr nonnull @_tmpl_ptr_to_string, ptr %self)
+  %buf_ptr4.deref = load ptr, ptr %alloca.ptr, align 8
+  %i_add = add i64 %0, 1
+  %1 = insertvalue %"#dynarray" zeroinitializer, ptr %buf_ptr4.deref, 0
+  %2 = insertvalue %"#dynarray" %1, i64 %0, 1
+  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 2
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
 }
 
 declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
@@ -52,19 +52,19 @@ declare i64 @asprintf(ptr, ptr, ...) local_unnamed_addr
 ; Function Attrs: mustprogress nofree nounwind willreturn
 define %string_chars @"string::chars"(ptr nocapture readonly %self) local_unnamed_addr #1 {
 body:
-  %.unpack.unpack.i = load ptr, ptr %self, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack.i, 0
-  %.unpack.elt1.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
-  %.unpack.unpack2.i = load i64, ptr %.unpack.elt1.i, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack.unpack2.i, 1
-  %.unpack.elt3.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
-  %.unpack.unpack4.i = load i64, ptr %.unpack.elt3.i, align 8
-  %.unpack5.i = insertvalue %"#dynarray" %1, i64 %.unpack.unpack4.i, 2
-  %2 = insertvalue %string undef, %"#dynarray" %.unpack5.i, 0
-  %3 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
-  %4 = insertvalue %string_chars zeroinitializer, %string %2, 0
-  %5 = insertvalue %string_chars %4, ptr %3, 1
-  ret %string_chars %5
+  %str1.unpack.unpack.i = load ptr, ptr %self, align 8
+  %0 = insertvalue %"#dynarray" undef, ptr %str1.unpack.unpack.i, 0
+  %str1.unpack.elt2.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
+  %str1.unpack.unpack3.i = load i64, ptr %str1.unpack.elt2.i, align 8
+  %1 = insertvalue %"#dynarray" %0, i64 %str1.unpack.unpack3.i, 1
+  %str1.unpack.elt4.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %str1.unpack.unpack5.i = load i64, ptr %str1.unpack.elt4.i, align 8
+  %str1.unpack6.i = insertvalue %"#dynarray" %1, i64 %str1.unpack.unpack5.i, 2
+  %str11.i = insertvalue %string undef, %"#dynarray" %str1.unpack6.i, 0
+  %2 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
+  %3 = insertvalue %string_chars zeroinitializer, %string %str11.i, 0
+  %4 = insertvalue %string_chars %3, ptr %2, 1
+  ret %string_chars %4
 }
 
 ; Function Attrs: inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0)
@@ -73,53 +73,53 @@ declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
 ; Function Attrs: mustprogress nofree nounwind willreturn
 define %string_chars @"string_chars::new"(ptr nocapture readonly %str) local_unnamed_addr #1 {
 body:
-  %.unpack.unpack = load ptr, ptr %str, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
-  %.unpack.elt1 = getelementptr inbounds %"#dynarray", ptr %str, i64 0, i32 1
-  %.unpack.unpack2 = load i64, ptr %.unpack.elt1, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack.unpack2, 1
-  %.unpack.elt3 = getelementptr inbounds %"#dynarray", ptr %str, i64 0, i32 2
-  %.unpack.unpack4 = load i64, ptr %.unpack.elt3, align 8
-  %.unpack5 = insertvalue %"#dynarray" %1, i64 %.unpack.unpack4, 2
-  %2 = insertvalue %string undef, %"#dynarray" %.unpack5, 0
-  %3 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
-  %4 = insertvalue %string_chars zeroinitializer, %string %2, 0
-  %5 = insertvalue %string_chars %4, ptr %3, 1
-  ret %string_chars %5
+  %str1.unpack.unpack = load ptr, ptr %str, align 8
+  %0 = insertvalue %"#dynarray" undef, ptr %str1.unpack.unpack, 0
+  %str1.unpack.elt2 = getelementptr inbounds %"#dynarray", ptr %str, i64 0, i32 1
+  %str1.unpack.unpack3 = load i64, ptr %str1.unpack.elt2, align 8
+  %1 = insertvalue %"#dynarray" %0, i64 %str1.unpack.unpack3, 1
+  %str1.unpack.elt4 = getelementptr inbounds %"#dynarray", ptr %str, i64 0, i32 2
+  %str1.unpack.unpack5 = load i64, ptr %str1.unpack.elt4, align 8
+  %str1.unpack6 = insertvalue %"#dynarray" %1, i64 %str1.unpack.unpack5, 2
+  %str11 = insertvalue %string undef, %"#dynarray" %str1.unpack6, 0
+  %2 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
+  %3 = insertvalue %string_chars zeroinitializer, %string %str11, 0
+  %4 = insertvalue %string_chars %3, ptr %2, 1
+  ret %string_chars %4
 }
 
 define %string @"string::slice_bytes"(ptr nocapture readonly %self, i64 %start, i64 %end) local_unnamed_addr {
 body:
   %i_le = icmp sgt i64 %start, -1
-  %i_le4 = icmp sge i64 %end, %start
-  %and_result = select i1 %i_le, i1 %i_le4, i1 false
-  br i1 %and_result, label %and_true6, label %else
+  %i_le7 = icmp sge i64 %end, %start
+  %and_result = select i1 %i_le, i1 %i_le7, i1 false
+  br i1 %and_result, label %and_true9, label %else
 
-else:                                             ; preds = %and_true6, %body
+else:                                             ; preds = %and_true9, %body
   %stderr = tail call ptr @fdopen(i64 2, ptr nonnull @_write.1)
   %0 = tail call i64 @fwrite(ptr nonnull @throw_msg, i64 13, i64 1, ptr %stderr)
   %1 = tail call i64 @fputwc(i32 10, ptr %stderr)
   tail call void @exit(i64 1)
   unreachable
 
-merge:                                            ; preds = %and_true6
+merge:                                            ; preds = %and_true9
   %self.0.0.load = load ptr, ptr %self, align 8
-  %gep = getelementptr i8, ptr %self.0.0.load, i64 %start
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %gep, 0
+  %self.0.0.load.gep = getelementptr i8, ptr %self.0.0.load, i64 %start
+  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %self.0.0.load.gep, 0
   %i_sub = sub i64 %end, %start
   %3 = insertvalue %"#dynarray" %2, i64 %i_sub, 1
   %self.0.2 = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 2
   %self.0.2.load = load i64, ptr %self.0.2, align 4
-  %i_sub12 = sub i64 %self.0.2.load, %start
-  %4 = insertvalue %"#dynarray" %3, i64 %i_sub12, 2
+  %i_sub20 = sub i64 %self.0.2.load, %start
+  %4 = insertvalue %"#dynarray" %3, i64 %i_sub20, 2
   %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
   ret %string %5
 
-and_true6:                                        ; preds = %body
+and_true9:                                        ; preds = %body
   %self.0.1.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load.i = load i64, ptr %self.0.1.i, align 4
-  %i_le9.not = icmp slt i64 %self.0.1.load.i, %end
-  br i1 %i_le9.not, label %else, label %merge
+  %i_le13.not = icmp slt i64 %self.0.1.load.i, %end
+  br i1 %i_le13.not, label %else, label %merge
 }
 
 ; Function Attrs: nofree nounwind
@@ -143,16 +143,16 @@ body:
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
 define %string @"string::to_string"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
-  %.unpack.unpack = load ptr, ptr %self, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
-  %.unpack.elt1 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
-  %.unpack.unpack2 = load i64, ptr %.unpack.elt1, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack.unpack2, 1
-  %.unpack.elt3 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
-  %.unpack.unpack4 = load i64, ptr %.unpack.elt3, align 8
-  %.unpack5 = insertvalue %"#dynarray" %1, i64 %.unpack.unpack4, 2
-  %2 = insertvalue %string undef, %"#dynarray" %.unpack5, 0
-  ret %string %2
+  %self1.unpack.unpack = load ptr, ptr %self, align 8
+  %0 = insertvalue %"#dynarray" undef, ptr %self1.unpack.unpack, 0
+  %self1.unpack.elt2 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
+  %self1.unpack.unpack3 = load i64, ptr %self1.unpack.elt2, align 8
+  %1 = insertvalue %"#dynarray" %0, i64 %self1.unpack.unpack3, 1
+  %self1.unpack.elt4 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %self1.unpack.unpack5 = load i64, ptr %self1.unpack.elt4, align 8
+  %self1.unpack6 = insertvalue %"#dynarray" %1, i64 %self1.unpack.unpack5, 2
+  %self11 = insertvalue %string undef, %"#dynarray" %self1.unpack6, 0
+  ret %string %self11
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
@@ -166,32 +166,52 @@ body:
   %0 = tail call ptr @malloc(i64 %i_add)
   %self.0.0.load = load ptr, ptr %self, align 8
   %i_lt.i.i21 = icmp slt i64 %i_add, %self.0.1.load.i
-  br i1 %i_lt.i.i21, label %"#dynarray::extend.exit31", label %"#dynarray::extend.exit"
+  br i1 %i_lt.i.i21, label %"#dynarray::extend.exit32", label %"#dynarray::extend.exit32.thread"
 
-"#dynarray::extend.exit31":                       ; preds = %body
-  %1 = tail call ptr @malloc(i64 %self.0.1.load.i)
-  tail call void @free(ptr %0)
+"#dynarray::extend.exit32.thread":                ; preds = %body
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %self.0.0.load, i64 %self.0.1.load.i, i1 false)
+  %other.0.0.load9 = load ptr, ptr %other, align 8
   br label %"#dynarray::extend.exit"
 
-"#dynarray::extend.exit":                         ; preds = %body, %"#dynarray::extend.exit31"
-  %.sink = phi ptr [ %1, %"#dynarray::extend.exit31" ], [ %0, %body ]
-  %result_inner.sroa.15.1 = phi i64 [ %self.0.1.load.i, %"#dynarray::extend.exit31" ], [ %i_add, %body ]
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink, ptr align 1 %self.0.0.load, i64 %self.0.1.load.i, i1 false)
-  %other.0.0.load11 = load ptr, ptr %other, align 8
-  %gep.i = getelementptr i8, ptr %.sink, i64 %self.0.1.load.i
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i, ptr align 1 %other.0.0.load11, i64 %self.0.1.load.i11, i1 false)
-  %2 = insertvalue %"#dynarray" undef, ptr %.sink, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %result_inner.sroa.15.1, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+"#dynarray::extend.exit32":                       ; preds = %body
+  %i_mul.i.i22 = shl i64 %i_add, 1
+  %1 = tail call i64 @llvm.smax.i64(i64 %self.0.1.load.i, i64 %i_mul.i.i22)
+  %2 = tail call ptr @malloc(i64 %1)
+  tail call void @free(ptr %0)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %2, ptr align 1 %self.0.0.load, i64 %self.0.1.load.i, i1 false)
+  %other.0.0.load = load ptr, ptr %other, align 8
+  %i_lt.i.i = icmp slt i64 %1, %i_add
+  br i1 %i_lt.i.i, label %then.i.i, label %"#dynarray::extend.exit"
+
+then.i.i:                                         ; preds = %"#dynarray::extend.exit32"
+  %i_mul.i.i = shl i64 %1, 1
+  %3 = tail call i64 @llvm.smax.i64(i64 %i_add, i64 %i_mul.i.i)
+  %4 = tail call ptr @malloc(i64 %3)
+  tail call void @llvm.memmove.p0.p0.i64(ptr align 1 %4, ptr align 1 %self.0.0.load, i64 %self.0.1.load.i, i1 false)
+  tail call void @free(ptr %2)
+  br label %"#dynarray::extend.exit"
+
+"#dynarray::extend.exit":                         ; preds = %"#dynarray::extend.exit32.thread", %then.i.i, %"#dynarray::extend.exit32"
+  %other.0.0.load11 = phi ptr [ %other.0.0.load, %then.i.i ], [ %other.0.0.load, %"#dynarray::extend.exit32" ], [ %other.0.0.load9, %"#dynarray::extend.exit32.thread" ]
+  %result_inner.sroa.15.1 = phi i64 [ %3, %then.i.i ], [ %1, %"#dynarray::extend.exit32" ], [ %i_add, %"#dynarray::extend.exit32.thread" ]
+  %result_inner.sroa.0.1 = phi ptr [ %4, %then.i.i ], [ %2, %"#dynarray::extend.exit32" ], [ %0, %"#dynarray::extend.exit32.thread" ]
+  %self.0.load.gep.i = getelementptr i8, ptr %result_inner.sroa.0.1, i64 %self.0.1.load.i
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep.i, ptr align 1 %other.0.0.load11, i64 %self.0.1.load.i11, i1 false)
+  %5 = insertvalue %"#dynarray" undef, ptr %result_inner.sroa.0.1, 0
+  %6 = insertvalue %"#dynarray" %5, i64 %i_add, 1
+  %result_inner29 = insertvalue %"#dynarray" %6, i64 %result_inner.sroa.15.1, 2
+  %7 = insertvalue %string zeroinitializer, %"#dynarray" %result_inner29, 0
+  ret %string %7
 }
 
+; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
+declare i64 @llvm.smax.i64(i64, i64) #5
+
 ; Function Attrs: argmemonly mustprogress nocallback nofree nounwind willreturn
-declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #5
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #6
 
 ; Function Attrs: inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free")
-declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #6
+declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #7
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
 define %"#dynarray" @"#dynarray::new"(i64 %cap) local_unnamed_addr #1 {
@@ -215,23 +235,25 @@ body:
   br i1 %i_lt.i, label %then.i, label %"#dynarray::resize.exit"
 
 then.i:                                           ; preds = %body
+  %i_mul.i = shl i64 %self.2.load.i, 1
+  %0 = tail call i64 @llvm.smax.i64(i64 %i_add, i64 %i_mul.i)
   %self.0.load.i = load ptr, ptr %self, align 8
-  %0 = tail call ptr @malloc(i64 %i_add)
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %self.0.load.i, i64 %self.1.load, i1 false)
-  store ptr %0, ptr %self, align 8
-  store i64 %i_add, ptr %self.2.i, align 4
+  %1 = tail call ptr @malloc(i64 %0)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %1, ptr align 1 %self.0.load.i, i64 %self.1.load, i1 false)
+  store ptr %1, ptr %self, align 8
+  store i64 %0, ptr %self.2.i, align 4
   tail call void @free(ptr %self.0.load.i)
-  %self.13.load.pre = load i64, ptr %self.1, align 4
+  %self.14.load.pre = load i64, ptr %self.1, align 4
   br label %"#dynarray::resize.exit"
 
 "#dynarray::resize.exit":                         ; preds = %then.i, %body
-  %self.13.load = phi i64 [ %self.13.load.pre, %then.i ], [ %self.1.load, %body ]
+  %self.14.load = phi i64 [ %self.14.load.pre, %then.i ], [ %self.1.load, %body ]
   %self.0.load = load ptr, ptr %self, align 8
-  %gep = getelementptr i8, ptr %self.0.load, i64 %self.13.load
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep, ptr align 1 %add_buf, i64 %add_len, i1 false)
-  %self.14.load = load i64, ptr %self.1, align 4
-  %i_add5 = add i64 %self.14.load, %add_len
-  store i64 %i_add5, ptr %self.1, align 4
+  %self.0.load.gep = getelementptr i8, ptr %self.0.load, i64 %self.14.load
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep, ptr align 1 %add_buf, i64 %add_len, i1 false)
+  %self.18.load = load i64, ptr %self.1, align 4
+  %i_add10 = add i64 %self.18.load, %add_len
+  store i64 %i_add10, ptr %self.1, align 4
   ret void
 }
 
@@ -244,18 +266,27 @@ body:
   br i1 %i_lt, label %then, label %merge
 
 then:                                             ; preds = %body
+  %i_mul = shl i64 %self.2.load, 1
+  %0 = tail call i64 @llvm.smax.i64(i64 %new_cap, i64 %i_mul)
   %self.0.load = load ptr, ptr %self, align 8
-  %0 = tail call ptr @malloc(i64 %new_cap)
+  %1 = tail call ptr @malloc(i64 %0)
   %self.1 = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
   %self.1.load = load i64, ptr %self.1, align 4
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %self.0.load, i64 %self.1.load, i1 false)
-  store ptr %0, ptr %self, align 8
-  store i64 %new_cap, ptr %self.2, align 4
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %1, ptr align 1 %self.0.load, i64 %self.1.load, i1 false)
+  store ptr %1, ptr %self, align 8
+  store i64 %0, ptr %self.2, align 4
   tail call void @free(ptr %self.0.load)
   br label %merge
 
 merge:                                            ; preds = %then, %body
   ret void
+}
+
+; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
+define i64 @"int::max"(i64 %self, i64 %o) local_unnamed_addr #8 {
+body:
+  %0 = tail call i64 @llvm.smax.i64(i64 %self, i64 %o)
+  ret i64 %0
 }
 
 define %"option<char>" @"string_chars::next"(ptr nocapture %self) local_unnamed_addr {
@@ -272,11 +303,11 @@ else:                                             ; preds = %body
   %0 = tail call i64 @llvm.smin.i64(i64 %self.0.1.load.i, i64 6)
   %1 = tail call i64 @mbtowc(ptr %self.1.load, ptr %self.0.0.0.load, i64 %0)
   %i_lt = icmp slt i64 %1, 1
-  br i1 %i_lt, label %block, label %block8
+  br i1 %i_lt, label %block, label %block9
 
 merge:                                            ; preds = %"string::slice_bytes.exit", %block, %body
-  %if_result14 = phi %"option<char>" [ zeroinitializer, %block ], [ %6, %"string::slice_bytes.exit" ], [ zeroinitializer, %body ]
-  ret %"option<char>" %if_result14
+  %if_result17 = phi %"option<char>" [ zeroinitializer, %block ], [ %6, %"string::slice_bytes.exit" ], [ zeroinitializer, %body ]
+  ret %"option<char>" %if_result17
 
 block:                                            ; preds = %else
   %2 = tail call ptr @malloc(i64 0)
@@ -284,49 +315,49 @@ block:                                            ; preds = %else
   tail call void @llvm.memset.p0.i64(ptr noundef nonnull align 8 dereferenceable(16) %self.0.1.i, i8 0, i64 16, i1 false)
   br label %merge
 
-block8:                                           ; preds = %else
+block9:                                           ; preds = %else
   %self.0.1.load.i13 = load i64, ptr %self.0.1.i, align 4
-  %i_le4.i.not = icmp slt i64 %self.0.1.load.i13, %1
-  br i1 %i_le4.i.not, label %else.i, label %"string::slice_bytes.exit"
+  %i_le7.i.not = icmp slt i64 %self.0.1.load.i13, %1
+  br i1 %i_le7.i.not, label %else.i, label %"string::slice_bytes.exit"
 
-else.i:                                           ; preds = %block8
+else.i:                                           ; preds = %block9
   %stderr.i = tail call ptr @fdopen(i64 2, ptr nonnull @_write.1)
   %3 = tail call i64 @fwrite(ptr nonnull @throw_msg, i64 13, i64 1, ptr %stderr.i)
   %4 = tail call i64 @fputwc(i32 10, ptr %stderr.i)
   tail call void @exit(i64 1)
   unreachable
 
-"string::slice_bytes.exit":                       ; preds = %block8
+"string::slice_bytes.exit":                       ; preds = %block9
   %self.0.0.load.i = load ptr, ptr %self, align 8
-  %gep.i = getelementptr i8, ptr %self.0.0.load.i, i64 %1
+  %self.0.0.load.gep.i = getelementptr i8, ptr %self.0.0.load.i, i64 %1
   %i_sub.i = sub i64 %self.0.1.load.i13, %1
   %self.0.2.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 2
   %self.0.2.load.i = load i64, ptr %self.0.2.i, align 4
-  %i_sub12.i = sub i64 %self.0.2.load.i, %1
-  store ptr %gep.i, ptr %self, align 8
+  %i_sub20.i = sub i64 %self.0.2.load.i, %1
+  store ptr %self.0.0.load.gep.i, ptr %self, align 8
   store i64 %i_sub.i, ptr %self.0.1.i, align 8
-  store i64 %i_sub12.i, ptr %self.0.2.i, align 8
-  %self.113.load = load ptr, ptr %self.1, align 8
-  %deref = load i32, ptr %self.113.load, align 4
+  store i64 %i_sub20.i, ptr %self.0.2.i, align 8
+  %self.115.load = load ptr, ptr %self.1, align 8
+  %self.115.load.deref = load i32, ptr %self.115.load, align 4
   %5 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
-  store i32 %deref, ptr %5, align 4
+  store i32 %self.115.load.deref, ptr %5, align 4
   %6 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %5, 1
   br label %merge
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.smin.i64(i64, i64) #7
+declare i64 @llvm.smin.i64(i64, i64) #5
 
 declare i64 @mbtowc(ptr, ptr, i64) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define %"option<char>" @"option<char>::none"() local_unnamed_addr #8 {
+define %"option<char>" @"option<char>::none"() local_unnamed_addr #9 {
 body:
   ret %"option<char>" zeroinitializer
 }
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::min"(i64 %self, i64 %o) local_unnamed_addr #9 {
+define i64 @"int::min"(i64 %self, i64 %o) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.smin.i64(i64 %self, i64 %o)
   ret i64 %0
@@ -353,101 +384,125 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define noalias ptr @"#ptr::null"() local_unnamed_addr #8 {
+define noalias ptr @"#ptr::null"() local_unnamed_addr #9 {
 body:
   ret ptr null
 }
 
 define %string @"option<char>::to_string"(ptr nocapture readonly %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
+  %alloca.ptr.i = alloca ptr, align 8
   %self.0.load = load i1, ptr %self, align 1
   br i1 %self.0.load, label %then, label %else
 
 then:                                             ; preds = %body
   %self.1 = getelementptr inbounds %"option<char>", ptr %self, i64 0, i32 1
   %self.1.load = load ptr, ptr %self.1, align 8
-  %deref = load i32, ptr %self.1.load, align 4
-  %1 = alloca [5 x i8], align 1
-  store i8 115, ptr %1, align 1
-  %.repack4 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 1
+  %self.1.load.deref = load i32, ptr %self.1.load, align 4
+  %0 = alloca [5 x i8], align 1
+  store i8 115, ptr %0, align 1
+  %.repack4 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 1
   store i8 111, ptr %.repack4, align 1
-  %.repack5 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 2
+  %.repack5 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 2
   store i8 109, ptr %.repack5, align 1
-  %.repack6 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 3
+  %.repack6 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 3
   store i8 101, ptr %.repack6, align 1
-  %.repack7 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 4
+  %.repack7 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 4
   store i8 40, ptr %.repack7, align 1
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %0)
-  %2 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_char_to_string, i32 %deref)
-  %deref.i = load ptr, ptr %0, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %0)
-  %i_add.i1 = add i64 %2, 5
-  %3 = call ptr @malloc(i64 %i_add.i1)
-  %i_lt.i.i21.i = icmp ugt i64 %2, 9223372036854775802
-  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit31.i", label %"string::add_string.exit"
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i, ptr nonnull @_tmpl_char_to_string, i32 %self.1.load.deref)
+  %buf_ptr4.deref.i = load ptr, ptr %alloca.ptr.i, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %i_add.i1 = add i64 %1, 5
+  %2 = call ptr @malloc(i64 %i_add.i1)
+  %i_lt.i.i21.i = icmp ugt i64 %1, 9223372036854775802
+  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit32.i", label %"#dynarray::extend.exit32.thread.i"
 
-"#dynarray::extend.exit31.i":                     ; preds = %then
-  %4 = call dereferenceable_or_null(5) ptr @malloc(i64 5)
-  call void @free(ptr %3)
+"#dynarray::extend.exit32.thread.i":              ; preds = %then
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %2, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
   br label %"string::add_string.exit"
 
-"string::add_string.exit":                        ; preds = %then, %"#dynarray::extend.exit31.i"
-  %.sink.i = phi ptr [ %4, %"#dynarray::extend.exit31.i" ], [ %3, %then ]
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %.sink.i, ptr noundef nonnull align 1 dereferenceable(5) %1, i64 5, i1 false)
-  %gep.i.i = getelementptr i8, ptr %.sink.i, i64 5
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i.i, ptr align 1 %deref.i, i64 %2, i1 false)
-  %5 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
-  store i8 41, ptr %5, align 1
-  %i_add.i6 = add i64 %2, 6
-  %6 = call ptr @malloc(i64 %i_add.i6)
-  %i_lt.i.i21.i8 = icmp slt i64 %i_add.i6, %i_add.i1
-  br i1 %i_lt.i.i21.i8, label %"#dynarray::extend.exit31.i9", label %"string::add_string.exit14"
+"#dynarray::extend.exit32.i":                     ; preds = %then
+  %i_mul.i.i22.i = shl i64 %i_add.i1, 1
+  %3 = call i64 @llvm.smax.i64(i64 %i_mul.i.i22.i, i64 5)
+  %4 = call ptr @malloc(i64 %3)
+  call void @free(ptr %2)
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %4, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
+  %i_lt.i.i.i = icmp slt i64 %3, %i_add.i1
+  br i1 %i_lt.i.i.i, label %then.i.i.i, label %"string::add_string.exit"
 
-"#dynarray::extend.exit31.i9":                    ; preds = %"string::add_string.exit"
-  %7 = call ptr @malloc(i64 %i_add.i1)
-  call void @free(ptr %6)
-  br label %"string::add_string.exit14"
+then.i.i.i:                                       ; preds = %"#dynarray::extend.exit32.i"
+  %i_mul.i.i.i = shl nuw i64 %3, 1
+  %5 = call i64 @llvm.smax.i64(i64 %i_add.i1, i64 %i_mul.i.i.i)
+  %6 = call ptr @malloc(i64 %5)
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %6, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
+  call void @free(ptr nonnull %4)
+  br label %"string::add_string.exit"
 
-"string::add_string.exit14":                      ; preds = %"string::add_string.exit", %"#dynarray::extend.exit31.i9"
-  %.sink.i10 = phi ptr [ %7, %"#dynarray::extend.exit31.i9" ], [ %6, %"string::add_string.exit" ]
-  %result_inner.sroa.15.1.i11 = phi i64 [ %i_add.i1, %"#dynarray::extend.exit31.i9" ], [ %i_add.i6, %"string::add_string.exit" ]
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink.i10, ptr nonnull align 1 %.sink.i, i64 %i_add.i1, i1 false)
-  %gep.i.i13 = getelementptr i8, ptr %.sink.i10, i64 %i_add.i1
-  %8 = load i8, ptr %5, align 1
-  store i8 %8, ptr %gep.i.i13, align 1
+"string::add_string.exit":                        ; preds = %"#dynarray::extend.exit32.thread.i", %"#dynarray::extend.exit32.i", %then.i.i.i
+  %result_inner.sroa.0.1.i = phi ptr [ %6, %then.i.i.i ], [ %4, %"#dynarray::extend.exit32.i" ], [ %2, %"#dynarray::extend.exit32.thread.i" ]
+  %self.0.load.gep.i.i = getelementptr i8, ptr %result_inner.sroa.0.1.i, i64 5
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep.i.i, ptr align 1 %buf_ptr4.deref.i, i64 %1, i1 false)
+  %7 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
+  store i8 41, ptr %7, align 1
+  %i_add.i7 = add i64 %1, 6
+  %8 = call ptr @malloc(i64 %i_add.i7)
+  %i_lt.i.i21.i9 = icmp slt i64 %i_add.i7, %i_add.i1
+  br i1 %i_lt.i.i21.i9, label %"#dynarray::extend.exit32.i15", label %"#dynarray::extend.exit32.thread.i11"
+
+"#dynarray::extend.exit32.thread.i11":            ; preds = %"string::add_string.exit"
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %8, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i1, i1 false)
+  br label %"string::add_string.exit23"
+
+"#dynarray::extend.exit32.i15":                   ; preds = %"string::add_string.exit"
+  %i_mul.i.i22.i12 = shl i64 %i_add.i7, 1
+  %9 = call i64 @llvm.smax.i64(i64 %i_add.i1, i64 %i_mul.i.i22.i12)
+  %10 = call ptr @malloc(i64 %9)
+  call void @free(ptr %8)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %10, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i1, i1 false)
+  %i_lt.i.i.i14 = icmp slt i64 %9, %i_add.i7
+  br i1 %i_lt.i.i.i14, label %then.i.i.i17, label %"string::add_string.exit23"
+
+then.i.i.i17:                                     ; preds = %"#dynarray::extend.exit32.i15"
+  %i_mul.i.i.i16 = shl i64 %9, 1
+  %11 = call i64 @llvm.smax.i64(i64 %i_add.i7, i64 %i_mul.i.i.i16)
+  %12 = call ptr @malloc(i64 %11)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %12, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i1, i1 false)
+  call void @free(ptr %10)
+  br label %"string::add_string.exit23"
+
+"string::add_string.exit23":                      ; preds = %"#dynarray::extend.exit32.thread.i11", %"#dynarray::extend.exit32.i15", %then.i.i.i17
+  %result_inner.sroa.15.1.i19 = phi i64 [ %11, %then.i.i.i17 ], [ %9, %"#dynarray::extend.exit32.i15" ], [ %i_add.i7, %"#dynarray::extend.exit32.thread.i11" ]
+  %result_inner.sroa.0.1.i20 = phi ptr [ %12, %then.i.i.i17 ], [ %10, %"#dynarray::extend.exit32.i15" ], [ %8, %"#dynarray::extend.exit32.thread.i11" ]
+  %self.0.load.gep.i.i21 = getelementptr i8, ptr %result_inner.sroa.0.1.i20, i64 %i_add.i1
+  %13 = load i8, ptr %7, align 1
+  store i8 %13, ptr %self.0.load.gep.i.i21, align 1
   br label %merge
 
 else:                                             ; preds = %body
-  %9 = alloca [4 x i8], align 4
-  store i8 110, ptr %9, align 4
-  %.repack1 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 1
+  %14 = alloca [4 x i8], align 4
+  store i8 110, ptr %14, align 4
+  %.repack1 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 1
   store i8 111, ptr %.repack1, align 1
-  %.repack2 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 2
+  %.repack2 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 2
   store i8 110, ptr %.repack2, align 2
-  %.repack3 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 3
+  %.repack3 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 3
   store i8 101, ptr %.repack3, align 1
-  %10 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
-  %11 = load i32, ptr %9, align 4
-  store i32 %11, ptr %10, align 1
+  %15 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
+  %16 = load i32, ptr %14, align 4
+  store i32 %16, ptr %15, align 1
   br label %merge
 
-merge:                                            ; preds = %else, %"string::add_string.exit14"
-  %.sink.i10.pn = phi ptr [ %.sink.i10, %"string::add_string.exit14" ], [ %10, %else ]
-  %i_add.i6.pn = phi i64 [ %i_add.i6, %"string::add_string.exit14" ], [ 4, %else ]
-  %result_inner.sroa.15.1.i11.pn = phi i64 [ %result_inner.sroa.15.1.i11, %"string::add_string.exit14" ], [ 4, %else ]
-  %.pn16 = insertvalue %"#dynarray" undef, ptr %.sink.i10.pn, 0
-  %.pn = insertvalue %"#dynarray" %.pn16, i64 %i_add.i6.pn, 1
-  %.pn15 = insertvalue %"#dynarray" %.pn, i64 %result_inner.sroa.15.1.i11.pn, 2
-  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %.pn15, 0
+merge:                                            ; preds = %else, %"string::add_string.exit23"
+  %result_inner.sroa.0.1.i20.pn = phi ptr [ %result_inner.sroa.0.1.i20, %"string::add_string.exit23" ], [ %15, %else ]
+  %i_add.i7.pn = phi i64 [ %i_add.i7, %"string::add_string.exit23" ], [ 4, %else ]
+  %result_inner.sroa.15.1.i19.pn = phi i64 [ %result_inner.sroa.15.1.i19, %"string::add_string.exit23" ], [ 4, %else ]
+  %.pn27 = insertvalue %"#dynarray" undef, ptr %result_inner.sroa.0.1.i20.pn, 0
+  %.pn = insertvalue %"#dynarray" %.pn27, i64 %i_add.i7.pn, 1
+  %result_inner29.i22.pn = insertvalue %"#dynarray" %.pn, i64 %result_inner.sroa.15.1.i19.pn, 2
+  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %result_inner29.i22.pn, 0
   ret %string %if_result
 }
-
-; Function Attrs: argmemonly mustprogress nocallback nofree nosync nounwind willreturn
-declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture) #10
-
-; Function Attrs: argmemonly mustprogress nocallback nofree nosync nounwind willreturn
-declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture) #10
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
 define %string @"string::from_raw"(ptr nocapture readonly %contents, i64 %len) local_unnamed_addr #1 {
@@ -456,22 +511,28 @@ body:
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %contents, i64 %len, i1 false)
   %1 = insertvalue %"#dynarray" undef, ptr %0, 0
   %2 = insertvalue %"#dynarray" %1, i64 %len, 1
-  %3 = insertvalue %"#dynarray" %2, i64 %len, 2
-  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
-  ret %string %4
+  %inner69 = insertvalue %"#dynarray" %2, i64 %len, 2
+  %3 = insertvalue %string zeroinitializer, %"#dynarray" %inner69, 0
+  ret %string %3
 }
+
+; Function Attrs: argmemonly mustprogress nocallback nofree nosync nounwind willreturn
+declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture) #10
+
+; Function Attrs: argmemonly mustprogress nocallback nofree nosync nounwind willreturn
+declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture) #10
 
 define %string @"char::to_string"(i32 %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_char_to_string, i32 %self)
-  %deref = load ptr, ptr %0, align 8
-  %i_add = add i64 %1, 1
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+  %alloca.ptr = alloca ptr, align 8
+  %0 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr, ptr nonnull @_tmpl_char_to_string, i32 %self)
+  %buf_ptr4.deref = load ptr, ptr %alloca.ptr, align 8
+  %i_add = add i64 %0, 1
+  %1 = insertvalue %"#dynarray" zeroinitializer, ptr %buf_ptr4.deref, 0
+  %2 = insertvalue %"#dynarray" %1, i64 %0, 1
+  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 2
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
 }
 
 define ptr @"#dynarray::take"(ptr nocapture %self, i64 %sub_len) local_unnamed_addr {
@@ -492,8 +553,8 @@ block:                                            ; preds = %body
   %i_sub = sub i64 %self.1.load, %sub_len
   store i64 %i_sub, ptr %self.1, align 4
   %self.0.load = load ptr, ptr %self, align 8
-  %gep = getelementptr i8, ptr %self.0.load, i64 %i_sub
-  ret ptr %gep
+  %self.0.load.gep = getelementptr i8, ptr %self.0.load, i64 %i_sub
+  ret ptr %self.0.load.gep
 }
 
 define i32 @"option<char>::get"(ptr nocapture readonly %self) local_unnamed_addr {
@@ -511,21 +572,21 @@ else:                                             ; preds = %body
 merge:                                            ; preds = %body
   %self.1 = getelementptr inbounds %"option<char>", ptr %self, i64 0, i32 1
   %self.1.load = load ptr, ptr %self.1, align 8
-  %deref = load i32, ptr %self.1.load, align 4
-  ret i32 %deref
+  %self.1.load.deref = load i32, ptr %self.1.load, align 4
+  ret i32 %self.1.load.deref
 }
 
 define %string @"#byte::to_string"(i8 %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_byte_to_string, i8 %self)
-  %deref = load ptr, ptr %0, align 8
-  %i_add = add i64 %1, 1
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+  %alloca.ptr = alloca ptr, align 8
+  %0 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr, ptr nonnull @_tmpl_byte_to_string, i8 %self)
+  %buf_ptr4.deref = load ptr, ptr %alloca.ptr, align 8
+  %i_add = add i64 %0, 1
+  %1 = insertvalue %"#dynarray" zeroinitializer, ptr %buf_ptr4.deref, 0
+  %2 = insertvalue %"#dynarray" %1, i64 %0, 1
+  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 2
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn
@@ -563,12 +624,12 @@ else:                                             ; preds = %body
   br label %merge
 
 merge:                                            ; preds = %else, %then
-  %.unpack.i.pn = phi ptr [ %1, %then ], [ %4, %else ]
-  %.unpack7.i.pn = phi i64 [ 4, %then ], [ 5, %else ]
-  %.pn2 = insertvalue %"#dynarray" undef, ptr %.unpack.i.pn, 0
-  %.pn = insertvalue %"#dynarray" %.pn2, i64 %.unpack7.i.pn, 1
-  %.pn1 = insertvalue %"#dynarray" %.pn, i64 %.unpack7.i.pn, 2
-  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %.pn1, 0
+  %.pn6 = phi ptr [ %1, %then ], [ %4, %else ]
+  %.pn2 = phi i64 [ 4, %then ], [ 5, %else ]
+  %.pn3 = insertvalue %"#dynarray" undef, ptr %.pn6, 0
+  %.pn = insertvalue %"#dynarray" %.pn3, i64 %.pn2, 1
+  %inner69.i.pn = insertvalue %"#dynarray" %.pn, i64 %.pn2, 2
+  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %inner69.i.pn, 0
   ret %string %if_result
 }
 
@@ -589,14 +650,14 @@ body:
 declare i1 @isinf(double) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::sign"(double %self) local_unnamed_addr #9 {
+define double @"float::sign"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.copysign.f64(double 1.000000e+00, double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.copysign.f64(double, double) #7
+declare double @llvm.copysign.f64(double, double) #5
 
 define double @"float::nexttoward"(double %self, double %twd) local_unnamed_addr {
 body:
@@ -615,44 +676,44 @@ body:
 declare i64 @lround(double) local_unnamed_addr
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::round"(double %self) local_unnamed_addr #9 {
+define double @"float::round"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.round.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.round.f64(double) #7
+declare double @llvm.round.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::trunc"(double %self) local_unnamed_addr #9 {
+define double @"float::trunc"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.trunc.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.trunc.f64(double) #7
+declare double @llvm.trunc.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::floor"(double %self) local_unnamed_addr #9 {
+define double @"float::floor"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.floor.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.floor.f64(double) #7
+declare double @llvm.floor.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::ceil"(double %self) local_unnamed_addr #9 {
+define double @"float::ceil"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.ceil.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.ceil.f64(double) #7
+declare double @llvm.ceil.f64(double) #5
 
 define double @"float::tgamma"(double %self) local_unnamed_addr {
 body:
@@ -797,27 +858,27 @@ body:
 declare double @tan(double) local_unnamed_addr #11
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::cos"(double %self) local_unnamed_addr #9 {
+define double @"float::cos"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.cos.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.cos.f64(double) #7
+declare double @llvm.cos.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::sin"(double %self) local_unnamed_addr #9 {
+define double @"float::sin"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.sin.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.sin.f64(double) #7
+declare double @llvm.sin.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::powi"(double %self, i64 %exp) local_unnamed_addr #9 {
+define double @"float::powi"(double %self, i64 %exp) local_unnamed_addr #8 {
 body:
   %cast = sitofp i64 %exp to double
   %0 = tail call double @llvm.pow.f64(double %self, double %cast)
@@ -825,10 +886,10 @@ body:
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.pow.f64(double, double) #7
+declare double @llvm.pow.f64(double, double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::pow"(double %self, double %exp) local_unnamed_addr #9 {
+define double @"float::pow"(double %self, double %exp) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.pow.f64(double %self, double %exp)
   ret double %0
@@ -853,14 +914,14 @@ body:
 declare double @cbrt(double) local_unnamed_addr #11
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::sqrt"(double %self) local_unnamed_addr #9 {
+define double @"float::sqrt"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.sqrt.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.sqrt.f64(double) #7
+declare double @llvm.sqrt.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nounwind willreturn writeonly
 define double @"float::log1p"(double %self) local_unnamed_addr #11 {
@@ -873,34 +934,34 @@ body:
 declare double @log1p(double) local_unnamed_addr #11
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::log10"(double %self) local_unnamed_addr #9 {
+define double @"float::log10"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.log10.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log10.f64(double) #7
+declare double @llvm.log10.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::log2"(double %self) local_unnamed_addr #9 {
+define double @"float::log2"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.log2.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log2.f64(double) #7
+declare double @llvm.log2.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::log"(double %self) local_unnamed_addr #9 {
+define double @"float::log"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.log.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.log.f64(double) #7
+declare double @llvm.log.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nounwind willreturn writeonly
 define double @"float::expm1"(double %self) local_unnamed_addr #11 {
@@ -913,130 +974,130 @@ body:
 declare double @expm1(double) local_unnamed_addr #11
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::exp2"(double %self) local_unnamed_addr #9 {
+define double @"float::exp2"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.exp2.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.exp2.f64(double) #7
+declare double @llvm.exp2.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::exp"(double %self) local_unnamed_addr #9 {
+define double @"float::exp"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.exp.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.exp.f64(double) #7
+declare double @llvm.exp.f64(double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::min"(double %self, double %o) local_unnamed_addr #9 {
+define double @"float::min"(double %self, double %o) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.minnum.f64(double %self, double %o)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.minnum.f64(double, double) #7
+declare double @llvm.minnum.f64(double, double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::max"(double %self, double %o) local_unnamed_addr #9 {
+define double @"float::max"(double %self, double %o) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.maxnum.f64(double %self, double %o)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.maxnum.f64(double, double) #7
+declare double @llvm.maxnum.f64(double, double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::fma"(double %self, double %multiplicand, double %addend) local_unnamed_addr #9 {
+define double @"float::fma"(double %self, double %multiplicand, double %addend) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.fma.f64(double %self, double %multiplicand, double %addend)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.fma.f64(double, double, double) #7
+declare double @llvm.fma.f64(double, double, double) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define double @"float::abs"(double %self) local_unnamed_addr #9 {
+define double @"float::abs"(double %self) local_unnamed_addr #8 {
 body:
   %0 = tail call double @llvm.fabs.f64(double %self)
   ret double %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare double @llvm.fabs.f64(double) #7
+declare double @llvm.fabs.f64(double) #5
 
 define %string @"float::to_string"(double %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_float_to_string, double %self)
-  %deref = load ptr, ptr %0, align 8
-  %i_add = add i64 %1, 1
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+  %alloca.ptr = alloca ptr, align 8
+  %0 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr, ptr nonnull @_tmpl_float_to_string, double %self)
+  %buf_ptr4.deref = load ptr, ptr %alloca.ptr, align 8
+  %i_add = add i64 %0, 1
+  %1 = insertvalue %"#dynarray" zeroinitializer, ptr %buf_ptr4.deref, 0
+  %2 = insertvalue %"#dynarray" %1, i64 %0, 1
+  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 2
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
 }
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::trailing_zeroes"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::trailing_zeroes"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.cttz.i64(i64 %self, i1 false), !range !0
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.cttz.i64(i64, i1 immarg) #7
+declare i64 @llvm.cttz.i64(i64, i1 immarg) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::leading_zeroes"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::leading_zeroes"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.ctlz.i64(i64 %self, i1 false), !range !0
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.ctlz.i64(i64, i1 immarg) #7
+declare i64 @llvm.ctlz.i64(i64, i1 immarg) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::reverse_bytes"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::reverse_bytes"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.bswap.i64(i64 %self)
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.bswap.i64(i64) #7
+declare i64 @llvm.bswap.i64(i64) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::reverse_bits"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::reverse_bits"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.bitreverse.i64(i64 %self)
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.bitreverse.i64(i64) #7
+declare i64 @llvm.bitreverse.i64(i64) #5
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::count_ones"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::count_ones"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.ctpop.i64(i64 %self), !range !0
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.ctpop.i64(i64) #7
+declare i64 @llvm.ctpop.i64(i64) #5
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define i64 @"int::sign"(i64 %self) local_unnamed_addr #8 {
+define i64 @"int::sign"(i64 %self) local_unnamed_addr #9 {
 body:
   %i_lt.not = icmp ne i64 %self, 0
   %spec.select = sext i1 %i_lt.not to i64
@@ -1046,24 +1107,14 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::max"(i64 %self, i64 %o) local_unnamed_addr #9 {
-body:
-  %0 = tail call i64 @llvm.smax.i64(i64 %self, i64 %o)
-  ret i64 %0
-}
-
-; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.smax.i64(i64, i64) #7
-
-; Function Attrs: mustprogress nofree nosync nounwind readnone willreturn
-define i64 @"int::abs"(i64 %self) local_unnamed_addr #9 {
+define i64 @"int::abs"(i64 %self) local_unnamed_addr #8 {
 body:
   %0 = tail call i64 @llvm.abs.i64(i64 %self, i1 false)
   ret i64 %0
 }
 
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn
-declare i64 @llvm.abs.i64(i64, i1 immarg) #7
+declare i64 @llvm.abs.i64(i64, i1 immarg) #5
 
 define i64 @"int::idiv"(i64 %self, i64 %d) local_unnamed_addr {
 body:
@@ -1084,15 +1135,15 @@ else:                                             ; preds = %body
 
 define %string @"int::to_string"(i64 %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_int_to_string, i64 %self)
-  %deref = load ptr, ptr %0, align 8
-  %i_add = add i64 %1, 1
-  %2 = insertvalue %"#dynarray" zeroinitializer, ptr %deref, 0
-  %3 = insertvalue %"#dynarray" %2, i64 %1, 1
-  %4 = insertvalue %"#dynarray" %3, i64 %i_add, 2
-  %5 = insertvalue %string zeroinitializer, %"#dynarray" %4, 0
-  ret %string %5
+  %alloca.ptr = alloca ptr, align 8
+  %0 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr, ptr nonnull @_tmpl_int_to_string, i64 %self)
+  %buf_ptr4.deref = load ptr, ptr %alloca.ptr, align 8
+  %i_add = add i64 %0, 1
+  %1 = insertvalue %"#dynarray" zeroinitializer, ptr %buf_ptr4.deref, 0
+  %2 = insertvalue %"#dynarray" %1, i64 %0, 1
+  %3 = insertvalue %"#dynarray" %2, i64 %i_add, 2
+  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
+  ret %string %4
 }
 
 declare ptr @setlocale(i64, ptr) local_unnamed_addr
@@ -1110,17 +1161,17 @@ body:
 
 define i64 @"list<int>::sum"(ptr nocapture readonly %self) local_unnamed_addr {
 body:
-  %.unpack.unpack.i.i = load ptr, ptr %self, align 8
-  %.unpack.elt1.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
-  %.unpack.unpack2.i.i = load i64, ptr %.unpack.elt1.i.i, align 8
-  %.unpack.elt3.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
-  %.unpack.unpack4.i.i = load i64, ptr %.unpack.elt3.i.i, align 8
+  %inner1.unpack.unpack.i.i = load ptr, ptr %self, align 8
+  %inner1.unpack.elt2.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
+  %inner1.unpack.unpack3.i.i = load i64, ptr %inner1.unpack.elt2.i.i, align 8
+  %inner1.unpack.elt4.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %inner1.unpack.unpack5.i.i = load i64, ptr %inner1.unpack.elt4.i.i, align 8
   %0 = alloca %"listiterator<int>", align 8
-  store ptr %.unpack.unpack.i.i, ptr %0, align 8
+  store ptr %inner1.unpack.unpack.i.i, ptr %0, align 8
   %.repack4 = getelementptr inbounds %"#dynarray", ptr %0, i64 0, i32 1
-  store i64 %.unpack.unpack2.i.i, ptr %.repack4, align 8
+  store i64 %inner1.unpack.unpack3.i.i, ptr %.repack4, align 8
   %.repack6 = getelementptr inbounds %"#dynarray", ptr %0, i64 0, i32 2
-  store i64 %.unpack.unpack4.i.i, ptr %.repack6, align 8
+  store i64 %inner1.unpack.unpack5.i.i, ptr %.repack6, align 8
   %.repack1 = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
   store i64 0, ptr %.repack1, align 8
   %self.1.i = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
@@ -1144,10 +1195,10 @@ else.i.i:                                         ; preds = %else.i
 
 "list<int>::get.exit.i":                          ; preds = %else.i
   %self.0.0.load.i.i = load ptr, ptr %0, align 8
-  %gep.i.i = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i
-  %deref.i.i = load i64, ptr %gep.i.i, align 4
+  %self.0.0.load.gep.i.i = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i
+  %self.0.0.load.gep.deref.i.i = load i64, ptr %self.0.0.load.gep.i.i, align 4
   %4 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i, ptr %4, align 4
+  store i64 %self.0.0.load.gep.deref.i.i, ptr %4, align 4
   %5 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %4, 1
   %i_add.i = add nuw nsw i64 %self.1.load.i, 1
   store i64 %i_add.i, ptr %self.1.i, align 4
@@ -1189,10 +1240,10 @@ else.i.i18:                                       ; preds = %else.i16
 
 "list<int>::get.exit.i23":                        ; preds = %else.i16
   %self.0.0.load.i.i19 = load ptr, ptr %0, align 8
-  %gep.i.i20 = getelementptr i64, ptr %self.0.0.load.i.i19, i64 %self.1.load.i11
-  %deref.i.i21 = load i64, ptr %gep.i.i20, align 4
+  %self.0.0.load.gep.i.i20 = getelementptr i64, ptr %self.0.0.load.i.i19, i64 %self.1.load.i11
+  %self.0.0.load.gep.deref.i.i21 = load i64, ptr %self.0.0.load.gep.i.i20, align 4
   %12 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i21, ptr %12, align 4
+  store i64 %self.0.0.load.gep.deref.i.i21, ptr %12, align 4
   %13 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %12, 1
   %i_add.i22 = add nuw nsw i64 %self.1.load.i11, 1
   store i64 %i_add.i22, ptr %self.1.i10, align 4
@@ -1207,18 +1258,18 @@ else.i.i18:                                       ; preds = %else.i16
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
 define %"listiterator<int>" @"list<int>::iterator"(ptr nocapture readonly %self) local_unnamed_addr #3 {
 body:
-  %.unpack.unpack.i = load ptr, ptr %self, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack.i, 0
-  %.unpack.elt1.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
-  %.unpack.unpack2.i = load i64, ptr %.unpack.elt1.i, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack.unpack2.i, 1
-  %.unpack.elt3.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
-  %.unpack.unpack4.i = load i64, ptr %.unpack.elt3.i, align 8
-  %.unpack5.i = insertvalue %"#dynarray" %1, i64 %.unpack.unpack4.i, 2
-  %2 = insertvalue %string undef, %"#dynarray" %.unpack5.i, 0
-  %3 = insertvalue %"listiterator<int>" zeroinitializer, %string %2, 0
-  %4 = insertvalue %"listiterator<int>" %3, i64 0, 1
-  ret %"listiterator<int>" %4
+  %inner1.unpack.unpack.i = load ptr, ptr %self, align 8
+  %0 = insertvalue %"#dynarray" undef, ptr %inner1.unpack.unpack.i, 0
+  %inner1.unpack.elt2.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 1
+  %inner1.unpack.unpack3.i = load i64, ptr %inner1.unpack.elt2.i, align 8
+  %1 = insertvalue %"#dynarray" %0, i64 %inner1.unpack.unpack3.i, 1
+  %inner1.unpack.elt4.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %inner1.unpack.unpack5.i = load i64, ptr %inner1.unpack.elt4.i, align 8
+  %inner1.unpack6.i = insertvalue %"#dynarray" %1, i64 %inner1.unpack.unpack5.i, 2
+  %inner11.i = insertvalue %string undef, %"#dynarray" %inner1.unpack6.i, 0
+  %2 = insertvalue %"listiterator<int>" zeroinitializer, %string %inner11.i, 0
+  %3 = insertvalue %"listiterator<int>" %2, i64 0, 1
+  ret %"listiterator<int>" %3
 }
 
 define %"option<char>" @"listiterator<int>::next"(ptr nocapture %self) local_unnamed_addr {
@@ -1244,10 +1295,10 @@ else.i:                                           ; preds = %else
 
 "list<int>::get.exit":                            ; preds = %else
   %self.0.0.load.i = load ptr, ptr %self, align 8
-  %gep.i = getelementptr i64, ptr %self.0.0.load.i, i64 %self.1.load
-  %deref.i = load i64, ptr %gep.i, align 4
+  %self.0.0.load.gep.i = getelementptr i64, ptr %self.0.0.load.i, i64 %self.1.load
+  %self.0.0.load.gep.deref.i = load i64, ptr %self.0.0.load.gep.i, align 4
   %3 = tail call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i, ptr %3, align 4
+  store i64 %self.0.0.load.gep.deref.i, ptr %3, align 4
   %4 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %3, 1
   %i_add = add nuw nsw i64 %self.1.load, 1
   store i64 %i_add, ptr %self.1, align 4
@@ -1268,7 +1319,7 @@ body:
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind readnone willreturn
-define %"option<char>" @"option<int>::none"() local_unnamed_addr #8 {
+define %"option<char>" @"option<int>::none"() local_unnamed_addr #9 {
 body:
   ret %"option<char>" zeroinitializer
 }
@@ -1287,9 +1338,9 @@ else:                                             ; preds = %body, %and_true
 
 merge:                                            ; preds = %and_true
   %self.0.0.load = load ptr, ptr %self, align 8
-  %gep = getelementptr i64, ptr %self.0.0.load, i64 %i
-  %deref = load i64, ptr %gep, align 4
-  ret i64 %deref
+  %self.0.0.load.gep = getelementptr i64, ptr %self.0.0.load, i64 %i
+  %self.0.0.load.gep.deref = load i64, ptr %self.0.0.load.gep, align 4
+  ret i64 %self.0.0.load.gep.deref
 
 and_true:                                         ; preds = %body
   %self.0.1.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
@@ -1311,272 +1362,334 @@ body:
 ; Function Attrs: argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn
 define %"listiterator<int>" @"listiterator<int>::new"(ptr nocapture readonly %inner) local_unnamed_addr #3 {
 body:
-  %.unpack.unpack = load ptr, ptr %inner, align 8
-  %0 = insertvalue %"#dynarray" undef, ptr %.unpack.unpack, 0
-  %.unpack.elt1 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 1
-  %.unpack.unpack2 = load i64, ptr %.unpack.elt1, align 8
-  %1 = insertvalue %"#dynarray" %0, i64 %.unpack.unpack2, 1
-  %.unpack.elt3 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 2
-  %.unpack.unpack4 = load i64, ptr %.unpack.elt3, align 8
-  %.unpack5 = insertvalue %"#dynarray" %1, i64 %.unpack.unpack4, 2
-  %2 = insertvalue %string undef, %"#dynarray" %.unpack5, 0
-  %3 = insertvalue %"listiterator<int>" zeroinitializer, %string %2, 0
-  %4 = insertvalue %"listiterator<int>" %3, i64 0, 1
-  ret %"listiterator<int>" %4
+  %inner1.unpack.unpack = load ptr, ptr %inner, align 8
+  %0 = insertvalue %"#dynarray" undef, ptr %inner1.unpack.unpack, 0
+  %inner1.unpack.elt2 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 1
+  %inner1.unpack.unpack3 = load i64, ptr %inner1.unpack.elt2, align 8
+  %1 = insertvalue %"#dynarray" %0, i64 %inner1.unpack.unpack3, 1
+  %inner1.unpack.elt4 = getelementptr inbounds %"#dynarray", ptr %inner, i64 0, i32 2
+  %inner1.unpack.unpack5 = load i64, ptr %inner1.unpack.elt4, align 8
+  %inner1.unpack6 = insertvalue %"#dynarray" %1, i64 %inner1.unpack.unpack5, 2
+  %inner11 = insertvalue %string undef, %"#dynarray" %inner1.unpack6, 0
+  %2 = insertvalue %"listiterator<int>" zeroinitializer, %string %inner11, 0
+  %3 = insertvalue %"listiterator<int>" %2, i64 0, 1
+  ret %"listiterator<int>" %3
 }
 
 define %string @"list<int>::to_string"(ptr nocapture readonly %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = alloca ptr, align 8
+  %alloca.ptr.i116 = alloca ptr, align 8
+  %alloca.ptr.i = alloca ptr, align 8
   %self.0.1.i = getelementptr inbounds %string, ptr %self, i64 0, i32 0, i32 1
   %self.0.1.load.i = load i64, ptr %self.0.1.i, align 4
   %self.0.1.load.i.off = add i64 %self.0.1.load.i, 7
-  %2 = icmp ult i64 %self.0.1.load.i.off, 15
-  br i1 %2, label %then, label %else
+  %0 = icmp ult i64 %self.0.1.load.i.off, 15
+  br i1 %0, label %then, label %else
 
 then:                                             ; preds = %body
-  %3 = alloca [2 x i8], align 2
-  store i8 91, ptr %3, align 2
-  %.repack59 = getelementptr inbounds [2 x i8], ptr %3, i64 0, i64 1
-  store i8 93, ptr %.repack59, align 1
-  %4 = tail call dereferenceable_or_null(2) ptr @malloc(i64 2)
-  %5 = load i16, ptr %3, align 2
-  store i16 %5, ptr %4, align 1
+  %1 = alloca [2 x i8], align 2
+  store i8 91, ptr %1, align 2
+  %.repack60 = getelementptr inbounds [2 x i8], ptr %1, i64 0, i64 1
+  store i8 93, ptr %.repack60, align 1
+  %2 = tail call dereferenceable_or_null(2) ptr @malloc(i64 2)
+  %3 = load i16, ptr %1, align 2
+  store i16 %3, ptr %2, align 1
   br label %merge
 
 else:                                             ; preds = %body
-  %6 = tail call dereferenceable_or_null(1) ptr @malloc(i64 1)
-  store i8 91, ptr %6, align 1
+  %4 = tail call dereferenceable_or_null(1) ptr @malloc(i64 1)
+  store i8 91, ptr %4, align 1
   %it = alloca %"listiterator<int>", align 8
-  %.unpack.unpack.i.i = load ptr, ptr %self, align 8
-  %.unpack.elt3.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
-  %.unpack.unpack4.i.i = load i64, ptr %.unpack.elt3.i.i, align 8
-  store ptr %.unpack.unpack.i.i, ptr %it, align 8
+  %inner1.unpack.unpack.i.i = load ptr, ptr %self, align 8
+  %inner1.unpack.elt4.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
+  %inner1.unpack.unpack5.i.i = load i64, ptr %inner1.unpack.elt4.i.i, align 8
+  store ptr %inner1.unpack.unpack.i.i, ptr %it, align 8
   %it.repack9 = getelementptr inbounds %"#dynarray", ptr %it, i64 0, i32 1
   store i64 %self.0.1.load.i, ptr %it.repack9, align 8
   %it.repack11 = getelementptr inbounds %"#dynarray", ptr %it, i64 0, i32 2
-  store i64 %.unpack.unpack4.i.i, ptr %it.repack11, align 8
+  store i64 %inner1.unpack.unpack5.i.i, ptr %it.repack11, align 8
   %it.repack6 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
   store i64 0, ptr %it.repack6, align 8
-  %self.1.i125 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
-  %self.1.load.i126 = load i64, ptr %self.1.i125, align 4
+  %self.1.i158 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
+  %self.1.load.i159 = load i64, ptr %self.1.i158, align 4
   %self.0.1.i.i = getelementptr inbounds %string, ptr %it, i64 0, i32 0, i32 1
-  %self.0.1.load.i.i127 = load i64, ptr %self.0.1.i.i, align 4
-  %7 = sdiv i64 %self.0.1.load.i.i127, 8
-  %i_ge.not.i = icmp slt i64 %self.1.load.i126, %7
-  br i1 %i_ge.not.i, label %else.i128, label %"listiterator<int>::next.exit"
+  %self.0.1.load.i.i160 = load i64, ptr %self.0.1.i.i, align 4
+  %5 = sdiv i64 %self.0.1.load.i.i160, 8
+  %i_ge.not.i = icmp slt i64 %self.1.load.i159, %5
+  br i1 %i_ge.not.i, label %else.i161, label %"listiterator<int>::next.exit"
 
-else.i128:                                        ; preds = %else
-  %i_le.i.i = icmp sgt i64 %self.1.load.i126, -1
+else.i161:                                        ; preds = %else
+  %i_le.i.i = icmp sgt i64 %self.1.load.i159, -1
   br i1 %i_le.i.i, label %"list<int>::get.exit.i", label %else.i.i
 
-else.i.i:                                         ; preds = %else.i128
+else.i.i:                                         ; preds = %else.i161
   %stderr.i.i = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
-  %8 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i)
-  %9 = call i64 @fputwc(i32 10, ptr %stderr.i.i)
+  %6 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i)
+  %7 = call i64 @fputwc(i32 10, ptr %stderr.i.i)
   call void @exit(i64 1)
   unreachable
 
-"list<int>::get.exit.i":                          ; preds = %else.i128
+"list<int>::get.exit.i":                          ; preds = %else.i161
   %self.0.0.load.i.i = load ptr, ptr %it, align 8
-  %gep.i.i129 = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i126
-  %deref.i.i = load i64, ptr %gep.i.i129, align 4
-  %10 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i, ptr %10, align 4
-  %11 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %10, 1
-  %i_add.i130 = add nuw nsw i64 %self.1.load.i126, 1
-  store i64 %i_add.i130, ptr %self.1.i125, align 4
+  %self.0.0.load.gep.i.i = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i159
+  %self.0.0.load.gep.deref.i.i = load i64, ptr %self.0.0.load.gep.i.i, align 4
+  %8 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
+  store i64 %self.0.0.load.gep.deref.i.i, ptr %8, align 4
+  %9 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %8, 1
+  %i_add.i162 = add nuw nsw i64 %self.1.load.i159, 1
+  store i64 %i_add.i162, ptr %self.1.i158, align 4
   br label %"listiterator<int>::next.exit"
 
 "listiterator<int>::next.exit":                   ; preds = %else, %"list<int>::get.exit.i"
-  %if_result.i = phi %"option<char>" [ %11, %"list<int>::get.exit.i" ], [ zeroinitializer, %else ]
-  %12 = alloca %"option<char>", align 8
-  store %"option<char>" %if_result.i, ptr %12, align 8
-  %self.0.load.i = load i1, ptr %12, align 8
+  %if_result.i = phi %"option<char>" [ %9, %"list<int>::get.exit.i" ], [ zeroinitializer, %else ]
+  %10 = alloca %"option<char>", align 8
+  store %"option<char>" %if_result.i, ptr %10, align 8
+  %self.0.load.i = load i1, ptr %10, align 8
   br i1 %self.0.load.i, label %"option<int>::get.exit", label %else.i
 
 else.i:                                           ; preds = %"listiterator<int>::next.exit"
   %stderr.i = tail call ptr @fdopen(i64 2, ptr nonnull @_write.1)
-  %13 = tail call i64 @fwrite(ptr nonnull @throw_msg.4, i64 16, i64 1, ptr %stderr.i)
-  %14 = tail call i64 @fputwc(i32 10, ptr %stderr.i)
+  %11 = tail call i64 @fwrite(ptr nonnull @throw_msg.4, i64 16, i64 1, ptr %stderr.i)
+  %12 = tail call i64 @fputwc(i32 10, ptr %stderr.i)
   tail call void @exit(i64 1)
   unreachable
 
 "option<int>::get.exit":                          ; preds = %"listiterator<int>::next.exit"
-  %self.1.i = getelementptr inbounds %"option<char>", ptr %12, i64 0, i32 1
+  %self.1.i = getelementptr inbounds %"option<char>", ptr %10, i64 0, i32 1
   %self.1.load.i = load ptr, ptr %self.1.i, align 8
-  %deref.i = load i64, ptr %self.1.load.i, align 4
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %1)
-  %15 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %1, ptr nonnull @_tmpl_int_to_string, i64 %deref.i)
-  %deref.i70 = load ptr, ptr %1, align 8
-  %i_add.i71 = add i64 %15, 1
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %1)
-  %16 = call ptr @malloc(i64 %i_add.i71)
-  %i_lt.i.i21.i78 = icmp ugt i64 %15, 9223372036854775806
-  br i1 %i_lt.i.i21.i78, label %"#dynarray::extend.exit31.i79", label %"string::add_string.exit84"
+  %self.1.load.deref.i = load i64, ptr %self.1.load.i, align 4
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %13 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i, ptr nonnull @_tmpl_int_to_string, i64 %self.1.load.deref.i)
+  %buf_ptr4.deref.i = load ptr, ptr %alloca.ptr.i, align 8
+  %i_add.i72 = add i64 %13, 1
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %14 = call ptr @malloc(i64 %i_add.i72)
+  %i_lt.i.i21.i79 = icmp ugt i64 %13, 9223372036854775806
+  br i1 %i_lt.i.i21.i79, label %"#dynarray::extend.exit32.i85", label %"#dynarray::extend.exit32.thread.i81"
 
-"#dynarray::extend.exit31.i79":                   ; preds = %"option<int>::get.exit"
-  %17 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
-  call void @free(ptr %16)
-  br label %"string::add_string.exit84"
+"#dynarray::extend.exit32.thread.i81":            ; preds = %"option<int>::get.exit"
+  %15 = load i8, ptr %4, align 1
+  store i8 %15, ptr %14, align 1
+  br label %"string::add_string.exit93"
 
-"string::add_string.exit84":                      ; preds = %"option<int>::get.exit", %"#dynarray::extend.exit31.i79"
-  %.sink.i80 = phi ptr [ %17, %"#dynarray::extend.exit31.i79" ], [ %16, %"option<int>::get.exit" ]
-  %18 = load i8, ptr %6, align 1
-  store i8 %18, ptr %.sink.i80, align 1
-  %gep.i.i83 = getelementptr i8, ptr %.sink.i80, i64 1
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i.i83, ptr align 1 %deref.i70, i64 %15, i1 false)
-  %self.1.i131 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
-  %self.1.load.i132 = load i64, ptr %self.1.i131, align 4
-  %self.0.1.i.i133 = getelementptr inbounds %string, ptr %it, i64 0, i32 0, i32 1
-  %self.0.1.load.i.i134 = load i64, ptr %self.0.1.i.i133, align 4
-  %19 = sdiv i64 %self.0.1.load.i.i134, 8
-  %i_ge.not.i135 = icmp slt i64 %self.1.load.i132, %19
-  br i1 %i_ge.not.i135, label %else.i137, label %"listiterator<int>::next.exit146"
+"#dynarray::extend.exit32.i85":                   ; preds = %"option<int>::get.exit"
+  %i_mul.i.i22.i82 = shl i64 %i_add.i72, 1
+  %16 = call i64 @llvm.smax.i64(i64 %i_mul.i.i22.i82, i64 1)
+  %17 = call ptr @malloc(i64 %16)
+  call void @free(ptr %14)
+  %18 = load i8, ptr %4, align 1
+  store i8 %18, ptr %17, align 1
+  %i_lt.i.i.i84 = icmp slt i64 %16, %i_add.i72
+  br i1 %i_lt.i.i.i84, label %then.i.i.i87, label %"string::add_string.exit93"
 
-else.i137:                                        ; preds = %"string::add_string.exit84"
-  %i_le.i.i136 = icmp sgt i64 %self.1.load.i132, -1
-  br i1 %i_le.i.i136, label %"list<int>::get.exit.i144", label %else.i.i139
+then.i.i.i87:                                     ; preds = %"#dynarray::extend.exit32.i85"
+  %i_mul.i.i.i86 = shl nuw i64 %16, 1
+  %19 = call i64 @llvm.smax.i64(i64 %i_add.i72, i64 %i_mul.i.i.i86)
+  %20 = call ptr @malloc(i64 %19)
+  %21 = load i8, ptr %4, align 1
+  store i8 %21, ptr %20, align 1
+  call void @free(ptr nonnull %17)
+  br label %"string::add_string.exit93"
 
-else.i.i139:                                      ; preds = %else.i137
-  %stderr.i.i138 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
-  %20 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i138)
-  %21 = call i64 @fputwc(i32 10, ptr %stderr.i.i138)
+"string::add_string.exit93":                      ; preds = %"#dynarray::extend.exit32.thread.i81", %"#dynarray::extend.exit32.i85", %then.i.i.i87
+  %result_inner.sroa.0.1.i90 = phi ptr [ %20, %then.i.i.i87 ], [ %17, %"#dynarray::extend.exit32.i85" ], [ %14, %"#dynarray::extend.exit32.thread.i81" ]
+  %self.0.load.gep.i.i91 = getelementptr i8, ptr %result_inner.sroa.0.1.i90, i64 1
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep.i.i91, ptr align 1 %buf_ptr4.deref.i, i64 %13, i1 false)
+  %self.1.i163 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
+  %self.1.load.i164 = load i64, ptr %self.1.i163, align 4
+  %self.0.1.i.i165 = getelementptr inbounds %string, ptr %it, i64 0, i32 0, i32 1
+  %self.0.1.load.i.i166 = load i64, ptr %self.0.1.i.i165, align 4
+  %22 = sdiv i64 %self.0.1.load.i.i166, 8
+  %i_ge.not.i167 = icmp slt i64 %self.1.load.i164, %22
+  br i1 %i_ge.not.i167, label %else.i169, label %"listiterator<int>::next.exit178"
+
+else.i169:                                        ; preds = %"string::add_string.exit93"
+  %i_le.i.i168 = icmp sgt i64 %self.1.load.i164, -1
+  br i1 %i_le.i.i168, label %"list<int>::get.exit.i176", label %else.i.i171
+
+else.i.i171:                                      ; preds = %else.i169
+  %stderr.i.i170 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
+  %23 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i170)
+  %24 = call i64 @fputwc(i32 10, ptr %stderr.i.i170)
   call void @exit(i64 1)
   unreachable
 
-"list<int>::get.exit.i144":                       ; preds = %else.i137
-  %self.0.0.load.i.i140 = load ptr, ptr %it, align 8
-  %gep.i.i141 = getelementptr i64, ptr %self.0.0.load.i.i140, i64 %self.1.load.i132
-  %deref.i.i142 = load i64, ptr %gep.i.i141, align 4
-  %22 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i142, ptr %22, align 4
-  %23 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %22, 1
-  %i_add.i143 = add nuw nsw i64 %self.1.load.i132, 1
-  store i64 %i_add.i143, ptr %self.1.i131, align 4
-  br label %"listiterator<int>::next.exit146"
+"list<int>::get.exit.i176":                       ; preds = %else.i169
+  %self.0.0.load.i.i172 = load ptr, ptr %it, align 8
+  %self.0.0.load.gep.i.i173 = getelementptr i64, ptr %self.0.0.load.i.i172, i64 %self.1.load.i164
+  %self.0.0.load.gep.deref.i.i174 = load i64, ptr %self.0.0.load.gep.i.i173, align 4
+  %25 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
+  store i64 %self.0.0.load.gep.deref.i.i174, ptr %25, align 4
+  %26 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %25, 1
+  %i_add.i175 = add nuw nsw i64 %self.1.load.i164, 1
+  store i64 %i_add.i175, ptr %self.1.i163, align 4
+  br label %"listiterator<int>::next.exit178"
 
-"listiterator<int>::next.exit146":                ; preds = %"string::add_string.exit84", %"list<int>::get.exit.i144"
-  %if_result.i145 = phi %"option<char>" [ %23, %"list<int>::get.exit.i144" ], [ zeroinitializer, %"string::add_string.exit84" ]
-  %present69 = extractvalue %"option<char>" %if_result.i145, 0
-  br i1 %present69, label %for, label %block5
+"listiterator<int>::next.exit178":                ; preds = %"string::add_string.exit93", %"list<int>::get.exit.i176"
+  %if_result.i177 = phi %"option<char>" [ %26, %"list<int>::get.exit.i176" ], [ zeroinitializer, %"string::add_string.exit93" ]
+  %present70 = extractvalue %"option<char>" %if_result.i177, 0
+  br i1 %present70, label %for, label %block6
 
 merge:                                            ; preds = %"string::add_string.exit", %then
-  %.pn120 = phi ptr [ %4, %then ], [ %.sink.i, %"string::add_string.exit" ]
-  %.pn118 = phi i64 [ 2, %then ], [ %i_add.i, %"string::add_string.exit" ]
-  %.pn116 = phi i64 [ 2, %then ], [ %result_inner.sroa.15.1.i, %"string::add_string.exit" ]
-  %.pn117 = insertvalue %"#dynarray" undef, ptr %.pn120, 0
-  %.pn115 = insertvalue %"#dynarray" %.pn117, i64 %.pn118, 1
-  %.pn114 = insertvalue %"#dynarray" %.pn115, i64 %.pn116, 2
-  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %.pn114, 0
+  %.pn153 = phi ptr [ %2, %then ], [ %result_inner.sroa.0.1.i, %"string::add_string.exit" ]
+  %.pn151 = phi i64 [ 2, %then ], [ %i_add.i, %"string::add_string.exit" ]
+  %.pn149 = phi i64 [ 2, %then ], [ %result_inner.sroa.15.1.i, %"string::add_string.exit" ]
+  %.pn150 = insertvalue %"#dynarray" undef, ptr %.pn153, 0
+  %.pn148 = insertvalue %"#dynarray" %.pn150, i64 %.pn151, 1
+  %inner69.i.pn = insertvalue %"#dynarray" %.pn148, i64 %.pn149, 2
+  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %inner69.i.pn, 0
   ret %string %if_result
 
-for:                                              ; preds = %"listiterator<int>::next.exit146", %"listiterator<int>::next.exit162"
-  %self.0.0.load.i90 = phi ptr [ %.sink.i108, %"listiterator<int>::next.exit162" ], [ %.sink.i80, %"listiterator<int>::next.exit146" ]
-  %self.0.1.load.i.i86 = phi i64 [ %i_add.i104, %"listiterator<int>::next.exit162" ], [ %i_add.i71, %"listiterator<int>::next.exit146" ]
-  %24 = phi %"option<char>" [ %if_result.i161, %"listiterator<int>::next.exit162" ], [ %if_result.i145, %"listiterator<int>::next.exit146" ]
-  %25 = extractvalue %"option<char>" %24, 1
-  %26 = load i64, ptr %25, align 4
-  %27 = alloca [2 x i8], align 2
-  store i8 44, ptr %27, align 2
-  %.repack38 = getelementptr inbounds [2 x i8], ptr %27, i64 0, i64 1
-  store i8 32, ptr %.repack38, align 1
-  %28 = call dereferenceable_or_null(2) ptr @malloc(i64 2)
-  %29 = load i16, ptr %27, align 2
-  store i16 %29, ptr %28, align 1
-  %i_add.i89 = add i64 %self.0.1.load.i.i86, 2
-  %30 = call ptr @malloc(i64 %i_add.i89)
-  %i_lt.i.i21.i91 = icmp sgt i64 %self.0.1.load.i.i86, 9223372036854775805
-  br i1 %i_lt.i.i21.i91, label %"#dynarray::extend.exit31.i92", label %"string::add_string.exit97"
+for:                                              ; preds = %"listiterator<int>::next.exit178", %"listiterator<int>::next.exit194"
+  %self.0.0.load.i100 = phi ptr [ %result_inner.sroa.0.1.i136, %"listiterator<int>::next.exit194" ], [ %result_inner.sroa.0.1.i90, %"listiterator<int>::next.exit178" ]
+  %self.0.1.load.i.i96 = phi i64 [ %i_add.i123, %"listiterator<int>::next.exit194" ], [ %i_add.i72, %"listiterator<int>::next.exit178" ]
+  %27 = phi %"option<char>" [ %if_result.i193, %"listiterator<int>::next.exit194" ], [ %if_result.i177, %"listiterator<int>::next.exit178" ]
+  %28 = extractvalue %"option<char>" %27, 1
+  %29 = load i64, ptr %28, align 4
+  %30 = alloca [2 x i8], align 2
+  store i8 44, ptr %30, align 2
+  %.repack39 = getelementptr inbounds [2 x i8], ptr %30, i64 0, i64 1
+  store i8 32, ptr %.repack39, align 1
+  %31 = call dereferenceable_or_null(2) ptr @malloc(i64 2)
+  %32 = load i16, ptr %30, align 2
+  store i16 %32, ptr %31, align 1
+  %i_add.i99 = add i64 %self.0.1.load.i.i96, 2
+  %33 = call ptr @malloc(i64 %i_add.i99)
+  %i_lt.i.i21.i101 = icmp sgt i64 %self.0.1.load.i.i96, 9223372036854775805
+  br i1 %i_lt.i.i21.i101, label %"#dynarray::extend.exit32.i107", label %"#dynarray::extend.exit32.thread.i103"
 
-"#dynarray::extend.exit31.i92":                   ; preds = %for
-  %31 = call ptr @malloc(i64 %self.0.1.load.i.i86)
-  call void @free(ptr %30)
-  br label %"string::add_string.exit97"
+"#dynarray::extend.exit32.thread.i103":           ; preds = %for
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %33, ptr align 1 %self.0.0.load.i100, i64 %self.0.1.load.i.i96, i1 false)
+  br label %"string::add_string.exit115"
 
-"string::add_string.exit97":                      ; preds = %for, %"#dynarray::extend.exit31.i92"
-  %.sink.i93 = phi ptr [ %31, %"#dynarray::extend.exit31.i92" ], [ %30, %for ]
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink.i93, ptr align 1 %self.0.0.load.i90, i64 %self.0.1.load.i.i86, i1 false)
-  %gep.i.i96 = getelementptr i8, ptr %.sink.i93, i64 %self.0.1.load.i.i86
-  %32 = load i16, ptr %28, align 1
-  store i16 %32, ptr %gep.i.i96, align 1
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %0)
-  %33 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_int_to_string, i64 %26)
-  %deref.i98 = load ptr, ptr %0, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %0)
-  %i_add.i104 = add i64 %33, %i_add.i89
-  %34 = call ptr @malloc(i64 %i_add.i104)
-  %i_lt.i.i21.i106 = icmp slt i64 %i_add.i104, %i_add.i89
-  br i1 %i_lt.i.i21.i106, label %"#dynarray::extend.exit31.i107", label %"string::add_string.exit112"
+"#dynarray::extend.exit32.i107":                  ; preds = %for
+  %i_mul.i.i22.i104 = shl i64 %i_add.i99, 1
+  %34 = call i64 @llvm.smax.i64(i64 %self.0.1.load.i.i96, i64 %i_mul.i.i22.i104)
+  %35 = call ptr @malloc(i64 %34)
+  call void @free(ptr %33)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %35, ptr align 1 %self.0.0.load.i100, i64 %self.0.1.load.i.i96, i1 false)
+  %i_lt.i.i.i106.not = icmp ult i64 %34, %i_add.i99
+  br i1 %i_lt.i.i.i106.not, label %"string::add_string.exit115", label %then.i.i.i109
 
-"#dynarray::extend.exit31.i107":                  ; preds = %"string::add_string.exit97"
-  %35 = call ptr @malloc(i64 %i_add.i89)
-  call void @free(ptr %34)
-  br label %"string::add_string.exit112"
+then.i.i.i109:                                    ; preds = %"#dynarray::extend.exit32.i107"
+  %i_mul.i.i.i108 = shl nuw i64 %34, 1
+  %36 = call i64 @llvm.smax.i64(i64 %i_add.i99, i64 %i_mul.i.i.i108)
+  %37 = call ptr @malloc(i64 %36)
+  call void @llvm.memmove.p0.p0.i64(ptr align 1 %37, ptr align 1 %self.0.0.load.i100, i64 %self.0.1.load.i.i96, i1 false)
+  call void @free(ptr %35)
+  br label %"string::add_string.exit115"
 
-"string::add_string.exit112":                     ; preds = %"string::add_string.exit97", %"#dynarray::extend.exit31.i107"
-  %.sink.i108 = phi ptr [ %35, %"#dynarray::extend.exit31.i107" ], [ %34, %"string::add_string.exit97" ]
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink.i108, ptr nonnull align 1 %.sink.i93, i64 %i_add.i89, i1 false)
-  %gep.i.i111 = getelementptr i8, ptr %.sink.i108, i64 %i_add.i89
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i.i111, ptr align 1 %deref.i98, i64 %33, i1 false)
-  %self.1.i147 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
-  %self.1.load.i148 = load i64, ptr %self.1.i147, align 4
-  %self.0.1.i.i149 = getelementptr inbounds %string, ptr %it, i64 0, i32 0, i32 1
-  %self.0.1.load.i.i150 = load i64, ptr %self.0.1.i.i149, align 4
-  %36 = sdiv i64 %self.0.1.load.i.i150, 8
-  %i_ge.not.i151 = icmp slt i64 %self.1.load.i148, %36
-  br i1 %i_ge.not.i151, label %else.i153, label %"listiterator<int>::next.exit162"
+"string::add_string.exit115":                     ; preds = %"#dynarray::extend.exit32.thread.i103", %"#dynarray::extend.exit32.i107", %then.i.i.i109
+  %result_inner.sroa.0.1.i112 = phi ptr [ %37, %then.i.i.i109 ], [ %35, %"#dynarray::extend.exit32.i107" ], [ %33, %"#dynarray::extend.exit32.thread.i103" ]
+  %self.0.load.gep.i.i113 = getelementptr i8, ptr %result_inner.sroa.0.1.i112, i64 %self.0.1.load.i.i96
+  %38 = load i16, ptr %31, align 1
+  store i16 %38, ptr %self.0.load.gep.i.i113, align 1
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i116)
+  %39 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i116, ptr nonnull @_tmpl_int_to_string, i64 %29)
+  %buf_ptr4.deref.i117 = load ptr, ptr %alloca.ptr.i116, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i116)
+  %i_add.i123 = add i64 %39, %i_add.i99
+  %40 = call ptr @malloc(i64 %i_add.i123)
+  %i_lt.i.i21.i125 = icmp slt i64 %i_add.i123, %i_add.i99
+  br i1 %i_lt.i.i21.i125, label %"#dynarray::extend.exit32.i131", label %"#dynarray::extend.exit32.thread.i127"
 
-else.i153:                                        ; preds = %"string::add_string.exit112"
-  %i_le.i.i152 = icmp sgt i64 %self.1.load.i148, -1
-  br i1 %i_le.i.i152, label %"list<int>::get.exit.i160", label %else.i.i155
+"#dynarray::extend.exit32.thread.i127":           ; preds = %"string::add_string.exit115"
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %40, ptr nonnull align 1 %result_inner.sroa.0.1.i112, i64 %i_add.i99, i1 false)
+  br label %"string::add_string.exit139"
 
-else.i.i155:                                      ; preds = %else.i153
-  %stderr.i.i154 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
-  %37 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i154)
-  %38 = call i64 @fputwc(i32 10, ptr %stderr.i.i154)
+"#dynarray::extend.exit32.i131":                  ; preds = %"string::add_string.exit115"
+  %i_mul.i.i22.i128 = shl i64 %i_add.i123, 1
+  %41 = call i64 @llvm.smax.i64(i64 %i_add.i99, i64 %i_mul.i.i22.i128)
+  %42 = call ptr @malloc(i64 %41)
+  call void @free(ptr %40)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %42, ptr nonnull align 1 %result_inner.sroa.0.1.i112, i64 %i_add.i99, i1 false)
+  %i_lt.i.i.i130 = icmp slt i64 %41, %i_add.i123
+  br i1 %i_lt.i.i.i130, label %then.i.i.i133, label %"string::add_string.exit139"
+
+then.i.i.i133:                                    ; preds = %"#dynarray::extend.exit32.i131"
+  %i_mul.i.i.i132 = shl i64 %41, 1
+  %43 = call i64 @llvm.smax.i64(i64 %i_add.i123, i64 %i_mul.i.i.i132)
+  %44 = call ptr @malloc(i64 %43)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %44, ptr nonnull align 1 %result_inner.sroa.0.1.i112, i64 %i_add.i99, i1 false)
+  call void @free(ptr %42)
+  br label %"string::add_string.exit139"
+
+"string::add_string.exit139":                     ; preds = %"#dynarray::extend.exit32.thread.i127", %"#dynarray::extend.exit32.i131", %then.i.i.i133
+  %result_inner.sroa.0.1.i136 = phi ptr [ %44, %then.i.i.i133 ], [ %42, %"#dynarray::extend.exit32.i131" ], [ %40, %"#dynarray::extend.exit32.thread.i127" ]
+  %self.0.load.gep.i.i137 = getelementptr i8, ptr %result_inner.sroa.0.1.i136, i64 %i_add.i99
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep.i.i137, ptr align 1 %buf_ptr4.deref.i117, i64 %39, i1 false)
+  %self.1.i179 = getelementptr inbounds %"listiterator<int>", ptr %it, i64 0, i32 1
+  %self.1.load.i180 = load i64, ptr %self.1.i179, align 4
+  %self.0.1.i.i181 = getelementptr inbounds %string, ptr %it, i64 0, i32 0, i32 1
+  %self.0.1.load.i.i182 = load i64, ptr %self.0.1.i.i181, align 4
+  %45 = sdiv i64 %self.0.1.load.i.i182, 8
+  %i_ge.not.i183 = icmp slt i64 %self.1.load.i180, %45
+  br i1 %i_ge.not.i183, label %else.i185, label %"listiterator<int>::next.exit194"
+
+else.i185:                                        ; preds = %"string::add_string.exit139"
+  %i_le.i.i184 = icmp sgt i64 %self.1.load.i180, -1
+  br i1 %i_le.i.i184, label %"list<int>::get.exit.i192", label %else.i.i187
+
+else.i.i187:                                      ; preds = %else.i185
+  %stderr.i.i186 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
+  %46 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i186)
+  %47 = call i64 @fputwc(i32 10, ptr %stderr.i.i186)
   call void @exit(i64 1)
   unreachable
 
-"list<int>::get.exit.i160":                       ; preds = %else.i153
-  %self.0.0.load.i.i156 = load ptr, ptr %it, align 8
-  %gep.i.i157 = getelementptr i64, ptr %self.0.0.load.i.i156, i64 %self.1.load.i148
-  %deref.i.i158 = load i64, ptr %gep.i.i157, align 4
-  %39 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i158, ptr %39, align 4
-  %40 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %39, 1
-  %i_add.i159 = add nuw nsw i64 %self.1.load.i148, 1
-  store i64 %i_add.i159, ptr %self.1.i147, align 4
-  br label %"listiterator<int>::next.exit162"
+"list<int>::get.exit.i192":                       ; preds = %else.i185
+  %self.0.0.load.i.i188 = load ptr, ptr %it, align 8
+  %self.0.0.load.gep.i.i189 = getelementptr i64, ptr %self.0.0.load.i.i188, i64 %self.1.load.i180
+  %self.0.0.load.gep.deref.i.i190 = load i64, ptr %self.0.0.load.gep.i.i189, align 4
+  %48 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
+  store i64 %self.0.0.load.gep.deref.i.i190, ptr %48, align 4
+  %49 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %48, 1
+  %i_add.i191 = add nuw nsw i64 %self.1.load.i180, 1
+  store i64 %i_add.i191, ptr %self.1.i179, align 4
+  br label %"listiterator<int>::next.exit194"
 
-"listiterator<int>::next.exit162":                ; preds = %"string::add_string.exit112", %"list<int>::get.exit.i160"
-  %if_result.i161 = phi %"option<char>" [ %40, %"list<int>::get.exit.i160" ], [ zeroinitializer, %"string::add_string.exit112" ]
-  %present = extractvalue %"option<char>" %if_result.i161, 0
-  br i1 %present, label %for, label %block5
+"listiterator<int>::next.exit194":                ; preds = %"string::add_string.exit139", %"list<int>::get.exit.i192"
+  %if_result.i193 = phi %"option<char>" [ %49, %"list<int>::get.exit.i192" ], [ zeroinitializer, %"string::add_string.exit139" ]
+  %present = extractvalue %"option<char>" %if_result.i193, 0
+  br i1 %present, label %for, label %block6
 
-block5:                                           ; preds = %"listiterator<int>::next.exit162", %"listiterator<int>::next.exit146"
-  %self.0.0.load.i = phi ptr [ %.sink.i80, %"listiterator<int>::next.exit146" ], [ %.sink.i108, %"listiterator<int>::next.exit162" ]
-  %self.0.1.load.i.i = phi i64 [ %i_add.i71, %"listiterator<int>::next.exit146" ], [ %i_add.i104, %"listiterator<int>::next.exit162" ]
-  %41 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
-  store i8 93, ptr %41, align 1
+block6:                                           ; preds = %"listiterator<int>::next.exit194", %"listiterator<int>::next.exit178"
+  %self.0.0.load.i = phi ptr [ %result_inner.sroa.0.1.i90, %"listiterator<int>::next.exit178" ], [ %result_inner.sroa.0.1.i136, %"listiterator<int>::next.exit194" ]
+  %self.0.1.load.i.i = phi i64 [ %i_add.i72, %"listiterator<int>::next.exit178" ], [ %i_add.i123, %"listiterator<int>::next.exit194" ]
+  %50 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
+  store i8 93, ptr %50, align 1
   %i_add.i = add i64 %self.0.1.load.i.i, 1
-  %42 = call ptr @malloc(i64 %i_add.i)
+  %51 = call ptr @malloc(i64 %i_add.i)
   %i_lt.i.i21.i = icmp eq i64 %self.0.1.load.i.i, 9223372036854775807
-  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit31.i", label %"string::add_string.exit"
+  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit32.i", label %"#dynarray::extend.exit32.thread.i"
 
-"#dynarray::extend.exit31.i":                     ; preds = %block5
-  %43 = call ptr @malloc(i64 %self.0.1.load.i.i)
-  call void @free(ptr %42)
+"#dynarray::extend.exit32.thread.i":              ; preds = %block6
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %51, ptr align 1 %self.0.0.load.i, i64 %self.0.1.load.i.i, i1 false)
   br label %"string::add_string.exit"
 
-"string::add_string.exit":                        ; preds = %block5, %"#dynarray::extend.exit31.i"
-  %.sink.i = phi ptr [ %43, %"#dynarray::extend.exit31.i" ], [ %42, %block5 ]
-  %result_inner.sroa.15.1.i = phi i64 [ 9223372036854775807, %"#dynarray::extend.exit31.i" ], [ %i_add.i, %block5 ]
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink.i, ptr align 1 %self.0.0.load.i, i64 %self.0.1.load.i.i, i1 false)
-  %gep.i.i = getelementptr i8, ptr %.sink.i, i64 %self.0.1.load.i.i
-  %44 = load i8, ptr %41, align 1
-  store i8 %44, ptr %gep.i.i, align 1
+"#dynarray::extend.exit32.i":                     ; preds = %block6
+  %i_mul.i.i22.i = shl i64 %i_add.i, 1
+  %52 = call i64 @llvm.smax.i64(i64 %self.0.1.load.i.i, i64 %i_mul.i.i22.i)
+  %53 = call ptr @malloc(i64 %52)
+  call void @free(ptr %51)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %53, ptr align 1 %self.0.0.load.i, i64 %self.0.1.load.i.i, i1 false)
+  %i_lt.i.i.i.not = icmp ult i64 %52, %i_add.i
+  br i1 %i_lt.i.i.i.not, label %"string::add_string.exit", label %then.i.i.i
+
+then.i.i.i:                                       ; preds = %"#dynarray::extend.exit32.i"
+  %i_mul.i.i.i = shl nuw i64 %52, 1
+  %54 = call i64 @llvm.smax.i64(i64 %i_add.i, i64 %i_mul.i.i.i)
+  %55 = call ptr @malloc(i64 %54)
+  call void @llvm.memmove.p0.p0.i64(ptr align 1 %55, ptr align 1 %self.0.0.load.i, i64 %self.0.1.load.i.i, i1 false)
+  call void @free(ptr %53)
+  br label %"string::add_string.exit"
+
+"string::add_string.exit":                        ; preds = %"#dynarray::extend.exit32.thread.i", %"#dynarray::extend.exit32.i", %then.i.i.i
+  %result_inner.sroa.15.1.i = phi i64 [ -2, %then.i.i.i ], [ 9223372036854775807, %"#dynarray::extend.exit32.i" ], [ %i_add.i, %"#dynarray::extend.exit32.thread.i" ]
+  %result_inner.sroa.0.1.i = phi ptr [ %55, %then.i.i.i ], [ %53, %"#dynarray::extend.exit32.i" ], [ %51, %"#dynarray::extend.exit32.thread.i" ]
+  %self.0.load.gep.i.i = getelementptr i8, ptr %result_inner.sroa.0.1.i, i64 %self.0.1.load.i.i
+  %56 = load i8, ptr %50, align 1
+  store i8 %56, ptr %self.0.load.gep.i.i, align 1
   br label %merge
 }
 
@@ -1595,8 +1708,8 @@ else:                                             ; preds = %body
 merge:                                            ; preds = %body
   %self.1 = getelementptr inbounds %"option<char>", ptr %self, i64 0, i32 1
   %self.1.load = load ptr, ptr %self.1, align 8
-  %deref = load i64, ptr %self.1.load, align 4
-  ret i64 %deref
+  %self.1.load.deref = load i64, ptr %self.1.load, align 4
+  ret i64 %self.1.load.deref
 }
 
 define void @"list<int>::set"(ptr nocapture readonly %self, i64 %i, i64 %t) local_unnamed_addr {
@@ -1620,24 +1733,24 @@ and_true:                                         ; preds = %body
 
 block:                                            ; preds = %and_true
   %self.0.0.load = load ptr, ptr %self, align 8
-  %gep = getelementptr i64, ptr %self.0.0.load, i64 %i
-  store i64 %t, ptr %gep, align 4
+  %self.0.0.load.gep = getelementptr i64, ptr %self.0.0.load, i64 %i
+  store i64 %t, ptr %self.0.0.load.gep, align 4
   ret void
 }
 
 define void @"list<int>::extend"(ptr nocapture %self, ptr nocapture readonly %lst) local_unnamed_addr {
 body:
-  %.unpack.unpack.i.i = load ptr, ptr %lst, align 8
-  %.unpack.elt1.i.i = getelementptr inbounds %"#dynarray", ptr %lst, i64 0, i32 1
-  %.unpack.unpack2.i.i = load i64, ptr %.unpack.elt1.i.i, align 8
-  %.unpack.elt3.i.i = getelementptr inbounds %"#dynarray", ptr %lst, i64 0, i32 2
-  %.unpack.unpack4.i.i = load i64, ptr %.unpack.elt3.i.i, align 8
+  %inner1.unpack.unpack.i.i = load ptr, ptr %lst, align 8
+  %inner1.unpack.elt2.i.i = getelementptr inbounds %"#dynarray", ptr %lst, i64 0, i32 1
+  %inner1.unpack.unpack3.i.i = load i64, ptr %inner1.unpack.elt2.i.i, align 8
+  %inner1.unpack.elt4.i.i = getelementptr inbounds %"#dynarray", ptr %lst, i64 0, i32 2
+  %inner1.unpack.unpack5.i.i = load i64, ptr %inner1.unpack.elt4.i.i, align 8
   %0 = alloca %"listiterator<int>", align 8
-  store ptr %.unpack.unpack.i.i, ptr %0, align 8
+  store ptr %inner1.unpack.unpack.i.i, ptr %0, align 8
   %.repack4 = getelementptr inbounds %"#dynarray", ptr %0, i64 0, i32 1
-  store i64 %.unpack.unpack2.i.i, ptr %.repack4, align 8
+  store i64 %inner1.unpack.unpack3.i.i, ptr %.repack4, align 8
   %.repack6 = getelementptr inbounds %"#dynarray", ptr %0, i64 0, i32 2
-  store i64 %.unpack.unpack4.i.i, ptr %.repack6, align 8
+  store i64 %inner1.unpack.unpack5.i.i, ptr %.repack6, align 8
   %.repack1 = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
   store i64 0, ptr %.repack1, align 8
   %self.1.i = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
@@ -1661,10 +1774,10 @@ else.i.i:                                         ; preds = %else.i
 
 "list<int>::get.exit.i":                          ; preds = %else.i
   %self.0.0.load.i.i = load ptr, ptr %0, align 8
-  %gep.i.i9 = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i
-  %deref.i.i = load i64, ptr %gep.i.i9, align 4
+  %self.0.0.load.gep.i.i = getelementptr i64, ptr %self.0.0.load.i.i, i64 %self.1.load.i
+  %self.0.0.load.gep.deref.i.i = load i64, ptr %self.0.0.load.gep.i.i, align 4
   %4 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i, ptr %4, align 4
+  store i64 %self.0.0.load.gep.deref.i.i, ptr %4, align 4
   %5 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %4, 1
   %i_add.i = add nuw nsw i64 %self.1.load.i, 1
   store i64 %i_add.i, ptr %self.1.i, align 4
@@ -1680,8 +1793,8 @@ for.preheader:                                    ; preds = %"listiterator<int>:
   %self.2.i.i.i = getelementptr inbounds %"#dynarray", ptr %self, i64 0, i32 2
   br label %for
 
-for:                                              ; preds = %for.preheader, %"listiterator<int>::next.exit25"
-  %6 = phi %"option<char>" [ %if_result.i24, %"listiterator<int>::next.exit25" ], [ %if_result.i, %for.preheader ]
+for:                                              ; preds = %for.preheader, %"listiterator<int>::next.exit24"
+  %6 = phi %"option<char>" [ %if_result.i23, %"listiterator<int>::next.exit24" ], [ %if_result.i, %for.preheader ]
   %7 = extractvalue %"option<char>" %6, 1
   %8 = load i64, ptr %7, align 4
   %self.1.load.i.i = load i64, ptr %self.1.i.i, align 4
@@ -1691,59 +1804,61 @@ for:                                              ; preds = %for.preheader, %"li
   br i1 %i_lt.i.i.i, label %then.i.i.i, label %"list<int>::push.exit"
 
 then.i.i.i:                                       ; preds = %for
+  %i_mul.i.i.i = shl i64 %self.2.load.i.i.i, 1
+  %9 = tail call i64 @llvm.smax.i64(i64 %i_add.i.i, i64 %i_mul.i.i.i)
   %self.0.load.i.i.i = load ptr, ptr %self, align 8
-  %9 = tail call ptr @malloc(i64 %i_add.i.i)
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %9, ptr align 1 %self.0.load.i.i.i, i64 %self.1.load.i.i, i1 false)
-  store ptr %9, ptr %self, align 8
-  store i64 %i_add.i.i, ptr %self.2.i.i.i, align 4
+  %10 = tail call ptr @malloc(i64 %9)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %10, ptr align 1 %self.0.load.i.i.i, i64 %self.1.load.i.i, i1 false)
+  store ptr %10, ptr %self, align 8
+  store i64 %9, ptr %self.2.i.i.i, align 4
   tail call void @free(ptr %self.0.load.i.i.i)
-  %self.13.load.pre.i.i = load i64, ptr %self.1.i.i, align 4
+  %self.14.load.pre.i.i = load i64, ptr %self.1.i.i, align 4
   br label %"list<int>::push.exit"
 
 "list<int>::push.exit":                           ; preds = %for, %then.i.i.i
-  %self.13.load.i.i = phi i64 [ %self.13.load.pre.i.i, %then.i.i.i ], [ %self.1.load.i.i, %for ]
+  %self.14.load.i.i = phi i64 [ %self.14.load.pre.i.i, %then.i.i.i ], [ %self.1.load.i.i, %for ]
   %self.0.load.i.i = load ptr, ptr %self, align 8
-  %gep.i.i = getelementptr i8, ptr %self.0.load.i.i, i64 %self.13.load.i.i
-  store i64 %8, ptr %gep.i.i, align 1
-  %self.14.load.i.i = load i64, ptr %self.1.i.i, align 4
-  %i_add5.i.i = add i64 %self.14.load.i.i, 8
-  store i64 %i_add5.i.i, ptr %self.1.i.i, align 4
-  %self.1.i10 = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
-  %self.1.load.i11 = load i64, ptr %self.1.i10, align 4
-  %self.0.1.i.i12 = getelementptr inbounds %string, ptr %0, i64 0, i32 0, i32 1
-  %self.0.1.load.i.i13 = load i64, ptr %self.0.1.i.i12, align 4
-  %10 = sdiv i64 %self.0.1.load.i.i13, 8
-  %i_ge.not.i14 = icmp slt i64 %self.1.load.i11, %10
-  br i1 %i_ge.not.i14, label %else.i16, label %"listiterator<int>::next.exit25"
+  %self.0.load.gep.i.i = getelementptr i8, ptr %self.0.load.i.i, i64 %self.14.load.i.i
+  store i64 %8, ptr %self.0.load.gep.i.i, align 1
+  %self.18.load.i.i = load i64, ptr %self.1.i.i, align 4
+  %i_add10.i.i = add i64 %self.18.load.i.i, 8
+  store i64 %i_add10.i.i, ptr %self.1.i.i, align 4
+  %self.1.i9 = getelementptr inbounds %"listiterator<int>", ptr %0, i64 0, i32 1
+  %self.1.load.i10 = load i64, ptr %self.1.i9, align 4
+  %self.0.1.i.i11 = getelementptr inbounds %string, ptr %0, i64 0, i32 0, i32 1
+  %self.0.1.load.i.i12 = load i64, ptr %self.0.1.i.i11, align 4
+  %11 = sdiv i64 %self.0.1.load.i.i12, 8
+  %i_ge.not.i13 = icmp slt i64 %self.1.load.i10, %11
+  br i1 %i_ge.not.i13, label %else.i15, label %"listiterator<int>::next.exit24"
 
-else.i16:                                         ; preds = %"list<int>::push.exit"
-  %i_le.i.i15 = icmp sgt i64 %self.1.load.i11, -1
-  br i1 %i_le.i.i15, label %"list<int>::get.exit.i23", label %else.i.i18
+else.i15:                                         ; preds = %"list<int>::push.exit"
+  %i_le.i.i14 = icmp sgt i64 %self.1.load.i10, -1
+  br i1 %i_le.i.i14, label %"list<int>::get.exit.i22", label %else.i.i17
 
-else.i.i18:                                       ; preds = %else.i16
-  %stderr.i.i17 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
-  %11 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i17)
-  %12 = call i64 @fputwc(i32 10, ptr %stderr.i.i17)
+else.i.i17:                                       ; preds = %else.i15
+  %stderr.i.i16 = call ptr @fdopen(i64 2, ptr nonnull @_write.1)
+  %12 = call i64 @fwrite(ptr nonnull @throw_msg.2.5, i64 25, i64 1, ptr %stderr.i.i16)
+  %13 = call i64 @fputwc(i32 10, ptr %stderr.i.i16)
   call void @exit(i64 1)
   unreachable
 
-"list<int>::get.exit.i23":                        ; preds = %else.i16
-  %self.0.0.load.i.i19 = load ptr, ptr %0, align 8
-  %gep.i.i20 = getelementptr i64, ptr %self.0.0.load.i.i19, i64 %self.1.load.i11
-  %deref.i.i21 = load i64, ptr %gep.i.i20, align 4
-  %13 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
-  store i64 %deref.i.i21, ptr %13, align 4
-  %14 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %13, 1
-  %i_add.i22 = add nuw nsw i64 %self.1.load.i11, 1
-  store i64 %i_add.i22, ptr %self.1.i10, align 4
-  br label %"listiterator<int>::next.exit25"
+"list<int>::get.exit.i22":                        ; preds = %else.i15
+  %self.0.0.load.i.i18 = load ptr, ptr %0, align 8
+  %self.0.0.load.gep.i.i19 = getelementptr i64, ptr %self.0.0.load.i.i18, i64 %self.1.load.i10
+  %self.0.0.load.gep.deref.i.i20 = load i64, ptr %self.0.0.load.gep.i.i19, align 4
+  %14 = call dereferenceable_or_null(8) ptr @malloc(i64 8)
+  store i64 %self.0.0.load.gep.deref.i.i20, ptr %14, align 4
+  %15 = insertvalue %"option<char>" { i1 true, ptr null }, ptr %14, 1
+  %i_add.i21 = add nuw nsw i64 %self.1.load.i10, 1
+  store i64 %i_add.i21, ptr %self.1.i9, align 4
+  br label %"listiterator<int>::next.exit24"
 
-"listiterator<int>::next.exit25":                 ; preds = %"list<int>::push.exit", %"list<int>::get.exit.i23"
-  %if_result.i24 = phi %"option<char>" [ %14, %"list<int>::get.exit.i23" ], [ zeroinitializer, %"list<int>::push.exit" ]
-  %present = extractvalue %"option<char>" %if_result.i24, 0
+"listiterator<int>::next.exit24":                 ; preds = %"list<int>::push.exit", %"list<int>::get.exit.i22"
+  %if_result.i23 = phi %"option<char>" [ %15, %"list<int>::get.exit.i22" ], [ zeroinitializer, %"list<int>::push.exit" ]
+  %present = extractvalue %"option<char>" %if_result.i23, 0
   br i1 %present, label %for, label %post_for
 
-post_for:                                         ; preds = %"listiterator<int>::next.exit25", %"listiterator<int>::next.exit"
+post_for:                                         ; preds = %"listiterator<int>::next.exit24", %"listiterator<int>::next.exit"
   ret void
 }
 
@@ -1759,23 +1874,25 @@ body:
   br i1 %i_lt.i.i, label %then.i.i, label %"#dynarray::extend.exit"
 
 then.i.i:                                         ; preds = %body
+  %i_mul.i.i = shl i64 %self.2.load.i.i, 1
+  %0 = tail call i64 @llvm.smax.i64(i64 %i_add.i, i64 %i_mul.i.i)
   %self.0.load.i.i = load ptr, ptr %self, align 8
-  %0 = tail call ptr @malloc(i64 %i_add.i)
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %self.0.load.i.i, i64 %self.1.load.i, i1 false)
-  store ptr %0, ptr %self, align 8
-  store i64 %i_add.i, ptr %self.2.i.i, align 4
+  %1 = tail call ptr @malloc(i64 %0)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %1, ptr align 1 %self.0.load.i.i, i64 %self.1.load.i, i1 false)
+  store ptr %1, ptr %self, align 8
+  store i64 %0, ptr %self.2.i.i, align 4
   tail call void @free(ptr %self.0.load.i.i)
-  %self.13.load.pre.i = load i64, ptr %self.1.i, align 4
+  %self.14.load.pre.i = load i64, ptr %self.1.i, align 4
   br label %"#dynarray::extend.exit"
 
 "#dynarray::extend.exit":                         ; preds = %body, %then.i.i
-  %self.13.load.i = phi i64 [ %self.13.load.pre.i, %then.i.i ], [ %self.1.load.i, %body ]
+  %self.14.load.i = phi i64 [ %self.14.load.pre.i, %then.i.i ], [ %self.1.load.i, %body ]
   %self.0.load.i = load ptr, ptr %self, align 8
-  %gep.i = getelementptr i8, ptr %self.0.load.i, i64 %self.13.load.i
-  store i64 %e, ptr %gep.i, align 1
-  %self.14.load.i = load i64, ptr %self.1.i, align 4
-  %i_add5.i = add i64 %self.14.load.i, 8
-  store i64 %i_add5.i, ptr %self.1.i, align 4
+  %self.0.load.gep.i = getelementptr i8, ptr %self.0.load.i, i64 %self.14.load.i
+  store i64 %e, ptr %self.0.load.gep.i, align 1
+  %self.18.load.i = load i64, ptr %self.1.i, align 4
+  %i_add10.i = add i64 %self.18.load.i, 8
+  store i64 %i_add10.i, ptr %self.1.i, align 4
   ret void
 }
 
@@ -1797,93 +1914,123 @@ else.i:                                           ; preds = %body
   %i_sub.i = add nsw i64 %self.1.load.i, -8
   store i64 %i_sub.i, ptr %self.1.i, align 4
   %self.0.load.i = load ptr, ptr %self, align 8
-  %gep.i = getelementptr i8, ptr %self.0.load.i, i64 %i_sub.i
-  %deref = load i64, ptr %gep.i, align 4
-  ret i64 %deref
+  %self.0.load.gep.i = getelementptr i8, ptr %self.0.load.i, i64 %i_sub.i
+  %.deref = load i64, ptr %self.0.load.gep.i, align 4
+  ret i64 %.deref
 }
 
 define %string @"option<int>::to_string"(ptr nocapture readonly %self) local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
+  %alloca.ptr.i = alloca ptr, align 8
   %self.0.load = load i1, ptr %self, align 1
   br i1 %self.0.load, label %then, label %else
 
 then:                                             ; preds = %body
   %self.1 = getelementptr inbounds %"option<char>", ptr %self, i64 0, i32 1
   %self.1.load = load ptr, ptr %self.1, align 8
-  %deref = load i64, ptr %self.1.load, align 4
-  %1 = alloca [5 x i8], align 1
-  store i8 115, ptr %1, align 1
-  %.repack4 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 1
+  %self.1.load.deref = load i64, ptr %self.1.load, align 4
+  %0 = alloca [5 x i8], align 1
+  store i8 115, ptr %0, align 1
+  %.repack4 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 1
   store i8 111, ptr %.repack4, align 1
-  %.repack5 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 2
+  %.repack5 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 2
   store i8 109, ptr %.repack5, align 1
-  %.repack6 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 3
+  %.repack6 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 3
   store i8 101, ptr %.repack6, align 1
-  %.repack7 = getelementptr inbounds [5 x i8], ptr %1, i64 0, i64 4
+  %.repack7 = getelementptr inbounds [5 x i8], ptr %0, i64 0, i64 4
   store i8 40, ptr %.repack7, align 1
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %0)
-  %2 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_int_to_string, i64 %deref)
-  %deref.i = load ptr, ptr %0, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %0)
-  %i_add.i27 = add i64 %2, 5
-  %3 = call ptr @malloc(i64 %i_add.i27)
-  %i_lt.i.i21.i = icmp ugt i64 %2, 9223372036854775802
-  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit31.i", label %"string::add_string.exit"
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %1 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i, ptr nonnull @_tmpl_int_to_string, i64 %self.1.load.deref)
+  %buf_ptr4.deref.i = load ptr, ptr %alloca.ptr.i, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i)
+  %i_add.i27 = add i64 %1, 5
+  %2 = call ptr @malloc(i64 %i_add.i27)
+  %i_lt.i.i21.i = icmp ugt i64 %1, 9223372036854775802
+  br i1 %i_lt.i.i21.i, label %"#dynarray::extend.exit32.i", label %"#dynarray::extend.exit32.thread.i"
 
-"#dynarray::extend.exit31.i":                     ; preds = %then
-  %4 = call dereferenceable_or_null(5) ptr @malloc(i64 5)
-  call void @free(ptr %3)
+"#dynarray::extend.exit32.thread.i":              ; preds = %then
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %2, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
   br label %"string::add_string.exit"
 
-"string::add_string.exit":                        ; preds = %then, %"#dynarray::extend.exit31.i"
-  %.sink.i = phi ptr [ %4, %"#dynarray::extend.exit31.i" ], [ %3, %then ]
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %.sink.i, ptr noundef nonnull align 1 dereferenceable(5) %1, i64 5, i1 false)
-  %gep.i.i = getelementptr i8, ptr %.sink.i, i64 5
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %gep.i.i, ptr align 1 %deref.i, i64 %2, i1 false)
-  %5 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
-  store i8 41, ptr %5, align 1
-  %i_add.i32 = add i64 %2, 6
-  %6 = call ptr @malloc(i64 %i_add.i32)
-  %i_lt.i.i21.i34 = icmp slt i64 %i_add.i32, %i_add.i27
-  br i1 %i_lt.i.i21.i34, label %"#dynarray::extend.exit31.i35", label %"string::add_string.exit40"
+"#dynarray::extend.exit32.i":                     ; preds = %then
+  %i_mul.i.i22.i = shl i64 %i_add.i27, 1
+  %3 = call i64 @llvm.smax.i64(i64 %i_mul.i.i22.i, i64 5)
+  %4 = call ptr @malloc(i64 %3)
+  call void @free(ptr %2)
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %4, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
+  %i_lt.i.i.i = icmp slt i64 %3, %i_add.i27
+  br i1 %i_lt.i.i.i, label %then.i.i.i, label %"string::add_string.exit"
 
-"#dynarray::extend.exit31.i35":                   ; preds = %"string::add_string.exit"
-  %7 = call ptr @malloc(i64 %i_add.i27)
-  call void @free(ptr %6)
-  br label %"string::add_string.exit40"
+then.i.i.i:                                       ; preds = %"#dynarray::extend.exit32.i"
+  %i_mul.i.i.i = shl nuw i64 %3, 1
+  %5 = call i64 @llvm.smax.i64(i64 %i_add.i27, i64 %i_mul.i.i.i)
+  %6 = call ptr @malloc(i64 %5)
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(5) %6, ptr noundef nonnull align 1 dereferenceable(5) %0, i64 5, i1 false)
+  call void @free(ptr nonnull %4)
+  br label %"string::add_string.exit"
 
-"string::add_string.exit40":                      ; preds = %"string::add_string.exit", %"#dynarray::extend.exit31.i35"
-  %.sink.i36 = phi ptr [ %7, %"#dynarray::extend.exit31.i35" ], [ %6, %"string::add_string.exit" ]
-  %result_inner.sroa.15.1.i37 = phi i64 [ %i_add.i27, %"#dynarray::extend.exit31.i35" ], [ %i_add.i32, %"string::add_string.exit" ]
-  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %.sink.i36, ptr nonnull align 1 %.sink.i, i64 %i_add.i27, i1 false)
-  %gep.i.i39 = getelementptr i8, ptr %.sink.i36, i64 %i_add.i27
-  %8 = load i8, ptr %5, align 1
-  store i8 %8, ptr %gep.i.i39, align 1
+"string::add_string.exit":                        ; preds = %"#dynarray::extend.exit32.thread.i", %"#dynarray::extend.exit32.i", %then.i.i.i
+  %result_inner.sroa.0.1.i = phi ptr [ %6, %then.i.i.i ], [ %4, %"#dynarray::extend.exit32.i" ], [ %2, %"#dynarray::extend.exit32.thread.i" ]
+  %self.0.load.gep.i.i = getelementptr i8, ptr %result_inner.sroa.0.1.i, i64 5
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %self.0.load.gep.i.i, ptr align 1 %buf_ptr4.deref.i, i64 %1, i1 false)
+  %7 = call dereferenceable_or_null(1) ptr @malloc(i64 1)
+  store i8 41, ptr %7, align 1
+  %i_add.i33 = add i64 %1, 6
+  %8 = call ptr @malloc(i64 %i_add.i33)
+  %i_lt.i.i21.i35 = icmp slt i64 %i_add.i33, %i_add.i27
+  br i1 %i_lt.i.i21.i35, label %"#dynarray::extend.exit32.i41", label %"#dynarray::extend.exit32.thread.i37"
+
+"#dynarray::extend.exit32.thread.i37":            ; preds = %"string::add_string.exit"
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %8, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i27, i1 false)
+  br label %"string::add_string.exit49"
+
+"#dynarray::extend.exit32.i41":                   ; preds = %"string::add_string.exit"
+  %i_mul.i.i22.i38 = shl i64 %i_add.i33, 1
+  %9 = call i64 @llvm.smax.i64(i64 %i_add.i27, i64 %i_mul.i.i22.i38)
+  %10 = call ptr @malloc(i64 %9)
+  call void @free(ptr %8)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %10, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i27, i1 false)
+  %i_lt.i.i.i40 = icmp slt i64 %9, %i_add.i33
+  br i1 %i_lt.i.i.i40, label %then.i.i.i43, label %"string::add_string.exit49"
+
+then.i.i.i43:                                     ; preds = %"#dynarray::extend.exit32.i41"
+  %i_mul.i.i.i42 = shl i64 %9, 1
+  %11 = call i64 @llvm.smax.i64(i64 %i_add.i33, i64 %i_mul.i.i.i42)
+  %12 = call ptr @malloc(i64 %11)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %12, ptr nonnull align 1 %result_inner.sroa.0.1.i, i64 %i_add.i27, i1 false)
+  call void @free(ptr %10)
+  br label %"string::add_string.exit49"
+
+"string::add_string.exit49":                      ; preds = %"#dynarray::extend.exit32.thread.i37", %"#dynarray::extend.exit32.i41", %then.i.i.i43
+  %result_inner.sroa.15.1.i45 = phi i64 [ %11, %then.i.i.i43 ], [ %9, %"#dynarray::extend.exit32.i41" ], [ %i_add.i33, %"#dynarray::extend.exit32.thread.i37" ]
+  %result_inner.sroa.0.1.i46 = phi ptr [ %12, %then.i.i.i43 ], [ %10, %"#dynarray::extend.exit32.i41" ], [ %8, %"#dynarray::extend.exit32.thread.i37" ]
+  %self.0.load.gep.i.i47 = getelementptr i8, ptr %result_inner.sroa.0.1.i46, i64 %i_add.i27
+  %13 = load i8, ptr %7, align 1
+  store i8 %13, ptr %self.0.load.gep.i.i47, align 1
   br label %merge
 
 else:                                             ; preds = %body
-  %9 = alloca [4 x i8], align 4
-  store i8 110, ptr %9, align 4
-  %.repack1 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 1
+  %14 = alloca [4 x i8], align 4
+  store i8 110, ptr %14, align 4
+  %.repack1 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 1
   store i8 111, ptr %.repack1, align 1
-  %.repack2 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 2
+  %.repack2 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 2
   store i8 110, ptr %.repack2, align 2
-  %.repack3 = getelementptr inbounds [4 x i8], ptr %9, i64 0, i64 3
+  %.repack3 = getelementptr inbounds [4 x i8], ptr %14, i64 0, i64 3
   store i8 101, ptr %.repack3, align 1
-  %10 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
-  %11 = load i32, ptr %9, align 4
-  store i32 %11, ptr %10, align 1
+  %15 = tail call dereferenceable_or_null(4) ptr @malloc(i64 4)
+  %16 = load i32, ptr %14, align 4
+  store i32 %16, ptr %15, align 1
   br label %merge
 
-merge:                                            ; preds = %else, %"string::add_string.exit40"
-  %.sink.i36.pn = phi ptr [ %.sink.i36, %"string::add_string.exit40" ], [ %10, %else ]
-  %i_add.i32.pn = phi i64 [ %i_add.i32, %"string::add_string.exit40" ], [ 4, %else ]
-  %result_inner.sroa.15.1.i37.pn = phi i64 [ %result_inner.sroa.15.1.i37, %"string::add_string.exit40" ], [ 4, %else ]
-  %.pn42 = insertvalue %"#dynarray" undef, ptr %.sink.i36.pn, 0
-  %.pn = insertvalue %"#dynarray" %.pn42, i64 %i_add.i32.pn, 1
-  %.pn41 = insertvalue %"#dynarray" %.pn, i64 %result_inner.sroa.15.1.i37.pn, 2
-  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %.pn41, 0
+merge:                                            ; preds = %else, %"string::add_string.exit49"
+  %result_inner.sroa.0.1.i46.pn = phi ptr [ %result_inner.sroa.0.1.i46, %"string::add_string.exit49" ], [ %15, %else ]
+  %i_add.i33.pn = phi i64 [ %i_add.i33, %"string::add_string.exit49" ], [ 4, %else ]
+  %result_inner.sroa.15.1.i45.pn = phi i64 [ %result_inner.sroa.15.1.i45, %"string::add_string.exit49" ], [ 4, %else ]
+  %.pn53 = insertvalue %"#dynarray" undef, ptr %result_inner.sroa.0.1.i46.pn, 0
+  %.pn = insertvalue %"#dynarray" %.pn53, i64 %i_add.i33.pn, 1
+  %result_inner29.i48.pn = insertvalue %"#dynarray" %.pn, i64 %result_inner.sroa.15.1.i45.pn, 2
+  %if_result = insertvalue %string zeroinitializer, %"#dynarray" %result_inner29.i48.pn, 0
   ret %string %if_result
 }
 
@@ -1895,57 +2042,60 @@ body:
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %0, ptr align 1 %contents, i64 %i_mul, i1 false)
   %1 = insertvalue %"#dynarray" undef, ptr %0, 0
   %2 = insertvalue %"#dynarray" %1, i64 %i_mul, 1
-  %3 = insertvalue %"#dynarray" %2, i64 %i_mul, 2
-  %4 = insertvalue %string zeroinitializer, %"#dynarray" %3, 0
-  ret %string %4
+  %inner79 = insertvalue %"#dynarray" %2, i64 %i_mul, 2
+  %3 = insertvalue %string zeroinitializer, %"#dynarray" %inner79, 0
+  ret %string %3
 }
 
 define i8 @main() local_unnamed_addr {
 body:
-  %0 = alloca ptr, align 8
-  %1 = alloca ptr, align 8
-  %2 = alloca ptr, align 8
+  %alloca.ptr.i38.i = alloca ptr, align 8
+  %alloca.ptr.i32.i = alloca ptr, align 8
+  %alloca.ptr.i.i = alloca ptr, align 8
   %a.i = alloca %string, align 8
-  %3 = tail call ptr @setlocale(i64 0, ptr nonnull @locale.6)
+  %0 = tail call ptr @setlocale(i64 0, ptr nonnull @locale.6)
   call void @llvm.lifetime.start.p0(i64 24, ptr %a.i)
-  %4 = tail call dereferenceable_or_null(40) ptr @malloc(i64 40)
-  store i64 1, ptr %4, align 1
-  %.sroa.252.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 8
-  store i64 2, ptr %.sroa.252.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.3.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 16
+  %1 = tail call dereferenceable_or_null(40) ptr @malloc(i64 40)
+  store i64 1, ptr %1, align 1
+  %.sroa.254.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 8
+  store i64 2, ptr %.sroa.254.0.self.0.load.i.i.sroa_idx.i, align 1
+  %.sroa.3.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 16
   store i64 3, ptr %.sroa.3.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.453.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 24
-  store i64 4, ptr %.sroa.453.0.self.0.load.i.i.sroa_idx.i, align 1
-  %.sroa.5.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %4, i64 32
+  %.sroa.455.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 24
+  store i64 4, ptr %.sroa.455.0.self.0.load.i.i.sroa_idx.i, align 1
+  %.sroa.5.0.self.0.load.i.i.sroa_idx.i = getelementptr inbounds i8, ptr %1, i64 32
   store i64 5, ptr %.sroa.5.0.self.0.load.i.i.sroa_idx.i, align 1
-  store ptr %4, ptr %a.i, align 8
+  store ptr %1, ptr %a.i, align 8
   %a.repack5.i = getelementptr inbounds %"#dynarray", ptr %a.i, i64 0, i32 1
   store i64 40, ptr %a.repack5.i, align 8
   %a.repack7.i = getelementptr inbounds %"#dynarray", ptr %a.i, i64 0, i32 2
   store i64 40, ptr %a.repack7.i, align 8
-  %5 = call %string @"list<int>::to_string"(ptr nonnull %a.i)
-  %6 = extractvalue %string %5, 0
-  %.elt9.i = extractvalue %"#dynarray" %6, 0
-  %.elt11.i = extractvalue %"#dynarray" %6, 1
-  %7 = tail call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %.elt11.i, ptr %.elt9.i)
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %2)
-  %8 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %2, ptr nonnull @_tmpl_byte_to_string, i8 127)
-  %deref.i.i = load ptr, ptr %2, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %2)
-  %9 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %8, ptr %deref.i.i)
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %1)
-  %10 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %1, ptr nonnull @_tmpl_ptr_to_string, ptr nonnull %4)
-  %deref.i32.i = load ptr, ptr %1, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %1)
-  %11 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %10, ptr %deref.i32.i)
-  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %0)
-  %12 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %0, ptr nonnull @_tmpl_int_to_string, i64 141)
-  %deref.i37.i = load ptr, ptr %0, align 8
-  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %0)
-  %13 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %12, ptr %deref.i37.i)
+  %2 = call %string @"list<int>::to_string"(ptr nonnull %a.i)
+  %3 = extractvalue %string %2, 0
+  %.elt9.i = extractvalue %"#dynarray" %3, 0
+  %.elt11.i = extractvalue %"#dynarray" %3, 1
+  %4 = tail call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %.elt11.i, ptr %.elt9.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i.i)
+  %5 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i.i, ptr nonnull @_tmpl_byte_to_string, i8 127)
+  %buf_ptr4.deref.i.i = load ptr, ptr %alloca.ptr.i.i, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i.i)
+  %6 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %5, ptr %buf_ptr4.deref.i.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i32.i)
+  %7 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i32.i, ptr nonnull @_tmpl_ptr_to_string, ptr nonnull %1)
+  %buf_ptr4.deref.i33.i = load ptr, ptr %alloca.ptr.i32.i, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i32.i)
+  %8 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %7, ptr %buf_ptr4.deref.i33.i)
+  call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %alloca.ptr.i38.i)
+  %9 = call i64 (ptr, ptr, ...) @asprintf(ptr nonnull %alloca.ptr.i38.i, ptr nonnull @_tmpl_int_to_string, i64 141)
+  %buf_ptr4.deref.i39.i = load ptr, ptr %alloca.ptr.i38.i, align 8
+  call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %alloca.ptr.i38.i)
+  %10 = call i64 (ptr, ...) @printf(ptr nonnull @_tmpl_print, i64 %9, ptr %buf_ptr4.deref.i39.i)
   call void @llvm.lifetime.end.p0(i64 24, ptr %a.i)
   ret i8 0
 }
+
+; Function Attrs: argmemonly mustprogress nocallback nofree nounwind willreturn
+declare void @llvm.memmove.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg) #6
 
 ; Function Attrs: argmemonly mustprogress nocallback nofree nounwind willreturn writeonly
 declare void @llvm.memset.p0.i64(ptr nocapture writeonly, i8, i64, i1 immarg) #12
@@ -1955,11 +2105,11 @@ attributes #1 = { mustprogress nofree nounwind willreturn }
 attributes #2 = { inaccessiblememonly mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) "alloc-family"="malloc" }
 attributes #3 = { argmemonly mustprogress nofree norecurse nosync nounwind readonly willreturn }
 attributes #4 = { mustprogress nounwind willreturn }
-attributes #5 = { argmemonly mustprogress nocallback nofree nounwind willreturn }
-attributes #6 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
-attributes #7 = { mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn }
-attributes #8 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
-attributes #9 = { mustprogress nofree nosync nounwind readnone willreturn }
+attributes #5 = { mustprogress nocallback nofree nosync nounwind readnone speculatable willreturn }
+attributes #6 = { argmemonly mustprogress nocallback nofree nounwind willreturn }
+attributes #7 = { inaccessiblemem_or_argmemonly mustprogress nounwind willreturn allockind("free") "alloc-family"="malloc" }
+attributes #8 = { mustprogress nofree nosync nounwind readnone willreturn }
+attributes #9 = { mustprogress nofree norecurse nosync nounwind readnone willreturn }
 attributes #10 = { argmemonly mustprogress nocallback nofree nosync nounwind willreturn }
 attributes #11 = { mustprogress nofree nounwind willreturn writeonly }
 attributes #12 = { argmemonly mustprogress nocallback nofree nounwind willreturn writeonly }

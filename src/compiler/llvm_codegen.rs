@@ -291,11 +291,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(alloca)
     }
 
-    fn get_ptr_opt(&mut self, ident: &str) -> Option<PointerValue<'ctx>> {
+    fn get_ptr(&mut self, ident: &str) -> Option<PointerValue<'ctx>> {
         self.vars.get(ident).copied()
     }
-    fn get_ptr(&mut self, ident: &str) -> LLVMResult<PointerValue<'ctx>> {
-        self.get_ptr_opt(ident)
+    fn get_ptr_or_err(&mut self, ident: &str) -> LLVMResult<PointerValue<'ctx>> {
+        self.get_ptr(ident)
             .ok_or_else(|| LLVMErr::UndefinedVar(String::from(ident)))
     }
 
@@ -810,9 +810,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 
         match expr {
             plir::ExprType::Ident(id) => {
-                match compiler.get_ptr_opt(id) {
+                match compiler.get_ptr(id) {
                     Some(ptr) => {
                         let bv = compiler.builder.build_load(expr_layout, ptr, "");
+                        bv.set_name(id);
                         Ok(GonValue::Basic(bv))
                     },
                     None => {
@@ -886,7 +887,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let val = expr.write_value(compiler)?;
 
                 let ptr = match target {
-                    plir::AsgUnit::Ident(ident) => compiler.get_ptr(ident)?,
+                    plir::AsgUnit::Ident(ident) => compiler.get_ptr_or_err(ident)?,
                     plir::AsgUnit::Path(p)      => p.write_ptr(compiler)?,
                     plir::AsgUnit::Index(_)     => todo!(),
                     plir::AsgUnit::Deref(d)     => d.write_ptr(compiler)?,
@@ -1133,15 +1134,23 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let ptr = compiler.basic_value_of(ptr_gv)
                     .into_pointer_value();
 
+                let ptr_name = ptr.get_name()
+                    .to_str()
+                    .unwrap();
                 let gep_ptr = unsafe {
-                    compiler.builder.build_gep(layout, ptr, &params, "gep")
+                    compiler.builder.build_gep(layout, ptr, &params, &format!("{ptr_name}.gep"))
                 };
 
                 Ok(GonValue::Basic(gep_ptr.into()))
             },
             plir::ExprType::Alloca(ty) => {
                 let layout = compiler.get_layout(ty)?;
-                let ptr = compiler.builder.build_alloca(layout, "");
+
+                let mut ty_ident = ty.short_ident();
+                ty_ident = ty_ident.strip_prefix('#')
+                    .unwrap_or(ty_ident);
+
+                let ptr = compiler.builder.build_alloca(layout, &format!("alloca.{ty_ident}"));
                 Ok(GonValue::Basic(ptr.into()))
             }
             plir::ExprType::SizeOf(ty) => {
@@ -1164,7 +1173,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
 impl<'ctx> TraverseIRPtr<'ctx> for plir::Expr {
     fn write_ptr(&self, compiler: &mut LLVMCodegen<'ctx>) -> LLVMResult<PointerValue<'ctx>> {
         match &self.expr {
-            plir::ExprType::Ident(ident) => compiler.get_ptr(ident),
+            plir::ExprType::Ident(ident) => compiler.get_ptr_or_err(ident),
             plir::ExprType::Path(p) => p.write_ptr(compiler),
             plir::ExprType::Deref(d) => d.write_ptr(compiler),
             _ => {
@@ -1287,7 +1296,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
         let ptr = self.write_ptr(compiler)?;
         let layout = compiler.get_layout(&self.ty)?;
 
-        let bv = compiler.builder.build_load(layout, ptr, "deref");
+        let ptr_name = ptr.get_name()
+            .to_str()
+            .unwrap();
+        let bv = compiler.builder.build_load(layout, ptr, &format!("{ptr_name}.deref"));
         Ok(GonValue::Basic(bv))
     }
 }
