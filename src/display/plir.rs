@@ -202,12 +202,16 @@ impl Display for Param {
     }
 }
 
-impl Display for KnownType {
+impl<U: TypeUnit> Display for Type<U> 
+    where U::Ref: Display
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.as_ref().fmt(f)
     }
 }
-impl Display for TypeRef<'_> {
+impl<U: TypeUnit> Display for TypeRef<'_, U> 
+    where U::Ref: Display
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeRef::Prim(ident) => write!(f, "{ident}"),
@@ -240,21 +244,22 @@ impl Display for TypeRef<'_> {
     }
 }
 
-impl Display for FunType {
+impl<U: TypeUnit> Display for FunType<U> 
+    where U::Ref: Display
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunType { params, ret, varargs } = self;
-        write!(f, "(")?;
-
-        let mut pd: Vec<_> = params.iter()
-            .map(|t| t as _)
-            .collect();
-        if *varargs { pd.push(&".." as _); }
-        fmt_dyn_list(f, &pd)?;
-
-        write!(f, ") -> {ret}")
+        write!(f, "{}", self.as_ref())
     }
 }
 
+impl Display for MTypeUnit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MTypeUnit::Known(s) => write!(f, "{s}"),
+            MTypeUnit::Unk(i)   => write!(f, "?{i}"),
+        }
+    }
+}
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Expr { ty, expr } = self;

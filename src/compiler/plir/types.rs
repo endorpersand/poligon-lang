@@ -9,7 +9,7 @@ use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 use super::Split;
 
 /// Trait holding any type which can be used as a primitive for [Type].
-pub trait TypeUnit {
+pub trait TypeUnit: Borrow<Self::Ref> {
     /// Reference type for parametrized [TypeRef]
     type Ref: ?Sized + ToOwned<Owned=Self> + PartialEq;
 }
@@ -163,9 +163,7 @@ impl<U: TypeUnit> Type<U> {
         }
     }
 
-    pub(crate) fn as_ref(&self) -> TypeRef<<U::Ref as ToOwned>::Owned> 
-        where U: Borrow<U::Ref> // <-- should be known, but rustc's yelling at me
-    {
+    pub(crate) fn as_ref(&self) -> TypeRef<<U::Ref as ToOwned>::Owned> {
         match self {
             Type::Prim(prim) => TypeRef::Prim(prim.borrow()),
             Type::Generic(ident, params) => TypeRef::Generic(ident.borrow(), params),
@@ -322,18 +320,18 @@ impl KnownType {
     }
 }
 
-impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<TypeRef<'a, U>> for Type<U> {
+impl<'a, U: TypeUnit + PartialEq> PartialEq<TypeRef<'a, U>> for Type<U> {
     fn eq(&self, &other: &TypeRef<U>) -> bool {
         self.as_ref() == other
     }
 }
-impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<Type<U>> for TypeRef<'a, U> {
+impl<'a, U: TypeUnit + PartialEq> PartialEq<Type<U>> for TypeRef<'a, U> {
     fn eq(&self, other: &Type<U>) -> bool { other.eq(self) }
 }
-impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<TypeRef<'a, U>> for &'a Type<U> {
+impl<'a, U: TypeUnit + PartialEq> PartialEq<TypeRef<'a, U>> for &'a Type<U> {
     fn eq(&self, other: &TypeRef<U>) -> bool { (*self).eq(other) }
 }
-impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<&'a Type<U>> for TypeRef<'a, U> {
+impl<'a, U: TypeUnit + PartialEq> PartialEq<&'a Type<U>> for TypeRef<'a, U> {
     fn eq(&self, other: &&Type<U>) -> bool { self.eq(*other) }
 }
 
