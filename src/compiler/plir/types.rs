@@ -1,47 +1,68 @@
-use std::borrow::Cow;
+use std::borrow::{Cow, Borrow};
 
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
 
 use crate::ast;
-use crate::compiler::plir_codegen::OpErr;
+use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 
 use super::Split;
+
+/// Trait holding any type which can be used as a primitive for [Type].
+pub trait TypeUnit {
+    /// Reference type for parametrized [TypeRef]
+    type Ref: ?Sized + ToOwned<Owned=Self> + PartialEq;
+}
+impl TypeUnit for String {
+    type Ref = str;
+}
 
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type {
+pub enum Type<U: TypeUnit = String> {
     /// A type without type parameters (e.g. `string`, `int`).
-    Prim(String),
+    Prim(U),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
-    Generic(String, Vec<Type>),
+    Generic(String, Vec<Type<U>>),
     /// A tuple of types (e.g. `[int, int, int]`).
-    Tuple(Vec<Type>),
+    Tuple(Vec<Type<U>>),
     /// A function (e.g. `() -> int`, `str -> int`).
-    Fun(FunType)
+    Fun(FunType<U>)
 }
 
 /// A function type expression.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct FunType {
+pub struct FunType<U: TypeUnit = String> {
     /// The parameter types of this function type
-    pub params: Vec<Type>, 
+    pub params: Vec<Type<U>>, 
 
     /// The return type
-    pub ret: Box<Type>,
+    pub ret: Box<Type<U>>,
 
     /// Whether this type has varargs at the end of its parameters
     pub varargs: bool
 }
 
-impl FunType {
+impl<U: TypeUnit> FunType<U> {
     /// Constructs a new function type.
-    pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
+    pub fn new(params: Vec<Type<U>>, ret: Type<U>, varargs: bool) -> Self {
         FunType {params, ret: Box::new(ret), varargs }
     }
 
+    /// Removes the first parameter of the function.
+    /// 
+    /// This is useful for removing the referent in method types.
+    pub fn pop_front(&mut self) {
+        self.params.remove(0);
+    }
+
+    pub(crate) fn as_ref(&self) -> TypeRef<U> {
+        TypeRef::Fun(&self.params, &self.ret, self.varargs)
+    }
+}
+impl FunType {
     /// Constructs a function signature (with parameter names lost) out of a given function type.
     pub fn extern_fun_sig(&self, ident: super::FunIdent) -> super::FunSignature {
         let params = self.params.iter()
@@ -62,26 +83,12 @@ impl FunType {
             ret: (*self.ret).clone(),
         }
     }
-
-    pub(crate) fn as_ref(&self) -> TypeRef {
-        TypeRef::Fun(&self.params, &self.ret, self.varargs)
-    }
-
-    /// Removes the first parameter of the function.
-    /// 
-    /// This is useful for removing the referent in method types.
-    pub fn pop_front(&mut self) {
-        self.params.remove(0);
-    }
-
 }
 
 impl TryFrom<Type> for FunType {
-    type Error = crate::compiler::plir_codegen::PLIRErr;
+    type Error = PLIRErr;
 
     fn try_from(value: Type) -> Result<Self, Self::Error> {
-        use crate::compiler::plir_codegen::PLIRErr;
-
         match value {
             Type::Fun(f) => Ok(f),
             t => Err(PLIRErr::CannotCall(t))
@@ -89,28 +96,64 @@ impl TryFrom<Type> for FunType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum TypeRef<'a> {
-    Prim(&'a str),
-    Generic(&'a str, &'a [Type]),
-    Tuple(&'a [Type]),
-    Fun(&'a [Type], &'a Type, bool)
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TypeRef<'a, U: TypeUnit = String> {
+    Prim(&'a U::Ref),
+    Generic(&'a str, &'a [Type<U>]),
+    Tuple(&'a [Type<U>]),
+    Fun(&'a [Type<U>], &'a Type<U>, bool)
 }
-impl TypeRef<'_> {
+impl<U: TypeUnit + Clone> TypeRef<'_, U> {
     #[allow(unused)]
-    pub(crate) fn to_owned(self) -> Type {
+    pub(crate) fn to_owned(self) -> Type<U> {
         match self {
-            TypeRef::Prim(ident) => Type::Prim(String::from(ident)),
-            TypeRef::Generic(ident, params) => Type::Generic(String::from(ident), Vec::from(params)),
+            TypeRef::Prim(ident) => Type::Prim(ident.to_owned()),
+            TypeRef::Generic(ident, params) => Type::Generic(ident.to_owned(), Vec::from(params)),
             TypeRef::Tuple(tys) => Type::Tuple(Vec::from(tys)),
             TypeRef::Fun(params, ret, var_args) => Type::fun_type(Vec::from(params), ret.clone(), var_args),
         }
     }
 }
+impl<U: TypeUnit> Clone for TypeRef<'_, U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U: TypeUnit> Copy for TypeRef<'_, U> {}
 
 enum TypeRezError {
     NoBranches,
     MultipleBranches
+}
+impl<U: TypeUnit> Type<U> {
+    pub(crate) fn fun_type(params: impl IntoIterator<Item=Self>, ret: Self, var_args: bool) -> Self {
+        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
+    }
+
+    /// Gets the generic parameters of this type.
+    /// 
+    /// This function does not allocate or clone anything.
+    pub fn generic_args(&self) -> Cow<[Self]> 
+        where Self: Clone
+    {
+        match self {
+            Type::Prim(_)       => Cow::from(vec![]),
+            Type::Generic(_, p) => Cow::from(p),
+            Type::Tuple(_)      => Cow::from(vec![]),
+            Type::Fun(_)        => Cow::from(vec![]),
+        }
+    }
+
+    pub(crate) fn as_ref(&self) -> TypeRef<<U::Ref as ToOwned>::Owned> 
+        where U: Borrow<U::Ref> // <-- should be known, but rustc's yelling at me
+    {
+        match self {
+            Type::Prim(prim) => TypeRef::Prim(prim.borrow()),
+            Type::Generic(ident, params) => TypeRef::Generic(ident.borrow(), params),
+            Type::Tuple(params) => TypeRef::Tuple(params),
+            Type::Fun(ft) => ft.as_ref()
+        }
+    }
 }
 impl Type {
     pub(crate) const S_INT:   &'static str = "int";
@@ -125,19 +168,6 @@ impl Type {
     pub(crate) const S_RANGE: &'static str = "range";
     pub(crate) const S_NEVER: &'static str = "never";
     pub(crate) const S_UNK:   &'static str = "unk";
-
-    pub(crate) fn as_ref(&self) -> TypeRef {
-        match self {
-            Type::Prim(ident) => TypeRef::Prim(ident),
-            Type::Generic(ident, params) => TypeRef::Generic(ident, params),
-            Type::Tuple(params) => TypeRef::Tuple(params),
-            Type::Fun(ft) => ft.as_ref()
-        }
-    }
-
-    pub(crate) fn fun_type(params: impl IntoIterator<Item=Type>, ret: Type, var_args: bool) -> Self {
-        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
-    }
 
     /// Test if this type is `never`.
     #[inline]
@@ -271,33 +301,21 @@ impl Type {
             },
         }
     }
-
-    /// Gets the generic parameters of this type.
-    /// 
-    /// This function does not allocate or clone anything.
-    pub fn generic_args(&self) -> Cow<[Type]> {
-        match self {
-            Type::Prim(_)       => Cow::from(vec![]),
-            Type::Generic(_, p) => Cow::from(p),
-            Type::Tuple(_)      => Cow::from(vec![]),
-            Type::Fun(_)        => Cow::from(vec![]),
-        }
-    }
 }
 
-impl<'a> PartialEq<TypeRef<'a>> for Type {
-    fn eq(&self, &other: &TypeRef) -> bool {
+impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<TypeRef<'a, U>> for Type<U> {
+    fn eq(&self, &other: &TypeRef<U>) -> bool {
         self.as_ref() == other
     }
 }
-impl<'a> PartialEq<Type> for TypeRef<'a> {
-    fn eq(&self, other: &Type) -> bool { other.eq(self) }
+impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<Type<U>> for TypeRef<'a, U> {
+    fn eq(&self, other: &Type<U>) -> bool { other.eq(self) }
 }
-impl<'a> PartialEq<TypeRef<'a>> for &'a Type {
-    fn eq(&self, other: &TypeRef) -> bool { (*self).eq(other) }
+impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<TypeRef<'a, U>> for &'a Type<U> {
+    fn eq(&self, other: &TypeRef<U>) -> bool { (*self).eq(other) }
 }
-impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
-    fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
+impl<'a, U: TypeUnit + PartialEq + Borrow<U::Ref>> PartialEq<&'a Type<U>> for TypeRef<'a, U> {
+    fn eq(&self, other: &&Type<U>) -> bool { self.eq(*other) }
 }
 
 /// Helper type which generalizes numerics into categories.
