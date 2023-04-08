@@ -92,18 +92,18 @@ impl<'ctx> ExitPointers<'ctx> {
 }
 
 pub(super) struct TypeLayouts<V> {
-    layouts: HashMap<plir::Type, V>
+    layouts: HashMap<plir::KnownType, V>
 }
 impl<V> TypeLayouts<V> {
     fn new() -> Self {
         TypeLayouts { layouts: HashMap::new() }
     }
 
-    fn get_by_type(&self, ty: &plir::Type) -> Option<&V> {
+    fn get_by_type(&self, ty: &plir::KnownType) -> Option<&V> {
         self.layouts.get(ty)
     }
 
-    fn insert(&mut self, ty: plir::Type, v: V) {
+    fn insert(&mut self, ty: plir::KnownType, v: V) {
         self.layouts.insert(ty, v);
     }
 }
@@ -258,7 +258,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Create an alloca instruction that can store a value of a given [`plir::Type`].
-    fn alloca(&mut self, ty: &plir::Type, ident: &str) -> LLVMResult<PointerValue<'ctx>>
+    fn alloca(&mut self, ty: &plir::KnownType, ident: &str) -> LLVMResult<PointerValue<'ctx>>
     {
         let alloca = self.builder.build_alloca(self.get_layout(ty)?, ident);
         self.vars.insert(String::from(ident), alloca);
@@ -379,7 +379,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Build a function return instruction using a GonValue.
-    pub fn build_typed_return(&self, ty: &plir::Type, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
+    pub fn build_typed_return(&self, ty: &plir::KnownType, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
         match (ty.as_ref(), gv) {
             (plir::TypeRef::Prim(plir::Type::S_VOID), _) => self.builder.build_return(None),
             (_, GonValue::Unit)                          => self.builder.build_return(None),
@@ -444,12 +444,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Define a type for the compiler to track.
-    fn define_type(&mut self, ty: plir::Type, layout: impl BasicType<'ctx>) {
+    fn define_type(&mut self, ty: plir::KnownType, layout: impl BasicType<'ctx>) {
         self.layouts.insert(ty, layout.as_basic_type_enum());
     }
 
     /// Get the LLVM layout of a given PLIR type.
-    pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> LLVMResult<BasicTypeEnum<'ctx>> {
+    pub(in crate::compiler) fn get_layout(&self, ty: &plir::KnownType) -> LLVMResult<BasicTypeEnum<'ctx>> {
         if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
             Ok(self.get_layout(t)?.array_type(0).into())
         } else {
@@ -462,7 +462,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Get the BasicTypeEnum for this PLIR type (or void if is void).
     /// 
     /// This is useful for function types returning.
-    fn get_layout_or_void(&self, ty: &plir::Type) -> LLVMResult<ReturnableType<'ctx>> {
+    fn get_layout_or_void(&self, ty: &plir::KnownType) -> LLVMResult<ReturnableType<'ctx>> {
         use plir::{TypeRef, Type};
 
         if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
@@ -474,7 +474,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Determines whether this type is copy-by-reference through functions.
     /// Errors if type does not have an LLVM representation.
-    fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<bool> {
+    fn is_ref_layout(&self, ty: &plir::KnownType) -> LLVMResult<bool> {
         use plir::{Type, TypeRef};
 
         let layout = self.get_layout(ty)?;
@@ -489,7 +489,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
     /// If a type is copy-by-reference, this type is LLVM `ptr`, otherwise it is its normal value.
-    fn get_ref_layout(&self, ty: &plir::Type) -> LLVMResult<BasicTypeEnum<'ctx>> {
+    fn get_ref_layout(&self, ty: &plir::KnownType) -> LLVMResult<BasicTypeEnum<'ctx>> {
         if self.is_ref_layout(ty)? {
             Ok(self.ptr_type(Default::default()).into())
         } else {
@@ -534,7 +534,7 @@ pub enum LLVMErr {
     /// The function created was invalid.
     InvalidFun,
     /// The given PLIR type could not be resolved into a type in LLVM.
-    UnresolvedType(plir::Type),
+    UnresolvedType(plir::KnownType),
     /// The unary operator cannot be applied to this LLVM type.
     CannotUnary(op::Unary, BasicTypeEnumS),
     /// The binary operator cannot be applied between these two LLVM types.
@@ -542,7 +542,7 @@ pub enum LLVMErr {
     /// These two LLVM types can't be compared using the given operation.
     CannotCmp(op::Cmp, BasicTypeEnumS, BasicTypeEnumS),
     /// Cannot perform a type cast from A to B
-    CannotCast(plir::Type /* from */, plir::Type /* to */),
+    CannotCast(plir::KnownType /* from */, plir::KnownType /* to */),
     /// Endpoint for LLVM (main function) could not be resolved.
     CannotDetermineMain,
     /// Endpoint for LLVM (main function) had invalid parameters.

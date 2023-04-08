@@ -29,9 +29,9 @@ fn wrap_ident(ident: &str, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{ident:?}")
     }
 }
-fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
+fn wrap_ty(ty: &plir::KnownType, f: &mut Formatter<'_>) -> std::fmt::Result {
     match ty {
-        Type::Prim(ident) => wrap_ident(ident, f),
+        KnownType::Prim(ident) => wrap_ident(ident, f),
         _ => write!(f, "<{ty}>")
     }
 }
@@ -202,7 +202,7 @@ impl Display for Param {
     }
 }
 
-impl Display for Type {
+impl Display for KnownType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.as_ref().fmt(f)
     }

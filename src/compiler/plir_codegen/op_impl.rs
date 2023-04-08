@@ -8,21 +8,21 @@ use super::PLIRResult;
 #[derive(Debug)]
 pub enum OpErr {
     /// The unary operator cannot be applied to this type.
-    CannotUnary(op::Unary, Type),
+    CannotUnary(op::Unary, KnownType),
     /// The binary operator cannot be applied between these two types.
-    CannotBinary(op::Binary, Type, Type),
+    CannotBinary(op::Binary, KnownType, KnownType),
     /// These two types can't be compared using the given operation.
-    CannotCmp(op::Cmp, Type, Type),
+    CannotCmp(op::Cmp, KnownType, KnownType),
     /// Cannot index this type.
-    CannotIndex(Type),
+    CannotIndex(KnownType),
     /// Cannot index this type using the other type.
-    CannotIndexWith(Type, Type),
+    CannotIndexWith(KnownType, KnownType),
     /// Type is a tuple, and cannot be indexed by a non-literal.
-    TupleIndexNonLiteral(Type),
+    TupleIndexNonLiteral(KnownType),
     /// Type is a tuple, and the index provided was out of bounds.
-    TupleIndexOOB(Type, isize),
+    TupleIndexOOB(KnownType, isize),
     /// Type cannot be split properly using this split.
-    InvalidSplit(Type, Split)
+    InvalidSplit(KnownType, Split)
 }
 
 impl GonErr for OpErr {
@@ -57,7 +57,7 @@ impl std::error::Error for OpErr {}
 type HomoResult<T> = Result<T, T>;
 struct Cast<'a> {
     src: Located<Expr>,
-    dest: &'a Type,
+    dest: &'a KnownType,
     cf: CastFlags
 }
 
@@ -97,7 +97,7 @@ impl<'a> Cast<'a> {
     }
 
     fn apply_cast(self, cg: &mut super::PLIRCodegen) -> PLIRResult<HomoResult<Located<Expr>>> {
-        fn basic_cast(src: Located<Expr>, dest: &Type) -> Located<Expr> {
+        fn basic_cast(src: Located<Expr>, dest: &KnownType) -> Located<Expr> {
             src.map(|e| Expr {
                 ty: dest.clone(), expr: ExprType::Cast(Box::new(e))
             })
@@ -184,10 +184,10 @@ impl<T> ResultIntoInner for HomoResult<T> {
 }
 
 impl super::PLIRCodegen {
-    pub(super) fn apply_cast(&mut self, src: Located<Expr>, dest: &Type, cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> {
+    pub(super) fn apply_cast(&mut self, src: Located<Expr>, dest: &KnownType, cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> {
         Cast { src, dest, cf }.apply_cast(self)
     }
-    fn apply_cast2(&mut self, (left, right): (Located<Expr>, Located<Expr>), dest: &Type, cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
+    fn apply_cast2(&mut self, (left, right): (Located<Expr>, Located<Expr>), dest: &KnownType, cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> {
         let cast1 = Cast { src: left, dest, cf };
         let cast2 = Cast { src: right, dest, cf };
 
@@ -202,7 +202,7 @@ impl super::PLIRCodegen {
 
     /// Try casting the expression to one of the given types until successful.
     fn cast_chain<'a, I>(&mut self, src: Located<Expr>, tys: I, cf: CastFlags) -> PLIRResult<HomoResult<Located<Expr>>> 
-        where I: IntoIterator<Item=&'a Type>
+        where I: IntoIterator<Item=&'a KnownType>
     {
         let mut cast = Cast { src, dest: &ty!(Type::S_NEVER), cf };
         for dest in tys {
@@ -218,7 +218,7 @@ impl super::PLIRCodegen {
 
     /// Try casting the expression to one of the given types until successful.
     fn cast_chain2<'a, I>(&mut self, (left, right): (Located<Expr>, Located<Expr>), tys: I, cf: CastFlags) -> PLIRResult<HomoResult<(Located<Expr>, Located<Expr>)>> 
-        where I: IntoIterator<Item=&'a Type>
+        where I: IntoIterator<Item=&'a KnownType>
     {
         let mut cast1 = Cast { src: left,  dest: &ty!(Type::S_NEVER), cf };
         let mut cast2 = Cast { src: right, dest: &ty!(Type::S_NEVER), cf };
@@ -239,7 +239,7 @@ impl super::PLIRCodegen {
     }
 
     /// Checks if this unary operator exists as a method.
-    fn find_unary_method(&mut self, op: op::Unary, left: Located<&Type>) -> PLIRResult<Option<Expr>> {
+    fn find_unary_method(&mut self, op: op::Unary, left: Located<&KnownType>) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Unary::Plus   => "plus",
             op::Unary::Minus  => "minus",
@@ -312,7 +312,7 @@ impl super::PLIRCodegen {
     }
 
     /// Checks if this unary operator exists as a method.
-    fn find_binary_method(&mut self, op: op::Binary, left: Located<&Type>, right: &Type) -> PLIRResult<Option<Expr>> {
+    fn find_binary_method(&mut self, op: op::Binary, left: Located<&KnownType>, right: &KnownType) -> PLIRResult<Option<Expr>> {
         let method_name = match op {
             op::Binary::Add => "add",
             op::Binary::Sub => "sub",
@@ -483,7 +483,7 @@ impl super::PLIRCodegen {
         Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast.0), right: Box::new(rcast.0) }})
     }
 
-    pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
+    pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(KnownType, Index)> {
         // Check for any valid casts that can be applied here:
         let lcast = self.apply_cast(left, &ty!(Type::S_STR), CastFlags::Implicit)?.into_inner();
     

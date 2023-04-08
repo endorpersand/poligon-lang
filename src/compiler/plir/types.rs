@@ -17,25 +17,11 @@ impl TypeUnit for String {
     type Ref = str;
 }
 
-/// Unit type which includes the possibility of an unknown type variable.
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum MTypeUnit {
-    /// Primitive type which is known
-    Known(String),
-    /// Unknown type variable
-    Unk(usize)
-}
-impl TypeUnit for MTypeUnit {
-    type Ref = MTypeUnit;
-}
-/// A type expression which can include an unknown type variable.
-pub type MaybeType = Type<MTypeUnit>;
-
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type<U: TypeUnit = String> {
+pub enum Type<U: TypeUnit> {
     /// A type without type parameters (e.g. `string`, `int`).
     Prim(U),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
@@ -58,6 +44,25 @@ pub struct FunType<U: TypeUnit = String> {
     /// Whether this type has varargs at the end of its parameters
     pub varargs: bool
 }
+
+
+/// Unit type which includes the possibility of an unknown type variable.
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub enum MTypeUnit {
+    /// Primitive type which is known
+    Known(String),
+    /// Unknown type variable
+    Unk(usize)
+}
+impl TypeUnit for MTypeUnit {
+    type Ref = MTypeUnit;
+}
+/// A type expression which can include an unknown type variable.
+pub type MaybeType = Type<MTypeUnit>;
+/// A known type unit.
+pub type KTypeUnit = String;
+/// A type expression whose type is fully known
+pub type KnownType = Type<KTypeUnit>;
 
 impl<U: TypeUnit> FunType<U> {
     /// Constructs a new function type.
@@ -99,10 +104,10 @@ impl FunType {
     }
 }
 
-impl TryFrom<Type> for FunType {
+impl TryFrom<KnownType> for FunType {
     type Error = PLIRErr;
 
-    fn try_from(value: Type) -> Result<Self, Self::Error> {
+    fn try_from(value: KnownType) -> Result<Self, Self::Error> {
         match value {
             Type::Fun(f) => Ok(f),
             t => Err(PLIRErr::CannotCall(t))
@@ -169,7 +174,7 @@ impl<U: TypeUnit> Type<U> {
         }
     }
 }
-impl Type {
+impl KnownType {
     pub(crate) const S_INT:   &'static str = "int";
     pub(crate) const S_FLOAT: &'static str = "float";
     pub(crate) const S_BOOL:  &'static str = "bool";
@@ -209,7 +214,7 @@ impl Type {
     }
 
     /// Given some types, merge them into what type it could be.
-    fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
+    fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Result<KnownType, TypeRezError> {
         let mut it = into_it.into_iter()
             .filter(|ty| !ty.is_never());
     
@@ -224,7 +229,7 @@ impl Type {
     }
 
     /// Resolve a block's type, given the types of the values exited from the block.
-    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
+    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Option<KnownType> {
         match Type::resolve_type(into_it) {
             Ok(ty) => Some(ty),
             Err(TypeRezError::NoBranches) => Some(ty!(Type::S_NEVER)),
@@ -232,12 +237,12 @@ impl Type {
         }
     }
     /// Resolve a collection literal's type, given the types of the elements of the collection.
-    pub fn resolve_collection_ty<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
+    pub fn resolve_collection_ty<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Option<KnownType> {
         Type::resolve_type(into_it).ok()
     }
 
     /// Compute the type that would result by splitting this type with the given [`Split`].
-    pub fn split(&self, sp: Split) -> Result<Type, OpErr> {
+    pub fn split(&self, sp: Split) -> Result<KnownType, OpErr> {
         match self.as_ref() {
             TypeRef::Prim(Type::S_STR) => match sp {
                 Split::Left(_)
@@ -289,7 +294,7 @@ impl Type {
     /// Return this type's full identifier.
     pub fn ident(&self) -> Cow<str> {
         #[inline]
-        fn param_tuple(params: &[Type]) -> String {
+        fn param_tuple(params: &[KnownType]) -> String {
             params.iter()
                 .map(Type::ident)
                 .collect::<Vec<_>>()
@@ -339,7 +344,7 @@ pub(crate) struct NumType {
     pub bit_len: usize
 }
 lazy_static! {
-    static ref NUM_TYPE_ORDER: IndexMap<Type, NumType> = {
+    static ref NUM_TYPE_ORDER: IndexMap<KnownType, NumType> = {
         let mut m = IndexMap::new();
 
         m.insert(ty!("#byte"),       NumType { floating: false, bit_len: 8  });
@@ -350,7 +355,7 @@ lazy_static! {
     };
 }
 impl NumType {
-    pub fn new(ty: &Type) -> Option<Self> {
+    pub fn new(ty: &KnownType) -> Option<Self> {
         NUM_TYPE_ORDER.get(ty).copied()
     }
 
@@ -361,15 +366,15 @@ impl NumType {
         self.floating
     }
 
-    pub fn order<'a>() -> Vec<&'a Type> {
+    pub fn order<'a>() -> Vec<&'a KnownType> {
         NUM_TYPE_ORDER.keys().collect()
     }
-    pub fn int_order<'a>() -> Vec<&'a Type> {
+    pub fn int_order<'a>() -> Vec<&'a KnownType> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(pt, nt)| nt.is_int_like().then_some(pt))
             .collect()
     }
-    pub fn float_order<'a>() -> Vec<&'a Type> {
+    pub fn float_order<'a>() -> Vec<&'a KnownType> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(t, nt)| nt.is_float_like().then_some(t))
             .collect()
@@ -412,7 +417,7 @@ pub(crate) use ty;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Class {
     /// The associated [`Type`] of this class
-    pub ty: Type,
+    pub ty: KnownType,
     /// A mapping of identifiers to fields in the class
     pub fields: IndexMap<String, Field>
 }
@@ -430,5 +435,5 @@ pub struct Field {
     pub mt: ast::MutType,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Type
+    pub ty: KnownType
 }

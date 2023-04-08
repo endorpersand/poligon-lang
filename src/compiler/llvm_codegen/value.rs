@@ -70,7 +70,6 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
-        // todo: support \0
         let _int = layout!(self, S_INT).into_int_type();
         let _str = layout!(self, S_STR).into_struct_type();
 
@@ -99,7 +98,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// - float to int
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::KnownType, dest: &plir::KnownType) -> LLVMResult<GonValue<'ctx>> {
         use plir::{Type, NumType, TypeRef};
         
         match (src.as_ref(), dest.as_ref()) {
