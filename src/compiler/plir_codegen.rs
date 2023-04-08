@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 
 use crate::ast::{self, ReasgType, MutType};
 use crate::compiler::internals::C_INTRINSICS_PLIR;
