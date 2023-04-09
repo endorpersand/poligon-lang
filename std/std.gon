@@ -94,6 +94,25 @@ class string {
     fun self.chars() -> string_chars {
         string_chars::new(self);
     }
+    fun self.contains_char(m: char) -> bool {
+        for ch in self.chars() {
+            if ch == m { return true; }
+        }
+        return false;
+    }
+    fun self.get(i: int) -> char {
+        if 0 <= i && i < self.len() {
+            let c = 0;
+            let chars = self.chars();
+            while c < i {
+                chars.next();
+                c = c + 1;
+            }
+            chars.next().get();
+        } else {
+            throw "array index out of bounds";
+        }
+    }
 }
 
 class string_chars {

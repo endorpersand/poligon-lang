@@ -26,36 +26,47 @@ class string_chars {
     str: string,
     buf: #ptr
 }
-fun <string>::chars(self: string) -> string_chars {
-    return <string_chars>(<(string) -> string_chars>(<string_chars>::new)(<string>(self)));
-}
-fun <string>::slice_bytes(self: string, start: int, end: int) -> string {
-    return <string>(if <bool>(<bool>(<bool>(<int>(0) <= <int>(start)) && <bool>(<int>(start) <= <int>(end))) && <bool>(<int>(end) <= <int>(<() -> int>(<string>(self).len)()))) <string>{
-        exit string #{#dynarray #{<#ptr>(<#byte>::#gep(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(start))), <int>(<int>(end) - <int>(start)), <int>(<int>(<#dynarray>(<string>(self).0).2) - <int>(start))}};
-    } else <never>{
-        throw "invalid slice";
-    });
-}
-extern fun "#malloc"(arg0: int) -> #ptr;
-fun <string_chars>::new(str: string) -> string_chars {
-    return string_chars #{<string>(str), <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())))};
-}
-fun <string>::len(self: string) -> int {
-    return <int>(<#dynarray>(<string>(self).0).1);
-}
-fun <string>::to_string(self: string) -> string {
-    return <string>(self);
-}
-fun <string>::add_string(self: string, other: string) -> string {
-    let new_len: int = <int>(<int>(<() -> int>(<string>(self).len)()) + <int>(<() -> int>(<string>(other).len)()));
-    let result_inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(new_len)));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(<() -> int>(<string>(self).len)())));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
-    return string #{<#dynarray>(result_inner)};
-}
 class <option<char>> {
     present: bool,
     value: #ptr
+}
+fun <string>::get(self: string, i: int) -> char {
+    return <char>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<string>(self).len)()))) <char>{
+        let c: int = <int>(0);
+        let chars: string_chars = <string_chars>(<() -> string_chars>(<string>(self).chars)());
+        <void>(while <bool>(<int>(c) < <int>(i)) <int>{
+            <option<char>>(<() -> option<char>>(<string_chars>(chars).next)());
+            exit <int>{
+                exit <int>(c = <int>(<int>(c) + <int>(1)));
+            };
+        })
+        exit <char>(<() -> char>(<option<char>>(<() -> option<char>>(<string_chars>(chars).next)()).get)());
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <string>::contains_char(self: string, m: char) -> bool {
+    <void>(for <char>(ch) in <string_chars>(<() -> string_chars>(<string>(self).chars)()) <void>{
+        exit <void>(if <bool>(<char>(ch) == <char>(m)) <never>{
+            return <bool>(true);
+        });
+    })
+    return <bool>(false);
+}
+fun <option<char>>::get(self: option<char>) -> char {
+    return <char>(if <bool>(<option<char>>(self).0) <char>{
+        exit <char>(*<option<char>>(self).1);
+    } else <never>{
+        throw "no value present";
+    });
+}
+fun <option<char>>::to_string(self: option<char>) -> string {
+    return <string>(if <bool>(<option<char>>(self).0) <string>{
+        let value: char = <char>(*<option<char>>(self).1);
+        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(<(char) -> string>(<char>::to_string)(<char>(value))))), <string>(")")));
+    } else <string>{
+        exit <string>("none");
+    });
 }
 extern fun "#mbtowc"(arg0: #ptr, arg1: #ptr, arg2: int) -> int;
 fun <string_chars>::next(self: string_chars) -> option<char> {
@@ -77,6 +88,21 @@ fun <string_chars>::next(self: string_chars) -> option<char> {
         });
     });
 }
+fun <string>::add_string(self: string, other: string) -> string {
+    let new_len: int = <int>(<int>(<() -> int>(<string>(self).len)()) + <int>(<() -> int>(<string>(other).len)()));
+    let result_inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(new_len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(<() -> int>(<string>(self).len)())));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(result_inner).extend)(<#ptr>(<#dynarray>(<string>(other).0).0), <int>(<() -> int>(<string>(other).len)())));
+    return string #{<#dynarray>(result_inner)};
+}
+extern fun "#malloc"(arg0: int) -> #ptr;
+fun <option<char>>::some(t: char) -> option<char> {
+    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())));
+    <char>{
+        exit <char>(*value = <char>(t));
+    }
+    return option<char> #{<bool>(true), <#ptr>(value)};
+}
 extern fun "#memcpy"(arg0: #ptr, arg1: #ptr, arg2: int) -> #ptr;
 fun <#dynarray>::extend(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
     <void>(<(int) -> void>(<#dynarray>(self).resize)(<int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
@@ -86,12 +112,8 @@ fun <#dynarray>::extend(self: #dynarray, add_buf: #ptr, add_len: int) -> void {
         exit <void>(castfrom <int>(<#dynarray>(self).1 = <int>(<int>(<#dynarray>(self).1) + <int>(add_len))));
     };
 }
-fun <option<char>>::some(t: char) -> option<char> {
-    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())));
-    <char>{
-        exit <char>(*value = <char>(t));
-    }
-    return option<char> #{<bool>(true), <#ptr>(value)};
+fun <string_chars>::new(str: string) -> string_chars {
+    return string_chars #{<string>(str), <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<char>::size_of())))};
 }
 extern fun "#free"(arg0: #ptr) -> void;
 fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
@@ -109,22 +131,24 @@ fun <#dynarray>::resize(self: #dynarray, new_cap: int) -> void {
         exit <void>(<(#ptr) -> void>(#free)(<#ptr>(old_buf)));
     });
 }
-fun <option<char>>::to_string(self: option<char>) -> string {
-    return <string>(if <bool>(<option<char>>(self).0) <string>{
-        let value: char = <char>(*<option<char>>(self).1);
-        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(<(char) -> string>(<char>::to_string)(<char>(value))))), <string>(")")));
-    } else <string>{
-        exit <string>("none");
-    });
+fun <string>::to_string(self: string) -> string {
+    return <string>(self);
 }
 extern fun "#smax"(arg0: int, arg1: int) -> int;
 fun <int>::max(self: int, o: int) -> int {
     return <int>(<(int, int) -> int>(#smax)(<int>(self), <int>(o)));
 }
-fun <char>::to_string(self: char) -> string {
-    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
-    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
-    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
+fun <string>::len(self: string) -> int {
+    return <int>(<#dynarray>(<string>(self).0).1);
+}
+fun <string>::from_raw(contents: #ptr, len: int) -> string {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(len)));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
+    return string #{<#dynarray>(inner)};
+}
+extern fun "#smin"(arg0: int, arg1: int) -> int;
+fun <int>::min(self: int, o: int) -> int {
+    return <int>(<(int, int) -> int>(#smin)(<int>(self), <int>(o)));
 }
 fun <#dynarray>::take(self: #dynarray, sub_len: int) -> #ptr {
     return <#ptr>(if <bool>(<int>(<#dynarray>(self).1) >= <int>(sub_len)) <#ptr>{
@@ -140,17 +164,11 @@ fun <#dynarray>::new(cap: int) -> #dynarray {
     let buf: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(cap)));
     return #dynarray #{<#ptr>(buf), <int>(0), <int>(cap)};
 }
-fun <option<char>>::get(self: option<char>) -> char {
-    return <char>(if <bool>(<option<char>>(self).0) <char>{
-        exit <char>(*<option<char>>(self).1);
-    } else <never>{
-        throw "no value present";
-    });
+fun <string>::new() -> string {
+    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
 }
-fun <string>::from_raw(contents: #ptr, len: int) -> string {
-    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(len)));
-    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(len)));
-    return string #{<#dynarray>(inner)};
+fun <string>::chars(self: string) -> string_chars {
+    return <string_chars>(<(string) -> string_chars>(<string_chars>::new)(<string>(self)));
 }
 extern fun "#ptrnull"() -> #ptr;
 fun <#ptr>::null() -> #ptr {
@@ -168,9 +186,12 @@ fun <bool>::to_string(self: bool) -> string {
         exit <string>("false");
     });
 }
-extern fun "#smin"(arg0: int, arg1: int) -> int;
-fun <int>::min(self: int, o: int) -> int {
-    return <int>(<(int, int) -> int>(#smin)(<int>(self), <int>(o)));
+fun <string>::slice_bytes(self: string, start: int, end: int) -> string {
+    return <string>(if <bool>(<bool>(<bool>(<int>(0) <= <int>(start)) && <bool>(<int>(start) <= <int>(end))) && <bool>(<int>(end) <= <int>(<() -> int>(<string>(self).len)()))) <string>{
+        exit string #{#dynarray #{<#ptr>(<#byte>::#gep(<#ptr>(<#dynarray>(<string>(self).0).0), <int>(start))), <int>(<int>(end) - <int>(start)), <int>(<int>(<#dynarray>(<string>(self).0).2) - <int>(start))}};
+    } else <never>{
+        throw "invalid slice";
+    });
 }
 extern fun "#isnan"(arg0: float) -> bool;
 fun <float>::isnan(self: float) -> bool {
@@ -376,8 +397,10 @@ fun <int>::sign(self: int) -> int {
 fun <option<char>>::none() -> option<char> {
     return option<char> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
 }
-fun <string>::new() -> string {
-    return string #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+fun <char>::to_string(self: char) -> string {
+    let buf_ptr: #ptr = <#ptr>(<#ptr>::#alloca());
+    let len: int = <int>(<(#ptr, #ptr, ..) -> int>(#asprintf)(<#ptr>(buf_ptr), <#ptr>(_tmpl_char_to_string), <char>(self)));
+    return string #{#dynarray #{<#ptr>(*buf_ptr), <int>(len), <int>(<int>(len) + <int>(1))}};
 }
 extern fun "#abs"(arg0: int, arg1: bool) -> int;
 fun <int>::abs(self: int) -> int {
