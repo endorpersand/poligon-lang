@@ -1227,8 +1227,8 @@ impl PLIRCodegen {
         );
 
         let InsertBlock {block, mut exits, unres_values, unres_types, .. } = self.program;
-        debug_assert!(unres_values.is_empty(), "there was an unresolved value in program");
-        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program");
+        debug_assert!(unres_values.is_empty(), "there was an unresolved value in program {}", unres_values.iter().next().unwrap().0);
+        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program {}", unres_types.iter().next().unwrap().0);
 
         match exits.pop() {
             None => Ok(()),
@@ -1717,7 +1717,7 @@ impl PLIRCodegen {
             BlockExitHandle::Continue(ty) => type_branches.push(ty),
             BlockExitHandle::LoopExit => {},
             BlockExitHandle::Propagate(exit, conditional) => {
-                let located_exit = Located::new(exit, exit_range);
+                let located_exit = Located::new(exit, exit_range.clone());
                 if conditional {
                     self.peek_block().exits.push(located_exit);
                 } else {
@@ -1727,7 +1727,7 @@ impl PLIRCodegen {
         }
 
         let bty = plir::Type::resolve_branches(&type_branches)
-            .ok_or(PLIRErr::CannotResolveType)?;
+            .ok_or_else(|| PLIRErr::CannotResolveType.at_range(exit_range))?;
         Ok(plir::Block(bty, block))
     }
     fn consume_tree_block(
@@ -2296,7 +2296,7 @@ impl PLIRCodegen {
                 };
 
                 let ty = plir::Type::resolve_collection_ty([&left.ty, &right.ty])
-                    .ok_or(PLIRErr::CannotResolveType)?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_RANGE, [ty]),
@@ -2327,7 +2327,8 @@ impl PLIRCodegen {
                     .chain(std::iter::once(else_ty));
 
                 Ok(plir::Expr::new(
-                    plir::Type::resolve_branches(type_iter).ok_or(PLIRErr::CannotResolveType)?,
+                    plir::Type::resolve_branches(type_iter)
+                        .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?,
                     plir::ExprType::If { conditionals, last }
                 ))
             },
