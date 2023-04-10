@@ -91,14 +91,14 @@ impl<U: TypeUnit> FunType<U> {
         TypeRef::Fun(&self.params, &self.ret, self.varargs)
     }
 
-    pub(crate) fn try_map<V: TypeUnit, E>(self, mut f: impl FnMut(U) -> Result<V, E>) -> Result<FunType<V>, E> {
+    pub(crate) fn try_map<V: TypeUnit, E>(self, f: &mut impl FnMut(U) -> Result<V, E>) -> Result<FunType<V>, E> {
         let FunType { params, ret, varargs } = self;
         
         let params = params.into_iter()
-            .map(|t| t.try_map(&mut f))
+            .map(|t| t.try_map(f))
             .collect::<Result<_, _>>()?;
         
-        let ret = ret.try_map(&mut f)
+        let ret = ret.try_map(f)
             .map(Box::new)?;
 
         Ok(FunType { params, ret, varargs })
@@ -106,7 +106,7 @@ impl<U: TypeUnit> FunType<U> {
 
     #[allow(unused)]
     pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> FunType<V> {
-        self.try_map::<V, std::convert::Infallible>(|u| Ok(f(u)))
+        self.try_map::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
             .unwrap_or_else(|e| match e {})
     }
 }
@@ -159,26 +159,26 @@ impl<U: TypeUnit> TypeRef<'_, U> {
         self.map_owned(U::Ref::to_owned)
     }
 
-    pub(crate) fn try_map_owned<V: TypeUnit, E>(self, mut f: impl FnMut(&U::Ref) -> Result<V, E>) -> Result<Type<V>, E> {
+    pub(crate) fn try_map_owned<V: TypeUnit, E>(self, f: &mut impl FnMut(&U::Ref) -> Result<V, E>) -> Result<Type<V>, E> {
         let result = match self {
             TypeRef::Prim(id) => Type::Prim(f(id)?),
             TypeRef::Generic(id, params) => {
                 let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .map(|t| t.as_ref().try_map_owned(f))
                     .collect::<Result<_, _>>()?;
                 Type::Generic(id.to_owned(), params)
             },
             TypeRef::Tuple(params) => {
                 let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .map(|t| t.as_ref().try_map_owned(f))
                     .collect::<Result<_, _>>()?;
                 Type::Tuple(params)
             },
             TypeRef::Fun(params, ret, varargs) => {
                 let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(&mut f))
+                    .map(|t| t.as_ref().try_map_owned(f))
                     .collect::<Result<_, _>>()?;
-                let ret = ret.as_ref().try_map_owned(&mut f)?;
+                let ret = ret.as_ref().try_map_owned(f)?;
                 Type::Fun(FunType { params, ret: Box::new(ret), varargs })
             },
         };
@@ -187,7 +187,7 @@ impl<U: TypeUnit> TypeRef<'_, U> {
     }
 
     pub(crate) fn map_owned<V: TypeUnit>(self, mut f: impl FnMut(&U::Ref) -> V) -> Type<V> {
-        self.try_map_owned::<V, std::convert::Infallible>(|u| Ok(f(u)))
+        self.try_map_owned::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
             .unwrap_or_else(|e| match e {})
     }
 }
@@ -230,23 +230,23 @@ impl<U: TypeUnit> Type<U> {
         }
     }
 
-    pub(crate) fn try_map<V: TypeUnit, E>(self, mut f: impl FnMut(U) -> Result<V, E>) -> Result<Type<V>, E> {
+    pub(crate) fn try_map<V: TypeUnit, E>(self, f: &mut impl FnMut(U) -> Result<V, E>) -> Result<Type<V>, E> {
         let result = match self {
             Type::Prim(id) => Type::Prim(f(id)?),
             Type::Generic(id, params) => {
                 let params = params.into_iter()
-                    .map(|t| t.try_map(&mut f))
+                    .map(|t| t.try_map(f))
                     .collect::<Result<_, _>>()?;
                 Type::Generic(id, params)
             },
             Type::Tuple(params) => {
                 let params = params.into_iter()
-                    .map(|t| t.try_map(&mut f))
+                    .map(|t| t.try_map(f))
                     .collect::<Result<_, _>>()?;
                 Type::Tuple(params)
             },
             Type::Fun(fun) => {
-                Type::Fun(fun.try_map(&mut f)?)
+                Type::Fun(fun.try_map(f)?)
             },
         };
 
@@ -254,7 +254,7 @@ impl<U: TypeUnit> Type<U> {
     }
 
     pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> Type<V> {
-        self.try_map::<V, std::convert::Infallible>(|u| Ok(f(u)))
+        self.try_map::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
             .unwrap_or_else(|e| match e {})
     }
 }
