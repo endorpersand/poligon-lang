@@ -83,6 +83,8 @@ pub enum PLIRErr {
     DuplicateValueDefs(plir::FunIdent),
     /// Type has multiple definitions
     DuplicateTypeDefs(plir::KnownType),
+    /// Type constraint failed
+    TypeConstraintErr(ConstraintErr)
 }
 
 type FullPLIRErr = FullGonErr<PLIRErr>;
@@ -116,6 +118,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::WrongTypeArity(_, _)
             | PLIRErr::CannotInitialize(_)
             | PLIRErr::CannotDeref
+            | PLIRErr::TypeConstraintErr(_)
             => "type error",
             
             | PLIRErr::UndefinedVarAttr(_)
@@ -162,6 +165,10 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::UninitializedField(t, field) => write!(f, "uninitialized field '{field}' on type '{t}'"),
             PLIRErr::UnexpectedField(t, field)    => write!(f, "field '{field}' is not present on type '{t}'"),
             PLIRErr::CannotDeref                  => write!(f, "only pointers can be dereferenced"),
+            PLIRErr::TypeConstraintErr(e)         => {
+                writeln!(f, "broken type constraint")?;
+                e.fmt(f)
+            },
             PLIRErr::OpErr(e)                     => e.fmt(f),
         }
     }
@@ -1052,24 +1059,68 @@ struct TypeResolver {
     /// A DSDS of monotypes.
     /// 
     /// The top root of a group should always contain a non-unknown.
-    monos: dsds::UnionFind<plir::MaybeType>
+    monos: dsds::UnionFind<plir::MaybeType>,
+    next_unk: usize
 }
 #[derive(Debug)]
-enum ConstraintErr {
+enum ConstraintFail<T> {
     /// Two * types were set equal, but they are known to be inequal
-    MonoNe,
+    Mono(T, T),
     /// Two generic types (A<..>, B<..>) were set equal, but their identifier is not equal
-    GenericNe,
+    Generic(T, T),
     /// Two types were set equal, but their kinds aren't equal
-    ShapeNe
+    Shape(T, T)
 }
+/// Failed type constraint.
+#[derive(Debug)]
+pub struct ConstraintErr {
+    error: Vec<ConstraintFail<plir::MaybeType>>
+}
+impl From<ConstraintFail<plir::MaybeType>> for ConstraintErr {
+    fn from(value: ConstraintFail<plir::MaybeType>) -> Self {
+        ConstraintErr { error: vec![value] }
+    }
+}
+impl ConstraintErr {
+    fn caused(mut self, l: plir::MaybeType, r: plir::MaybeType) -> Self {
+        self.error.push(ConstraintFail::Mono(l, r));
+        self
+    }
+}
+impl<T: std::fmt::Display> std::fmt::Display for ConstraintFail<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConstraintFail::Mono(a, b)    => write!(f, "type '{a}' != '{b}'"),
+            ConstraintFail::Generic(a, b) => write!(f, "generic type of '{a}' does not match '{b}'"),
+            ConstraintFail::Shape(a, b)   => write!(f, "kind of '{a}' does not match '{b}'"),
+        }
+    }
+}
+impl std::fmt::Display for ConstraintErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, e) in self.error.iter().rev().enumerate() {
+            writeln!(f, "{:1$}{e}", "", i * 4)?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for ConstraintErr {}
 impl TypeResolver {
     fn new() -> TypeResolver {
         Self {
-            monos: dsds::UnionFind::new()
+            monos: dsds::UnionFind::new(),
+            next_unk: 0
         }
     }
 
+    fn new_unknown(&mut self) -> plir::MaybeType {
+        use plir::Type::Prim;
+        use plir::MTypeUnit::Unk;
+
+        let unk = Prim(Unk(self.next_unk));
+        self.next_unk += 1;
+        unk
+    }
     fn normalize_unk(&mut self, ty: plir::MaybeType) -> plir::MaybeType {
         use plir::Type::Prim;
         use plir::MTypeUnit::Unk;
@@ -1092,38 +1143,42 @@ impl TypeResolver {
         let left = self.normalize_unk(left);
         let right = self.normalize_unk(right);
 
-        match (left, right) {
-            (MaybeType::Prim(Unk(l)), r) => { self.set_unk_ty(l, r); },
-            (r, MaybeType::Prim(Unk(l))) => { self.set_unk_ty(l, r); },
+        match (&left, &right) {
+            (MaybeType::Prim(Unk(l)), r) => { self.set_unk_ty(*l, r.clone()); },
+            (r, MaybeType::Prim(Unk(l))) => { self.set_unk_ty(*l, r.clone()); },
             (l @ MaybeType::Prim(_), r @ MaybeType::Prim(_)) => { 
-                if l != r { Err(ConstraintErr::MonoNe)? }
+                if l != r { Err(ConstraintFail::Mono(left, right))? }
             },
 
             (MaybeType::Generic(ai, ap), MaybeType::Generic(bi, bp)) => {
-                if ai != bi { Err(ConstraintErr::GenericNe)? }
-                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+                if ai != bi { return Err(ConstraintFail::Generic(left, right))?; }
+                if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
-                for (a, b) in std::iter::zip(ap, bp) {
-                    self.add_constraint(a, b)?;
+                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                    self.add_constraint(a, b)
+                        .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
             (MaybeType::Tuple(ap), MaybeType::Tuple(bp)) => {
-                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+                if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
                 
-                for (a, b) in std::iter::zip(ap, bp) {
-                    self.add_constraint(a, b)?;
+                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                    self.add_constraint(a, b)
+                        .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
             (MaybeType::Fun(FunType { params: ap, ret: ar, varargs: av }), MaybeType::Fun(FunType { params: bp, ret: br, varargs: bv })) => {
-                if av != bv { Err(ConstraintErr::ShapeNe)? }
-                if ap.len() != bp.len() { Err(ConstraintErr::ShapeNe)? }
+                if av != bv { return Err(ConstraintFail::Shape(left, right))?; }
+                if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
-                self.add_constraint(*ar, *br)?;
-                for (a, b) in std::iter::zip(ap, bp) {
-                    self.add_constraint(a, b)?;
+                self.add_constraint((**ar).clone(), (**br).clone())
+                    .map_err(|e| e.caused(left.clone(), right.clone()))?;
+                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                    self.add_constraint(a, b)
+                        .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
-            _ => Err(ConstraintErr::ShapeNe)?
+            _ => Err(ConstraintFail::Shape(left, right))?
         }
 
         Ok(())
@@ -1182,7 +1237,8 @@ pub struct PLIRCodegen {
     program: InsertBlock,
     globals: Globals,
     blocks: Vec<InsertBlock>,
-    var_id: usize
+    var_id: usize,
+    resolver: TypeResolver
 }
 
 impl PLIRCodegen {
@@ -1216,7 +1272,8 @@ impl PLIRCodegen {
                 declared
             },
             blocks: vec![],
-            var_id: 0
+            var_id: 0,
+            resolver: TypeResolver::new()
         }
     }
 
@@ -2366,7 +2423,7 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::Call { funct, params } => {
-                let (lparams, funct) = match *funct {
+                let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
                         let ty = self.consume_type(sp.ty)?;
@@ -2418,50 +2475,48 @@ impl PLIRCodegen {
                         ))
                     }
                     e => {
-                        let lparams: Vec<_> = params.into_iter()
+                        let largs: Vec<_> = params.into_iter()
                             .map(|le| self.consume_located_expr(le, None))
                             .collect::<Result<_, _>>()?;
 
-                        let ptys = lparams.iter()
+                        let arg_tys = largs.iter()
                             .map(|e| e.ty.clone());
                         let fun_ty = plir::Type::fun_type(
-                            ptys, 
+                            arg_tys, 
                             ctx_type.unwrap_or(plir::ty!(plir::Type::S_VOID)), 
                             false
                         );
-                        (lparams, self.consume_located_expr(e, Some(fun_ty))?)
+                        (largs, self.consume_located_expr(e, Some(fun_ty))?)
                     }
                 };
 
                 match &funct.ty {
                     plir::Type::Fun(plir::FunType { params: param_tys, ret: _, varargs }) => {
                         let bad_arity = if *varargs {
-                            param_tys.len() > lparams.len()
+                            param_tys.len() > largs.len()
                         } else {
-                            param_tys.len() != lparams.len()
+                            param_tys.len() != largs.len()
                         };
 
                         if bad_arity {
-                            let err = PLIRErr::WrongArity(param_tys.len(), lparams.len()).at_range(range);
+                            let err = PLIRErr::WrongArity(param_tys.len(), largs.len()).at_range(range);
                             return Err(err);
                         }
 
-                        // can't use zip bc varargs
-                        let mut pty_iter = param_tys.iter();
-                        let params = lparams.into_iter()
-                            .map(|lparam| match pty_iter.next() {
-                                Some(pty) => {
-                                    self.apply_cast(lparam, pty, CastFlags::Decl)?
-                                        .map_err(|le| {
-                                            PLIRErr::ExpectedType(pty.clone(), le.0.ty).at_range(le.1)
-                                        })
-                                        .map(|lp| lp.0)
-                                }
-                                None => Ok(lparam.0),
+
+                        let pty_iter = param_tys.iter();
+                        let mut largs = largs.into_iter();
+                        let mut args: Vec<_> = std::iter::zip(pty_iter, largs.by_ref())
+                            .map(|(pty, larg)| {
+                                // TODO(cast): reimpl casting here
+                                self.resolver.add_constraint(pty.clone().into(), larg.ty.clone().into())
+                                    .map(|_| larg.0)
+                                    .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(larg.1))
                             })
                             .collect::<Result<_, _>>()?;
-                        
-                        plir::Expr::call(funct, params)
+                        args.extend(largs.map(|la| la.0));
+
+                        plir::Expr::call(funct, args)
                     },
                     t => Err(PLIRErr::CannotCall(t.clone()).at_range(funct.range()))
                 }
