@@ -1726,20 +1726,21 @@ impl PLIRCodegen {
                     match me.take() {
                         Some(e) => {
                             let le = Located::new(e, exit_range.clone());
-                            let flags = match btype == BlockBehavior::Function {
+                            let _flags = match btype == BlockBehavior::Function {
                                 true  => CastFlags::Decl | CastFlags::Void,
                                 // FIXME: this should not allow void, however
                                 // when expected_ty == S_VOID, it is possible for 
                                 // assignment block to expect void and that cast will fail
                                 false => CastFlags::Implicit | CastFlags::Void,
                             };
-                            match self.apply_cast(le, &exp_ty, flags)? {
-                                Ok(e) => {
-                                    // cast was successful so apply it
-                                    me.replace(e.0);
-                                    *exit_ty = exp_ty;
+                            // TODO(cast): reinstate casts here
+                            match self.resolver.add_constraint(le.ty.clone().into(), exp_ty.into()) {
+                                Ok(_) => {
+                                    // // cast was successful so apply it
+                                    // me.replace(e.0);
+                                    // *exit_ty = exp_ty;
                                 },
-                                Err(_) => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
+                                Err(e) => Err(PLIRErr::TypeConstraintErr(e).at_range(exit_range))?,
                             }
                         },
                         // exit_ty is void, and we already checked that exp_ty is not void
@@ -1895,9 +1896,10 @@ impl PLIRCodegen {
 
                 let ty = ty.unwrap_or_else(|| le.0.ty.clone());
                 // Type check decl, casting if possible
-                let e = match this.apply_cast(le, &ty, CastFlags::Decl)? {
-                    Ok(le) => le.0,
-                    Err(le) => return Err(PLIRErr::ExpectedType(ty, le.0.ty).at_range(le.1)),
+                // TODO(cast): reinstate cast
+                let e = match this.resolver.add_constraint(le.ty.clone().into(), ty.clone().into()) {
+                    Ok(_)  => le.0,
+                    Err(e) => return Err(PLIRErr::TypeConstraintErr(e).at_range(le.1)),
                 };
 
                 this.declare(&ident, ty.clone());
@@ -2248,9 +2250,11 @@ impl PLIRCodegen {
                         
                         let lfield_expr = self.consume_located_expr(ast_expr, Some(field_ty.clone()))?;
                         
-                        self.apply_cast(lfield_expr, &field_ty, CastFlags::Decl)?
-                            .map(|le| le.0)
-                            .map_err(|le| PLIRErr::ExpectedType(field_ty, le.0.ty).at_range(le.1))
+                        // TODO(cast): reinstate casts
+                        match self.resolver.add_constraint(lfield_expr.ty.clone().into(), field_ty.into()) {
+                            Ok(_)  => Ok(lfield_expr.0),
+                            Err(e) => Err(PLIRErr::TypeConstraintErr(e).at_range(lfield_expr.1)),
+                        }
                     })
                     .collect::<PLIRResult<_>>()?;
                 

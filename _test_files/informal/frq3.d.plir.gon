@@ -14,28 +14,34 @@ class <option<char>> {
     present: bool,
     value: #ptr
 }
-class <list<int>> {
+class Review {
+    rating: int,
+    comment: string
+}
+class <list<Review>> {
     inner: #dynarray
 }
-class <option<int>> {
-    present: bool,
-    value: #ptr
+class ReviewAnalysis {
+    all_reviews: list<Review>
 }
-class <option<option<int>>> {
-    present: bool,
-    value: #ptr
+class <list<string>> {
+    inner: #dynarray
 }
-class <option<option<option<int>>>> {
-    present: bool,
-    value: #ptr
-}
-class <option<option<option<option<int>>>>> {
-    present: bool,
-    value: #ptr
-}
-class <listiterator<int>> {
-    inner: list<int>,
+class <listiterator<string>> {
+    inner: list<string>,
     i: int
+}
+class <option<string>> {
+    present: bool,
+    value: #ptr
+}
+class <listiterator<Review>> {
+    inner: list<Review>,
+    i: int
+}
+class <option<Review>> {
+    present: bool,
+    value: #ptr
 }
 extern fun print(arg0: string) -> void;
 extern fun <#ptr>::to_string(arg0: #ptr) -> string;
@@ -116,33 +122,39 @@ extern fun <char>::to_string(arg0: char) -> string;
 extern fun <int>::abs(arg0: int) -> int;
 extern fun <int>::idiv(arg0: int, arg1: int) -> int;
 extern fun <int>::to_string(arg0: int) -> string;
-extern fun <list<int>>::new() -> list<int>;
 extern fun main() -> void;
-extern fun <list<int>>::sum(arg0: list<int>) -> int;
-extern fun <option<option<option<option<int>>>>>::to_string(arg0: option<option<option<option<int>>>>) -> string;
-extern fun <listiterator<int>>::next(arg0: listiterator<int>) -> option<int>;
-extern fun <option<option<option<int>>>>::to_string(arg0: option<option<option<int>>>) -> string;
-extern fun <list<int>>::get(arg0: list<int>, arg1: int) -> int;
-extern fun <option<option<int>>>::to_string(arg0: option<option<int>>) -> string;
-extern fun <option<option<option<option<int>>>>>::some(arg0: option<option<option<int>>>) -> option<option<option<option<int>>>>;
-extern fun <option<int>>::to_string(arg0: option<int>) -> string;
-extern fun <option<option<option<int>>>>::get(arg0: option<option<option<int>>>) -> option<option<int>>;
-extern fun <option<option<option<int>>>>::none() -> option<option<option<int>>>;
-extern fun <list<int>>::iterator(arg0: list<int>) -> listiterator<int>;
-extern fun <option<option<int>>>::some(arg0: option<int>) -> option<option<int>>;
-extern fun <listiterator<int>>::new(arg0: list<int>) -> listiterator<int>;
-extern fun <option<option<int>>>::none() -> option<option<int>>;
-extern fun <option<option<option<option<int>>>>>::none() -> option<option<option<option<int>>>>;
-extern fun <option<int>>::some(arg0: int) -> option<int>;
-extern fun <option<int>>::get(arg0: option<int>) -> int;
-extern fun <list<int>>::len(arg0: list<int>) -> int;
-extern fun <option<option<option<int>>>>::some(arg0: option<option<int>>) -> option<option<option<int>>>;
-extern fun <option<option<option<option<int>>>>>::get(arg0: option<option<option<option<int>>>>) -> option<option<option<int>>>;
-extern fun <list<int>>::to_string(arg0: list<int>) -> string;
-extern fun <list<int>>::set(arg0: list<int>, arg1: int, arg2: int) -> void;
-extern fun <option<int>>::none() -> option<int>;
-extern fun <list<int>>::extend(arg0: list<int>, arg1: list<int>) -> void;
-extern fun <list<int>>::pop(arg0: list<int>) -> int;
-extern fun <list<int>>::push(arg0: list<int>, arg1: int) -> void;
-extern fun <option<option<int>>>::get(arg0: option<option<int>>) -> option<int>;
-extern fun <list<int>>::from_raw(arg0: #ptr, arg1: int) -> list<int>;
+extern fun <Review>::to_string(arg0: Review) -> string;
+extern fun <list<string>>::to_string(arg0: list<string>) -> string;
+extern fun <list<string>>::len(arg0: list<string>) -> int;
+extern fun <option<string>>::get(arg0: option<string>) -> string;
+extern fun <option<string>>::to_string(arg0: option<string>) -> string;
+extern fun <listiterator<string>>::next(arg0: listiterator<string>) -> option<string>;
+extern fun <list<string>>::get(arg0: list<string>, arg1: int) -> string;
+extern fun <option<string>>::some(arg0: string) -> option<string>;
+extern fun <list<string>>::iterator(arg0: list<string>) -> listiterator<string>;
+extern fun <list<string>>::set(arg0: list<string>, arg1: int, arg2: string) -> void;
+extern fun <listiterator<string>>::new(arg0: list<string>) -> listiterator<string>;
+extern fun <option<string>>::none() -> option<string>;
+extern fun <list<string>>::extend(arg0: list<string>, arg1: list<string>) -> void;
+extern fun <list<string>>::pop(arg0: list<string>) -> string;
+extern fun <list<string>>::push(arg0: list<string>, arg1: string) -> void;
+extern fun <ReviewAnalysis>::collect_comments(arg0: ReviewAnalysis) -> list<string>;
+extern fun <list<string>>::from_raw(arg0: #ptr, arg1: int) -> list<string>;
+extern fun <listiterator<Review>>::next(arg0: listiterator<Review>) -> option<Review>;
+extern fun <option<Review>>::to_string(arg0: option<Review>) -> string;
+extern fun <option<Review>>::some(arg0: Review) -> option<Review>;
+extern fun <list<Review>>::len(arg0: list<Review>) -> int;
+extern fun <list<Review>>::get(arg0: list<Review>, arg1: int) -> Review;
+extern fun <list<Review>>::iterator(arg0: list<Review>) -> listiterator<Review>;
+extern fun <ReviewAnalysis>::get_average_rating(arg0: ReviewAnalysis) -> float;
+extern fun <listiterator<Review>>::new(arg0: list<Review>) -> listiterator<Review>;
+extern fun <list<string>>::new() -> list<string>;
+extern fun <list<Review>>::to_string(arg0: list<Review>) -> string;
+extern fun <list<Review>>::set(arg0: list<Review>, arg1: int, arg2: Review) -> void;
+extern fun <option<Review>>::get(arg0: option<Review>) -> Review;
+extern fun <list<Review>>::extend(arg0: list<Review>, arg1: list<Review>) -> void;
+extern fun <list<Review>>::pop(arg0: list<Review>) -> Review;
+extern fun <list<Review>>::push(arg0: list<Review>, arg1: Review) -> void;
+extern fun <option<Review>>::none() -> option<Review>;
+extern fun <list<Review>>::from_raw(arg0: #ptr, arg1: int) -> list<Review>;
+extern fun <list<Review>>::new() -> list<Review>;

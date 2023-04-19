@@ -1,5 +1,4 @@
 import intrinsic;
-
 class list<T> {
     inner: #dynarray
 
@@ -114,63 +113,60 @@ class listiterator<T> {
     }
 }
 
-class union<A, B> {
-    inner: #ptr,
-    _left: bool
-
-    fun ::left(a: A) -> union<A, B> {
-        let inner = #malloc(A::size_of().max(B::size_of()));
-        *inner = a;
-
-        <union<A, B>> #{ inner, _left: true };
-    }
-
-    fun ::right(b: B) -> union<A, B> {
-        let inner = #malloc(A::size_of().max(B::size_of()));
-        *inner = b;
-
-        <union<A, B>> #{ inner, _left: false };
-    }
-
-    fun self.is_left() -> bool {
-        self._left;
-    }
-    fun self.is_right() -> bool {
-        !self._left;
-    }
-    fun self.to_string() -> string {
-        let a = #ptr::#alloca();
-        *a = self.inner;
-        let b: int = *a;
-
-        "<union @ " + b + ">";
-    }
+class Review {
+    rating: int,
+    comment: string
 }
 
-fit class list<int> {
-    fun self.sum() -> int {
-        let result = 0;
-        for el in self.iterator() {
-            result = result + el;
+class ReviewAnalysis {
+    all_reviews: list<Review>
+
+    fun self.get_average_rating() -> float {
+        let sum = 0;
+        for review in self.all_reviews.iterator() {
+            sum = sum + review.rating;
         }
-        
-        result;
+        sum / self.all_reviews.len();
+    }
+    fun self.collect_comments() -> list<string> {
+        let comments: list<string> = [];
+
+        let i = 0;
+        for review in self.all_reviews.iterator() {
+            if review.comment.contains_char('!') {
+                let comment = i + "-" + review.comment;
+                if comment.get(comment.len() - 1) != '!' && comment.get(comment.len() - 1) != '.' {
+                    comment = comment + '.';
+                } else {
+                    comment;
+                }
+                comments.push(comment);
+            }
+            i = i + 1;
+        }
+
+        comments;
     }
 }
 
 fun main() {
-    let z = <option<option<option<option<int>>>>>::some(<option<option<int>>>::some(<option<option<int>>>::some(<option<int>>::some(2))));
-    print(z.to_string());
+    let analysis = ReviewAnalysis #{
+        all_reviews: [
+            Review #{ rating: 4, comment: "Good! Thx" },
+            Review #{ rating: 3, comment: "OK site" },
+            Review #{ rating: 5, comment: "Great!" },
+            Review #{ rating: 2, comment: "Poor! Bad." },
+            Review #{ rating: 3, comment: "" },
+        ]
+    };
 
-    //    let a = [1, 2, 3, 4, 5];
-    //    print(a);
-    //
-    //    let b = #malloc(8);
-    //    *b = 9187201950435737471;
-    //    let c: #byte = *b;
-    //    print(c);
-    //    print(a.inner.buf);
-    //
-    //    let e = c + 14;
-    //    print(e);
+    print(analysis.get_average_rating());
+    print(analysis.collect_comments());
+}
+
+
+fit class Review {
+    fun self.to_string() -> string {
+        self.comment + " (" + self.rating + ")";
+    }
 }

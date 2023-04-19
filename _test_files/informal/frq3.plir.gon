@@ -1,0 +1,276 @@
+class Review {
+    rating: int,
+    comment: string
+}
+class <list<Review>> {
+    inner: #dynarray
+}
+class ReviewAnalysis {
+    all_reviews: list<Review>
+}
+class <list<string>> {
+    inner: #dynarray
+}
+fun main() -> void {
+    let analysis: ReviewAnalysis = ReviewAnalysis #{<list<Review>>([Review #{<int>(4), <string>("Good! Thx")}, Review #{<int>(3), <string>("OK site")}, Review #{<int>(5), <string>("Great!")}, Review #{<int>(2), <string>("Poor! Bad.")}, Review #{<int>(3), <string>("")}])};
+    <void>(<(string) -> void>(print)(<string>(<(float) -> string>(<float>::to_string)(<float>(<() -> float>(<ReviewAnalysis>(analysis).get_average_rating)())))));
+    return <void>(<(string) -> void>(print)(<string>(<(list<string>) -> string>(<list<string>>::to_string)(<list<string>>(<() -> list<string>>(<ReviewAnalysis>(analysis).collect_comments)())))));
+}
+fun <Review>::to_string(self: Review) -> string {
+    return <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(<Review>(self).1), <string>(" ("))), <string>(<(int) -> string>(<int>::to_string)(<int>(<Review>(self).0))))), <string>(")")));
+}
+class <listiterator<string>> {
+    inner: list<string>,
+    i: int
+}
+class <option<string>> {
+    present: bool,
+    value: #ptr
+}
+fun <list<string>>::to_string(self: list<string>) -> string {
+    return <string>(if <bool>(<int>(<() -> int>(<list<string>>(self).len)()) == <int>(0)) <string>{
+        exit <string>("[]");
+    } else <string>{
+        let result: string = <string>("[");
+        let it: listiterator<string> = <listiterator<string>>(<() -> listiterator<string>>(<list<string>>(self).iterator)());
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(<() -> string>(<option<string>>(<() -> option<string>>(<listiterator<string>>(it).next)()).get)()))));
+        }
+        <void>(for <string>(e) in <listiterator<string>>(it) <string>{
+            exit <string>{
+                exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(", "))), <string>(e))));
+            };
+        })
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>("]"))));
+        }
+        exit <string>(result);
+    });
+}
+fun <list<string>>::len(self: list<string>) -> int {
+    return <int>(<(int) -> int>(<int>(<#dynarray>(<list<string>>(self).0).1).idiv)(<int>(<string>::size_of())));
+}
+fun <option<string>>::get(self: option<string>) -> string {
+    return <string>(if <bool>(<option<string>>(self).0) <string>{
+        exit <string>(*<option<string>>(self).1);
+    } else <never>{
+        throw "no value present";
+    });
+}
+fun <option<string>>::to_string(self: option<string>) -> string {
+    return <string>(if <bool>(<option<string>>(self).0) <string>{
+        let value: string = <string>(*<option<string>>(self).1);
+        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(value))), <string>(")")));
+    } else <string>{
+        exit <string>("none");
+    });
+}
+fun <listiterator<string>>::next(self: listiterator<string>) -> option<string> {
+    return <option<string>>(if <bool>(<int>(<listiterator<string>>(self).1) >= <int>(<() -> int>(<list<string>>(<listiterator<string>>(self).0).len)())) <option<string>>{
+        exit <option<string>>(<() -> option<string>>(<option<string>>::none)());
+    } else <option<string>>{
+        let t: option<string> = <option<string>>(<(string) -> option<string>>(<option<string>>::some)(<string>(<(int) -> string>(<list<string>>(<listiterator<string>>(self).0).get)(<int>(<listiterator<string>>(self).1)))));
+        <int>{
+            exit <int>(<listiterator<string>>(self).1 = <int>(<int>(<listiterator<string>>(self).1) + <int>(1)));
+        }
+        exit <option<string>>(t);
+    });
+}
+fun <list<string>>::get(self: list<string>, i: int) -> string {
+    return <string>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<string>>(self).len)()))) <string>{
+        exit <string>(*<string>::#gep(<#ptr>(<#dynarray>(<list<string>>(self).0).0), <int>(i)));
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+extern fun "#malloc"(arg0: int) -> #ptr;
+fun <option<string>>::some(t: string) -> option<string> {
+    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<string>::size_of())));
+    <string>{
+        exit <string>(*value = <string>(t));
+    }
+    return option<string> #{<bool>(true), <#ptr>(value)};
+}
+fun <list<string>>::iterator(self: list<string>) -> listiterator<string> {
+    return <listiterator<string>>(<(list<string>) -> listiterator<string>>(<listiterator<string>>::new)(<list<string>>(self)));
+}
+fun <list<string>>::set(self: list<string>, i: int, t: string) -> void {
+    return <void>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<string>>(self).len)()))) <void>{
+        exit <void>{
+            exit <void>(castfrom <string>(*<string>::#gep(<#ptr>(<#dynarray>(<list<string>>(self).0).0), <int>(i)) = <string>(t)));
+        };
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <listiterator<string>>::new(inner: list<string>) -> listiterator<string> {
+    return listiterator<string> #{<list<string>>(inner), <int>(0)};
+}
+fun <option<string>>::none() -> option<string> {
+    return option<string> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
+}
+fun <list<string>>::extend(self: list<string>, lst: list<string>) -> void {
+    return <void>(for <string>(e) in <listiterator<string>>(<() -> listiterator<string>>(<list<string>>(lst).iterator)()) <void>{
+        exit <void>(<(string) -> void>(<list<string>>(self).push)(<string>(e)));
+    });
+}
+fun <list<string>>::pop(self: list<string>) -> string {
+    return <string>(*<(int) -> #ptr>(<#dynarray>(<list<string>>(self).0).take)(<int>(<string>::size_of())));
+}
+fun <list<string>>::push(self: list<string>, e: string) -> void {
+    let buf: #ptr = <#ptr>(<string>::#alloca());
+    <string>{
+        exit <string>(*buf = <string>(e));
+    }
+    return <void>(<(#ptr, int) -> void>(<#dynarray>(<list<string>>(self).0).extend)(<#ptr>(buf), <int>(<string>::size_of())));
+}
+class <listiterator<Review>> {
+    inner: list<Review>,
+    i: int
+}
+class <option<Review>> {
+    present: bool,
+    value: #ptr
+}
+fun <ReviewAnalysis>::collect_comments(self: ReviewAnalysis) -> list<string> {
+    let comments: list<string> = <list<string>>([]);
+    let i: int = <int>(0);
+    <void>(for <Review>(review) in <listiterator<Review>>(<() -> listiterator<Review>>(<list<Review>>(<ReviewAnalysis>(self).0).iterator)()) <int>{
+        <void>(if <bool>(<(char) -> bool>(<string>(<Review>(review).1).contains_char)(<char>('!'))) <void>{
+            let comment: string = <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(<(int) -> string>(<int>::to_string)(<int>(i))), <string>("-"))), <string>(<Review>(review).1)));
+            <string>(if <bool>(<bool>(<char>(<(int) -> char>(<string>(comment).get)(<int>(<int>(<() -> int>(<string>(comment).len)()) - <int>(1)))) != <char>('!')) && <bool>(<char>(<(int) -> char>(<string>(comment).get)(<int>(<int>(<() -> int>(<string>(comment).len)()) - <int>(1)))) != <char>('.'))) <string>{
+                exit <string>{
+                    exit <string>(comment = <string>(<(string, string) -> string>(<string>::add_string)(<string>(comment), <string>(<(char) -> string>(<char>::to_string)(<char>('.'))))));
+                };
+            } else <string>{
+                exit <string>(comment);
+            })
+            exit <void>(<(string) -> void>(<list<string>>(comments).push)(<string>(comment)));
+        })
+        exit <int>{
+            exit <int>(i = <int>(<int>(i) + <int>(1)));
+        };
+    })
+    return <list<string>>(comments);
+}
+fun <list<string>>::from_raw(contents: #ptr, len: int) -> list<string> {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(<int>(len) * <int>(<string>::size_of()))));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(<int>(len) * <int>(<string>::size_of()))));
+    return list<string> #{<#dynarray>(inner)};
+}
+fun <listiterator<Review>>::next(self: listiterator<Review>) -> option<Review> {
+    return <option<Review>>(if <bool>(<int>(<listiterator<Review>>(self).1) >= <int>(<() -> int>(<list<Review>>(<listiterator<Review>>(self).0).len)())) <option<Review>>{
+        exit <option<Review>>(<() -> option<Review>>(<option<Review>>::none)());
+    } else <option<Review>>{
+        let t: option<Review> = <option<Review>>(<(Review) -> option<Review>>(<option<Review>>::some)(<Review>(<(int) -> Review>(<list<Review>>(<listiterator<Review>>(self).0).get)(<int>(<listiterator<Review>>(self).1)))));
+        <int>{
+            exit <int>(<listiterator<Review>>(self).1 = <int>(<int>(<listiterator<Review>>(self).1) + <int>(1)));
+        }
+        exit <option<Review>>(t);
+    });
+}
+fun <option<Review>>::to_string(self: option<Review>) -> string {
+    return <string>(if <bool>(<option<Review>>(self).0) <string>{
+        let value: Review = <Review>(*<option<Review>>(self).1);
+        exit <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>("some("), <string>(<(Review) -> string>(<Review>::to_string)(<Review>(value))))), <string>(")")));
+    } else <string>{
+        exit <string>("none");
+    });
+}
+fun <option<Review>>::some(t: Review) -> option<Review> {
+    let value: #ptr = <#ptr>(<(int) -> #ptr>(#malloc)(<int>(<Review>::size_of())));
+    <Review>{
+        exit <Review>(*value = <Review>(t));
+    }
+    return option<Review> #{<bool>(true), <#ptr>(value)};
+}
+fun <list<Review>>::len(self: list<Review>) -> int {
+    return <int>(<(int) -> int>(<int>(<#dynarray>(<list<Review>>(self).0).1).idiv)(<int>(<Review>::size_of())));
+}
+fun <list<Review>>::get(self: list<Review>, i: int) -> Review {
+    return <Review>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<Review>>(self).len)()))) <Review>{
+        exit <Review>(*<Review>::#gep(<#ptr>(<#dynarray>(<list<Review>>(self).0).0), <int>(i)));
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <list<Review>>::iterator(self: list<Review>) -> listiterator<Review> {
+    return <listiterator<Review>>(<(list<Review>) -> listiterator<Review>>(<listiterator<Review>>::new)(<list<Review>>(self)));
+}
+fun <ReviewAnalysis>::get_average_rating(self: ReviewAnalysis) -> float {
+    let sum: int = <int>(0);
+    <void>(for <Review>(review) in <listiterator<Review>>(<() -> listiterator<Review>>(<list<Review>>(<ReviewAnalysis>(self).0).iterator)()) <int>{
+        exit <int>{
+            exit <int>(sum = <int>(<int>(sum) + <int>(<Review>(review).0)));
+        };
+    })
+    return <float>(<float>(castfrom <int>(sum)) / <float>(castfrom <int>(<() -> int>(<list<Review>>(<ReviewAnalysis>(self).0).len)())));
+}
+fun <listiterator<Review>>::new(inner: list<Review>) -> listiterator<Review> {
+    return listiterator<Review> #{<list<Review>>(inner), <int>(0)};
+}
+fun <list<string>>::new() -> list<string> {
+    return list<string> #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+}
+fun <list<Review>>::to_string(self: list<Review>) -> string {
+    return <string>(if <bool>(<int>(<() -> int>(<list<Review>>(self).len)()) == <int>(0)) <string>{
+        exit <string>("[]");
+    } else <string>{
+        let result: string = <string>("[");
+        let it: listiterator<Review> = <listiterator<Review>>(<() -> listiterator<Review>>(<list<Review>>(self).iterator)());
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(<(Review) -> string>(<Review>::to_string)(<Review>(<() -> Review>(<option<Review>>(<() -> option<Review>>(<listiterator<Review>>(it).next)()).get)()))))));
+        }
+        <void>(for <Review>(e) in <listiterator<Review>>(it) <string>{
+            exit <string>{
+                exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>(", "))), <string>(<(Review) -> string>(<Review>::to_string)(<Review>(e))))));
+            };
+        })
+        <string>{
+            exit <string>(result = <string>(<(string, string) -> string>(<string>::add_string)(<string>(result), <string>("]"))));
+        }
+        exit <string>(result);
+    });
+}
+fun <list<Review>>::set(self: list<Review>, i: int, t: Review) -> void {
+    return <void>(if <bool>(<bool>(<int>(0) <= <int>(i)) && <bool>(<int>(i) < <int>(<() -> int>(<list<Review>>(self).len)()))) <void>{
+        exit <void>{
+            exit <void>(castfrom <Review>(*<Review>::#gep(<#ptr>(<#dynarray>(<list<Review>>(self).0).0), <int>(i)) = <Review>(t)));
+        };
+    } else <never>{
+        throw "array index out of bounds";
+    });
+}
+fun <option<Review>>::get(self: option<Review>) -> Review {
+    return <Review>(if <bool>(<option<Review>>(self).0) <Review>{
+        exit <Review>(*<option<Review>>(self).1);
+    } else <never>{
+        throw "no value present";
+    });
+}
+fun <list<Review>>::extend(self: list<Review>, lst: list<Review>) -> void {
+    return <void>(for <Review>(e) in <listiterator<Review>>(<() -> listiterator<Review>>(<list<Review>>(lst).iterator)()) <void>{
+        exit <void>(<(Review) -> void>(<list<Review>>(self).push)(<Review>(e)));
+    });
+}
+fun <list<Review>>::pop(self: list<Review>) -> Review {
+    return <Review>(*<(int) -> #ptr>(<#dynarray>(<list<Review>>(self).0).take)(<int>(<Review>::size_of())));
+}
+fun <list<Review>>::push(self: list<Review>, e: Review) -> void {
+    let buf: #ptr = <#ptr>(<Review>::#alloca());
+    <Review>{
+        exit <Review>(*buf = <Review>(e));
+    }
+    return <void>(<(#ptr, int) -> void>(<#dynarray>(<list<Review>>(self).0).extend)(<#ptr>(buf), <int>(<Review>::size_of())));
+}
+fun <option<Review>>::none() -> option<Review> {
+    return option<Review> #{<bool>(false), <#ptr>(<() -> #ptr>(<#ptr>::null)())};
+}
+fun <list<Review>>::from_raw(contents: #ptr, len: int) -> list<Review> {
+    let inner: #dynarray = <#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(<int>(len) * <int>(<Review>::size_of()))));
+    <void>(<(#ptr, int) -> void>(<#dynarray>(inner).extend)(<#ptr>(contents), <int>(<int>(len) * <int>(<Review>::size_of()))));
+    return list<Review> #{<#dynarray>(inner)};
+}
+fun <list<Review>>::new() -> list<Review> {
+    return list<Review> #{<#dynarray>(<(int) -> #dynarray>(<#dynarray>::new)(<int>(0)))};
+}
