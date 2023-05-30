@@ -297,19 +297,19 @@ enum UnresolvedType {
     Import(ast::StaticPath)
 }
 trait Unresolved 
-    where <Self::Ident as ToOwned>::Owned: std::hash::Hash + Eq
+    where <Self::KeyRef as ToOwned>::Owned: std::hash::Hash + Eq
 {
-    type Ident: ToOwned + ?Sized;
+    type KeyRef: ToOwned + ?Sized;
 
-    fn resolution_ident(&self) -> Cow<Self::Ident>;
-    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<<Self::Ident as ToOwned>::Owned, Self>
+    fn rez_key(&self) -> Cow<Self::KeyRef>;
+    fn block_map(block: &mut InsertBlock) -> &mut IndexMap<<Self::KeyRef as ToOwned>::Owned, Self>
         where Self: Sized;
 }
 
 impl Unresolved for UnresolvedValue {
-    type Ident = plir::FunIdent;
+    type KeyRef = plir::FunIdent;
 
-    fn resolution_ident(&self) -> Cow<plir::FunIdent> {
+    fn rez_key(&self) -> Cow<plir::FunIdent> {
         match self {
             UnresolvedValue::ExternFun(pi, _)  => Cow::Borrowed(&pi.id),
             UnresolvedValue::Fun(pi, _)        => Cow::Borrowed(&pi.id),
@@ -323,9 +323,9 @@ impl Unresolved for UnresolvedValue {
     }
 }
 impl Unresolved for UnresolvedType {
-    type Ident = str;
+    type KeyRef = str;
 
-    fn resolution_ident(&self) -> Cow<str> {
+    fn rez_key(&self) -> Cow<str> {
         match self {
             UnresolvedType::Class(cls) => Cow::from(&cls.ident),
             UnresolvedType::Import(mp) => Cow::from(&mp.attr),
@@ -535,10 +535,10 @@ impl InsertBlock {
     /// Insert an unresolved class/function into the insert block.
     fn insert_unresolved<U>(&mut self, unresolved: U) 
         where U: Unresolved,
-            <U::Ident as ToOwned>::Owned: std::hash::Hash + Eq
+            <U::KeyRef as ToOwned>::Owned: std::hash::Hash + Eq
     {
         U::block_map(self)
-            .insert(unresolved.resolution_ident().into_owned(), unresolved);
+            .insert(unresolved.rez_key().into_owned(), unresolved);
     }
 
     /// Insert a class into the insert block's type register.
