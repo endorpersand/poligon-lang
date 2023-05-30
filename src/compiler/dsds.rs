@@ -31,9 +31,10 @@ impl UnionFindInner {
     /// 
     /// This function returns the new element that was added.
     fn make_set(&mut self) -> usize {
-        self.parents.push(self.parents.len());
+        let id = self.parents.len();
+        self.parents.push(id);
         self.sizes.push(1);
-        self.parents.len()
+        id
     }
 
     /// Finds the root of this element's group.
@@ -144,6 +145,7 @@ impl<T: Hash + Eq> UnionFind<T> {
     }
 
     /// Gets the number of elements in the set.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.arena.len()
     }
@@ -184,6 +186,7 @@ impl<T: Hash + Eq> UnionFind<T> {
     /// 
     /// The group with the greater size (number of elements in its tree) becomes the root.
     /// This returns true if union was successful.
+    #[allow(dead_code)]
     pub fn union(&mut self, x: Idx<T>, y: Idx<T>) -> bool {
         self.inner.union(x.0, y.0)
     }

@@ -1282,7 +1282,8 @@ impl PLIRCodegen {
     /// 
     /// It can be accessed again with [`PLIRCodegen::unwrap`].
     pub fn consume_program(&mut self, prog: ast::Program) -> PLIRResult<()> {
-        self.consume_stmts(prog.0)
+        self.consume_stmts(prog.0)?;
+        Ok(())
     }
 
     /// Consume an iterator of statements into the current insert block.
@@ -1628,25 +1629,24 @@ impl PLIRCodegen {
         let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
         
         let ty = match ty {
-            Some(t) => Some(self.consume_type(t)?),
-            None => None,
+            Some(t) => self.consume_type(t)?,
+            None => self.resolver.new_unknown(),
         };
-        let e = self.consume_located_expr(val, ty.clone())?;
+        let e = self.consume_located_expr(val, Some(ty.clone()))?;
 
         self.unpack_pat(pat, e, 
-            ((rt, ty), |(rt, mty), idx| {
-                Ok((*rt, match mty {
-                    Some(t) => Some(t.split(idx).map_err(|e| {
-                        e.at_range(decl_range.clone())
-                    })?),
-                    None => None,
-                }))
+            ((rt, ty), |(rt, ty), idx| {
+                // TODO: add special rules for plir::Type::Unk
+                let spl_ty = ty.split(idx).map_err(|e| {
+                    e.at_range(decl_range.clone())
+                })?;
+
+                Ok((*rt, spl_ty))
             }),
             |this, unit, le, extra| {
                 let Located(ast::DeclUnit(ident, mt), _) = unit;
                 let (rt, ty) = extra;
 
-                let ty = ty.unwrap_or_else(|| le.0.ty.clone());
                 // Type check decl, casting if possible
                 // TODO(cast): reinstate cast
                 let e = match this.resolver.add_constraint(le.ty.clone(), ty.clone()) {
