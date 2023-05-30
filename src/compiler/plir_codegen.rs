@@ -1257,18 +1257,21 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<&plir::Type>> 
+    fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<plir::Type>> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
-        self.resolve_ident(ident)?;
-        Ok(self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident())))
+        self.resolve_ident(ident).map(|_| {
+            self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident()))
+                .cloned()
+                .map(|t| self.resolver.normalize(t))
+        })
     }
 
     /// Gets the type of the identifier, raising an UndefinedVar error if not present.
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type_or_err<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<&plir::Type> 
+    fn get_var_type_or_err<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<plir::Type> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.get_var_type(ident)?
@@ -1928,7 +1931,7 @@ impl PLIRCodegen {
         
         match expr {
             ast::Expr::Ident(ident) => {
-                let ty = self.get_var_type_or_err(&ident, range)?.clone();
+                let ty = self.get_var_type_or_err(&ident, range)?;
 
                 Ok(plir::Expr::new(
                     ty,
@@ -2133,7 +2136,7 @@ impl PLIRCodegen {
                         let id = plir::FunIdent::new_static(&ty, &attr);
                         PLIRErr::UndefinedVarAttr(id).at_range(range.clone())
                     })?;
-                Ok(plir::Path::Static(ty, attr, self.get_var_type_or_err(&attrref, range)?.clone()))
+                Ok(plir::Path::Static(ty, attr, self.get_var_type_or_err(&attrref, range)?))
                     .map(Into::into)
             },
             ast::Expr::UnaryOps { ops, expr } => {
@@ -2220,7 +2223,8 @@ impl PLIRCodegen {
                 // FIXME: cleanup
                 let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
                 let m = cls.get_method_or_err("next", itrange.clone())?;
-                let element_type = match self.get_var_type_or_err(&m, itrange.clone())?.as_ref() {
+                let itnext_ty = self.get_var_type_or_err(&m, itrange.clone())?;
+                let element_type = match itnext_ty.as_ref() {
                     plir::TypeRef::Fun([a], plir::Type::Generic(ri, rp), false) if a == &iterator.ty && ri == "option" && rp.len() == 1 => {
                         let idty = rp[0].clone();
                         // FIXME: put this inside block scope
@@ -2381,7 +2385,6 @@ impl PLIRCodegen {
                 } else {
                     let metref = metref.clone();
                     let mut fun_ty: plir::FunType = self.get_var_type_or_err(&metref, expr_range.clone())?
-                        .clone()
                         .try_into()?;
                     fun_ty.pop_front();
 
