@@ -10,6 +10,7 @@
 //! [AST]: crate::ast
 
 mod types;
+pub(crate) mod walk;
 
 use std::borrow::Cow;
 

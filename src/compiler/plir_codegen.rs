@@ -14,6 +14,7 @@
 //! which utilizes the [`PLIRCodegen`] struct.
 
 mod op_impl;
+mod type_apply;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ use indexmap::IndexMap;
 use crate::ast::{self, ReasgType, MutType};
 use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
+use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
 pub(crate) use self::op_impl::{CastFlags, OpErr};
@@ -851,7 +853,9 @@ impl std::fmt::Display for ConstraintErr {
         Ok(())
     }
 }
+
 impl std::error::Error for ConstraintErr {}
+struct CannotResolve(usize);
 impl TypeResolver {
     fn new() -> TypeResolver {
         Self {
@@ -865,7 +869,7 @@ impl TypeResolver {
         self.next_unk += 1;
         unk
     }
-    fn normalize_unk(&mut self, ty: plir::Type) -> plir::Type {
+    fn normalize(&mut self, ty: plir::Type) -> plir::Type {
         match ty {
             plir::Type::Unk(_) => {
                 let id = self.monos.make_set(ty);
@@ -875,13 +879,63 @@ impl TypeResolver {
             _ => ty
         }
     }
+    fn deep_normalize(&mut self, mut ty: plir::Type) -> Result<plir::Type, CannotResolve> {
+        use plir::{Type, FunType};
 
+        fn has_unks(ty: &Type) -> bool {
+            match ty {
+                Type::Unk(_) => true,
+                Type::Prim(_) => false,
+                Type::Generic(_, t) => t.iter().any(has_unks),
+                Type::Tuple(t) => t.iter().any(has_unks),
+                Type::Fun(FunType { params, ret, varargs: _ }) => {
+                    params.iter().any(has_unks) || has_unks(ret)
+                },
+            }
+        }
+
+        while has_unks(&ty) {
+            ty = match ty {
+                unk @ Type::Unk(_) => {
+                    match self.normalize(unk) {
+                        Type::Unk(idx) => Err(CannotResolve(idx))?,
+                        t => t
+                    }
+                },
+                prim @ Type::Prim(_) => return Ok(prim),
+                Type::Generic(id, tys) => {
+                    let tys = tys.into_iter()
+                        .map(|ty| self.deep_normalize(ty))
+                        .collect::<Result<_, _>>()?;
+                
+                    Type::Generic(id, tys)
+                },
+                Type::Tuple(tys) => {
+                    let tys = tys.into_iter()
+                        .map(|ty| self.deep_normalize(ty))
+                        .collect::<Result<_, _>>()?;
+
+                    Type::Tuple(tys)
+                },
+                Type::Fun(FunType { params, ret, varargs }) => {
+                    let params: Vec<_> = params.into_iter()
+                        .map(|p| self.deep_normalize(p))
+                        .collect::<Result<_, _>>()?;
+                    let ret = self.deep_normalize(*ret)?;
+
+                    Type::fun_type(params, ret, varargs)
+                },
+            }
+        }
+
+        Ok(ty)
+    }
     fn add_constraint(&mut self, left: plir::Type, right: plir::Type) -> Result<(), ConstraintErr> {
         use plir::Type;
         use plir::FunType;
 
-        let left = self.normalize_unk(left);
-        let right = self.normalize_unk(right);
+        let left = self.normalize(left);
+        let right = self.normalize(right);
 
         match (&left, &right) {
             (Type::Unk(l), r) => { self.set_unk_ty(*l, r.clone()); },
@@ -1041,7 +1095,12 @@ impl PLIRCodegen {
         }?;
 
         let stmts = self.globals.stmts.into_values().collect();
-        Ok(plir::Program(stmts, block))
+
+        let mut resolver = self.resolver;
+        let mut program = plir::Program(stmts, block);
+        type_apply::TypeApplier(&mut resolver).walk_program(&mut program)
+            .unwrap_or_else(|CannotResolve(n)| panic!("cannot resolve ?{n}"));
+        Ok(program)
     }
 
     /// Gets all the types declared by this code generation.
