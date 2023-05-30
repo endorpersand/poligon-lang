@@ -87,7 +87,9 @@ pub enum PLIRErr {
     /// Type has multiple definitions
     DuplicateTypeDefs(plir::Type),
     /// Type constraint failed
-    TypeConstraintErr(ConstraintErr)
+    TypeConstraintErr(ConstraintErr),
+    /// Cannot resolve this monotype
+    CannotResolveUnk(usize)
 }
 
 type FullPLIRErr = FullGonErr<PLIRErr>;
@@ -122,6 +124,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotInitialize(_)
             | PLIRErr::CannotDeref
             | PLIRErr::TypeConstraintErr(_)
+            | PLIRErr::CannotResolveUnk(_)
             => "type error",
             
             | PLIRErr::UndefinedVarAttr(_)
@@ -172,6 +175,7 @@ impl std::fmt::Display for PLIRErr {
                 writeln!(f, "broken type constraint")?;
                 e.fmt(f)
             },
+            PLIRErr::CannotResolveUnk(idx)        => write!(f, "type ?{idx} could not be resolved"),
             PLIRErr::OpErr(e)                     => e.fmt(f),
         }
     }
@@ -856,6 +860,11 @@ impl std::fmt::Display for ConstraintErr {
 
 impl std::error::Error for ConstraintErr {}
 struct CannotResolve(usize);
+impl From<CannotResolve> for PLIRErr {
+    fn from(value: CannotResolve) -> Self {
+        PLIRErr::CannotResolveUnk(value.0)
+    }
+}
 impl TypeResolver {
     fn new() -> TypeResolver {
         Self {
@@ -879,6 +888,13 @@ impl TypeResolver {
             _ => ty
         }
     }
+    /// Attempts to normalize, erroring if type is still unknown.
+    fn normalize_or_err(&mut self, ty: plir::Type) -> Result<plir::Type, CannotResolve> {
+        match self.normalize(ty) {
+            plir::Type::Unk(idx) => Err(CannotResolve(idx)),
+            t => Ok(t)
+        }
+    }
     fn deep_normalize(&mut self, mut ty: plir::Type) -> Result<plir::Type, CannotResolve> {
         use plir::{Type, FunType};
 
@@ -896,12 +912,7 @@ impl TypeResolver {
 
         while has_unks(&ty) {
             ty = match ty {
-                unk @ Type::Unk(_) => {
-                    match self.normalize(unk) {
-                        Type::Unk(idx) => Err(CannotResolve(idx))?,
-                        t => t
-                    }
-                },
+                unk @ Type::Unk(_) => self.normalize_or_err(unk)?,
                 prim @ Type::Prim(_) => return Ok(prim),
                 Type::Generic(id, tys) => {
                     let tys = tys.into_iter()
@@ -1305,6 +1316,12 @@ impl PLIRCodegen {
                             .at_range(range)
                     })
             },
+            TypeRef::Unk(_) => {
+                let norm = self.resolver.normalize_or_err(ty.clone())
+                    .map_err(|e| PLIRErr::from(e).at_range(range.clone()))?;
+                
+                self.get_class(Located::new(&norm, range))
+            }
             s => todo!("getting type data for {s}")
         }
     }
