@@ -87,12 +87,12 @@ lazy_static! {
     static ref PTR_L:   PtrTypeS   = PtrTypeS;
     static ref VOID_L:  VoidTypeS  = VoidTypeS;
     
-    static ref BOOL_P:  plir::KnownType = plir::ty!(plir::Type::S_BOOL);
-    static ref CHAR_P:  plir::KnownType = plir::ty!(plir::Type::S_CHAR);
-    static ref INT_P:   plir::KnownType = plir::ty!(plir::Type::S_INT);
-    static ref FLOAT_P: plir::KnownType = plir::ty!(plir::Type::S_FLOAT);
-    static ref PTR_P:   plir::KnownType = plir::ty!("#ptr");
-    static ref VOID_P:  plir::KnownType = plir::ty!(plir::Type::S_VOID);
+    static ref BOOL_P:  plir::Type = plir::ty!(plir::Type::S_BOOL);
+    static ref CHAR_P:  plir::Type = plir::ty!(plir::Type::S_CHAR);
+    static ref INT_P:   plir::Type = plir::ty!(plir::Type::S_INT);
+    static ref FLOAT_P: plir::Type = plir::ty!(plir::Type::S_FLOAT);
+    static ref PTR_P:   plir::Type = plir::ty!("#ptr");
+    static ref VOID_P:  plir::Type = plir::ty!(plir::Type::S_VOID);
 }
 c_intrinsics! {
     putwchar: { // (char) -> int

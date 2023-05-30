@@ -505,7 +505,7 @@ impl DParser {
     /// The function that *should* be used for type expression parsing purposes is [`DParser::expect_type`].
     /// 
     /// The verify parameter indicates whether or not the type should be checked for existence.
-    fn match_type(&mut self, verify: bool) -> DParseResult<Option<plir::KnownType>> {
+    fn match_type(&mut self, verify: bool) -> DParseResult<Option<plir::Type>> {
         if self.has_ident().is_some() {
             self.push_loc_block("match_type");
             let ident = self.expect_ident()?.0;
@@ -558,7 +558,7 @@ impl DParser {
     /// Expect that the next tokens in the input represent a type expression.
     /// 
     /// The verify parameter indicates whether or not the type should be checked for existence.
-    pub fn expect_type(&mut self, verify: bool) -> DParseResult<plir::KnownType> {
+    pub fn expect_type(&mut self, verify: bool) -> DParseResult<plir::Type> {
         self.match_type(verify)?
             .ok_or_else(|| DParseErr::ExpectedType.at_range(self.peek_loc()))
     }

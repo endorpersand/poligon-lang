@@ -98,7 +98,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// - float to int
     /// - anything to unit
     /// - anything to bool
-    pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::KnownType, dest: &plir::KnownType) -> LLVMResult<GonValue<'ctx>> {
+    pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<GonValue<'ctx>> {
         use plir::{Type, NumType, TypeRef};
         
         match (src.as_ref(), dest.as_ref()) {

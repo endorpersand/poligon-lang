@@ -49,21 +49,21 @@ pub enum PLIRErr {
     CannotReturn,
     // TODO: split into Covariant, Invariant, and Contravariant
     /// Expected one type, but found a different type
-    ExpectedType(plir::KnownType /* expected */, plir::KnownType /* found */),
+    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     /// Cannot iterate over this type
-    CannotIterateType(plir::KnownType),
+    CannotIterateType(plir::Type),
     /// Could not determine the type of the expression
     CannotResolveType,
     /// Variable (or attribute) is not defined
     UndefinedVarAttr(plir::FunIdent),
     /// Type/class is not defined
-    UndefinedType(plir::KnownType),
+    UndefinedType(plir::Type),
     /// Tried to use . access on a method
     CannotAccessOnMethod,
     /// Tried to assign to a method
     CannotAssignToMethod,
     /// Cannot call given type
-    CannotCall(plir::KnownType),
+    CannotCall(plir::Type),
     /// Wrong number of parameters
     WrongArity(usize /* expected */, usize /* got */),
     /// Wrong number of type parameters
@@ -71,11 +71,11 @@ pub enum PLIRErr {
     /// Cannot spread here.
     CannotSpread,
     /// Cannot use class initializer syntax on this type.
-    CannotInitialize(plir::KnownType),
+    CannotInitialize(plir::Type),
     /// The field was not initialized on the type.
-    UninitializedField(plir::KnownType, String),
+    UninitializedField(plir::Type, String),
     /// The field was unexpectedly initialized on the type.
-    UnexpectedField(plir::KnownType, String),
+    UnexpectedField(plir::Type, String),
     /// Operation between two types cannot be computed.
     OpErr(OpErr),
     /// Cannot deref this expression (because it is not a pointer)
@@ -83,7 +83,7 @@ pub enum PLIRErr {
     /// Identifier has multiple definitions
     DuplicateValueDefs(plir::FunIdent),
     /// Type has multiple definitions
-    DuplicateTypeDefs(plir::KnownType),
+    DuplicateTypeDefs(plir::Type),
     /// Type constraint failed
     TypeConstraintErr(ConstraintErr)
 }
@@ -186,7 +186,7 @@ impl std::error::Error for PLIRErr {
 #[derive(Debug, Clone)]
 enum BlockExit {
     /// This block exited by returning a value.
-    Return(plir::KnownType),
+    Return(plir::Type),
 
     /// This block exited by `break`.
     Break,
@@ -195,7 +195,7 @@ enum BlockExit {
     Continue,
 
     /// This block exited normally.
-    Exit(plir::KnownType),
+    Exit(plir::Type),
 
     /// An exception was thrown
     Throw,
@@ -220,7 +220,7 @@ enum BlockExitHandle {
     /// Continue running in the upper loop.
     /// 
     /// If a block exits here, it has a known value type.
-    Continue(plir::KnownType),
+    Continue(plir::Type),
     
     /// This is either an `break` or `continue`.
     /// 
@@ -268,7 +268,7 @@ impl BlockBehavior {
     }
 }
 
-fn primitives(prims: impl IntoIterator<Item=plir::KnownType>) -> HashMap<plir::KnownType, TypeData> {
+fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, TypeData> {
     prims.into_iter()
         .map(|t| {
             let dat = TypeData::primitive(&t);
@@ -352,9 +352,9 @@ struct InsertBlock {
     /// If a conditional exit does not pass, this exit is how the block exits.
     final_exit: Option<Located<BlockExit>>,
 
-    vars: HashMap<plir::FunIdent, plir::KnownType>,
-    types: HashMap<plir::KnownType, TypeData>,
-    type_aliases: HashMap<plir::KnownType, plir::KnownType>,
+    vars: HashMap<plir::FunIdent, plir::Type>,
+    types: HashMap<plir::Type, TypeData>,
+    type_aliases: HashMap<plir::Type, plir::Type>,
 
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
@@ -363,11 +363,11 @@ struct InsertBlock {
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
     /// a type.
-    expected_ty: Option<plir::KnownType>
+    expected_ty: Option<plir::Type>
 }
 
 impl InsertBlock {
-    fn new(block_range: CursorRange, expected_ty: Option<plir::KnownType>) -> Self {
+    fn new(block_range: CursorRange, expected_ty: Option<plir::Type>) -> Self {
         Self {
             block: vec![],
             last_stmt_loc: block_range,
@@ -409,16 +409,16 @@ impl InsertBlock {
         }
     }
 
-    fn last_stmt_type(&self) -> Cow<plir::KnownType> {
-        use plir::{ProcStmt, Type, KnownType, ty};
+    fn last_stmt_type(&self) -> Cow<plir::Type> {
+        use plir::{ProcStmt, Type, ty};
 
         #[inline]
-        fn void_ty<'t>() -> Cow<'t, KnownType> {
+        fn void_ty<'t>() -> Cow<'t, Type> {
             Cow::Owned(ty!(Type::S_VOID))
         }
 
         #[inline]
-        fn never_ty<'t>() -> Cow<'t, KnownType> {
+        fn never_ty<'t>() -> Cow<'t, Type> {
             Cow::Owned(ty!(Type::S_NEVER))
         }
 
@@ -540,7 +540,7 @@ impl InsertBlock {
         self.types.insert(cls.ty.clone(), TypeData::structural(cls.clone()));
     }
 
-    fn insert_unresolved_method(&mut self, ty: &plir::KnownType, method: ast::MethodDecl) {
+    fn insert_unresolved_method(&mut self, ty: &plir::Type, method: ast::MethodDecl) {
         let ast::MethodDecl {
             sig: ast::MethodSignature { referent, is_static, name: method_name, generics, params, ret }, 
             block 
@@ -574,7 +574,7 @@ impl InsertBlock {
     }
 
     /// Declares a variable within this insert block.
-    fn declare<I>(&mut self, ident: &I, ty: plir::KnownType) 
+    fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.vars.insert(ident.as_fun_ident().into_owned(), ty);
@@ -584,7 +584,7 @@ impl InsertBlock {
 #[derive(Clone, PartialEq, Eq)]
 struct Var {
     ident: String,
-    ty: plir::KnownType,
+    ty: plir::Type,
     decl_range: CursorRange
 }
 impl Var {
@@ -603,11 +603,11 @@ impl Var {
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct SigKey<'k> {
     ident: Cow<'k, str>,
-    params: Cow<'k, [plir::KnownType]>
+    params: Cow<'k, [plir::Type]>
 }
 
 impl<'k> SigKey<'k> {
-    fn new(ident: impl Into<Cow<'k, str>>, params: impl Into<Cow<'k, [plir::KnownType]>>) -> Self {
+    fn new(ident: impl Into<Cow<'k, str>>, params: impl Into<Cow<'k, [plir::Type]>>) -> Self {
         Self { ident: ident.into(), params: params.into() }
     }
 }
@@ -618,14 +618,14 @@ impl<'k> SigKey<'k> {
 /// and access type fields.
 #[derive(Debug)]
 pub(super) struct TypeData {
-    plir_ty: plir::KnownType,
+    plir_ty: plir::Type,
     structure: TypeStructure,
     methods: HashMap<SigKey<'static>, plir::FunIdent>
 }
 
 impl TypeData {
     /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
-    pub fn primitive(ty: &plir::KnownType) -> Self {
+    pub fn primitive(ty: &plir::Type) -> Self {
         Self {
             plir_ty: ty.clone(),
             structure: TypeStructure::Primitive,
@@ -666,7 +666,7 @@ impl TypeData {
     }
 
     /// Get a field on the type (if present).
-    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::KnownType)> {
+    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
         match &self.structure {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
@@ -690,8 +690,8 @@ enum TypeStructure {
 /// A struct which holds the types declared by PLIR code generation.
 #[derive(Default, Clone, Debug)]
 pub struct DeclaredTypes {
-    pub(super) types: IndexMap<plir::KnownType, plir::Class>,
-    pub(super) values: IndexMap<plir::FunIdent, plir::KnownType>
+    pub(super) types: IndexMap<plir::Type, plir::Class>,
+    pub(super) values: IndexMap<plir::FunIdent, plir::Type>
 }
 
 impl DeclaredTypes {
@@ -744,7 +744,7 @@ impl std::ops::AddAssign for DeclaredTypes {
 #[derive(PartialEq, Eq, Hash)]
 enum GlobalKey {
     Value(plir::FunIdent),
-    Type(plir::KnownType)
+    Type(plir::Type)
 }
 
 #[derive(Default)]
@@ -806,7 +806,7 @@ struct TypeResolver {
     /// A DSDS of monotypes.
     /// 
     /// The top root of a group should always contain a non-unknown.
-    monos: dsds::UnionFind<plir::MaybeType>,
+    monos: dsds::UnionFind<plir::Type>,
     next_unk: usize
 }
 #[derive(Debug)]
@@ -821,15 +821,15 @@ enum ConstraintFail<T> {
 /// Failed type constraint.
 #[derive(Debug)]
 pub struct ConstraintErr {
-    error: Vec<ConstraintFail<plir::MaybeType>>
+    error: Vec<ConstraintFail<plir::Type>>
 }
-impl From<ConstraintFail<plir::MaybeType>> for ConstraintErr {
-    fn from(value: ConstraintFail<plir::MaybeType>) -> Self {
+impl From<ConstraintFail<plir::Type>> for ConstraintErr {
+    fn from(value: ConstraintFail<plir::Type>) -> Self {
         ConstraintErr { error: vec![value] }
     }
 }
 impl ConstraintErr {
-    fn caused(mut self, l: plir::MaybeType, r: plir::MaybeType) -> Self {
+    fn caused(mut self, l: plir::Type, r: plir::Type) -> Self {
         self.error.push(ConstraintFail::Mono(l, r));
         self
     }
@@ -860,20 +860,14 @@ impl TypeResolver {
         }
     }
 
-    fn new_unknown(&mut self) -> plir::MaybeType {
-        use plir::Type::Prim;
-        use plir::MTypeUnit::Unk;
-
-        let unk = Prim(Unk(self.next_unk));
+    fn new_unknown(&mut self) -> plir::Type {
+        let unk = plir::Type::Unk(self.next_unk);
         self.next_unk += 1;
         unk
     }
-    fn normalize_unk(&mut self, ty: plir::MaybeType) -> plir::MaybeType {
-        use plir::Type::Prim;
-        use plir::MTypeUnit::Unk;
-
+    fn normalize_unk(&mut self, ty: plir::Type) -> plir::Type {
         match ty {
-            Prim(Unk(_)) => {
+            plir::Type::Unk(_) => {
                 let id = self.monos.make_set(ty);
                 let root = self.monos.find(id);
                 self.monos.get_idx(root).clone()
@@ -882,22 +876,21 @@ impl TypeResolver {
         }
     }
 
-    fn add_constraint(&mut self, left: plir::MaybeType, right: plir::MaybeType) -> Result<(), ConstraintErr> {
-        use plir::MaybeType;
-        use plir::MTypeUnit::Unk;
+    fn add_constraint(&mut self, left: plir::Type, right: plir::Type) -> Result<(), ConstraintErr> {
+        use plir::Type;
         use plir::FunType;
 
         let left = self.normalize_unk(left);
         let right = self.normalize_unk(right);
 
         match (&left, &right) {
-            (MaybeType::Prim(Unk(l)), r) => { self.set_unk_ty(*l, r.clone()); },
-            (r, MaybeType::Prim(Unk(l))) => { self.set_unk_ty(*l, r.clone()); },
-            (l @ MaybeType::Prim(_), r @ MaybeType::Prim(_)) => { 
+            (Type::Unk(l), r) => { self.set_unk_ty(*l, r.clone()); },
+            (r, Type::Unk(l)) => { self.set_unk_ty(*l, r.clone()); },
+            (l @ Type::Prim(_), r @ Type::Prim(_)) => { 
                 if l != r { Err(ConstraintFail::Mono(left, right))? }
             },
 
-            (MaybeType::Generic(ai, ap), MaybeType::Generic(bi, bp)) => {
+            (Type::Generic(ai, ap), Type::Generic(bi, bp)) => {
                 if ai != bi { return Err(ConstraintFail::Generic(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
@@ -906,7 +899,7 @@ impl TypeResolver {
                         .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
-            (MaybeType::Tuple(ap), MaybeType::Tuple(bp)) => {
+            (Type::Tuple(ap), Type::Tuple(bp)) => {
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
                 
                 for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
@@ -914,7 +907,7 @@ impl TypeResolver {
                         .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
-            (MaybeType::Fun(FunType { params: ap, ret: ar, varargs: av }), MaybeType::Fun(FunType { params: bp, ret: br, varargs: bv })) => {
+            (Type::Fun(FunType { params: ap, ret: ar, varargs: av }), Type::Fun(FunType { params: bp, ret: br, varargs: bv })) => {
                 if av != bv { return Err(ConstraintFail::Shape(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
@@ -932,17 +925,19 @@ impl TypeResolver {
     }
 
     /// Sets an unknown type variable equal to another type.
-    fn set_unk_ty(&mut self, unk: usize, t: plir::MaybeType) {
-        use plir::Type::Prim;
-        use plir::MTypeUnit::Unk;
+    fn set_unk_ty(&mut self, unk: usize, t: plir::Type) {
+        use plir::Type;
 
-        let left  = self.monos.make_set(Prim(Unk(unk)));
+        let left  = self.monos.make_set(Type::Unk(unk));
         let right = self.monos.make_set(t);
 
         self.monos.union_select(left, right, |l, r| {
-            debug_assert!(matches!(l, Prim(Unk(_))), "{l:?} should have been normalized before set_unk_ty call");
+            debug_assert!(
+                matches!(l, Type::Unk(_)),
+                "{l:?} should have been normalized before set_unk_ty call"
+            );
             match r {
-                Prim(Unk(_)) => dsds::Selector::Whatever,
+                Type::Unk(_) => dsds::Selector::Whatever,
                 _ => dsds::Selector::Right,
             }
         });
@@ -1054,7 +1049,7 @@ impl PLIRCodegen {
         self.globals.declared.clone()
     }
 
-    fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::KnownType>) {
+    fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::Type>) {
         self.blocks.push(InsertBlock::new(block_range, expected_ty))
     }
     fn pop_block(&mut self) -> Option<InsertBlock> {
@@ -1065,7 +1060,7 @@ impl PLIRCodegen {
     }
 
     /// Declares a variable with a given type.
-    fn declare<I>(&mut self, ident: &I, ty: plir::KnownType) 
+    fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.peek_block().declare(ident, ty)
@@ -1132,7 +1127,7 @@ impl PLIRCodegen {
     /// When a type is found during PLIR traversal,
     /// this function is used to initialize the definition
     /// of the type (assuming it is concrete).
-    fn resolve_type(&mut self, ty: Located<&plir::KnownType>) -> PLIRResult<()> {
+    fn resolve_type(&mut self, ty: Located<&plir::Type>) -> PLIRResult<()> {
         use indexmap::map::Entry;
 
         let ident = ty.short_ident();
@@ -1203,7 +1198,7 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<&plir::KnownType>> 
+    fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<&plir::Type>> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.resolve_ident(ident)?;
@@ -1214,7 +1209,7 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type_or_err<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<&plir::KnownType> 
+    fn get_var_type_or_err<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<&plir::Type> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.get_var_type(ident)?
@@ -1223,7 +1218,7 @@ impl PLIRCodegen {
             })
     }
 
-    fn get_class(&mut self, ty: Located<&plir::KnownType>) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
         self.resolve_type(Located::clone(&ty))?;
         let Located(ty, range) = ty;
@@ -1380,7 +1375,7 @@ impl PLIRCodegen {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_eager_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::KnownType>, index_til_end: usize) -> PLIRResult<bool> {
+    fn consume_eager_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<bool> {
         let Located(stmt, range) = stmt;
 
         match stmt {
@@ -1491,7 +1486,7 @@ impl PLIRCodegen {
                                 false => CastFlags::Implicit | CastFlags::Void,
                             };
                             // TODO(cast): reinstate casts here
-                            match self.resolver.add_constraint(le.ty.clone().into(), exp_ty.into()) {
+                            match self.resolver.add_constraint(le.ty.clone(), exp_ty) {
                                 Ok(_) => {
                                     // // cast was successful so apply it
                                     // me.replace(e.0);
@@ -1549,7 +1544,7 @@ impl PLIRCodegen {
         &mut self, 
         block: Located<ast::Block>, 
         btype: BlockBehavior, 
-        expected_ty: Option<plir::KnownType>
+        expected_ty: Option<plir::Type>
     ) -> PLIRResult<plir::Block> {
         let Located(ast::Block(stmts), block_range) = block;
 
@@ -1654,7 +1649,7 @@ impl PLIRCodegen {
                 let ty = ty.unwrap_or_else(|| le.0.ty.clone());
                 // Type check decl, casting if possible
                 // TODO(cast): reinstate cast
-                let e = match this.resolver.add_constraint(le.ty.clone().into(), ty.clone().into()) {
+                let e = match this.resolver.add_constraint(le.ty.clone(), ty.clone()) {
                     Ok(_)  => le.0,
                     Err(e) => return Err(PLIRErr::TypeConstraintErr(e).at_range(le.1)),
                 };
@@ -1745,14 +1740,14 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn verify_type(&mut self, lty: Located<&mut plir::KnownType>) -> PLIRResult<&TypeData> {
+    pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<&TypeData> {
         if let Some(aliased_ty) = self.find_scoped(|ib| ib.type_aliases.get(lty.0)) {
             *lty.0 = aliased_ty.clone();
         }
 
         self.get_class(lty.map(|t| &*t))
     }
-    fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::KnownType, &TypeData)> {
+    fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
         let Located(ast::Type(ty_ident, ty_params), range) = ty;
         
         let mut ty = {
@@ -1770,7 +1765,7 @@ impl PLIRCodegen {
         Ok((ty, cls))
     }
 
-    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::KnownType> {
+    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
         self.consume_type_and_get_cls(ty)
             .map(|(ty, _)| ty)
     }
@@ -1789,7 +1784,7 @@ impl PLIRCodegen {
         self.push_global(cls)
     }
 
-    pub(super) fn instantiate_generic_cls(&mut self, cls: ast::Class, ty: Located<&plir::KnownType>) -> PLIRResult<()> {
+    pub(super) fn instantiate_generic_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
         if cls.generics.len() != ty.generic_args().len() {
             Err(PLIRErr::WrongTypeArity(cls.generics.len(), ty.generic_args().len()).at_range(ty.range()))?
         };
@@ -1815,7 +1810,7 @@ impl PLIRCodegen {
     /// and returns the defined type parameters.
     /// 
     /// This will not allocate.
-    fn get_generic_params(&self, ty: &plir::KnownType) -> Cow<[String]> {
+    fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
         match ty {
             plir::Type::Generic(id, _) => {
                 let mgcls = self.find_scoped(|ib| ib.generic_types.get(id));
@@ -1829,7 +1824,7 @@ impl PLIRCodegen {
         }
     }
 
-    fn with_generic_aliases<T>(&mut self, ty: &plir::KnownType, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
+    fn with_generic_aliases<T>(&mut self, ty: &plir::Type, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
         std::iter::zip(self.get_generic_params(ty).into_owned(), &*ty.generic_args())
             .for_each(|(p, arg)| {
                 self.peek_block().type_aliases.insert(plir::ty!(p), arg.clone());
@@ -1869,7 +1864,7 @@ impl PLIRCodegen {
         }
     }
 
-    fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::KnownType>) -> PLIRResult<plir::Expr> {
+    fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
         let Located(expr, range) = value;
         
         match expr {
@@ -2008,7 +2003,7 @@ impl PLIRCodegen {
                         let lfield_expr = self.consume_located_expr(ast_expr, Some(field_ty.clone()))?;
                         
                         // TODO(cast): reinstate casts
-                        match self.resolver.add_constraint(lfield_expr.ty.clone().into(), field_ty.into()) {
+                        match self.resolver.add_constraint(lfield_expr.ty.clone(), field_ty) {
                             Ok(_)  => Ok(lfield_expr.0),
                             Err(e) => Err(PLIRErr::TypeConstraintErr(e).at_range(lfield_expr.1)),
                         }
@@ -2270,7 +2265,7 @@ impl PLIRCodegen {
                         let mut args: Vec<_> = std::iter::zip(pty_iter, largs.by_ref())
                             .map(|(pty, larg)| {
                                 // TODO(cast): reimpl casting here
-                                self.resolver.add_constraint(pty.clone().into(), larg.ty.clone().into())
+                                self.resolver.add_constraint(pty.clone(), larg.ty.clone())
                                     .map(|_| larg.0)
                                     .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(larg.1))
                             })
@@ -2297,12 +2292,12 @@ impl PLIRCodegen {
         }
     }
 
-    fn consume_located_expr(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::KnownType>) -> PLIRResult<Located<plir::Expr>> {
+    fn consume_located_expr(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<Located<plir::Expr>> {
         let range = expr.range();
         self.consume_expr(expr, ctx_type)
             .map(|e| Located::new(e, range))
     }
-    fn consume_expr_and_box(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::KnownType>) -> PLIRResult<Box<plir::Expr>> {
+    fn consume_expr_and_box(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<Box<plir::Expr>> {
         self.consume_expr(expr, ctx_type).map(Box::new)
     }
     fn consume_expr_truth(&mut self, expr: Located<ast::Expr>) -> PLIRResult<plir::Expr> {
@@ -2353,7 +2348,7 @@ impl PLIRCodegen {
         Ok(path)
     }
 
-    fn consume_index(&mut self, idx: Located<ast::Index>) -> PLIRResult<(plir::KnownType, plir::Index)> {
+    fn consume_index(&mut self, idx: Located<ast::Index>) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
 
         let Located(ast::Index { expr, index }, expr_range) = idx;
@@ -2364,7 +2359,7 @@ impl PLIRCodegen {
         self.apply_index(expr, index, expr_range)
     }
 
-    fn consume_deref(&mut self, d: Located<ast::IDeref>, ty: plir::KnownType) -> PLIRResult<plir::IDeref> {
+    fn consume_deref(&mut self, d: Located<ast::IDeref>, ty: plir::Type) -> PLIRResult<plir::IDeref> {
         let Located(ast::IDeref(e), _) = d;
         let Located(expr, expr_range) = self.consume_located_expr(*e, None)?;
 

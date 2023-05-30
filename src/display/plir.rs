@@ -29,9 +29,9 @@ fn wrap_ident(ident: &str, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{ident:?}")
     }
 }
-fn wrap_ty(ty: &plir::KnownType, f: &mut Formatter<'_>) -> std::fmt::Result {
+fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
     match ty {
-        KnownType::Prim(ident) => wrap_ident(ident, f),
+        Type::Prim(ident) => wrap_ident(ident, f),
         _ => write!(f, "<{ty}>")
     }
 }
@@ -202,18 +202,15 @@ impl Display for Param {
     }
 }
 
-impl<U: TypeUnit> Display for Type<U> 
-    where U::Ref: Display
-{
+impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.as_ref().fmt(f)
     }
 }
-impl<U: TypeUnit> Display for TypeRef<'_, U> 
-    where U::Ref: Display
-{
+impl Display for TypeRef<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            TypeRef::Unk(unk) => write!(f, "?{unk}"),
             TypeRef::Prim(ident) => write!(f, "{ident}"),
             TypeRef::Generic(ident, params) => {
                 write!(f, "{ident}")?;
@@ -244,22 +241,12 @@ impl<U: TypeUnit> Display for TypeRef<'_, U>
     }
 }
 
-impl<U: TypeUnit> Display for FunType<U> 
-    where U::Ref: Display
-{
+impl Display for FunType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_ref())
     }
 }
 
-impl Display for MTypeUnit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MTypeUnit::Known(s) => write!(f, "{s}"),
-            MTypeUnit::Unk(i)   => write!(f, "?{i}"),
-        }
-    }
-}
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Expr { ty, expr } = self;

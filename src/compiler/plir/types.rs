@@ -8,75 +8,39 @@ use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 
 use super::Split;
 
-/// Trait holding any type which can be used as a primitive for [Type].
-pub trait TypeUnit: Borrow<Self::Ref> {
-    /// Reference type for parametrized [TypeRef]
-    type Ref: ?Sized + ToOwned<Owned=Self> + PartialEq;
-}
-
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type<U: TypeUnit> {
-    /// A type without type parameters (e.g. `string`, `int`).
-    Prim(U),
+pub enum Type {
+    /// An unresolved monotype (these are of the form `?1`, `?2`)
+    Unk(usize),
+    /// A concrete type without type parameters (e.g. `string`, `int`).
+    Prim(String),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
-    Generic(String, Vec<Type<U>>),
+    Generic(String, Vec<Type>),
     /// A tuple of types (e.g. `[int, int, int]`).
-    Tuple(Vec<Type<U>>),
+    Tuple(Vec<Type>),
     /// A function (e.g. `() -> int`, `str -> int`).
-    Fun(FunType<U>)
+    Fun(FunType)
 }
 
 /// A function type expression.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct FunType<U: TypeUnit = String> {
+pub struct FunType {
     /// The parameter types of this function type
-    pub params: Vec<Type<U>>, 
+    pub params: Vec<Type>, 
 
     /// The return type
-    pub ret: Box<Type<U>>,
+    pub ret: Box<Type>,
 
     /// Whether this type has varargs at the end of its parameters
     pub varargs: bool
 }
 
-/// A known type unit.
-pub type KTypeUnit = String;
-impl TypeUnit for KTypeUnit {
-    type Ref = str;
-}
-/// A type expression whose type is fully known
-pub type KnownType = Type<KTypeUnit>;
-
-/// Unit type which includes the possibility of an unknown type variable.
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum MTypeUnit {
-    /// Primitive type which is known
-    Known(KTypeUnit),
-    /// Unknown type variable
-    Unk(usize)
-}
-impl TypeUnit for MTypeUnit {
-    type Ref = MTypeUnit;
-}
-/// A type expression which can include an unknown type variable.
-pub type MaybeType = Type<MTypeUnit>;
-
-impl From<KTypeUnit> for MTypeUnit {
-    fn from(value: KTypeUnit) -> Self {
-        MTypeUnit::Known(value)
-    }
-}
-impl From<KnownType> for MaybeType {
-    fn from(value: KnownType) -> Self {
-        value.map(MTypeUnit::from)
-    }
-}
-impl<U: TypeUnit> FunType<U> {
+impl FunType {
     /// Constructs a new function type.
-    pub fn new(params: Vec<Type<U>>, ret: Type<U>, varargs: bool) -> Self {
+    pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
         FunType {params, ret: Box::new(ret), varargs }
     }
 
@@ -87,27 +51,8 @@ impl<U: TypeUnit> FunType<U> {
         self.params.remove(0);
     }
 
-    pub(crate) fn as_ref(&self) -> TypeRef<U> {
+    pub(crate) fn as_ref(&self) -> TypeRef {
         TypeRef::Fun(&self.params, &self.ret, self.varargs)
-    }
-
-    pub(crate) fn try_map<V: TypeUnit, E>(self, f: &mut impl FnMut(U) -> Result<V, E>) -> Result<FunType<V>, E> {
-        let FunType { params, ret, varargs } = self;
-        
-        let params = params.into_iter()
-            .map(|t| t.try_map(f))
-            .collect::<Result<_, _>>()?;
-        
-        let ret = ret.try_map(f)
-            .map(Box::new)?;
-
-        Ok(FunType { params, ret, varargs })
-    }
-
-    #[allow(unused)]
-    pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> FunType<V> {
-        self.try_map::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
-            .unwrap_or_else(|e| match e {})
     }
 }
 impl FunType {
@@ -133,10 +78,10 @@ impl FunType {
     }
 }
 
-impl TryFrom<KnownType> for FunType {
+impl TryFrom<Type> for FunType {
     type Error = PLIRErr;
 
-    fn try_from(value: KnownType) -> Result<Self, Self::Error> {
+    fn try_from(value: Type) -> Result<Self, Self::Error> {
         match value {
             Type::Fun(f) => Ok(f),
             t => Err(PLIRErr::CannotCall(t))
@@ -144,65 +89,31 @@ impl TryFrom<KnownType> for FunType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum TypeRef<'a, U: TypeUnit = String> {
-    Prim(&'a U::Ref),
-    Generic(&'a str, &'a [Type<U>]),
-    Tuple(&'a [Type<U>]),
-    Fun(&'a [Type<U>], &'a Type<U>, bool)
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum TypeRef<'a> {
+    Unk(usize),
+    Prim(&'a str),
+    Generic(&'a str, &'a [Type]),
+    Tuple(&'a [Type]),
+    Fun(&'a [Type], &'a Type, bool)
 }
-impl<U: TypeUnit> TypeRef<'_, U> {
+impl TypeRef<'_> {
     #[allow(unused)]
-    pub(crate) fn to_owned(self) -> Type<U> 
-        where U: Clone
-    {
-        self.map_owned(U::Ref::to_owned)
-    }
-
-    pub(crate) fn try_map_owned<V: TypeUnit, E>(self, f: &mut impl FnMut(&U::Ref) -> Result<V, E>) -> Result<Type<V>, E> {
-        let result = match self {
-            TypeRef::Prim(id) => Type::Prim(f(id)?),
-            TypeRef::Generic(id, params) => {
-                let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(f))
-                    .collect::<Result<_, _>>()?;
-                Type::Generic(id.to_owned(), params)
-            },
-            TypeRef::Tuple(params) => {
-                let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(f))
-                    .collect::<Result<_, _>>()?;
-                Type::Tuple(params)
-            },
-            TypeRef::Fun(params, ret, varargs) => {
-                let params = params.iter()
-                    .map(|t| t.as_ref().try_map_owned(f))
-                    .collect::<Result<_, _>>()?;
-                let ret = ret.as_ref().try_map_owned(f)?;
-                Type::Fun(FunType { params, ret: Box::new(ret), varargs })
-            },
-        };
-
-        Ok(result)
-    }
-
-    pub(crate) fn map_owned<V: TypeUnit>(self, mut f: impl FnMut(&U::Ref) -> V) -> Type<V> {
-        self.try_map_owned::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
-            .unwrap_or_else(|e| match e {})
+    pub(crate) fn to_owned(self) -> Type {
+        match self {
+            TypeRef::Unk(t) => Type::Unk(t),
+            TypeRef::Prim(t) => Type::Prim(t.to_owned()),
+            TypeRef::Generic(t, p) => Type::Generic(t.to_owned(), p.to_owned()),
+            TypeRef::Tuple(t) => Type::Tuple(t.to_owned()),
+            TypeRef::Fun(p, r, varargs) => Type::Fun(FunType::new(p.to_owned(), r.to_owned(), varargs)),
+        }
     }
 }
-impl<U: TypeUnit> Clone for TypeRef<'_, U> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<U: TypeUnit> Copy for TypeRef<'_, U> {}
-
 enum TypeRezError {
     NoBranches,
     MultipleBranches
 }
-impl<U: TypeUnit> Type<U> {
+impl Type {
     pub(crate) fn fun_type(params: impl IntoIterator<Item=Self>, ret: Self, var_args: bool) -> Self {
         Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
     }
@@ -214,6 +125,7 @@ impl<U: TypeUnit> Type<U> {
         where Self: Clone
     {
         match self {
+            Type::Unk(_)        => Cow::from(vec![]),
             Type::Prim(_)       => Cow::from(vec![]),
             Type::Generic(_, p) => Cow::from(p),
             Type::Tuple(_)      => Cow::from(vec![]),
@@ -221,44 +133,17 @@ impl<U: TypeUnit> Type<U> {
         }
     }
 
-    pub(crate) fn as_ref(&self) -> TypeRef<<U::Ref as ToOwned>::Owned> {
+    pub(crate) fn as_ref(&self) -> TypeRef {
         match self {
+            Type::Unk(idx) => TypeRef::Unk(*idx),
             Type::Prim(prim) => TypeRef::Prim(prim.borrow()),
             Type::Generic(ident, params) => TypeRef::Generic(ident.borrow(), params),
             Type::Tuple(params) => TypeRef::Tuple(params),
             Type::Fun(ft) => ft.as_ref()
         }
     }
-
-    pub(crate) fn try_map<V: TypeUnit, E>(self, f: &mut impl FnMut(U) -> Result<V, E>) -> Result<Type<V>, E> {
-        let result = match self {
-            Type::Prim(id) => Type::Prim(f(id)?),
-            Type::Generic(id, params) => {
-                let params = params.into_iter()
-                    .map(|t| t.try_map(f))
-                    .collect::<Result<_, _>>()?;
-                Type::Generic(id, params)
-            },
-            Type::Tuple(params) => {
-                let params = params.into_iter()
-                    .map(|t| t.try_map(f))
-                    .collect::<Result<_, _>>()?;
-                Type::Tuple(params)
-            },
-            Type::Fun(fun) => {
-                Type::Fun(fun.try_map(f)?)
-            },
-        };
-
-        Ok(result)
-    }
-
-    pub(crate) fn map<V: TypeUnit>(self, mut f: impl FnMut(U) -> V) -> Type<V> {
-        self.try_map::<V, std::convert::Infallible>(&mut |u| Ok(f(u)))
-            .unwrap_or_else(|e| match e {})
-    }
 }
-impl KnownType {
+impl Type {
     pub(crate) const S_INT:   &'static str = "int";
     pub(crate) const S_FLOAT: &'static str = "float";
     pub(crate) const S_BOOL:  &'static str = "bool";
@@ -298,7 +183,7 @@ impl KnownType {
     }
 
     /// Given some types, merge them into what type it could be.
-    fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Result<KnownType, TypeRezError> {
+    fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
         let mut it = into_it.into_iter()
             .filter(|ty| !ty.is_never());
     
@@ -313,7 +198,7 @@ impl KnownType {
     }
 
     /// Resolve a block's type, given the types of the values exited from the block.
-    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Option<KnownType> {
+    pub fn resolve_branches<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
         match Type::resolve_type(into_it) {
             Ok(ty) => Some(ty),
             Err(TypeRezError::NoBranches) => Some(ty!(Type::S_NEVER)),
@@ -321,12 +206,12 @@ impl KnownType {
         }
     }
     /// Resolve a collection literal's type, given the types of the elements of the collection.
-    pub fn resolve_collection_ty<'a>(into_it: impl IntoIterator<Item=&'a KnownType>) -> Option<KnownType> {
+    pub fn resolve_collection_ty<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Option<Type> {
         Type::resolve_type(into_it).ok()
     }
 
     /// Compute the type that would result by splitting this type with the given [`Split`].
-    pub fn split(&self, sp: Split) -> Result<KnownType, OpErr> {
+    pub fn split(&self, sp: Split) -> Result<Type, OpErr> {
         match self.as_ref() {
             TypeRef::Prim(Type::S_STR) => match sp {
                 Split::Left(_)
@@ -368,6 +253,7 @@ impl KnownType {
     /// Return a short form of this type's identifier.
     pub fn short_ident(&self) -> &str {
         match self {
+            Type::Unk(_) => "#unk",
             Type::Prim(n) => n,
             Type::Generic(n, _) => n,
             Type::Tuple(_) => "#tuple",
@@ -378,7 +264,7 @@ impl KnownType {
     /// Return this type's full identifier.
     pub fn ident(&self) -> Cow<str> {
         #[inline]
-        fn param_tuple(params: &[KnownType]) -> String {
+        fn param_tuple(params: &[Type]) -> String {
             params.iter()
                 .map(Type::ident)
                 .collect::<Vec<_>>()
@@ -386,6 +272,7 @@ impl KnownType {
         }
 
         match self.as_ref() {
+            TypeRef::Unk(idx) => Cow::from(format!("#unk{idx}")),
             TypeRef::Prim(ident) => Cow::from(ident),
             TypeRef::Generic(ident, params) => {
                 Cow::from(format!("{ident}<{}>", param_tuple(params)))
@@ -406,19 +293,19 @@ impl KnownType {
     }
 }
 
-impl<'a, U: TypeUnit + PartialEq> PartialEq<TypeRef<'a, U>> for Type<U> {
-    fn eq(&self, &other: &TypeRef<U>) -> bool {
+impl<'a> PartialEq<TypeRef<'a>> for Type {
+    fn eq(&self, &other: &TypeRef<'a>) -> bool {
         self.as_ref() == other
     }
 }
-impl<'a, U: TypeUnit + PartialEq> PartialEq<Type<U>> for TypeRef<'a, U> {
-    fn eq(&self, other: &Type<U>) -> bool { other.eq(self) }
+impl<'a> PartialEq<Type> for TypeRef<'a> {
+    fn eq(&self, other: &Type) -> bool { other.eq(self) }
 }
-impl<'a, U: TypeUnit + PartialEq> PartialEq<TypeRef<'a, U>> for &'a Type<U> {
-    fn eq(&self, other: &TypeRef<U>) -> bool { (*self).eq(other) }
+impl<'a> PartialEq<TypeRef<'a>> for &'a Type {
+    fn eq(&self, other: &TypeRef<'a>) -> bool { (*self).eq(other) }
 }
-impl<'a, U: TypeUnit + PartialEq> PartialEq<&'a Type<U>> for TypeRef<'a, U> {
-    fn eq(&self, other: &&Type<U>) -> bool { self.eq(*other) }
+impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
+    fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
 }
 
 /// Helper type which generalizes numerics into categories.
@@ -428,7 +315,7 @@ pub(crate) struct NumType {
     pub bit_len: usize
 }
 lazy_static! {
-    static ref NUM_TYPE_ORDER: IndexMap<KnownType, NumType> = {
+    static ref NUM_TYPE_ORDER: IndexMap<Type, NumType> = {
         let mut m = IndexMap::new();
 
         m.insert(ty!("#byte"),       NumType { floating: false, bit_len: 8  });
@@ -439,7 +326,7 @@ lazy_static! {
     };
 }
 impl NumType {
-    pub fn new(ty: &KnownType) -> Option<Self> {
+    pub fn new(ty: &Type) -> Option<Self> {
         NUM_TYPE_ORDER.get(ty).copied()
     }
 
@@ -450,15 +337,15 @@ impl NumType {
         self.floating
     }
 
-    pub fn order<'a>() -> Vec<&'a KnownType> {
+    pub fn order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.keys().collect()
     }
-    pub fn int_order<'a>() -> Vec<&'a KnownType> {
+    pub fn int_order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(pt, nt)| nt.is_int_like().then_some(pt))
             .collect()
     }
-    pub fn float_order<'a>() -> Vec<&'a KnownType> {
+    pub fn float_order<'a>() -> Vec<&'a Type> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(t, nt)| nt.is_float_like().then_some(t))
             .collect()
@@ -501,7 +388,7 @@ pub(crate) use ty;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Class {
     /// The associated [`Type`] of this class
-    pub ty: KnownType,
+    pub ty: Type,
     /// A mapping of identifiers to fields in the class
     pub fields: IndexMap<String, Field>
 }
@@ -519,5 +406,5 @@ pub struct Field {
     pub mt: ast::MutType,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: KnownType
+    pub ty: Type
 }

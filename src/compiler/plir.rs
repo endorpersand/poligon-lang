@@ -39,7 +39,7 @@ pub struct Program(pub Vec<HoistedStmt>, pub Vec<ProcStmt>);
 /// }
 /// ```
 #[derive(Debug, PartialEq, Eq)]
-pub struct Block(pub KnownType, pub Vec<ProcStmt>);
+pub struct Block(pub Type, pub Vec<ProcStmt>);
 
 impl Default for Block {
     fn default() -> Self {
@@ -228,7 +228,7 @@ pub struct Decl {
     pub ident: String,
 
     /// The type of the variable
-    pub ty: KnownType,
+    pub ty: Type,
 
     /// The value to declare the variable to
     pub val: Expr
@@ -260,7 +260,7 @@ pub struct Param {
     pub ident: String,
 
     /// The type of the parameter variable
-    pub ty: KnownType
+    pub ty: Type
 }
 
 /// The possible identifiers a function can have.
@@ -269,7 +269,7 @@ pub enum FunIdent {
     /// Just an identifier. For functions in scope.
     Simple(String),
     /// A method identifier.
-    Static(KnownType, String)
+    Static(Type, String)
 }
 
 impl FunIdent {
@@ -287,7 +287,7 @@ impl FunIdent {
     }
 
     /// Creates a new [`FunIdent::Static`] identifier.
-    pub fn new_static(ty: &KnownType, attr: &str) -> Self {
+    pub fn new_static(ty: &Type, attr: &str) -> Self {
         Self::Static(ty.clone(), attr.to_string())
     }
 
@@ -300,7 +300,7 @@ impl FunIdent {
     /// the type the method comes from (which can be used to identify generic parameters).
     /// 
     /// Otherwise, this returns a type without any type parameters.
-    pub(super) fn resolution_type(&self) -> Cow<KnownType> {
+    pub(super) fn resolution_type(&self) -> Cow<Type> {
         match self {
             FunIdent::Simple(_) => Cow::Owned(ty!(Type::S_VOID)),
             FunIdent::Static(t, _) => Cow::Borrowed(t),
@@ -310,7 +310,7 @@ impl FunIdent {
     /// Constructs a PLIR expression out of this function identifier.
     /// 
     /// This can either be an identifier expression or a static path.
-    pub fn into_expr(self, fun_ty: KnownType) -> Expr {
+    pub fn into_expr(self, fun_ty: Type) -> Expr {
         match self {
             FunIdent::Simple(id) => Expr::new(fun_ty, ExprType::Ident(id)),
             FunIdent::Static(cls_ty, attr) => Path::Static(cls_ty, attr, fun_ty).into(),
@@ -369,7 +369,7 @@ pub struct FunSignature {
     /// Whether the function is varargs
     pub varargs: bool,
     /// The function's return type
-    pub ret: KnownType
+    pub ret: Type
 }
 
 impl FunSignature {
@@ -413,7 +413,7 @@ pub struct FunDecl {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Expr {
     /// Value type of the expression
-    pub ty: KnownType,
+    pub ty: Type,
 
     /// The specific expression
     pub expr: ExprType
@@ -421,12 +421,12 @@ pub struct Expr {
 
 impl Expr {
     /// Create a new expression.
-    pub fn new(ty: KnownType, expr: ExprType) -> Self {
+    pub fn new(ty: Type, expr: ExprType) -> Self {
         Expr { ty, expr }
     }
 
     /// Create a new boxed expression.
-    pub fn boxed(ty: KnownType, expr: ExprType) -> Box<Self> {
+    pub fn boxed(ty: Type, expr: ExprType) -> Box<Self> {
         Box::new(Self::new(ty, expr))
     }
 
@@ -438,7 +438,7 @@ impl Expr {
     pub fn call(lfun: Located<Expr>, params: Vec<Expr>) -> PLIRResult<Self> {
         let Located(fun, range) = lfun;
         
-        let KnownType::Fun(ft) = &fun.ty else {
+        let Type::Fun(ft) = &fun.ty else {
             return Err(PLIRErr::CannotCall(fun.ty).at_range(range))
         };
 
@@ -479,7 +479,7 @@ pub enum ExprType {
     DictLiteral(Vec<(Expr, Expr)>),
 
     /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral(KnownType, Vec<Expr>),
+    ClassLiteral(Type, Vec<Expr>),
 
     /// An assignment operation.
     /// 
@@ -504,7 +504,7 @@ pub enum ExprType {
         /// 
         /// Unlike [`ast::Expr::UnaryOps`], this includes a [`Type`] 
         /// which indicates the type of the expression after the unary operator is applied.
-        ops: Vec<(op::Unary, KnownType)>,
+        ops: Vec<(op::Unary, Type)>,
         /// Expression to apply the unary operations to.
         expr: Box<Expr>
     },
@@ -561,7 +561,7 @@ pub enum ExprType {
         /// Variable to bind elements of the iterator to
         ident: String,
         /// The type of the element
-        element_type: KnownType,
+        element_type: Type,
         /// The iterator
         iterator: Box<Expr>,
         /// The block to run in each iteration.
@@ -594,13 +594,13 @@ pub enum ExprType {
     Deref(IDeref),
 
     /// Get element pointer (intrinsic)
-    GEP(KnownType, Box<Expr>, Vec<Expr>),
+    GEP(Type, Box<Expr>, Vec<Expr>),
 
     /// Allocate stack pointer (intrinsic)
-    Alloca(KnownType),
+    Alloca(Type),
 
     /// Gets the size of the LLVM layout for this type
-    SizeOf(KnownType),
+    SizeOf(Type),
 }
 
 /// A path.
@@ -615,13 +615,13 @@ pub enum Path {
     /// This includes the type expression being accessed, 
     /// the attribute being accessed,
     /// and the type of the access
-    Static(KnownType, String, KnownType),
+    Static(Type, String, Type),
     
     /// A chain of struct accesses (obj.0.1.2.3.4)
     /// 
     /// This includes the expression being accessed, 
     /// and a vector holding the chain of attributes accessed (and the type of the access)
-    Struct(Box<Expr>, Vec<(usize, KnownType)>),
+    Struct(Box<Expr>, Vec<(usize, Type)>),
 
     /// An method access (a.b where b is a method on type A)
     /// 
@@ -631,15 +631,15 @@ pub enum Path {
     Method(Box<Expr>, String, FunType)
 }
 impl Path {
-    pub(crate) fn ty(&self) -> Cow<KnownType> {
+    pub(crate) fn ty(&self) -> Cow<Type> {
         match self {
             Path::Static(_, _, ty) => Cow::Borrowed(ty),
             Path::Struct(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
-            Path::Method(_, _, ty) => Cow::Owned(KnownType::Fun(ty.clone())),
+            Path::Method(_, _, ty) => Cow::Owned(Type::Fun(ty.clone())),
         }
     }
 
-    pub(crate) fn add_struct_seg(&mut self, seg: (usize, KnownType)) -> Result<(), ()> {
+    pub(crate) fn add_struct_seg(&mut self, seg: (usize, Type)) -> Result<(), ()> {
         match self {
             Path::Static(_, _, _) => {
                 let placeholder = Path::Struct(Box::new(Expr::invalid()), vec![seg]);
@@ -718,7 +718,7 @@ pub struct IDeref {
     pub expr: Box<Expr>,
 
     /// Type to dereference to
-    pub ty: KnownType
+    pub ty: Type
 }
 
 /// A literal index used for splitting patterns.
