@@ -929,7 +929,24 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     None => Ok(lval),
                 }
             },
-            plir::ExprType::Range { .. } => todo!(),
+            plir::ExprType::Range { left, right, step } => {
+                let left = compiler.write_ref_value(left)?;
+                let right = compiler.write_ref_value(right)?;
+                
+                match step.as_deref() {
+                    Some(st) => todo!("deal with step"),
+                    None => {
+                        let id = plir::FunIdent::new_static(expr_ty, "new");
+                        let range_new = compiler.get_fn_by_plir_ident(&id)
+                            .unwrap_or_else(|| panic!("missing function {id}"));
+                        let call = compiler.builder.build_call(range_new, params![left, right], "")
+                            .try_as_basic_value()
+                            .left()
+                            .unwrap();
+                        Ok(GonValue::Basic(call))
+                    },
+                }
+            },
             plir::ExprType::If { conditionals, last } => {
                 let parent = compiler.parent_fn();
         

@@ -1071,7 +1071,13 @@ impl PLIRCodegen {
         self.peek_block().declare(ident, ty)
     }
 
-    /// If there is an unresolved structure present at the identifier, try to resolve it.
+    /// Resolves an identifier during PLIR traversal.
+    /// 
+    /// When an identifier is found during PLIR traversal,
+    /// it searches through the codegen's scopes 
+    /// to find if this identifier is some function (or similar object). 
+    /// If it finds such an object, it will try to resolve the object's
+    /// type and add it to the list of globals.
     fn resolve_ident<I>(&mut self, ident: &I) -> PLIRResult<()> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
@@ -1121,7 +1127,11 @@ impl PLIRCodegen {
         Ok(())
     }
 
-    /// [`PLIRCodegen::resolve_ident`], but using a type parameter
+    /// Resolves a type during PLIR traversal.
+    /// 
+    /// When a type is found during PLIR traversal,
+    /// this function is used to initialize the definition
+    /// of the type (assuming it is concrete).
     fn resolve_type(&mut self, ty: Located<&plir::KnownType>) -> PLIRResult<()> {
         use indexmap::map::Entry;
 
