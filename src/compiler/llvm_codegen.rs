@@ -380,10 +380,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Build a function return instruction using a GonValue.
     pub fn build_typed_return(&self, ty: &plir::Type, gv: GonValue<'ctx>) -> InstructionValue<'ctx> {
-        match (ty.as_ref(), gv) {
-            (plir::TypeRef::Prim(plir::Type::S_VOID), _) => self.builder.build_return(None),
-            (_, GonValue::Unit)                          => self.builder.build_return(None),
-            (_, GonValue::Basic(t))                      => self.builder.build_return(Some(&t))
+        use plir::TypeRef::Prim;
+        use Cow::Borrowed;
+
+        match (ty.downgrade(), gv) {
+            (Prim(Borrowed(plir::Type::S_VOID)), _) => self.builder.build_return(None),
+            (_, GonValue::Unit)                     => self.builder.build_return(None),
+            (_, GonValue::Basic(t))                 => self.builder.build_return(Some(&t))
         }
     }
 
@@ -450,7 +453,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Get the LLVM layout of a given PLIR type.
     pub(in crate::compiler) fn get_layout(&self, ty: &plir::Type) -> LLVMResult<BasicTypeEnum<'ctx>> {
-        if let plir::TypeRef::Generic("#ll_array", [t]) = ty.as_ref() {
+        use plir::TypeRef::*;
+        use Cow::Borrowed;
+
+        if let Generic(Borrowed("#ll_array"), Borrowed([t]), ()) = ty.downgrade() {
             Ok(self.get_layout(t)?.array_type(0).into())
         } else {
             self.layouts.get_by_type(ty)
@@ -463,9 +469,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// 
     /// This is useful for function types returning.
     fn get_layout_or_void(&self, ty: &plir::Type) -> LLVMResult<ReturnableType<'ctx>> {
-        use plir::{TypeRef, Type};
+        use plir::{TypeRef::*, Type};
+        use Cow::Borrowed;
 
-        if let TypeRef::Prim(Type::S_VOID) = ty.as_ref() {
+        if let Prim(Borrowed(Type::S_VOID)) = ty.downgrade() {
             Ok(self.ctx.void_type()).map(Into::into)
         } else {
             self.get_layout(ty).map(Into::into)
@@ -475,12 +482,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Determines whether this type is copy-by-reference through functions.
     /// Errors if type does not have an LLVM representation.
     fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<bool> {
-        use plir::{Type, TypeRef};
+        use plir::{Type, TypeRef::*};
+        use Cow::Borrowed;
 
         let layout = self.get_layout(ty)?;
         
-        let cond = match (ty.as_ref(), layout) {
-            (TypeRef::Prim(Type::S_VOID), _) => false,
+        let cond = match (ty.downgrade(), layout) {
+            (Prim(Borrowed(Type::S_VOID)), _) => false,
             (_, BasicTypeEnum::StructType(_)) => true,
             _ => false
         };
@@ -815,7 +823,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             },
             plir::ExprType::Literal(literal) => literal.write_value(compiler),
             plir::ExprType::ListLiteral(exprs) => {
-                let plir::TypeRef::Generic(plir::Type::S_LIST, [t]) = expr_ty.as_ref() else {
+                let plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ()) = expr_ty.downgrade() else {
                     panic!("expected list literal to return list, but actually returned {expr_ty}")
                 };
 

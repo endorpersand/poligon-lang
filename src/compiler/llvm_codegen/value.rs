@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use inkwell::values::BasicValueEnum;
 
 use super::{LLVMCodegen, LLVMResult, LLVMErr, layout, params};
@@ -100,24 +102,26 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// - anything to bool
     pub fn cast(&mut self, v: GonValue<'ctx>, src: &plir::Type, dest: &plir::Type) -> LLVMResult<GonValue<'ctx>> {
         use plir::{Type, NumType, TypeRef};
-        
-        match (src.as_ref(), dest.as_ref()) {
-            (TypeRef::Prim(Type::S_INT), TypeRef::Prim(Type::S_FLOAT)) => {
+        use TypeRef::Prim;
+        use Cow::Borrowed;
+
+        match (src.downgrade(), dest.downgrade()) {
+            (Prim(Borrowed(Type::S_INT)), Prim(Borrowed(Type::S_FLOAT))) => {
                 let _float = self.get_layout(dest)?.into_float_type();
                 let GonValue::Basic(bv) = v else { unreachable!() };
                 let val = self.builder.build_signed_int_to_float(bv.into_int_value(), _float, "cast");
                 
                 Ok(GonValue::Basic(val.into()))
             },
-            (TypeRef::Prim(Type::S_FLOAT), TypeRef::Prim(Type::S_INT)) => {
+            (Prim(Borrowed(Type::S_FLOAT)), Prim(Borrowed(Type::S_INT))) => {
                 let _int = self.get_layout(dest)?.into_int_type();
                 let GonValue::Basic(bv) = v else { unreachable!() };
                 let val = self.builder.build_float_to_signed_int(bv.into_float_value(), _int, "cast");
                 
                 Ok(GonValue::Basic(val.into()))
             },
-            (_, TypeRef::Prim(Type::S_BOOL)) => Ok(GonValue::Basic(self.truth(v).into())),
-            (_, TypeRef::Prim(Type::S_VOID)) => Ok(GonValue::Unit),
+            (_, Prim(Borrowed(Type::S_BOOL))) => Ok(GonValue::Basic(self.truth(v).into())),
+            (_, Prim(Borrowed(Type::S_VOID))) => Ok(GonValue::Unit),
             (_, _) if src.is_numeric() && dest.is_numeric() => {
                 let nsrc  = NumType::new(src).unwrap();
                 let ndest = NumType::new(dest).unwrap();

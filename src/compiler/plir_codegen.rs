@@ -415,36 +415,26 @@ impl InsertBlock {
         }
     }
 
-    fn last_stmt_type(&self) -> Cow<plir::Type> {
+    fn last_stmt_type(&self) -> plir::TypeRef {
         use plir::{ProcStmt, Type, ty};
-
-        #[inline]
-        fn void_ty<'t>() -> Cow<'t, Type> {
-            Cow::Owned(ty!(Type::S_VOID))
-        }
-
-        #[inline]
-        fn never_ty<'t>() -> Cow<'t, Type> {
-            Cow::Owned(ty!(Type::S_NEVER))
-        }
 
         match self.block.last() {
             Some(ProcStmt::Decl(d)) => {
                 let ty = &d.val.ty;
 
                 if ty.is_never() {
-                     Cow::Borrowed(ty)
+                    ty.downgrade()
                 } else {
-                    void_ty()
+                    ty!(Type::S_VOID)
                 }
             },
-            Some(ProcStmt::Return(_)) => never_ty(),
-            Some(ProcStmt::Break)     => never_ty(),
-            Some(ProcStmt::Continue)  => never_ty(),
-            Some(ProcStmt::Throw(_))  => never_ty(),
-            Some(ProcStmt::Exit(_))   => never_ty(),
-            Some(ProcStmt::Expr(e))   => Cow::Borrowed(&e.ty),
-            None => void_ty(),
+            Some(ProcStmt::Return(_)) => ty!(Type::S_NEVER),
+            Some(ProcStmt::Break)     => ty!(Type::S_NEVER),
+            Some(ProcStmt::Continue)  => ty!(Type::S_NEVER),
+            Some(ProcStmt::Throw(_))  => ty!(Type::S_NEVER),
+            Some(ProcStmt::Exit(_))   => ty!(Type::S_NEVER),
+            Some(ProcStmt::Expr(e))   => e.ty.downgrade(),
+            None => ty!(Type::S_VOID),
         }
     }
 
@@ -902,8 +892,8 @@ impl TypeResolver {
             match ty {
                 Type::Unk(_) => true,
                 Type::Prim(_) => false,
-                Type::Generic(_, t) => t.iter().any(has_unks),
-                Type::Tuple(t) => t.iter().any(has_unks),
+                Type::Generic(_, t, ()) => t.iter().any(has_unks),
+                Type::Tuple(t, ()) => t.iter().any(has_unks),
                 Type::Fun(FunType { params, ret, varargs: _ }) => {
                     params.iter().any(has_unks) || has_unks(ret)
                 },
@@ -914,27 +904,28 @@ impl TypeResolver {
             ty = match ty {
                 unk @ Type::Unk(_) => self.normalize_or_err(unk)?,
                 prim @ Type::Prim(_) => return Ok(prim),
-                Type::Generic(id, tys) => {
-                    let tys = tys.into_iter()
+                Type::Generic(id, tys, ()) => {
+                    let tys: Vec<_> = tys.iter().cloned()
                         .map(|ty| self.deep_normalize(ty))
                         .collect::<Result<_, _>>()?;
                 
-                    Type::Generic(id, tys)
+                    Type::new_generic(id, tys)
                 },
-                Type::Tuple(tys) => {
-                    let tys = tys.into_iter()
+                Type::Tuple(tys, ()) => {
+                    let tys: Vec<_> = tys.iter().cloned()
                         .map(|ty| self.deep_normalize(ty))
                         .collect::<Result<_, _>>()?;
 
-                    Type::Tuple(tys)
+                    Type::new_tuple(tys)
                 },
                 Type::Fun(FunType { params, ret, varargs }) => {
-                    let params: Vec<_> = params.into_iter()
+                    let params: Vec<_> = params.iter().cloned()
                         .map(|p| self.deep_normalize(p))
                         .collect::<Result<_, _>>()?;
-                    let ret = self.deep_normalize(*ret)?;
 
-                    Type::fun_type(params, ret, varargs)
+                    let ret = self.deep_normalize(*ret.into_owned())?;
+
+                    Type::new_fun(params, ret, varargs)
                 },
             }
         }
@@ -955,19 +946,19 @@ impl TypeResolver {
                 if l != r { Err(ConstraintFail::Mono(left, right))? }
             },
 
-            (Type::Generic(ai, ap), Type::Generic(bi, bp)) => {
+            (Type::Generic(ai, ap, ()), Type::Generic(bi, bp, ())) => {
                 if ai != bi { return Err(ConstraintFail::Generic(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
-                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                for (a, b) in std::iter::zip(ap.iter().cloned(), bp.iter().cloned()) {
                     self.add_constraint(a, b)
                         .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
             },
-            (Type::Tuple(ap), Type::Tuple(bp)) => {
+            (Type::Tuple(ap, ()), Type::Tuple(bp, ())) => {
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
                 
-                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                for (a, b) in std::iter::zip(ap.iter().cloned(), bp.iter().cloned()) {
                     self.add_constraint(a, b)
                         .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
@@ -976,9 +967,9 @@ impl TypeResolver {
                 if av != bv { return Err(ConstraintFail::Shape(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
-                self.add_constraint((**ar).clone(), (**br).clone())
+                self.add_constraint(ar.upgrade(), br.upgrade())
                     .map_err(|e| e.caused(left.clone(), right.clone()))?;
-                for (a, b) in std::iter::zip(ap.clone(), bp.clone()) {
+                for (a, b) in std::iter::zip(ap.iter().cloned(), bp.iter().cloned()) {
                     self.add_constraint(a, b)
                         .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 }
@@ -1223,11 +1214,11 @@ impl PLIRCodegen {
         }
 
         // instantiate generic:
-        if let plir::TypeRef::Generic(id, _) = ty.0.as_ref() {
-            if let Some(idx) = self.find_scoped_index(|ib| ib.generic_types.contains_key(id)) {
+        if let plir::TypeRef::Generic(id, _, ()) = ty.0.downgrade() {
+            if let Some(idx) = self.find_scoped_index(|ib| ib.generic_types.contains_key(&*id)) {
                 self.execute_upwards(idx, |this| {
                     if !this.peek_block().types.contains_key(*ty) {
-                        let gcls = this.peek_block().generic_types[id].clone();
+                        let gcls = this.peek_block().generic_types[&*id].clone();
                         this.instantiate_generic_cls(gcls, ty)
                     } else {
                         Ok(())
@@ -1293,12 +1284,14 @@ impl PLIRCodegen {
 
     fn get_class(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
+        use Cow::Borrowed;
+
         self.resolve_type(Located::clone(&ty))?;
         let Located(ty, range) = ty;
 
-        match ty.as_ref() {
+        match ty.downgrade() {
             // HACK ll_array
-            TypeRef::Generic("#ll_array", [t]) => {
+            TypeRef::Generic(Borrowed("#ll_array"), Borrowed([t]), ()) => {
                 if self.find_scoped(|ib| ib.types.get(ty)).is_none() {
                     self.get_class(Located(t, range))?;
                     self.program.types.insert(ty.clone(), TypeData::primitive(ty));
@@ -1306,10 +1299,10 @@ impl PLIRCodegen {
 
                 Ok(&self.program.types[ty])
             },
-            TypeRef::Generic("#ll_array", a) => {
+            TypeRef::Generic(Borrowed("#ll_array"), a, ()) => {
                 Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
             },
-            TypeRef::Prim(_) | TypeRef::Generic(_, _) => {
+            TypeRef::Prim(_) | TypeRef::Generic(_, _, ()) => {
                 self.find_scoped(|ib| ib.types.get(ty))
                     .ok_or_else(|| {
                         PLIRErr::UndefinedType(ty.clone())
@@ -1550,7 +1543,7 @@ impl PLIRCodegen {
             match fexit {
                 | BlockExit::Return(exit_ty) 
                 | BlockExit::Exit(exit_ty) 
-                => if exit_ty.as_ref() != exp_ty.as_ref() {
+                => if exit_ty.downgrade() != exp_ty.downgrade() {
                     let Some(ProcStmt::Return(me) | ProcStmt::Exit(me)) = block.last_mut() else {
                         unreachable!();
                     };
@@ -1831,13 +1824,13 @@ impl PLIRCodegen {
         
         let mut ty = {
             if ty_params.is_empty() {
-                plir::Type::Prim(ty_ident)
+                plir::Type::new_prim(ty_ident)
             } else {
-                let ty_params = ty_params.into_iter()
+                let ty_params: Vec<_> = ty_params.into_iter()
                     .map(|t| self.consume_type(t))
                     .collect::<Result<_, _>>()?;
                 
-                plir::Type::Generic(ty_ident, ty_params)
+                plir::Type::new_generic(ty_ident, ty_params)
             }
         };
         let cls = self.verify_type(Located::new(&mut ty, range))?;
@@ -1891,8 +1884,8 @@ impl PLIRCodegen {
     /// This will not allocate.
     fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
         match ty {
-            plir::Type::Generic(id, _) => {
-                let mgcls = self.find_scoped(|ib| ib.generic_types.get(id));
+            plir::Type::Generic(id, _, ()) => {
+                let mgcls = self.find_scoped(|ib| ib.generic_types.get(&**id));
 
                 match mgcls {
                     Some(gcls) => Cow::from(&gcls.generics),
@@ -1978,8 +1971,8 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::ListLiteral(lst) => {
-                let el_ty = match ctx_type.as_ref().map(plir::Type::as_ref) {
-                    Some(plir::TypeRef::Generic(plir::Type::S_LIST, [t])) => Some(t.clone()),
+                let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
+                    Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
                     _ => Err(PLIRErr::CannotResolveType.at_range(range.clone()))?
                 };
@@ -2001,8 +1994,8 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::SetLiteral(set) => {
-                let el_ty = match ctx_type.as_ref().map(plir::Type::as_ref) {
-                    Some(plir::TypeRef::Generic(plir::Type::S_SET, [t])) => Some(t.clone()),
+                let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
+                    Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_SET), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
                     _ => Err(PLIRErr::CannotResolveType.at_range(range.clone()))?
                 };
@@ -2024,8 +2017,8 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::DictLiteral(entries) => {
-                let (kty, vty) = match ctx_type.as_ref().map(plir::Type::as_ref) {
-                    Some(plir::TypeRef::Generic(plir::Type::S_DICT, [k, v])) => {
+                let (kty, vty) = match ctx_type.as_ref().map(plir::Type::downgrade) {
+                    Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_DICT), Cow::Borrowed([k, v]), ())) => {
                         (Some(k.clone()), Some(v.clone()))
                     },
                     None => (None, None),
@@ -2241,9 +2234,17 @@ impl PLIRCodegen {
                 let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
                 let m = cls.get_method_or_err("next", itrange.clone())?;
                 let itnext_ty = self.get_var_type_or_err(&m, itrange.clone())?;
-                let element_type = match itnext_ty.as_ref() {
-                    plir::TypeRef::Fun([a], plir::Type::Generic(ri, rp), false) if a == &iterator.ty && ri == "option" && rp.len() == 1 => {
-                        let idty = rp[0].clone();
+                let element_type = match itnext_ty.downgrade() {
+                    plir::TypeRef::Fun(plir::FunTypeRef {
+                        params: Cow::Borrowed([a]),
+                        ret,
+                        varargs: false
+                    }) if a == &iterator.ty => {
+                        let plir::TypeRef::Generic(Cow::Borrowed("option"), Cow::Borrowed([rp]), ()) = &**ret else {
+                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?
+                        };
+                        let idty = rp.clone();
+
                         // FIXME: put this inside block scope
                         self.declare(&ident, idty.clone());
 
@@ -2317,7 +2318,7 @@ impl PLIRCodegen {
 
                         let arg_tys = largs.iter()
                             .map(|e| e.ty.clone());
-                        let fun_ty = plir::Type::fun_type(
+                        let fun_ty = plir::Type::new_fun(
                             arg_tys, 
                             ctx_type.unwrap_or(plir::ty!(plir::Type::S_VOID)), 
                             false
@@ -2442,7 +2443,7 @@ impl PLIRCodegen {
         let Located(ast::IDeref(e), _) = d;
         let Located(expr, expr_range) = self.consume_located_expr(*e, None)?;
 
-        if let plir::TypeRef::Prim("#ptr") = expr.ty.as_ref() {
+        if let plir::TypeRef::Prim(Cow::Borrowed("#ptr")) = expr.ty.downgrade() {
             Ok(plir::IDeref { expr: Box::new(expr), ty })
         } else {
             Err(PLIRErr::CannotDeref.at_range(expr_range))

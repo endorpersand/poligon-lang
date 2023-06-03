@@ -1,4 +1,4 @@
-use std::borrow::{Cow, Borrow};
+use std::borrow::Cow;
 
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -8,31 +8,45 @@ use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 
 use super::Split;
 
+/// An owned type value.
+/// 
+/// The reference version (which this value is based on) is located at [`TypeRef`].
+pub type Type = TypeRef<'static>;
+/// An owned function type value.
+/// 
+/// The reference version (which this value is based on) is located at [`FunTypeRef`].
+pub type FunType = FunTypeRef<'static>;
 /// A type expression.
 /// 
 /// This corresponds to [`ast::Type`].
+/// 
+/// This includes owned type values and type references.
+/// The pure owned type version of this enum is located at [`Type`].
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type2<'t> {
+pub enum TypeRef<'t> {
     /// An unresolved monotype (these are of the form `?1`, `?2`)
     Unk(usize),
     /// A concrete type without type parameters (e.g. `string`, `int`).
     Prim(Cow<'t, str>),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
-    Generic(Cow<'t, str>, Cow<'t, [Type2<'static>]>, ()),
+    Generic(Cow<'t, str>, Cow<'t, [Type]>, ()),
     /// A tuple of types (e.g. `[int, int, int]`).
-    Tuple(Cow<'t, [Type2<'static>]>, ()),
+    Tuple(Cow<'t, [Type]>, ()),
     /// A function (e.g. `() -> int`, `str -> int`).
-    Fun(FunType2<'t>)
+    Fun(FunTypeRef<'t>)
 }
 
 /// A function type expression.
+/// 
+/// This includes owned function type values and type references.
+/// The pure owned function type version of this enum is located at [`FunType`].
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct FunType2<'t> {
+pub struct FunTypeRef<'t> {
     /// The parameter types of this function type
-    pub params: Cow<'t, [Type2<'static>]>, 
+    pub params: Cow<'t, [Type]>, 
 
     /// The return type
-    pub ret: Cow<'t, Box<Type2<'static>>>,
+    pub ret: Cow<'t, Box<Type>>,
 
     /// Whether this type has varargs at the end of its parameters
     pub varargs: bool
@@ -45,200 +59,42 @@ fn upgrade<T: ToOwned + ?Sized>(p: &T) -> Cow<'static, T> {
     Cow::Owned(p.to_owned())
 }
 
-impl Type2<'_> {
-    fn as_ref(&self) -> Type2 {
-        match self {
-            Type2::Unk(idx) => Type2::Unk(*idx),
-            Type2::Prim(id) => Type2::Prim(downgrade(id)),
-            Type2::Generic(id, params, _) => Type2::Generic(downgrade(id), downgrade(params), ()),
-            Type2::Tuple(params, _) => Type2::Tuple(downgrade(params), ()),
-            Type2::Fun(f) => Type2::Fun(f.as_ref()),
-        }
-    }
-    fn to_owned(&self) -> Type2<'static> {
-        match self {
-            Type2::Unk(idx) => Type2::Unk(*idx),
-            Type2::Prim(id) => Type2::Prim(upgrade(id)),
-            Type2::Generic(id, params, _) => Type2::Generic(upgrade(id), upgrade(params), ()),
-            Type2::Tuple(params, _) => Type2::Tuple(upgrade(params), ()),
-            Type2::Fun(f) => Type2::Fun(f.to_owned()),
-        }
-    }
-}
-impl FunType2<'_> {
-    fn as_ref(&self) -> FunType2 {
-        let FunType2 { params, ret, varargs } = self;
-        FunType2 {
-            params: downgrade(params),
-            ret: downgrade(ret),
-            varargs: *varargs
-        }
-    }
-
-    fn to_owned(&self) -> FunType2<'static> {
-        let FunType2 { params, ret, varargs } = self;
-        FunType2 {
-            params: upgrade(params),
-            ret: upgrade(ret),
-            varargs: *varargs,
-        }
-    }
-}
-/// A type expression.
-/// 
-/// This corresponds to [`ast::Type`].
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type {
-    /// An unresolved monotype (these are of the form `?1`, `?2`)
-    Unk(usize),
-    /// A concrete type without type parameters (e.g. `string`, `int`).
-    Prim(String),
-    /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
-    Generic(String, Vec<Type>),
-    /// A tuple of types (e.g. `[int, int, int]`).
-    Tuple(Vec<Type>),
-    /// A function (e.g. `() -> int`, `str -> int`).
-    Fun(FunType)
-}
-
-/// A function type expression.
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct FunType {
-    /// The parameter types of this function type
-    pub params: Vec<Type>, 
-
-    /// The return type
-    pub ret: Box<Type>,
-
-    /// Whether this type has varargs at the end of its parameters
-    pub varargs: bool
-}
-
-impl FunType {
-    /// Constructs a new function type.
-    pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
-        FunType {params, ret: Box::new(ret), varargs }
-    }
-
-    /// Removes the first parameter of the function.
-    /// 
-    /// This is useful for removing the referent in method types.
-    pub fn pop_front(&mut self) {
-        self.params.remove(0);
-    }
-
-    pub(crate) fn as_ref(&self) -> TypeRef {
-        TypeRef::Fun(&self.params, &self.ret, self.varargs)
-    }
-}
-impl FunType {
-    /// Constructs a function signature (with parameter names lost) out of a given function type.
-    pub fn extern_fun_sig(&self, ident: super::FunIdent) -> super::FunSignature {
-        let params = self.params.iter()
-            .enumerate()
-            .map(|(i, t)| super::Param {
-                rt: Default::default(),
-                mt: Default::default(),
-                ident: format!("arg{i}"),
-                ty: t.clone(),
-            })
-            .collect();
-
-        super::FunSignature {
-            private: false,
-            ident,
-            params,
-            varargs: self.varargs,
-            ret: (*self.ret).clone(),
-        }
-    }
-}
-
-impl TryFrom<Type> for FunType {
-    type Error = PLIRErr;
-
-    fn try_from(value: Type) -> Result<Self, Self::Error> {
-        match value {
-            Type::Fun(f) => Ok(f),
-            t => Err(PLIRErr::CannotCall(t))
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum TypeRef<'a> {
-    Unk(usize),
-    Prim(&'a str),
-    Generic(&'a str, &'a [Type]),
-    Tuple(&'a [Type]),
-    Fun(&'a [Type], &'a Type, bool)
-}
 impl TypeRef<'_> {
-    #[allow(unused)]
-    pub(crate) fn to_owned(self) -> Type {
+    pub(crate) fn downgrade(&self) -> TypeRef {
         match self {
-            TypeRef::Unk(t) => Type::Unk(t),
-            TypeRef::Prim(t) => Type::Prim(t.to_owned()),
-            TypeRef::Generic(t, p) => Type::Generic(t.to_owned(), p.to_owned()),
-            TypeRef::Tuple(t) => Type::Tuple(t.to_owned()),
-            TypeRef::Fun(p, r, varargs) => Type::Fun(FunType::new(p.to_owned(), r.to_owned(), varargs)),
+            TypeRef::Unk(idx) => TypeRef::Unk(*idx),
+            TypeRef::Prim(id) => TypeRef::Prim(downgrade(id)),
+            TypeRef::Generic(id, params, _) => TypeRef::Generic(downgrade(id), downgrade(params), ()),
+            TypeRef::Tuple(params, _) => TypeRef::Tuple(downgrade(params), ()),
+            TypeRef::Fun(f) => TypeRef::Fun(f.downgrade()),
         }
     }
-}
-enum TypeRezError {
-    NoBranches,
-    MultipleBranches
-}
-impl Type {
-    pub(crate) fn fun_type(params: impl IntoIterator<Item=Self>, ret: Self, var_args: bool) -> Self {
-        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
+    pub(crate) fn upgrade(&self) -> Type {
+        match self {
+            TypeRef::Unk(idx) => TypeRef::Unk(*idx),
+            TypeRef::Prim(id) => TypeRef::Prim(upgrade(id)),
+            TypeRef::Generic(id, params, _) => TypeRef::Generic(upgrade(id), upgrade(params), ()),
+            TypeRef::Tuple(params, _) => TypeRef::Tuple(upgrade(params), ()),
+            TypeRef::Fun(f) => TypeRef::Fun(f.upgrade()),
+        }
     }
 
     /// Gets the generic parameters of this type.
     /// 
     /// This function does not allocate or clone anything.
-    pub fn generic_args(&self) -> Cow<[Self]> 
-        where Self: Clone
-    {
+    pub fn generic_args(&self) -> Cow<[Type]> {
         match self {
-            Type::Unk(_)        => Cow::from(vec![]),
-            Type::Prim(_)       => Cow::from(vec![]),
-            Type::Generic(_, p) => Cow::from(p),
-            Type::Tuple(_)      => Cow::from(vec![]),
-            Type::Fun(_)        => Cow::from(vec![]),
+            TypeRef::Generic(_, p, ()) => Cow::Borrowed(p),
+            _ => Cow::Owned(vec![])
         }
     }
-
-    pub(crate) fn as_ref(&self) -> TypeRef {
-        match self {
-            Type::Unk(idx) => TypeRef::Unk(*idx),
-            Type::Prim(prim) => TypeRef::Prim(prim.borrow()),
-            Type::Generic(ident, params) => TypeRef::Generic(ident.borrow(), params),
-            Type::Tuple(params) => TypeRef::Tuple(params),
-            Type::Fun(ft) => ft.as_ref()
-        }
-    }
-}
-impl Type {
-    pub(crate) const S_INT:   &'static str = "int";
-    pub(crate) const S_FLOAT: &'static str = "float";
-    pub(crate) const S_BOOL:  &'static str = "bool";
-    pub(crate) const S_CHAR:  &'static str = "char";
-    pub(crate) const S_STR:   &'static str = "string";
-    pub(crate) const S_VOID:  &'static str = "void";
-    pub(crate) const S_LIST:  &'static str = "list";
-    pub(crate) const S_SET:   &'static str = "set";
-    pub(crate) const S_DICT:  &'static str = "dict";
-    pub(crate) const S_RANGE: &'static str = "range";
-    pub(crate) const S_NEVER: &'static str = "never";
-    pub(crate) const S_UNK:   &'static str = "unk";
 
     /// Test if this type is `never`.
     #[inline]
     pub fn is_never(&self) -> bool {
-        matches!(self.as_ref(), TypeRef::Prim(Type::S_NEVER))
+        matches!(self.downgrade(), TypeRef::Prim(Cow::Borrowed(Type::S_NEVER)))
     }
-    
+
     /// Test if this type is a numeric type (e.g., `int`, `float`).
     pub fn is_numeric(&self) -> bool {
         NumType::new(self).is_some()
@@ -257,7 +113,114 @@ impl Type {
             None => false,
         }
     }
+}
+impl Type {
+    pub(crate) const S_INT:   &'static str = "int";
+    pub(crate) const S_FLOAT: &'static str = "float";
+    pub(crate) const S_BOOL:  &'static str = "bool";
+    pub(crate) const S_CHAR:  &'static str = "char";
+    pub(crate) const S_STR:   &'static str = "string";
+    pub(crate) const S_VOID:  &'static str = "void";
+    pub(crate) const S_LIST:  &'static str = "list";
+    pub(crate) const S_SET:   &'static str = "set";
+    pub(crate) const S_DICT:  &'static str = "dict";
+    pub(crate) const S_RANGE: &'static str = "range";
+    pub(crate) const S_NEVER: &'static str = "never";
+    pub(crate) const S_UNK:   &'static str = "unk";
 
+    pub(crate) fn new_prim(id: impl Into<Cow<'static, str>>) -> Self {
+        Type::Prim(id.into())
+    }
+    pub(crate) fn new_generic(id: impl Into<Cow<'static, str>>, params: impl IntoIterator<Item=Self>) -> Self {
+        Type::Generic(id.into(), params.into_iter().collect(), ())
+    }
+    pub(crate) fn new_tuple(params: impl IntoIterator<Item=Self>) -> Self {
+        Type::Tuple(params.into_iter().collect(), ())
+    }
+    pub(crate) fn new_fun(params: impl IntoIterator<Item=Self>, ret: Self, var_args: bool) -> Self {
+        Type::Fun(FunType::new(params.into_iter().collect(), ret, var_args))
+    }
+}
+
+impl FunTypeRef<'_> {
+    pub(crate) fn downgrade(&self) -> FunTypeRef {
+        let FunTypeRef { params, ret, varargs } = self;
+        FunTypeRef {
+            params: downgrade(params),
+            ret: downgrade(ret),
+            varargs: *varargs
+        }
+    }
+
+    pub(crate) fn upgrade(&self) -> FunType {
+        let FunTypeRef { params, ret, varargs } = self;
+        FunTypeRef {
+            params: upgrade(params),
+            ret: upgrade(ret),
+            varargs: *varargs,
+        }
+    }
+
+    /// Removes the first parameter of the function.
+    /// 
+    /// This is useful for removing the referent in method types.
+    pub fn pop_front(&mut self) {
+        match &mut self.params {
+            Cow::Borrowed(p) => *p = &p[1..],
+            Cow::Owned(p) => { p.remove(0); },
+        }
+    }
+
+    /// Constructs a function signature (with parameter names lost) out of a given function type.
+    pub fn extern_fun_sig(&self, ident: super::FunIdent) -> super::FunSignature {
+        let params = self.params.iter()
+            .enumerate()
+            .map(|(i, t)| super::Param {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: format!("arg{i}"),
+                ty: t.upgrade(),
+            })
+            .collect();
+
+        super::FunSignature {
+            private: false,
+            ident,
+            params,
+            varargs: self.varargs,
+            ret: TypeRef::upgrade(&self.ret),
+        }
+    }
+}
+
+impl FunType {
+    /// Constructs a new function type.
+    pub fn new(params: Vec<Type>, ret: Type, varargs: bool) -> Self {
+        FunType {
+            params: params.into(), 
+            ret: Cow::Owned(Box::new(ret)), 
+            varargs 
+        }
+    }
+}
+
+impl TryFrom<Type> for FunType {
+    type Error = PLIRErr;
+
+    fn try_from(value: Type) -> Result<Self, Self::Error> {
+        match value {
+            Type::Fun(f) => Ok(f),
+            t => Err(PLIRErr::CannotCall(t))
+        }
+    }
+}
+
+enum TypeRezError {
+    NoBranches,
+    MultipleBranches
+}
+
+impl Type {
     /// Given some types, merge them into what type it could be.
     fn resolve_type<'a>(into_it: impl IntoIterator<Item=&'a Type>) -> Result<Type, TypeRezError> {
         let mut it = into_it.into_iter()
@@ -288,15 +251,15 @@ impl Type {
 
     /// Compute the type that would result by splitting this type with the given [`Split`].
     pub fn split(&self, sp: Split) -> Result<Type, OpErr> {
-        match self.as_ref() {
-            TypeRef::Prim(Type::S_STR) => match sp {
+        match self.downgrade() {
+            TypeRef::Prim(Cow::Borrowed(Type::S_STR)) => match sp {
                 Split::Left(_)
                 | Split::Right(_) 
                 => Ok(ty!(Type::S_CHAR)),
                 Split::Middle(_, _) => Ok(self.clone()),
             },
 
-            TypeRef::Generic(Type::S_LIST, params) => {
+            TypeRef::Generic(Cow::Borrowed(Type::S_LIST), params, ()) => {
                 let Some(param) = params.first() else {
                     unreachable!("list cannot be defined without parameters")
                 };
@@ -308,7 +271,7 @@ impl Type {
                 }
             },
 
-            TypeRef::Tuple(tpl) => match sp {
+            TypeRef::Tuple(tpl, ()) => match sp {
                 Split::Left(idx) => tpl.get(idx).cloned()
                     .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp)),
                 Split::Middle(start, end) => {
@@ -316,7 +279,7 @@ impl Type {
                         .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp))?
                         .to_vec();
                     
-                    Ok(Type::Tuple(vec))
+                    Ok(Type::new_tuple(vec))
                 },
                 Split::Right(idx) => tpl.get(tpl.len() - idx).cloned()
                     .ok_or_else(|| OpErr::InvalidSplit(self.clone(), sp)),
@@ -331,8 +294,8 @@ impl Type {
         match self {
             Type::Unk(_) => "#unk",
             Type::Prim(n) => n,
-            Type::Generic(n, _) => n,
-            Type::Tuple(_) => "#tuple",
+            Type::Generic(n, _, ()) => n,
+            Type::Tuple(_, ()) => "#tuple",
             Type::Fun(_) => "#fun",
         }
     }
@@ -347,41 +310,26 @@ impl Type {
                 .join(", ")
         }
 
-        match self.as_ref() {
+        match self.downgrade() {
             TypeRef::Unk(idx) => Cow::from(format!("#unk{idx}")),
-            TypeRef::Prim(ident) => Cow::from(ident),
-            TypeRef::Generic(ident, params) => {
-                Cow::from(format!("{ident}<{}>", param_tuple(params)))
+            TypeRef::Prim(ident) => ident,
+            TypeRef::Generic(ident, params, ()) => {
+                Cow::from(format!("{ident}<{}>", param_tuple(&params)))
             },
-            TypeRef::Tuple(params) => {
-                Cow::from(format!("#tuple<{}>", param_tuple(params)))
+            TypeRef::Tuple(params, ()) => {
+                Cow::from(format!("#tuple<{}>", param_tuple(&params)))
             },
-            TypeRef::Fun(params, ret, varargs) => {
+            TypeRef::Fun(FunTypeRef { params, ret, varargs }) => {
                 let va_filler = match (params.is_empty(), varargs) {
                     (true, true) => "..",
                     (false, true) => ", ..",
                     (_, false) => ""
                 };
 
-                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(params), va_filler, ret.ident()))
+                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(&params), va_filler, ret.ident()))
             },
         }
     }
-}
-
-impl<'a> PartialEq<TypeRef<'a>> for Type {
-    fn eq(&self, &other: &TypeRef<'a>) -> bool {
-        self.as_ref() == other
-    }
-}
-impl<'a> PartialEq<Type> for TypeRef<'a> {
-    fn eq(&self, other: &Type) -> bool { other.eq(self) }
-}
-impl<'a> PartialEq<TypeRef<'a>> for &'a Type {
-    fn eq(&self, other: &TypeRef<'a>) -> bool { (*self).eq(other) }
-}
-impl<'a> PartialEq<&'a Type> for TypeRef<'a> {
-    fn eq(&self, other: &&Type) -> bool { self.eq(*other) }
 }
 
 /// Helper type which generalizes numerics into categories.
@@ -402,7 +350,7 @@ lazy_static! {
     };
 }
 impl NumType {
-    pub fn new(ty: &Type) -> Option<Self> {
+    pub fn new(ty: &TypeRef) -> Option<Self> {
         NUM_TYPE_ORDER.get(ty).copied()
     }
 
@@ -413,15 +361,15 @@ impl NumType {
         self.floating
     }
 
-    pub fn order<'a>() -> Vec<&'a Type> {
+    pub fn order() -> Vec<&'static Type> {
         NUM_TYPE_ORDER.keys().collect()
     }
-    pub fn int_order<'a>() -> Vec<&'a Type> {
+    pub fn int_order() -> Vec<&'static Type> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(pt, nt)| nt.is_int_like().then_some(pt))
             .collect()
     }
-    pub fn float_order<'a>() -> Vec<&'a Type> {
+    pub fn float_order() -> Vec<&'static Type> {
         NUM_TYPE_ORDER.iter()
             .filter_map(|(t, nt)| nt.is_float_like().then_some(t))
             .collect()
@@ -431,22 +379,29 @@ impl NumType {
 /// Utility macro to make PLIR type expressions easier to read.
 macro_rules! ty {
     ($e:expr) => {
-        $crate::compiler::plir::Type::Prim(String::from($e))
+        $crate::compiler::plir::Type::Prim(std::borrow::Cow::from($e))
     };
 
     ($e:expr, [$($p:expr),+]) => {
-        $crate::compiler::plir::Type::Generic(String::from($e), vec![$($p),+])
+        $crate::compiler::plir::Type::Generic(
+            std::borrow::Cow::from($e), 
+            std::borrow::Cow::from(vec![$($p),+]), 
+            ()
+        )
     };
 
     ([$($p:expr),+]) => {
-        $crate::compiler::plir::Type::Tuple(vec![$($p),+])
+        $crate::compiler::plir::Type::Tuple(
+            std::borrow::Cow::from(vec![$($p),+]), 
+            ()
+        )
     };
 
     (($($p:expr),*) -> $r:expr) => {
         $crate::compiler::plir::Type::Fun(
             $crate::compiler::plir::FunType {
-                params: vec![$($p),*], 
-                ret: Box::new($r),
+                params: std::borrow::Cow::from(vec![$($p),*]), 
+                ret: std::borrow::Cow::Owned(Box::new($r)),
                 varargs: false
             }
         )

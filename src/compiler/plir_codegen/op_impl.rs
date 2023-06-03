@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::ast::{op, Literal};
 use crate::compiler::plir::*;
 use crate::err::{GonErr, CursorRange};
@@ -64,25 +66,30 @@ struct Cast<'a> {
 impl<'a> Cast<'a> {
     fn can_cast(&self, cg: &mut super::PLIRCodegen) -> PLIRResult<bool> {
         use TypeRef::*;
+        use Cow::Borrowed;
 
-        let result = match (self.src.ty.as_ref(), self.dest.as_ref()) {
+        let result = match (self.src.ty.downgrade(), self.dest.downgrade()) {
             (l, r) if l == r => true,
-            (_, Prim(Type::S_STR)) if self.cf.allows(CastFlags::Stringify) => {
+            (_, Prim(Borrowed(Type::S_STR))) if self.cf.allows(CastFlags::Stringify) => {
                 // Load src class
                 let cls = cg.get_class(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
                 if let Some(met_ident) = cls.get_method("to_string") {
                     cg.get_var_type(&met_ident)?
-                        .filter(|t| matches!( t.as_ref(), 
-                            Fun([p1], ret, false) if p1 == &self.src.ty && ret == self.dest
+                        .filter(|t| matches!( t.downgrade(), 
+                            Fun(FunTypeRef {
+                                params: Cow::Borrowed([p1]), 
+                                ret, 
+                                varargs: false
+                            }) if p1 == &self.src.ty && &**ret == self.dest
                         ))
                         .is_some()
                 } else {
                     false
                 }
             },
-            (_, Prim(Type::S_BOOL)) => self.cf.allows(CastFlags::Truth),
-            (_, Prim(Type::S_VOID)) => self.cf.allows(CastFlags::Void),
+            (_, Prim(Borrowed(Type::S_BOOL))) => self.cf.allows(CastFlags::Truth),
+            (_, Prim(Borrowed(Type::S_VOID))) => self.cf.allows(CastFlags::Void),
             (_, _) if self.src.ty.is_numeric() && self.dest.is_numeric() => {
                 let l = NumType::new(&self.src.ty).unwrap();
                 let r = NumType::new(self.dest).unwrap();
@@ -105,7 +112,7 @@ impl<'a> Cast<'a> {
 
         let result = if self.can_cast(cg)? {
             // all casts are basic casts except str casts
-            let result = match (self.src.ty.as_ref(), self.dest.as_ref()) {
+            let result = match (self.src.ty.downgrade(), self.dest.downgrade()) {
                 (l, r) if l == r => self.src,
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
@@ -277,11 +284,11 @@ impl super::PLIRCodegen {
         let ty = {
             let ty = cast.ty.clone();
     
-            match (op, ty.as_ref()) {
+            match (op, ty.downgrade()) {
                 (op::Unary::Plus,  _) if ty.is_numeric() => ty,
                 (op::Unary::Minus, _) if ty.is_numeric() => ty,
-                (op::Unary::LogNot, TypeRef::Prim(Type::S_BOOL)) => ty,
-                (op::Unary::BitNot, TypeRef::Prim(Type::S_BOOL)) => ty,
+                (op::Unary::LogNot, TypeRef::Prim(Cow::Borrowed(Type::S_BOOL))) => ty,
+                (op::Unary::BitNot, TypeRef::Prim(Cow::Borrowed(Type::S_BOOL))) => ty,
                 (op::Unary::BitNot, _) if ty.is_int_like() => ty,
                 (op, _) => {
                     let fun = self.find_unary_method(op, Located::new(&ty, left_range))?
@@ -343,6 +350,9 @@ impl super::PLIRCodegen {
         right: Located<Expr>, 
         expr_range: CursorRange
     ) -> PLIRResult<Expr> {
+        use TypeRef::*;
+        use Cow::Borrowed;
+
         // Check for any valid casts that can be applied here:
         let (lcast, rcast) = match op {
             op::Binary::Add => {
@@ -350,11 +360,11 @@ impl super::PLIRCodegen {
                     Ok(exprs) => exprs,
                     Err((l, r)) => {
                         let cf = CastFlags::Implicit | CastFlags::Stringify;
-                        match (l.ty.as_ref(), r.ty.as_ref()) {
-                            (TypeRef::Prim(Type::S_STR | Type::S_CHAR), _) => {
+                        match (l.ty.downgrade(), r.ty.downgrade()) {
+                            (Prim(Borrowed(Type::S_STR | Type::S_CHAR)), _) => {
                                 self.apply_cast2((l, r), &ty!(Type::S_STR), cf)?.into_inner()
                             },
-                            (_, TypeRef::Prim(Type::S_STR | Type::S_CHAR)) => {
+                            (_, Prim(Borrowed(Type::S_STR | Type::S_CHAR))) => {
                                 self.apply_cast2((l, r), &ty!(Type::S_STR), cf)?.into_inner()
                             },
                             _ => (l, r)
@@ -445,7 +455,7 @@ impl super::PLIRCodegen {
         let ty = {
             let left = lcast.ty.clone();
             let right = &rcast.ty;
-            match (op, left.as_ref(), right.as_ref()) {
+            match (op, left.downgrade(), right.downgrade()) {
                 // numeric operators:
                 (op::Binary::Add, l, r) if left.is_numeric() && l == r => left,
                 (op::Binary::Sub, l, r) if left.is_numeric() && l == r => left,
@@ -455,9 +465,9 @@ impl super::PLIRCodegen {
                 // bitwise operators:
                 (op::Binary::Shl, l, r) if left.is_int_like() && l == r => left,
                 (op::Binary::Shr, l, r) if left.is_int_like() && l == r => left,
-                (op::Binary::BitOr,  TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
-                (op::Binary::BitAnd, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
-                (op::Binary::BitXor, TypeRef::Prim(Type::S_BOOL), TypeRef::Prim(Type::S_BOOL)) => left,
+                (op::Binary::BitOr,  Prim(Borrowed(Type::S_BOOL)), Prim(Borrowed(Type::S_BOOL))) => left,
+                (op::Binary::BitAnd, Prim(Borrowed(Type::S_BOOL)), Prim(Borrowed(Type::S_BOOL))) => left,
+                (op::Binary::BitXor, Prim(Borrowed(Type::S_BOOL)), Prim(Borrowed(Type::S_BOOL))) => left,
                 (op::Binary::BitOr,  l, r) if left.is_int_like() && l == r => left,
                 (op::Binary::BitAnd, l, r) if left.is_int_like() && l == r => left,
                 (op::Binary::BitXor, l, r) if left.is_int_like() && l == r => left,
@@ -481,16 +491,19 @@ impl super::PLIRCodegen {
     }
 
     pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
+        use TypeRef::*;
+        use Cow::Borrowed;
+
         // Check for any valid casts that can be applied here:
         let lcast = self.apply_cast(left, &ty!(Type::S_STR), CastFlags::Implicit)?.into_inner();
     
-        let icast = match lcast.ty.as_ref() {
-            | TypeRef::Prim(Type::S_STR)
-            | TypeRef::Generic(Type::S_LIST, _)
-            | TypeRef::Tuple(_)
+        let icast = match lcast.ty.downgrade() {
+            | Prim(Borrowed(Type::S_STR))
+            | Generic(Borrowed(Type::S_LIST), _, ())
+            | Tuple(_, ())
             => self.apply_cast(index, &ty!(Type::S_INT), CastFlags::Implicit)?.into_inner(),
             
-            TypeRef::Generic(Type::S_DICT, [k, _]) => {
+            Generic(Borrowed(Type::S_DICT), Borrowed([k, _]), ()) => {
                 self.apply_cast(index, k, CastFlags::Implicit)?.into_inner()
             },
             
@@ -501,11 +514,11 @@ impl super::PLIRCodegen {
         let ty = {
             let left = lcast.ty.clone();
             let index = &icast.ty;
-            match (left.as_ref(), index.as_ref()) {
-                (TypeRef::Prim(Type::S_STR), TypeRef::Prim(Type::S_INT)) => ty!(Type::S_CHAR),
-                (TypeRef::Generic(Type::S_LIST, [t]), TypeRef::Prim(Type::S_INT)) => t.clone(),
-                (TypeRef::Generic(Type::S_DICT, [k, v]), idx) if idx == k => v.clone(),
-                (TypeRef::Tuple(tys), TypeRef::Prim(Type::S_INT)) => {
+            match (left.downgrade(), index.downgrade()) {
+                (Prim(Borrowed(Type::S_STR)), Prim(Borrowed(Type::S_INT))) => ty!(Type::S_CHAR),
+                (Generic(Borrowed(Type::S_LIST), Borrowed([t]), ()), Prim(Borrowed(Type::S_INT))) => t.clone(),
+                (Generic(Borrowed(Type::S_DICT), Borrowed([k, v]), ()), idx) if &idx == k => v.clone(),
+                (Tuple(tys, ()), Prim(Borrowed(Type::S_INT))) => {
                     let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
                         let err = OpErr::TupleIndexNonLiteral(left).at_range(expr_range);
                         return Err(err.into());

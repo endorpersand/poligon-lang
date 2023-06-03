@@ -531,9 +531,9 @@ impl DParser {
             };
 
             let mut result = if params.is_empty() {
-                plir::Type::Prim(ident)
+                plir::Type::new_prim(ident)
             } else {
-                plir::Type::Generic(ident, params)
+                plir::Type::new_generic(ident, params)
             };
             
             let block = self.pop_loc_block("match_type").unwrap();

@@ -202,17 +202,12 @@ impl Display for Param {
     }
 }
 
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.as_ref().fmt(f)
-    }
-}
 impl Display for TypeRef<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeRef::Unk(unk) => write!(f, "?{unk}"),
             TypeRef::Prim(ident) => write!(f, "{ident}"),
-            TypeRef::Generic(ident, params) => {
+            TypeRef::Generic(ident, params, ()) => {
                 write!(f, "{ident}")?;
                 if !params.is_empty() {
                     write!(f, "<")?;
@@ -221,29 +216,29 @@ impl Display for TypeRef<'_> {
                 }
                 Ok(())
             },
-            TypeRef::Tuple(types) => {
+            TypeRef::Tuple(types, ()) => {
                 write!(f, "[")?;
                 fmt_list(f, types)?;
                 write!(f, "]")
             },
-            TypeRef::Fun(params, ret, varargs) => {
-                write!(f, "(")?;
-
-                let mut pd: Vec<_> = params.iter()
-                    .map(|t| t as _)
-                    .collect();
-                if *varargs { pd.push(&".." as _); }
-                fmt_dyn_list(f, &pd)?;
-
-                write!(f, ") -> {ret}")
-            },
+            TypeRef::Fun(ft) => write!(f, "{ft}"),
         }
     }
 }
 
-impl Display for FunType {
+impl Display for FunTypeRef<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_ref())
+        let FunTypeRef { params, ret, varargs } = self;
+        
+        write!(f, "(")?;
+
+        let mut pd: Vec<_> = params.iter()
+            .map(|t| t as _)
+            .collect();
+        if *varargs { pd.push(&".." as _); }
+        fmt_dyn_list(f, &pd)?;
+
+        write!(f, ") -> {ret}")
     }
 }
 

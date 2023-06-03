@@ -380,11 +380,7 @@ impl FunSignature {
             .map(|p| p.ty.clone())
             .collect();
         
-        FunType { 
-            params, 
-            ret: Box::new(self.ret.clone()), 
-            varargs: self.varargs 
-        }
+        FunType::new(params, self.ret.clone(), self.varargs)
     }
 }
 
@@ -444,7 +440,7 @@ impl Expr {
         };
 
         Ok(Expr::new(
-            (*ft.ret).clone(), 
+            ft.ret.upgrade(),
             ExprType::Call {funct: Box::new(fun), params }
         ))
     }
