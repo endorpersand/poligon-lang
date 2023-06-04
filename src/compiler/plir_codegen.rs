@@ -618,7 +618,104 @@ pub(super) struct TypeData {
     structure: TypeStructure,
     methods: HashMap<SigKey<'static>, plir::FunIdent>
 }
+#[derive(Debug)]
+pub(super) struct TypeData2 {
+    ty_shape: plir::Type,
+    structure: TypeStructure,
+    methods: TDExtMap
+}
+type TDExtMap = ExtMap<SigKey<'static>, plir::FunIdent>;
+#[derive(Debug)]
+enum ExtMap<K, V> {
+    One(HashMap<K, V>),
+    Many(HashMap<Box<[plir::Type]>, HashMap<K, V>>)
+}
+impl<K, V> ExtMap<K, V> {
+    fn one() -> Self {
+        ExtMap::One(HashMap::new())
+    }
+    fn many() -> Self {
+        ExtMap::Many(HashMap::new())
+    }
+}
 
+impl <K: Eq + std::hash::Hash, V> ExtMap<K, V> {
+    fn iter(&self) -> ExtMapIter<K, V> {
+        match self {
+            ExtMap::One(m) => ExtMapIter::One(Some(m)),
+            ExtMap::Many(mm) => ExtMapIter::Many(mm.iter()),
+        }
+    }
+    fn get_appl_maps<'a>(&'a self, k: &'a [plir::Type]) -> MetMatchIter<K, V> {
+        MetMatchIter(self.iter(), k)
+    }
+    fn get_map_mut(&mut self, k: Box<[plir::Type]>) -> &mut HashMap<K, V> {
+        match self {
+            ExtMap::One(m) => m,
+            ExtMap::Many(mm) => mm.entry(k).or_default(),
+        }
+    }
+}
+enum ExtMapIter<'a, K, V> {
+    One(Option<&'a HashMap<K, V>>),
+    Many(std::collections::hash_map::Iter<'a, Box<[plir::Type]>, HashMap<K, V>>)
+}
+impl<'a, K, V> Iterator for ExtMapIter<'a, K, V> {
+    type Item = (&'a [plir::Type], &'a HashMap<K, V>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ExtMapIter::One(it) => it.take().map(|v| (&[][..], v)),
+            ExtMapIter::Many(it) => it.next().map(|(k, v)| (&k[..], v)),
+        }
+    }
+}
+struct MetMatchIter<'a, K, V>(ExtMapIter<'a, K, V>, &'a [plir::Type]);
+impl<'a, K, V> Iterator for MetMatchIter<'a, K, V> {
+    type Item = &'a HashMap<K, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for (k, v) in self.0.by_ref() {
+            // TODO: proper type analysis
+            if k == self.1 {
+                return Some(v);
+            }
+        }
+
+        None
+    }
+}
+impl TypeData2 {
+    fn method_skeleton(ty: &plir::Type) -> TDExtMap {
+        match ty {
+            plir::TypeRef::Unk(_) => panic!("cannot resolve type shape of unknown"),
+            plir::TypeRef::Prim(_) => ExtMap::one(),
+            plir::TypeRef::Generic(_, _, _) => ExtMap::many(),
+            plir::TypeRef::Tuple(_, _) => ExtMap::one(),
+            plir::TypeRef::Fun(_) => ExtMap::one(),
+        }
+    }
+    /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
+    pub fn primitive(ty: plir::Type) -> Self {
+        let methods = Self::method_skeleton(&ty);
+
+        Self {
+            ty_shape: ty,
+            structure: TypeStructure::Primitive,
+            methods
+        }
+    }
+    /// Create a structural type (a type whose fields are defined in Poligon)
+    pub fn structural(cls: plir::Class) -> Self {
+        let methods = Self::method_skeleton(&cls.ty);
+        
+        Self {
+            ty_shape: cls.ty.clone(),
+            structure: TypeStructure::Class(cls),
+            methods
+        }
+    }
+}
 impl TypeData {
     /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
     pub fn primitive(ty: &plir::Type) -> Self {
