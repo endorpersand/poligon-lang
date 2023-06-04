@@ -1,18 +1,40 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::compiler::plir::{self, Type, FunIdent};
 
-use super::{SigKey, TypeStructure};
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub(super) struct SigKey<'k> {
+    ident: Cow<'k, str>,
+    params: Cow<'k, [plir::Type]>
+}
+
+impl<'k> SigKey<'k> {
+    fn new(ident: impl Into<Cow<'k, str>>, params: impl Into<Cow<'k, [plir::Type]>>) -> Self {
+        Self { ident: ident.into(), params: params.into() }
+    }
+}
 
 #[derive(Debug)]
-pub(super) struct TypeData2 {
+pub(super) enum TypeStructure {
+    Primitive,
+    Class(plir::Class)
+}
+
+/// Value type that holds the data of a type.
+/// 
+/// This allows the PLIR codegen to replace methods with functions
+/// and access type fields.
+#[derive(Debug)]
+pub(super) struct TypeData {
     ty_shape: Type,
     structure: TypeStructure,
     methods: TDExtMap
 }
 type TDExtMap = ExtMap<SigKey<'static>, FunIdent>;
 #[derive(Debug)]
-enum ExtMap<K, V> {
+pub(super) enum ExtMap<K, V> {
     One(HashMap<K, V>),
     Many(HashMap<Box<[Type]>, HashMap<K, V>>)
 }
@@ -26,23 +48,23 @@ impl<K, V> ExtMap<K, V> {
 }
 
 impl <K: Eq + std::hash::Hash, V> ExtMap<K, V> {
-    fn iter(&self) -> ExtMapIter<K, V> {
+    pub(super) fn iter(&self) -> ExtMapIter<K, V> {
         match self {
             ExtMap::One(m) => ExtMapIter::One(Some(m)),
             ExtMap::Many(mm) => ExtMapIter::Many(mm.iter()),
         }
     }
-    fn get_appl_maps<'a>(&'a self, k: &'a [Type]) -> MetMatchIter<K, V> {
+    pub(super) fn get_appl_maps<'a>(&'a self, k: &'a [Type]) -> MetMatchIter<K, V> {
         MetMatchIter(self.iter(), k)
     }
-    fn get_map_mut(&mut self, k: Box<[Type]>) -> &mut HashMap<K, V> {
+    pub(super) fn get_map_mut(&mut self, k: Box<[Type]>) -> &mut HashMap<K, V> {
         match self {
             ExtMap::One(m) => m,
             ExtMap::Many(mm) => mm.entry(k).or_default(),
         }
     }
 }
-enum ExtMapIter<'a, K, V> {
+pub(super) enum ExtMapIter<'a, K, V> {
     One(Option<&'a HashMap<K, V>>),
     Many(std::collections::hash_map::Iter<'a, Box<[Type]>, HashMap<K, V>>)
 }
@@ -57,6 +79,7 @@ impl<'a, K, V> Iterator for ExtMapIter<'a, K, V> {
     }
 }
 
+pub(super) struct MetMatchIter<'a, K, V>(ExtMapIter<'a, K, V>, &'a [Type]);
 fn type_align(target: &[Type], real: &[Type]) -> bool {
     use std::array::from_ref;
 
@@ -82,7 +105,6 @@ fn type_align(target: &[Type], real: &[Type]) -> bool {
         false
     }
 }
-struct MetMatchIter<'a, K, V>(ExtMapIter<'a, K, V>, &'a [Type]);
 impl<'a, K, V> Iterator for MetMatchIter<'a, K, V> {
     type Item = &'a HashMap<K, V>;
 
@@ -96,7 +118,7 @@ impl<'a, K, V> Iterator for MetMatchIter<'a, K, V> {
         None
     }
 }
-impl TypeData2 {
+impl TypeData {
     fn method_skeleton(ty: &Type) -> TDExtMap {
         match ty {
             Type::Unk(_) => panic!("cannot resolve type shape of unknown"),
