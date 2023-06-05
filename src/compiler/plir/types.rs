@@ -139,7 +139,13 @@ impl Type {
         Type::Prim(id.into())
     }
     pub(crate) fn new_generic(id: impl Into<Cow<'static, str>>, params: impl IntoIterator<Item=Self>) -> Self {
-        Type::Generic(id.into(), params.into_iter().collect(), ())
+        let params: Vec<_> = params.into_iter().collect();
+
+        if params.is_empty() {
+            Type::new_prim(id)
+        } else {
+            Type::Generic(id.into(), Cow::from(params), ())
+        }
     }
     pub(crate) fn new_tuple(params: impl IntoIterator<Item=Self>) -> Self {
         Type::Tuple(params.into_iter().collect(), ())

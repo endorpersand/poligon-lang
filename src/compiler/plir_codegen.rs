@@ -337,6 +337,12 @@ impl Unresolved for UnresolvedType {
         &mut block.unres_types
     }
 }
+
+#[derive(Debug)]
+enum MaybeInitParam {
+    Uninit(ast::Param),
+    Init(plir::Param)
+}
 #[derive(Debug)]
 struct PreinitFun {
     /// The function identifier for the function.
@@ -345,6 +351,16 @@ struct PreinitFun {
     /// Any params that already were initialized.
     /// These are included at the beginning of the parameter list.
     params: Vec<plir::Param>
+}
+#[derive(Debug)]
+struct PreinitFun2 {
+    /// The function identifier for the function.
+    /// The original identifier is dropped.
+    id: plir::FunIdent,
+    /// The list of parameters.
+    /// Some of these parameters will already have been initialized,
+    /// while others have already been initialized.
+    params: Vec<MaybeInitParam>
 }
 
 #[derive(Debug)]
@@ -533,8 +549,8 @@ impl InsertBlock {
     }
 
     /// Insert a class into the insert block's type register.
-    fn insert_class(&mut self, cls: &plir::Class) {
-        self.types.insert(cls.ty.clone(), TypeData::structural(cls.clone()));
+    fn insert_class(&mut self, cls: plir::Class) {
+        self.types.insert(cls.ty.clone(), TypeData::structural(cls));
     }
 
     fn insert_unresolved_method(&mut self, ty: &plir::Type, method: ast::MethodDecl) {
@@ -566,6 +582,83 @@ impl InsertBlock {
         self.insert_unresolved(UnresolvedValue::Fun(preinit, decl));
 
         if let Some(c) = self.types.get_mut(ty) {
+            c.insert_method(method_name, metref);
+        }
+    }
+    // ty parameter must be a class shape.
+    fn insert_unresolved_method2(&mut self, cls_ty: &plir::Type, method: ast::MethodDecl) {
+        use MaybeInitParam::*;
+        use Cow::Borrowed;
+        use plir::TypeRef;
+
+        let ast::MethodDecl {
+            sig: ast::MethodSignature {
+                referent, is_static, name: method_name, generics, params, ret
+            }, 
+            block 
+        } = method;
+
+        let mut preinit_params = vec![];
+        if !is_static {
+            let this = referent.unwrap_or_else(|| String::from("#unused"));
+            let param = plir::Param {
+                rt: Default::default(),
+                mt: Default::default(),
+                ident: this,
+                ty: cls_ty.clone()
+            };
+            preinit_params.push(Init(param));
+        };
+        preinit_params.extend({
+            params.into_iter().map(|p| {
+                let ast::Param { rt, mt, ident, ty: mpty } = p;
+                let new_pty = match mpty {
+                    None => Ok(plir::ty!(plir::Type::S_UNK)),
+                    Some(pty) => 'mpty_some: {
+                        let Located(ast::Type(pty_id, pty_params), _) = &pty; 
+                        
+                        if pty_params.is_empty() {
+                            // pty is a single String
+                            if generics.contains(pty_id) {
+                                todo!("fun generics, method {method_name} on {cls_ty} has a generic fun param")
+                            } else if let TypeRef::Generic(cls_id, cls_params, ()) = cls_ty {
+                                // check if pty_id is in the class's list of params
+                                let pty_ref = TypeRef::TypeVar(Borrowed(cls_id), Borrowed(pty_id));
+                                if cls_params.contains(&pty_ref) {
+                                    break 'mpty_some Ok(pty_ref.upgrade())
+                                }
+                            }
+                        }
+                        
+                        Err(pty)
+                    }
+                };
+
+                match new_pty {
+                    Ok(plir_ty) => Init(plir::Param { rt, mt, ident, ty: plir_ty }),
+                    Err(ast_ty) => Uninit(ast::Param { rt, mt, ident, ty: Some(ast_ty) }),
+                }
+            })
+        });
+
+        let metref = plir::FunIdent::new_static(cls_ty, &method_name);
+        let sig = ast::FunSignature {
+            ident: String::from("#unnamed"), 
+            generics, 
+            params: vec![], 
+            varargs: false, 
+            ret
+        };
+        let decl = ast::FunDecl { sig, block };
+
+        let preinit = PreinitFun2 {
+            id: metref.clone(),
+            params: preinit_params,
+        };
+        todo!();
+        // self.insert_unresolved(UnresolvedValue::Fun(preinit, decl));
+
+        if let Some(c) = self.types.get_mut(cls_ty) {
             c.insert_method(method_name, metref);
         }
     }
@@ -1850,7 +1943,7 @@ impl PLIRCodegen {
     ) -> PLIRResult<()> {
         let ib = self.peek_block();
         
-        ib.insert_class(&cls);
+        ib.insert_class(cls.clone());
         for method in methods {
             ib.insert_unresolved_method(&cls.ty, method);
         }
@@ -1865,7 +1958,6 @@ impl PLIRCodegen {
 
         let ast::Class { ident: _, generics: _, fields, methods } = cls;
 
-        #[allow(clippy::explicit_auto_deref)]
         let fields = self.with_generic_aliases(*ty, |this| {
             fields.into_iter()
                 .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
@@ -1936,6 +2028,29 @@ impl PLIRCodegen {
         }
     }
 
+    fn consume_cls2(&mut self, cls: ast::Class) -> PLIRResult<()> {
+        let ast::Class { ident: cls_id, generics, fields, methods } = cls;
+
+        let fields = fields.into_iter()
+            .map(|ast::FieldDecl { rt, mt, ident: field_id, ty }| -> PLIRResult<_> {
+                let ty = match ty {
+                    // this is a class TypeVar
+                    Located(ast::Type(id, p), _) if generics.contains(&id) && p.is_empty() => {
+                        plir::Type::new_type_var(cls_id.clone(), id)
+                    }
+                    // otherwise, consume concrete type
+                    ty => self.consume_type(ty)?
+                };
+
+                Ok((field_id, plir::Field { rt, mt, ty }))
+            })
+            .collect::<Result<_, _>>()?;
+        
+        let params = generics.into_iter()
+            .map(|p| plir::Type::new_type_var(cls_id.clone(), p));
+        let cls = plir::Class { ty: plir::Type::new_generic(cls_id.clone(), params), fields };
+        self.register_concrete_cls(cls, methods)
+    }
     fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
         let Located(expr, range) = value;
         
