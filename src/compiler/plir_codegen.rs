@@ -1882,34 +1882,32 @@ impl PLIRCodegen {
     /// and returns the defined type parameters.
     /// 
     /// This will not allocate.
-    fn get_generic_params(&self, ty: &plir::Type) -> Cow<[String]> {
+    fn get_generic_params(&self, ty: &plir::Type) -> &[String] {
         match ty {
             plir::Type::Generic(id, _, ()) => {
                 let mgcls = self.find_scoped(|ib| ib.generic_types.get(&**id));
 
                 match mgcls {
-                    Some(gcls) => Cow::from(&gcls.generics),
-                    None => Cow::from(vec![]),
+                    Some(gcls) => &gcls.generics,
+                    None => &[],
                 }
             },
-            _ => Cow::from(vec![])
+            _ => &[]
         }
     }
 
     fn with_generic_aliases<T>(&mut self, ty: &plir::Type, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
-        std::iter::zip(self.get_generic_params(ty).into_owned(), &*ty.generic_args())
-            .for_each(|(p, arg)| {
-                self.peek_block().type_aliases.insert(plir::ty!(p), arg.clone());
-            });
+        for (p, arg) in std::iter::zip(self.get_generic_params(ty).to_vec(), ty.generic_args()) {
+            self.peek_block().type_aliases.insert(plir::ty!(p), arg.clone());
+        }
             
         let result = f(self);
             
         // it is, in fact, necessary
         #[allow(clippy::unnecessary_to_owned)]
-        self.get_generic_params(ty).into_owned().into_iter()
-            .for_each(|p| {
-                self.peek_block().type_aliases.remove(&plir::ty!(p));
-            });
+        for p in self.get_generic_params(ty).to_vec() {
+            self.peek_block().type_aliases.remove(&plir::ty!(p));
+        }
 
         result
     }

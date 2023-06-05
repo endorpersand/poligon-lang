@@ -82,10 +82,10 @@ impl TypeRef<'_> {
     /// Gets the generic parameters of this type.
     /// 
     /// This function does not allocate or clone anything.
-    pub fn generic_args(&self) -> Cow<[Type]> {
+    pub fn generic_args(&self) -> &[Type] {
         match self {
-            TypeRef::Generic(_, p, ()) => Cow::Borrowed(p),
-            _ => Cow::Owned(vec![])
+            TypeRef::Generic(_, p, ()) => p,
+            _ => &[]
         }
     }
 
