@@ -904,11 +904,7 @@ impl TypeResolver {
         while has_unks(&ty) {
             ty = match ty {
                 unk @ Type::Unk(_) => self.normalize_or_err(unk)?,
-                Type::TypeVar(t, var) => {
-                    let ty = self.deep_normalize(*t.into_owned())?;
-
-                    Type::new_type_var(ty, var)
-                }
+                tyvar @ Type::TypeVar(_, _) => return Ok(tyvar),
                 prim @ Type::Prim(_) => return Ok(prim),
                 Type::Generic(id, tys, ()) => {
                     let tys: Vec<_> = tys.iter().cloned()

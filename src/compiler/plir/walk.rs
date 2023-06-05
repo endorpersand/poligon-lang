@@ -88,15 +88,12 @@ pub(crate) trait Walker {
     fn walk_type(&mut self, el: &super::Type) -> Result<(), Self::Err> {
         self.visit_type(el)?;
         match el {
-            super::Type::Unk(_) | super::Type::Prim(_) => Ok(()),
+            super::Type::Unk(_) | super::Type::Prim(_) | super::Type::TypeVar(_, _) => Ok(()),
             super::Type::Generic(_, t, ()) | super::Type::Tuple(t, ()) => {
                 for ty in t.iter() {
                     self.walk_type(ty)?;
                 }
                 Ok(())
-            },
-            super::Type::TypeVar(ty, _) => {
-                self.walk_type(ty)
             },
             super::Type::Fun(ft) => self.walk_fun_type(ft),
         }
@@ -402,7 +399,7 @@ pub(crate) trait WalkerMut {
     fn walk_type(&mut self, el: &mut super::Type) -> Result<(), Self::Err> {
         self.visit_type(el)?;
         match el {
-            super::Type::Unk(_) | super::Type::Prim(_) => Ok(()),
+            super::Type::Unk(_) | super::Type::Prim(_) | super::Type::TypeVar(_, _) => Ok(()),
             super::Type::Generic(_, cow, ()) | super::Type::Tuple(cow, ()) => {
                 let tys = own_cow(cow);
 
@@ -410,10 +407,6 @@ pub(crate) trait WalkerMut {
                     self.walk_type(ty)?;
                 }
                 Ok(())
-            },
-            super::Type::TypeVar(ty, _) => {
-                let ty = own_cow(ty);
-                self.walk_type(ty)
             },
             super::Type::Fun(ft) => self.walk_fun_type(ft),
         }

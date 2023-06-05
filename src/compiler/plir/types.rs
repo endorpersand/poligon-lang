@@ -27,7 +27,7 @@ pub enum TypeRef<'t> {
     /// An unresolved monotype (these are of the form `?1`, `?2`)
     Unk(usize),
     /// A type variable
-    TypeVar(Cow<'t, Box<Type>>, Cow<'t, str>),
+    TypeVar(Cow<'t, str>, Cow<'t, str>),
     /// A concrete type without type parameters (e.g. `string`, `int`).
     Prim(Cow<'t, str>),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
@@ -132,8 +132,8 @@ impl Type {
     pub(crate) const S_NEVER: &'static str = "never";
     pub(crate) const S_UNK:   &'static str = "unk";
 
-    pub(crate) fn new_type_var(ty: Type, var: impl Into<Cow<'static, str>>) -> Self {
-        Type::TypeVar(Cow::Owned(Box::new(ty)), var.into())
+    pub(crate) fn new_type_var(ty: impl Into<Cow<'static, str>>, var: impl Into<Cow<'static, str>>) -> Self {
+        Type::TypeVar(ty.into(), var.into())
     }
     pub(crate) fn new_prim(id: impl Into<Cow<'static, str>>) -> Self {
         Type::Prim(id.into())
@@ -320,7 +320,7 @@ impl Type {
 
         match self.downgrade() {
             TypeRef::Unk(idx) => Cow::from(format!("#unk{idx}")),
-            TypeRef::TypeVar(ty, var) => Cow::from(format!("#tyvar<{}, {var}>", ty.ident())),
+            TypeRef::TypeVar(ty, var) => Cow::from(format!("#tyvar<{ty}, {var}>")),
             TypeRef::Prim(ident) => ident,
             TypeRef::Generic(ident, params, ()) => {
                 Cow::from(format!("{ident}<{}>", param_tuple(&params)))
