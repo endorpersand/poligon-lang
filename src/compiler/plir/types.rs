@@ -26,6 +26,8 @@ pub type FunType = FunTypeRef<'static>;
 pub enum TypeRef<'t> {
     /// An unresolved monotype (these are of the form `?1`, `?2`)
     Unk(usize),
+    /// A type variable
+    TypeVar(Cow<'t, Box<Type>>, Cow<'t, str>),
     /// A concrete type without type parameters (e.g. `string`, `int`).
     Prim(Cow<'t, str>),
     /// A type with type parameters (e.g. `list<string>`, `dict<string, int>`).
@@ -63,6 +65,7 @@ impl TypeRef<'_> {
     pub(crate) fn downgrade(&self) -> TypeRef {
         match self {
             TypeRef::Unk(idx) => TypeRef::Unk(*idx),
+            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(downgrade(ty), downgrade(var)),
             TypeRef::Prim(id) => TypeRef::Prim(downgrade(id)),
             TypeRef::Generic(id, params, _) => TypeRef::Generic(downgrade(id), downgrade(params), ()),
             TypeRef::Tuple(params, _) => TypeRef::Tuple(downgrade(params), ()),
@@ -72,6 +75,7 @@ impl TypeRef<'_> {
     pub(crate) fn upgrade(&self) -> Type {
         match self {
             TypeRef::Unk(idx) => TypeRef::Unk(*idx),
+            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(upgrade(ty), upgrade(var)),
             TypeRef::Prim(id) => TypeRef::Prim(upgrade(id)),
             TypeRef::Generic(id, params, _) => TypeRef::Generic(upgrade(id), upgrade(params), ()),
             TypeRef::Tuple(params, _) => TypeRef::Tuple(upgrade(params), ()),
@@ -128,6 +132,9 @@ impl Type {
     pub(crate) const S_NEVER: &'static str = "never";
     pub(crate) const S_UNK:   &'static str = "unk";
 
+    pub(crate) fn new_type_var(ty: Type, var: impl Into<Cow<'static, str>>) -> Self {
+        Type::TypeVar(Cow::Owned(Box::new(ty)), var.into())
+    }
     pub(crate) fn new_prim(id: impl Into<Cow<'static, str>>) -> Self {
         Type::Prim(id.into())
     }
@@ -293,6 +300,7 @@ impl Type {
     pub fn short_ident(&self) -> &str {
         match self {
             Type::Unk(_) => "#unk",
+            Type::TypeVar(_, var) => var,
             Type::Prim(n) => n,
             Type::Generic(n, _, ()) => n,
             Type::Tuple(_, ()) => "#tuple",
@@ -312,6 +320,7 @@ impl Type {
 
         match self.downgrade() {
             TypeRef::Unk(idx) => Cow::from(format!("#unk{idx}")),
+            TypeRef::TypeVar(ty, var) => Cow::from(format!("#tyvar<{}, {var}>", ty.ident())),
             TypeRef::Prim(ident) => ident,
             TypeRef::Generic(ident, params, ()) => {
                 Cow::from(format!("{ident}<{}>", param_tuple(&params)))

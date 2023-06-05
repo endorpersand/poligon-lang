@@ -123,6 +123,7 @@ impl TypeData {
     fn method_skeleton(ty: &Type) -> TDExtMap {
         match ty {
             Type::Unk(_) => panic!("cannot resolve type shape of unknown"),
+            Type::TypeVar(_, _) => panic!("cannot resolve type shape of type var"),
             Type::Prim(_) => ExtMap::one(),
             Type::Generic(_, _, _) => ExtMap::many(),
             Type::Tuple(_, _) => ExtMap::one(),

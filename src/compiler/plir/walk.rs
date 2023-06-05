@@ -95,6 +95,9 @@ pub(crate) trait Walker {
                 }
                 Ok(())
             },
+            super::Type::TypeVar(ty, _) => {
+                self.walk_type(ty)
+            },
             super::Type::Fun(ft) => self.walk_fun_type(ft),
         }
     }
@@ -302,6 +305,17 @@ pub(crate) trait Walker {
         self.walk_type(ty)
     }
 }
+
+fn own_cow<'a, T: ToOwned + ?Sized>(cow: &'a mut Cow<T>) -> &'a mut T::Owned {
+    if let Cow::Borrowed(b) = cow {
+        *cow = Cow::Owned(b.to_owned());
+    }
+
+    match cow {
+        Cow::Borrowed(_) => unreachable!(),
+        Cow::Owned(o) => o,
+    }
+}
 pub(crate) trait WalkerMut {
     type Err;
 
@@ -390,17 +404,16 @@ pub(crate) trait WalkerMut {
         match el {
             super::Type::Unk(_) | super::Type::Prim(_) => Ok(()),
             super::Type::Generic(_, cow, ()) | super::Type::Tuple(cow, ()) => {
-                // make data owned so that we can modify it
-                if let Cow::Borrowed(b) = cow {
-                    *cow = Cow::Owned(b.to_owned());
-                }
-                let Cow::Owned(tys) = cow else { unreachable!() };
-                //
+                let tys = own_cow(cow);
 
                 for ty in tys {
                     self.walk_type(ty)?;
                 }
                 Ok(())
+            },
+            super::Type::TypeVar(ty, _) => {
+                let ty = own_cow(ty);
+                self.walk_type(ty)
             },
             super::Type::Fun(ft) => self.walk_fun_type(ft),
         }
@@ -408,17 +421,9 @@ pub(crate) trait WalkerMut {
     fn walk_fun_type(&mut self, el: &mut super::FunType) -> Result<(), Self::Err> {
         self.visit_fun_type(el)?;
         let super::FunType { params, ret, varargs: _ } = el;
-        // make data owned so we can modify it
-        if let Cow::Borrowed(b) = params {
-            *params = Cow::Owned(b.to_owned());
-        }
-        let Cow::Owned(par) = params else { unreachable!() };
 
-        if let Cow::Borrowed(b) = ret {
-            *ret = Cow::Owned(b.clone());
-        }
-        let Cow::Owned(ret) = ret else { unreachable!() };
-        //
+        let par = own_cow(params);
+        let ret = own_cow(ret);
 
         for p in par {
             self.walk_type(p)?;

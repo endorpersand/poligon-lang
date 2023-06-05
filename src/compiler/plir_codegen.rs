@@ -891,6 +891,7 @@ impl TypeResolver {
         fn has_unks(ty: &Type) -> bool {
             match ty {
                 Type::Unk(_) => true,
+                Type::TypeVar(_, _) => todo!("checking if type var {ty} has unks"),
                 Type::Prim(_) => false,
                 Type::Generic(_, t, ()) => t.iter().any(has_unks),
                 Type::Tuple(t, ()) => t.iter().any(has_unks),
@@ -903,6 +904,11 @@ impl TypeResolver {
         while has_unks(&ty) {
             ty = match ty {
                 unk @ Type::Unk(_) => self.normalize_or_err(unk)?,
+                Type::TypeVar(t, var) => {
+                    let ty = self.deep_normalize(*t.into_owned())?;
+
+                    Type::new_type_var(ty, var)
+                }
                 prim @ Type::Prim(_) => return Ok(prim),
                 Type::Generic(id, tys, ()) => {
                     let tys: Vec<_> = tys.iter().cloned()

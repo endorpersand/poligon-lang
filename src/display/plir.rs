@@ -206,6 +206,7 @@ impl Display for TypeRef<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeRef::Unk(unk) => write!(f, "?{unk}"),
+            TypeRef::TypeVar(ty, var) => write!(f, "?<{ty}>::{var}"),
             TypeRef::Prim(ident) => write!(f, "{ident}"),
             TypeRef::Generic(ident, params, ()) => {
                 write!(f, "{ident}")?;
