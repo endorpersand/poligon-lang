@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::compiler::plir::{self, Type, FunIdent};
+use crate::err::{CursorRange, GonErr};
 
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -147,5 +148,33 @@ impl TypeData {
             structure: TypeStructure::Class(cls),
             methods
         }
+    }
+
+    /// Get a method defined in the type.
+    pub fn get_method(&self, ty_args: &[plir::Type], id: &str) -> Option<FunIdent> {
+        let key = SigKey::new(id, &[][..]);
+
+        // TODO: specialization
+        self.methods.get_appl_maps(ty_args)
+            .find_map(|m| m.get(&key))
+            .cloned()
+    }
+
+    /// Get a method defined in the type or produce an error.
+    pub fn get_method_or_err(&self, ty_args: &[plir::Type], id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
+        self.get_method(ty_args, id)
+            .ok_or_else(|| {
+                // TODO: do type arg fill
+                let id = FunIdent::new_static(&self.ty_shape, id);
+                super::PLIRErr::UndefinedVarAttr(id).at_range(range)
+            })
+    }
+
+    /// Add a method to the type.
+    pub fn insert_method(&mut self, ty_args: impl IntoIterator<Item=Type>, id: String, metref: FunIdent) {
+        let k = SigKey::new(id, vec![]);
+
+        self.methods.get_map_mut(ty_args.into_iter().collect())
+            .insert(k, metref);
     }
 }
