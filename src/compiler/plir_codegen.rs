@@ -278,7 +278,7 @@ impl BlockBehavior {
 fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, TypeData> {
     prims.into_iter()
         .map(|t| {
-            let dat = TypeData::primitive(&t);
+            let dat = TypeData::primitive(t.clone());
             (t, dat)
         })
         .collect()
@@ -689,9 +689,9 @@ pub(super) struct TypeData {
 }
 impl TypeData {
     /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
-    pub fn primitive(ty: &plir::Type) -> Self {
+    pub fn primitive(ty: plir::Type) -> Self {
         Self {
-            plir_ty: ty.clone(),
+            plir_ty: ty,
             structure: TypeStructure::Primitive,
             methods: Default::default()
         }
@@ -1351,28 +1351,42 @@ impl PLIRCodegen {
             })
     }
 
-    fn get_class(&mut self, ty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
         use Cow::Borrowed;
 
-        self.resolve_type(Located::clone(&ty))?;
-        let Located(ty, range) = ty;
+        // resolve non-concrete types:
+        let Located(ty, range) = lty;
+        let mut ty = ty.clone();
+        ty.try_map(&mut |unit| {
+            match unit {
+                TypeRef::Unk(_) => {
+                    self.resolver.normalize_or_err(unit.upgrade())
+                        .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
+                },
+                TypeRef::TypeVar(_, _) => todo!("type var resolution"),
+                TypeRef::Prim(_) => Ok(unit.upgrade()),
+                TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => unreachable!(),
+            }
+        })?;
+
+        // TODO: self.resolve_type(Located::clone(&ty))?;
 
         match ty.downgrade() {
             // HACK ll_array
             TypeRef::Generic(Borrowed("#ll_array"), Borrowed([t]), ()) => {
-                if self.find_scoped(|ib| ib.types.get(ty)).is_none() {
+                if self.find_scoped(|ib| ib.types.get(&ty)).is_none() {
                     self.get_class(Located(t, range))?;
-                    self.program.types.insert(ty.clone(), TypeData::primitive(ty));
+                    self.program.types.insert(ty.clone(), TypeData::primitive(ty.clone()));
                 }
 
-                Ok(&self.program.types[ty])
+                Ok(&self.program.types[&ty])
             },
             TypeRef::Generic(Borrowed("#ll_array"), a, ()) => {
                 Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
             },
             TypeRef::Prim(_) | TypeRef::Generic(_, _, ()) => {
-                self.find_scoped(|ib| ib.types.get(ty))
+                self.find_scoped(|ib| ib.types.get(&ty))
                     .ok_or_else(|| {
                         PLIRErr::UndefinedType(ty.clone())
                             .at_range(range)

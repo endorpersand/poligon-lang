@@ -118,29 +118,46 @@ impl TypeRef<'_> {
         }
     }
 
+    /// This maps Type units to other Type units.
+    /// 
+    /// This function does not check the return of the callback to see if it needs to be mapped.
+    pub(crate) fn map(&mut self, f: &mut impl FnMut(TypeRef) -> Type) {
+        self.try_map(&mut |t| Ok::<_, std::convert::Infallible>(f(t))).unwrap()
+    }
+
+    /// This maps Type units to other Type units.
+    /// 
+    /// This function does not check the return of the callback to see if it needs to be mapped.
+    /// 
+    /// If this function raises an error, it is likely that the Type will be partially mapped.
+    pub(crate) fn try_map<E>(&mut self, f: &mut impl FnMut(TypeRef) -> Result<Type, E>) -> Result<(), E> {
+        match self {
+            unit @ (TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_)) => {
+                *unit = f(unit.downgrade())?;
+                Ok(())
+            },
+            TypeRef::Generic(_, ref mut params, _) | TypeRef::Tuple(ref mut params, _) => {
+                for par in own_cow(params) {
+                    par.try_map(f)?;
+                }
+
+                Ok(())
+            },
+            TypeRef::Fun(FunTypeRef { ref mut params, ref mut ret, varargs: _ }) => {
+                for par in own_cow(params) {
+                    par.try_map(f)?;
+                }
+
+                own_cow(ret).try_map(f)
+            },
+        }
+    }
+
     /// This only substitutes properly assuming the HashMap keys consist of only Type units 
     /// (Type variants that do not consist of other Type variants) and
     /// the HashMap values do not consist of Types that need to be substituted
     pub(crate) fn substitute(&mut self, m: &std::collections::HashMap<TypeRef, TypeRef>) {
-        match self {
-            unit @ (TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_)) => {
-                if let Some(t) = m.get(unit) {
-                    *unit = t.upgrade();
-                }
-            },
-            TypeRef::Generic(_, ref mut params, _) | TypeRef::Tuple(ref mut params, _) => {
-                for par in own_cow(params).iter_mut() {
-                    par.substitute(m);
-                }
-            },
-            TypeRef::Fun(FunTypeRef { ref mut params, ref mut ret, varargs: _ }) => {
-                for par in own_cow(params).iter_mut() {
-                    par.substitute(m);
-                }
-
-                own_cow(ret).substitute(m);
-            },
-        }
+        self.map(&mut |t| m.get(&t).unwrap_or(&t).upgrade());
     }
 }
 impl Type {
