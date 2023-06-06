@@ -339,10 +339,13 @@ impl Unresolved for UnresolvedType {
 }
 
 #[derive(Debug)]
-enum MaybeInitParam {
-    Uninit(ast::Param),
-    Init(plir::Param)
+enum MaybeInit<U, I> {
+    Uninit(U),
+    Init(I)
 }
+type MaybeInitParam = MaybeInit<ast::Param, plir::Param>;
+type MaybeInitType = MaybeInit<Located<ast::Type>, plir::Type>;
+
 #[derive(Debug)]
 struct PreinitFun {
     /// The function identifier for the function.
@@ -353,14 +356,24 @@ struct PreinitFun {
     params: Vec<plir::Param>
 }
 #[derive(Debug)]
-struct PreinitFun2 {
+struct PiFunSig2 {
     /// The function identifier for the function.
-    /// The original identifier is dropped.
-    id: plir::FunIdent,
+    ident: plir::FunIdent,
+
+    /// Identifiers for the type parameters of this function
+    generics: Vec<String>,
+
     /// The list of parameters.
     /// Some of these parameters will already have been initialized,
     /// while others have already been initialized.
-    params: Vec<MaybeInitParam>
+    params: Vec<MaybeInitParam>,
+
+    /// Whether this function signature is varargs
+    varargs: bool,
+
+    /// The return type.
+    /// This may or may not already have been initialized.
+    ret: MaybeInitType
 }
 
 #[derive(Debug)]
@@ -587,7 +600,7 @@ impl InsertBlock {
     }
     // ty parameter must be a class shape.
     fn insert_unresolved_method2(&mut self, cls_ty: &plir::Type, method: ast::MethodDecl) {
-        use MaybeInitParam::*;
+        use MaybeInit::*;
         use Cow::Borrowed;
         use plir::TypeRef;
 
@@ -609,32 +622,35 @@ impl InsertBlock {
             };
             preinit_params.push(Init(param));
         };
+
+        let try_init_ty = |mpty| {
+            match mpty {
+                None => Ok(plir::ty!(plir::Type::S_UNK)),
+                Some(pty) => {
+                    let Located(ast::Type(pty_id, pty_params), _) = &pty; 
+                    
+                    if pty_params.is_empty() {
+                        // pty is a single String
+                        if generics.contains(pty_id) {
+                            todo!("fun generics, method {method_name} on {cls_ty} has a generic fun param")
+                        } else if let TypeRef::Generic(cls_id, cls_params, ()) = cls_ty {
+                            // check if pty_id is in the class's list of params
+                            let pty_ref = TypeRef::TypeVar(Borrowed(cls_id), Borrowed(pty_id));
+                            if cls_params.contains(&pty_ref) {
+                                return Ok(pty_ref.upgrade());
+                            }
+                        }
+                    }
+                    
+                    Err(pty)
+                }
+            }
+        };
+
         preinit_params.extend({
             params.into_iter().map(|p| {
                 let ast::Param { rt, mt, ident, ty: mpty } = p;
-                let new_pty = match mpty {
-                    None => Ok(plir::ty!(plir::Type::S_UNK)),
-                    Some(pty) => 'mpty_some: {
-                        let Located(ast::Type(pty_id, pty_params), _) = &pty; 
-                        
-                        if pty_params.is_empty() {
-                            // pty is a single String
-                            if generics.contains(pty_id) {
-                                todo!("fun generics, method {method_name} on {cls_ty} has a generic fun param")
-                            } else if let TypeRef::Generic(cls_id, cls_params, ()) = cls_ty {
-                                // check if pty_id is in the class's list of params
-                                let pty_ref = TypeRef::TypeVar(Borrowed(cls_id), Borrowed(pty_id));
-                                if cls_params.contains(&pty_ref) {
-                                    break 'mpty_some Ok(pty_ref.upgrade())
-                                }
-                            }
-                        }
-                        
-                        Err(pty)
-                    }
-                };
-
-                match new_pty {
+                match try_init_ty(mpty) {
                     Ok(plir_ty) => Init(plir::Param { rt, mt, ident, ty: plir_ty }),
                     Err(ast_ty) => Uninit(ast::Param { rt, mt, ident, ty: Some(ast_ty) }),
                 }
@@ -642,21 +658,21 @@ impl InsertBlock {
         });
 
         let metref = plir::FunIdent::new_static(cls_ty, &method_name);
-        let sig = ast::FunSignature {
-            ident: String::from("#unnamed"), 
-            generics, 
-            params: vec![], 
-            varargs: false, 
-            ret
+        let ret = match try_init_ty(ret) {
+            Ok(t)  => Init(t),
+            Err(t) => Uninit(t),
         };
-        let decl = ast::FunDecl { sig, block };
-
-        let preinit = PreinitFun2 {
-            id: metref.clone(),
+        
+        let preinit = PiFunSig2 {
+            ident: metref.clone(),
+            generics,
             params: preinit_params,
+            varargs: false,
+            ret,
         };
+
         todo!();
-        // self.insert_unresolved(UnresolvedValue::Fun(preinit, decl));
+        // self.insert_unresolved(UnresolvedValue::Fun(preinit, block));
 
         if let Some(c) = self.types.get_mut(cls_ty) {
             c.insert_method(method_name, metref);
