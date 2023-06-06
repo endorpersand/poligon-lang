@@ -176,7 +176,7 @@ impl DParser {
             match self.peek_token() {
                 Some(token![class]) => {
                     let cls = self.expect_class_decl()?;
-                    self.codegen.register_concrete_cls(cls, None)
+                    self.codegen.register_cls(cls, None)
                         .map_err(|e| e.map(DParseErr::PLIRErr))?;
                 },
                 Some(token![extern]) => {

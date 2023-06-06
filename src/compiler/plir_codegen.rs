@@ -1472,7 +1472,7 @@ impl PLIRCodegen {
                     self.push_global(plir::HoistedStmt::IGlobal(id, s))?;
                 },
                 ast::Stmt::FitClassDecl(ty, methods) => {
-                    let ty = self.consume_type(ty)?;
+                    let ty = self.consume_conc_type(ty)?;
                     let block = self.peek_block();
                     for m in methods {
                         block.insert_unresolved_method(&ty, m);
@@ -1780,7 +1780,7 @@ impl PLIRCodegen {
         let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
         
         let ty = match ty {
-            Some(t) => self.consume_type(t)?,
+            Some(t) => self.consume_conc_type(t)?,
             None => self.resolver.new_unknown(),
         };
         let e = self.consume_located_expr(val, Some(ty.clone()))?;
@@ -1833,7 +1833,7 @@ impl PLIRCodegen {
                 match mp {
                     MaybeInit::Uninit(ast::Param { rt, mt, ident, ty }) => {
                         let ty = match ty {
-                            Some(t) => self.consume_type(t)?,
+                            Some(t) => self.consume_conc_type(t)?,
                             None => plir::ty!(plir::Type::S_UNK),
                         };
     
@@ -1845,7 +1845,7 @@ impl PLIRCodegen {
             .collect::<Result<_, _>>()?;
         
         let ret = match ret {
-            MaybeInit::Uninit(ast_ty) => self.consume_type(ast_ty)?,
+            MaybeInit::Uninit(ast_ty) => self.consume_conc_type(ast_ty)?,
             MaybeInit::Init(plir_ty) => plir_ty,
         };
 
@@ -1907,7 +1907,7 @@ impl PLIRCodegen {
                 plir::Type::new_prim(ty_ident)
             } else {
                 let ty_params: Vec<_> = ty_params.into_iter()
-                    .map(|t| self.consume_type(t))
+                    .map(|t| self.consume_conc_type(t))
                     .collect::<Result<_, _>>()?;
                 
                 plir::Type::new_generic(ty_ident, ty_params)
@@ -1917,12 +1917,12 @@ impl PLIRCodegen {
         Ok((ty, cls))
     }
 
-    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+    fn consume_conc_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
         self.consume_type_and_get_cls(ty)
             .map(|(ty, _)| ty)
     }
 
-    pub(super) fn register_concrete_cls(
+    pub(super) fn register_cls(
         &mut self, cls: plir::Class, 
         methods: impl IntoIterator<Item=ast::MethodDecl>
     ) -> PLIRResult<()> {
@@ -1946,7 +1946,7 @@ impl PLIRCodegen {
         let fields = self.with_generic_aliases(*ty, |this| {
             fields.into_iter()
                 .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
-                    this.consume_type(ty).map(|ty| {
+                    this.consume_conc_type(ty).map(|ty| {
                         (ident, plir::Field { rt, mt, ty })
                     })
                 })
@@ -1954,7 +1954,7 @@ impl PLIRCodegen {
         })?;
     
         let cls = plir::Class { ty: ty.0.clone(), fields };
-        self.register_concrete_cls(cls, methods)
+        self.register_cls(cls, methods)
     }
 
     /// If this type is a generic type, it accesses the generic definition 
@@ -1992,28 +1992,6 @@ impl PLIRCodegen {
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
-        if cls.generics.is_empty() {
-            // concrete type
-            let ast::Class { ident, generics: _, fields, methods } = cls;
-
-            let fields = fields.into_iter()
-                .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
-                    self.consume_type(ty).map(|ty| {
-                        (ident, plir::Field { rt, mt, ty })
-                    })
-                })
-                .collect::<Result<_, _>>()?;
-        
-            let cls = plir::Class { ty: plir::ty!(ident), fields };
-            self.register_concrete_cls(cls, methods)
-        } else {
-            // generic type
-            self.peek_block().generic_types.insert(cls.ident.to_string(), cls);
-            Ok(())
-        }
-    }
-
-    fn consume_cls2(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generics, fields, methods } = cls;
 
         let fields = fields.into_iter()
@@ -2024,7 +2002,7 @@ impl PLIRCodegen {
                         plir::Type::new_type_var(cls_id.clone(), id)
                     }
                     // otherwise, consume concrete type
-                    ty => self.consume_type(ty)?
+                    ty => self.consume_conc_type(ty)?
                 };
 
                 Ok((field_id, plir::Field { rt, mt, ty }))
@@ -2033,8 +2011,9 @@ impl PLIRCodegen {
         
         let params = generics.into_iter()
             .map(|p| plir::Type::new_type_var(cls_id.clone(), p));
+        
         let cls = plir::Class { ty: plir::Type::new_generic(cls_id.clone(), params), fields };
-        self.register_concrete_cls(cls, methods)
+        self.register_cls(cls, methods)
     }
     fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
         let Located(expr, range) = value;
@@ -2149,7 +2128,7 @@ impl PLIRCodegen {
             },
             ast::Expr::ClassLiteral(ty, entries) => {
                 let tyrange = ty.range();
-                let ty = self.consume_type(ty)?;
+                let ty = self.consume_conc_type(ty)?;
                 
                 let cls_fields: IndexMap<_, _> = self.get_class(Located::new(&ty, tyrange.clone()))?
                     .fields()
@@ -2363,7 +2342,7 @@ impl PLIRCodegen {
                 let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
-                        let ty = self.consume_type(sp.ty)?;
+                        let ty = self.consume_conc_type(sp.ty)?;
 
                         let _ptr = plir::ty!("#ptr");
                         let _int = plir::ty!(plir::Type::S_INT);
@@ -2402,13 +2381,13 @@ impl PLIRCodegen {
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#alloca" => {
                         return Ok(plir::Expr::new(
                             plir::ty!("#ptr"),
-                            plir::ExprType::Alloca(self.consume_type(sp.ty)?)
+                            plir::ExprType::Alloca(self.consume_conc_type(sp.ty)?)
                         ))
                     },
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "size_of" => {
                         return Ok(plir::Expr::new(
                             plir::ty!(plir::Type::S_INT),
-                            plir::ExprType::SizeOf(self.consume_type(sp.ty)?)
+                            plir::ExprType::SizeOf(self.consume_conc_type(sp.ty)?)
                         ))
                     }
                     e => {

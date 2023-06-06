@@ -84,11 +84,12 @@ impl Display for Class {
         let Class { ty, fields: field_map } = self;
         write!(f, "class ")?;
         wrap_ty(ty, f)?;
+        write!(f, " ")?;
         
         if field_map.is_empty() {
             write!(f, "{{ }}")
         } else {
-            writeln!(f, " {{")?;
+            writeln!(f, "{{")?;
 
             for (fname, fdcl) in field_map.iter().take(field_map.len() - 1) {
                 writeln!(f, "{:4}{fname}: {fdcl},", "")?;
