@@ -623,9 +623,9 @@ impl InsertBlock {
             preinit_params.push(Init(param));
         };
 
-        let try_init_ty = |mpty| {
+        let try_init_ty = |mpty, fallback| {
             match mpty {
-                None => Ok(plir::ty!(plir::Type::S_UNK)),
+                None => Ok(fallback),
                 Some(pty) => {
                     let Located(ast::Type(pty_id, pty_params), _) = &pty; 
                     
@@ -650,7 +650,7 @@ impl InsertBlock {
         preinit_params.extend({
             params.into_iter().map(|p| {
                 let ast::Param { rt, mt, ident, ty: mpty } = p;
-                match try_init_ty(mpty) {
+                match try_init_ty(mpty, plir::ty!(plir::Type::S_UNK)) {
                     Ok(plir_ty) => Init(plir::Param { rt, mt, ident, ty: plir_ty }),
                     Err(ast_ty) => Uninit(ast::Param { rt, mt, ident, ty: Some(ast_ty) }),
                 }
@@ -658,7 +658,7 @@ impl InsertBlock {
         });
 
         let metref = plir::FunIdent::new_static(cls_ty, &method_name);
-        let ret = match try_init_ty(ret) {
+        let ret = match try_init_ty(ret, plir::ty!(plir::Type::S_VOID)) {
             Ok(t)  => Init(t),
             Err(t) => Uninit(t),
         };
