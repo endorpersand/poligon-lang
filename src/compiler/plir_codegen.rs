@@ -141,7 +141,6 @@ impl GonErr for PLIRErr {
             => e.err_name(),
         }
     }
-
 }
 
 impl std::fmt::Display for PLIRErr {
@@ -275,11 +274,11 @@ impl BlockBehavior {
     }
 }
 
-fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<plir::Type, TypeData> {
+fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<String, TypeData> {
     prims.into_iter()
         .map(|t| {
             let dat = TypeData::primitive(t.clone());
-            (t, dat)
+            (t.get_type_key().into_owned(), dat)
         })
         .collect()
 }
@@ -381,7 +380,7 @@ struct InsertBlock {
     final_exit: Option<Located<BlockExit>>,
 
     vars: HashMap<plir::FunIdent, plir::Type>,
-    types: HashMap<plir::Type, TypeData>,
+    types: HashMap<String, TypeData>,
     type_aliases: HashMap<plir::Type, plir::Type>,
 
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
@@ -555,7 +554,10 @@ impl InsertBlock {
 
     /// Insert a class into the insert block's type register.
     fn insert_class(&mut self, cls: plir::Class) {
-        self.types.insert(cls.ty.clone(), TypeData::structural(cls));
+        self.types.insert(
+            cls.ty.get_type_key().into_owned(),
+            TypeData::structural(cls)
+        );
     }
 
     // ty parameter must be a class shape.
@@ -633,7 +635,7 @@ impl InsertBlock {
 
         self.insert_unresolved(UnresolvedValue::Fun(preinit, block));
 
-        if let Some(c) = self.types.get_mut(cls_ty) {
+        if let Some(c) = self.types.get_mut(&*cls_ty.get_type_key()) {
             c.insert_method(method_name, metref);
         }
     }
@@ -1119,7 +1121,7 @@ impl PLIRCodegen {
     pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
         let mut top = InsertBlock::top();
         for (ident, cls) in &declared.types {
-            top.types.insert(ident.clone(), TypeData::structural(cls.clone()));
+            top.types.insert(ident.get_type_key().into_owned(), TypeData::structural(cls.clone()));
         }
         for (ident, value_ty) in &declared.values {
             // register values in scope
@@ -1127,7 +1129,7 @@ impl PLIRCodegen {
 
             // register methods to cls data
             if let plir::FunIdent::Static(ty, attr) = ident {
-                if let Some(cls) = top.types.get_mut(ty) {
+                if let Some(cls) = top.types.get_mut(&*ty.get_type_key()) {
                     cls.insert_method(attr.clone(), ident.clone());
                 }
             }
@@ -1252,53 +1254,6 @@ impl PLIRCodegen {
         Ok(())
     }
 
-    /// Resolves a type during PLIR traversal.
-    /// 
-    /// When a type is found during PLIR traversal,
-    /// this function is used to initialize the definition
-    /// of the type (assuming it is concrete).
-    fn resolve_type(&mut self, ty: Located<&plir::Type>) -> PLIRResult<()> {
-        use indexmap::map::Entry;
-
-        let ident = ty.short_ident();
-        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(ident)) {
-            self.execute_upwards(idx, |this| -> PLIRResult<_> {
-                // for generic types, we want to skip resolving a second time
-                if !this.peek_block().types.contains_key(*ty) {
-                    let Entry::Occupied(entry) = this.peek_block().unres_types.entry(ident.to_string()) else {
-                        unreachable!()
-                    };
-        
-                    match entry.get() {
-                        UnresolvedType::Class(_) => {
-                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                            this.consume_cls(cls)?;
-                        },
-                        UnresolvedType::Import(_) => todo!(),
-                    }
-                }
-
-                Ok(())
-            })?;
-        }
-
-        // instantiate generic:
-        if let plir::TypeRef::Generic(id, _, ()) = ty.0.downgrade() {
-            if let Some(idx) = self.find_scoped_index(|ib| ib.generic_types.contains_key(&*id)) {
-                self.execute_upwards(idx, |this| {
-                    if !this.peek_block().types.contains_key(*ty) {
-                        let gcls = this.peek_block().generic_types[&*id].clone();
-                        this.instantiate_generic_cls(gcls, ty)
-                    } else {
-                        Ok(())
-                    }
-                })?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Find a specific item, starting from the deepest scope and scaling out.
     fn find_scoped<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
         self.blocks.iter().rev()
@@ -1354,6 +1309,7 @@ impl PLIRCodegen {
     fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
         use Cow::Borrowed;
+        use indexmap::map::Entry;
 
         // resolve non-concrete types:
         let Located(ty, range) = lty;
@@ -1369,35 +1325,54 @@ impl PLIRCodegen {
             }
         })?;
 
-        // TODO: self.resolve_type(Located::clone(&ty))?;
+        // resolve uninitialized types:
+        {
+            let key = ty.get_type_key();
+            // find if this key is present. if so, load unresolved type at the scope where it was declared
+            if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(&*key)) {
+                self.execute_upwards(idx, |this| -> PLIRResult<_> {
+                    let Entry::Occupied(entry) = this.peek_block().unres_types.entry(key.into_owned()) else {
+                        unreachable!()
+                    };
+        
+                    match entry.get() {
+                        UnresolvedType::Class(_) => {
+                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                            this.consume_cls(cls)
+                        },
+                        UnresolvedType::Import(_) => todo!(),
+                    }
+                })?;
+            }
+        }
 
         match ty.downgrade() {
             // HACK ll_array
-            TypeRef::Generic(Borrowed("#ll_array"), Borrowed([t]), ()) => {
-                if self.find_scoped(|ib| ib.types.get(&ty)).is_none() {
-                    self.get_class(Located(t, range))?;
-                    self.program.types.insert(ty.clone(), TypeData::primitive(ty.clone()));
+            TypeRef::Generic(Borrowed("#ll_array"), ty_args, ()) => {
+                if let Borrowed([t]) = ty_args {
+                    if self.find_scoped(|ib| ib.types.get("#ll_array")).is_none() {
+                        self.get_class(Located(t, range))?;
+                        self.program.types.insert(String::from("#ll_array"), TypeData::primitive(ty.clone()));
+                    }
+    
+                    Ok(&self.program.types["#ll_array"])
+                } else {
+                    Err(PLIRErr::WrongTypeArity(1, ty_args.len()).at_range(range))
                 }
+            },
 
-                Ok(&self.program.types[&ty])
-            },
-            TypeRef::Generic(Borrowed("#ll_array"), a, ()) => {
-                Err(PLIRErr::WrongTypeArity(1, a.len()).at_range(range))
-            },
-            TypeRef::Prim(_) | TypeRef::Generic(_, _, ()) => {
-                self.find_scoped(|ib| ib.types.get(&ty))
-                    .ok_or_else(|| {
-                        PLIRErr::UndefinedType(ty.clone())
-                            .at_range(range)
-                    })
-            },
-            TypeRef::Unk(_) => {
-                let norm = self.resolver.normalize_or_err(ty.clone())
-                    .map_err(|e| PLIRErr::from(e).at_range(range.clone()))?;
-                
-                self.get_class(Located::new(&norm, range))
-            }
-            s => todo!("getting type data for {s}")
+            //
+            TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
+            TypeRef::Prim(_) => todo!(),
+            TypeRef::Generic(_, _, _) => todo!(),
+            // TypeRef::Prim(_) | TypeRef::Generic(_, _, ()) => {
+            //     self.find_scoped(|ib| ib.types.get(&ty))
+            //         .ok_or_else(|| {
+            //             PLIRErr::UndefinedType(ty.clone())
+            //                 .at_range(range)
+            //         })
+            // },
+            TypeRef::Tuple(_, _) | TypeRef::Fun(_) => todo!("getting type data for {ty}"),
         }
     }
 

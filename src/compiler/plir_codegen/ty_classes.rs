@@ -4,6 +4,17 @@ use std::collections::HashMap;
 use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
 use crate::err::{CursorRange, GonErr};
 
+impl TypeRef<'_> {
+    pub(super) fn get_type_key(&self) -> Cow<str> {
+        match self.downgrade() {
+            TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => panic!("cannot key type {self}"),
+            TypeRef::Prim(id) => id,
+            TypeRef::Generic(id, _, _) => id,
+            TypeRef::Tuple(params, _) => Cow::from(format!("#tuple{}", params.len())),
+            TypeRef::Fun(_) => Cow::from("#fun"),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub(super) struct SigKey<'k> {
@@ -18,7 +29,7 @@ impl<'k> SigKey<'k> {
 }
 
 #[derive(Debug)]
-pub(super) enum TypeStructure {
+pub(super) enum TypeFields {
     Primitive,
     Class(plir::Class)
 }
@@ -30,7 +41,7 @@ pub(super) enum TypeStructure {
 #[derive(Debug)]
 pub(super) struct TypeData {
     ty_shape: Type,
-    structure: TypeStructure,
+    structure: TypeFields,
     methods: TDExtMap
 }
 type TDExtMap = ExtMap<SigKey<'static>, FunIdent>;
@@ -136,7 +147,7 @@ impl TypeData {
 
         Self {
             ty_shape: ty,
-            structure: TypeStructure::Primitive,
+            structure: TypeFields::Primitive,
             methods
         }
     }
@@ -146,7 +157,7 @@ impl TypeData {
         
         Self {
             ty_shape: cls.ty.clone(),
-            structure: TypeStructure::Class(cls),
+            structure: TypeFields::Class(cls),
             methods
         }
     }
@@ -217,8 +228,8 @@ impl<'a> TypeDataView<'a, &TypeData> {
     /// Get a field on the type (if present).
     pub fn get_field(&self, ident: &str) -> Option<(usize, plir::Type)> {
         match &self.data.structure {
-            TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => {
+            TypeFields::Primitive => None,
+            TypeFields::Class(cls) => {
                 cls.fields.get_full(ident).map(|(i, _, v)| {
                     let ty = {
                         v.ty.clone()
@@ -235,8 +246,8 @@ impl<'a> TypeDataView<'a, &TypeData> {
     /// This will create a new clone which has substituted type parameters for the type arguments.
     pub fn fields(&self) -> Option<indexmap::IndexMap<String, plir::Field>> {
         match &self.data.structure {
-            TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => Some({
+            TypeFields::Primitive => None,
+            TypeFields::Class(cls) => Some({
                 let m = self.get_sub_map();
 
                 cls.fields.iter()
