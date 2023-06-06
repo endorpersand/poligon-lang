@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use crate::ast;
 use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 
-use super::Split;
+use super::{Split, own_cow};
 
 /// An owned type value.
 /// 
@@ -115,6 +115,31 @@ impl TypeRef<'_> {
         match NumType::new(self) {
             Some(t) => t.is_float_like(),
             None => false,
+        }
+    }
+
+    /// This only substitutes properly assuming the HashMap keys consist of only Type units 
+    /// (Type variants that do not consist of other Type variants) and
+    /// the HashMap values do not consist of Types that need to be substituted
+    pub(crate) fn substitute(&mut self, m: &std::collections::HashMap<TypeRef, TypeRef>) {
+        match self {
+            unit @ (TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_)) => {
+                if let Some(t) = m.get(unit) {
+                    *unit = t.upgrade();
+                }
+            },
+            TypeRef::Generic(_, ref mut params, _) | TypeRef::Tuple(ref mut params, _) => {
+                for par in own_cow(params).iter_mut() {
+                    par.substitute(m);
+                }
+            },
+            TypeRef::Fun(FunTypeRef { ref mut params, ref mut ret, varargs: _ }) => {
+                for par in own_cow(params).iter_mut() {
+                    par.substitute(m);
+                }
+
+                own_cow(ret).substitute(m);
+            },
         }
     }
 }

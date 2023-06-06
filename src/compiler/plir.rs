@@ -740,3 +740,14 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Index(Index),
     #[allow(missing_docs)] Deref(IDeref),
 }
+
+fn own_cow<'a, T: ToOwned + ?Sized>(cow: &'a mut Cow<T>) -> &'a mut T::Owned {
+    if let Cow::Borrowed(b) = cow {
+        *cow = Cow::Owned(b.to_owned());
+    }
+
+    match cow {
+        Cow::Borrowed(_) => unreachable!(),
+        Cow::Owned(o) => o,
+    }
+}

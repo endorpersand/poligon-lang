@@ -1,6 +1,6 @@
-use std::borrow::Cow;
-
 use crate::ast::Literal;
+
+use super::own_cow;
 
 pub(crate) trait Walker {
     type Err;
@@ -303,16 +303,6 @@ pub(crate) trait Walker {
     }
 }
 
-fn own_cow<'a, T: ToOwned + ?Sized>(cow: &'a mut Cow<T>) -> &'a mut T::Owned {
-    if let Cow::Borrowed(b) = cow {
-        *cow = Cow::Owned(b.to_owned());
-    }
-
-    match cow {
-        Cow::Borrowed(_) => unreachable!(),
-        Cow::Owned(o) => o,
-    }
-}
 pub(crate) trait WalkerMut {
     type Err;
 

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::compiler::plir::{self, Type, FunIdent};
+use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
 use crate::err::{CursorRange, GonErr};
 
 
@@ -152,6 +152,7 @@ impl TypeData {
     }
 
     pub fn type_view<'a>(&'a self, ty_args: &'a [plir::Type]) -> TypeDataView<&TypeData> {
+        assert_eq!(self.ty_shape.generic_args().len(), ty_args.len());
         TypeDataView { data: self, args: ty_args }
     }
     /// Add a method to the type's implementations.
@@ -176,6 +177,23 @@ pub(super) struct TypeDataView<'a, T: AsRef<TypeData> + 'a>{
 
 // impl<'a, T: AsRef<TypeData> + 'a> TypeDataView<'a, T> {
 impl<'a> TypeDataView<'a, &TypeData> {
+    fn get_sub_map(&self) -> HashMap<TypeRef, TypeRef> {
+        let data = match &self.data.ty_shape {
+            TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_) => None,
+            TypeRef::Generic(_, p, _) => Some(p),
+            TypeRef::Tuple(_, _) | TypeRef::Fun(_) => None,
+        };
+
+        match data {
+            Some(t) => {
+                std::iter::zip(&**t, self.args)
+                    .map(|(t, u)| (t.downgrade(), u.downgrade()))
+                    .collect()
+            },
+            None => HashMap::new(),
+        }
+    }
+
     /// Get a method defined in the type.
     pub fn get_method(&self, id: &str) -> Option<FunIdent> {
         let key = SigKey::new(id, &[][..]);
@@ -197,18 +215,38 @@ impl<'a> TypeDataView<'a, &TypeData> {
     }
 
     /// Get a field on the type (if present).
-    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
+    pub fn get_field(&self, ident: &str) -> Option<(usize, plir::Type)> {
         match &self.data.structure {
             TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
+            TypeStructure::Class(cls) => {
+                cls.fields.get_full(ident).map(|(i, _, v)| {
+                    let mut ty = v.ty.clone();
+                    ty.substitute(&self.get_sub_map());
+
+                    (i, ty)
+                })
+            },
         }
     }
 
     /// Get all fields on the type (if present).
-    pub fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::Field>> {
+    /// This will create a new clone which has substituted type parameters for the type arguments.
+    pub fn fields(&self) -> Option<indexmap::IndexMap<String, plir::Field>> {
         match &self.data.structure {
             TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => Some(&cls.fields)
+            TypeStructure::Class(cls) => Some({
+                let m = self.get_sub_map();
+
+                cls.fields.iter()
+                    .map(|(k, v)| {
+                        let k = k.clone();
+                        let mut v = v.clone();
+                        v.ty.substitute(&m);
+
+                        (k, v)
+                    })
+                    .collect()
+            })
         }
     }
 }
