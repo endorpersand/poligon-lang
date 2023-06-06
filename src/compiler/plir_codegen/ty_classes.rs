@@ -151,31 +151,64 @@ impl TypeData {
         }
     }
 
-    /// Get a method defined in the type.
-    pub fn get_method(&self, ty_args: &[plir::Type], id: &str) -> Option<FunIdent> {
-        let key = SigKey::new(id, &[][..]);
-
-        // TODO: specialization
-        self.methods.get_appl_maps(ty_args)
-            .find_map(|m| m.get(&key))
-            .cloned()
+    pub fn type_view<'a>(&'a self, ty_args: &'a [plir::Type]) -> TypeDataView<&TypeData> {
+        TypeDataView { data: self, args: ty_args }
     }
-
-    /// Get a method defined in the type or produce an error.
-    pub fn get_method_or_err(&self, ty_args: &[plir::Type], id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
-        self.get_method(ty_args, id)
-            .ok_or_else(|| {
-                // TODO: do type arg fill
-                let id = FunIdent::new_static(&self.ty_shape, id);
-                super::PLIRErr::UndefinedVarAttr(id).at_range(range)
-            })
-    }
-
-    /// Add a method to the type.
+    /// Add a method to the type's implementations.
     pub fn insert_method(&mut self, ty_args: impl IntoIterator<Item=Type>, id: String, metref: FunIdent) {
         let k = SigKey::new(id, vec![]);
 
         self.methods.get_map_mut(ty_args.into_iter().collect())
             .insert(k, metref);
+    }
+}
+
+impl AsRef<TypeData> for TypeData {
+    fn as_ref(&self) -> &TypeData {
+        self
+    }
+}
+
+pub(super) struct TypeDataView<'a, T: AsRef<TypeData> + 'a>{
+    data: T,
+    args: &'a [Type]
+}
+
+// impl<'a, T: AsRef<TypeData> + 'a> TypeDataView<'a, T> {
+impl<'a> TypeDataView<'a, &TypeData> {
+    /// Get a method defined in the type.
+    pub fn get_method(&self, id: &str) -> Option<FunIdent> {
+        let key = SigKey::new(id, &[][..]);
+
+        // TODO: specialization
+        self.data.methods.get_appl_maps(self.args)
+            .find_map(|m| m.get(&key))
+            .cloned()
+    }
+
+    /// Get a method defined in the type or produce an error.
+    pub fn get_method_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
+        self.get_method(id)
+            .ok_or_else(|| {
+                // TODO: do type arg fill
+                let id = FunIdent::new_static(&self.data.ty_shape, id);
+                super::PLIRErr::UndefinedVarAttr(id).at_range(range)
+            })
+    }
+
+    /// Get a field on the type (if present).
+    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
+        match &self.data.structure {
+            TypeStructure::Primitive => None,
+            TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
+        }
+    }
+
+    /// Get all fields on the type (if present).
+    pub fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::Field>> {
+        match &self.data.structure {
+            TypeStructure::Primitive => None,
+            TypeStructure::Class(cls) => Some(&cls.fields)
+        }
     }
 }
