@@ -220,8 +220,10 @@ impl<'a> TypeDataView<'a, &TypeData> {
             TypeStructure::Primitive => None,
             TypeStructure::Class(cls) => {
                 cls.fields.get_full(ident).map(|(i, _, v)| {
-                    let mut ty = v.ty.clone();
-                    ty.substitute(&self.get_sub_map());
+                    let ty = {
+                        v.ty.clone()
+                            .substitute(&self.get_sub_map())
+                    };
 
                     (i, ty)
                 })
@@ -240,8 +242,9 @@ impl<'a> TypeDataView<'a, &TypeData> {
                 cls.fields.iter()
                     .map(|(k, v)| {
                         let k = k.clone();
+                        
                         let mut v = v.clone();
-                        v.ty.substitute(&m);
+                        v.ty = v.ty.substitute(&m);
 
                         (k, v)
                     })

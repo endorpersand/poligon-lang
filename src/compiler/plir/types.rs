@@ -118,46 +118,67 @@ impl TypeRef<'_> {
         }
     }
 
-    /// This maps Type units to other Type units.
+    /// This function fallibly maps Type units to other Types, via a mutable reference.
     /// 
-    /// This function does not check the return of the callback to see if it needs to be mapped.
-    pub(crate) fn map(&mut self, f: &mut impl FnMut(TypeRef) -> Type) {
-        self.try_map(&mut |t| Ok::<_, std::convert::Infallible>(f(t))).unwrap()
-    }
-
-    /// This maps Type units to other Type units.
+    /// This will walk through the Type to replace units (f.e. Unk, TypeVar, Prim) 
+    /// using the provided replacer function. 
+    /// This function does not walk through the type returned by the replacer and
+    /// therefore will not replace any units of the type returned by the replacer.
     /// 
-    /// This function does not check the return of the callback to see if it needs to be mapped.
-    /// 
-    /// If this function raises an error, it is likely that the Type will be partially mapped.
-    pub(crate) fn try_map<E>(&mut self, f: &mut impl FnMut(TypeRef) -> Result<Type, E>) -> Result<(), E> {
+    /// If this function raises an error, the Type will be in a state of being partially mapped.
+    fn try_map_mut<E>(&mut self, f: &mut impl FnMut(TypeRef) -> Result<Type, E>) -> Result<(), E> {
         match self {
             unit @ (TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_)) => {
                 *unit = f(unit.downgrade())?;
+                
                 Ok(())
             },
             TypeRef::Generic(_, ref mut params, _) | TypeRef::Tuple(ref mut params, _) => {
                 for par in own_cow(params) {
-                    par.try_map(f)?;
+                    par.try_map_mut(f)?;
                 }
 
                 Ok(())
             },
             TypeRef::Fun(FunTypeRef { ref mut params, ref mut ret, varargs: _ }) => {
                 for par in own_cow(params) {
-                    par.try_map(f)?;
+                    par.try_map_mut(f)?;
                 }
 
-                own_cow(ret).try_map(f)
+                own_cow(ret).try_map_mut(f)
             },
         }
     }
 
-    /// This only substitutes properly assuming the HashMap keys consist of only Type units 
-    /// (Type variants that do not consist of other Type variants) and
-    /// the HashMap values do not consist of Types that need to be substituted
-    pub(crate) fn substitute(&mut self, m: &std::collections::HashMap<TypeRef, TypeRef>) {
-        self.map(&mut |t| m.get(&t).unwrap_or(&t).upgrade());
+    /// This function fallibly maps Type units in a given Type to other Types.
+    /// 
+    /// This will walk through the Type to replace units (f.e. Unk, TypeVar, Prim) 
+    /// using the provided replacer function. 
+    /// This function does not walk through the type returned by the replacer and
+    /// therefore will not replace any units of the type returned by the replacer.
+    pub(crate) fn try_map<E>(mut self, mut f: impl FnMut(TypeRef) -> Result<Type, E>) -> Result<Self, E> {
+        self.try_map_mut(&mut f)?;
+        Ok(self)
+    }
+
+    /// This function fallibly maps Type units in a given Type to other Types.
+    /// 
+    /// This will walk through the Type to replace units (f.e. Unk, TypeVar, Prim) 
+    /// using the provided replacer function. 
+    /// This function does not walk through the type returned by the replacer and
+    /// therefore will not replace any units of the type returned by the replacer.
+    pub(crate) fn map(self, mut f: impl FnMut(TypeRef) -> Type) -> Self {
+        self.try_map(|t| Ok::<_, std::convert::Infallible>(f(t))).unwrap()
+    }
+
+    /// This function substitutes Type units in a given Type using a substitution hash map.
+    /// 
+    /// This will walk through the Type to replace units (f.e. Unk, TypeVar, Prim) 
+    /// using the provided hash map.
+    /// This function does not walk through the type returned by the map and
+    /// therefore will not replace any units of the type returned by the map.
+    pub(crate) fn substitute(self, m: &std::collections::HashMap<TypeRef, TypeRef>) -> Self {
+        self.map(|t| m.get(&t).unwrap_or(&t).upgrade())
     }
 }
 impl Type {

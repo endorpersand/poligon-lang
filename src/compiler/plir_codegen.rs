@@ -1357,8 +1357,7 @@ impl PLIRCodegen {
 
         // resolve non-concrete types:
         let Located(ty, range) = lty;
-        let mut ty = ty.clone();
-        ty.try_map(&mut |unit| {
+        let ty = ty.clone().try_map(|unit| {
             match unit {
                 TypeRef::Unk(_) => {
                     self.resolver.normalize_or_err(unit.upgrade())
