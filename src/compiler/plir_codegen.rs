@@ -1352,7 +1352,10 @@ impl PLIRCodegen {
                 if let Borrowed([t]) = ty_args {
                     if self.find_scoped(|ib| ib.types.get("#ll_array")).is_none() {
                         self.get_class(Located(t, range))?;
-                        self.program.types.insert(String::from("#ll_array"), TypeData::primitive(ty.clone()));
+                        self.program.types.insert(
+                            String::from("#ll_array"), 
+                            TypeData::primitive(ty.clone())
+                        );
                     }
     
                     Ok(&self.program.types["#ll_array"])
@@ -1363,17 +1366,43 @@ impl PLIRCodegen {
 
             //
             TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
-            TypeRef::Prim(_) => todo!(),
-            TypeRef::Generic(_, _, _) => todo!(),
-            // TypeRef::Prim(_) | TypeRef::Generic(_, _, ()) => {
-            //     self.find_scoped(|ib| ib.types.get(&ty))
-            //         .ok_or_else(|| {
-            //             PLIRErr::UndefinedType(ty.clone())
-            //                 .at_range(range)
-            //         })
-            // },
+            pg_ty @ (TypeRef::Prim(_) | TypeRef::Generic(_, _, _)) => {
+                let params = match pg_ty {
+                    TypeRef::Prim(_) => Cow::from(vec![]),
+                    TypeRef::Generic(_, params, _) => params,
+                    _ => unreachable!()
+                };
+
+                self.find_scoped(|ib| ib.types.get(&*ty.get_type_key()))
+                    .ok_or_else(|| {
+                        PLIRErr::UndefinedType(ty.clone())
+                            .at_range(range.clone())
+                    })
+                    .and_then(|t| { // param existence check
+                        for p in params.iter() {
+                            if matches!(p, TypeRef::Unk(_)) { continue; }
+                            if self.concrete_type_exists(p) { continue; }
+                            Err({
+                                PLIRErr::UndefinedType(p.upgrade())
+                                    .at_range(range.clone())
+                            })?
+                        }
+
+                        Ok(t)
+                    })
+
+                    // TODO: param qty check
+            },
             TypeRef::Tuple(_, _) | TypeRef::Fun(_) => todo!("getting type data for {ty}"),
         }
+    }
+
+    fn concrete_type_exists(&self, ty: &plir::TypeRef) -> bool {
+        let key = &*ty.get_type_key();
+
+        self.find_scoped_index(|ib| {
+            ib.types.get(key).is_some() || ib.unres_types.get(key).is_some()
+        }).is_some()
     }
 
     fn tmp_var_name(&mut self, ident: &str) -> String {
