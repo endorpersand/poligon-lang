@@ -365,24 +365,14 @@ impl Type {
         }
     }
 
-    /// Return a short form of this type's identifier.
-    pub fn short_ident(&self) -> &str {
-        match self {
-            Type::Unk(_) => "#unk",
-            Type::TypeVar(_, var) => var,
-            Type::Prim(n) => n,
-            Type::Generic(n, _, ()) => n,
-            Type::Tuple(_, ()) => "#tuple",
-            Type::Fun(_) => "#fun",
-        }
-    }
-
-    /// Return this type's full identifier.
-    pub fn ident(&self) -> Cow<str> {
+    /// Return this type's string name in LLVM bytecode.
+    /// 
+    /// This differs from the Display type to make it look cleaner in bytecode.
+    pub fn llvm_ident(&self) -> Cow<str> {
         #[inline]
         fn param_tuple(params: &[Type]) -> String {
             params.iter()
-                .map(Type::ident)
+                .map(Type::llvm_ident)
                 .collect::<Vec<_>>()
                 .join(", ")
         }
@@ -404,7 +394,7 @@ impl Type {
                     (_, false) => ""
                 };
 
-                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(&params), va_filler, ret.ident()))
+                Cow::from(format!("#fun<({}{}) -> {}>", param_tuple(&params), va_filler, ret.llvm_ident()))
             },
         }
     }

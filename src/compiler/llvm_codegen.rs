@@ -1145,9 +1145,10 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
             plir::ExprType::Alloca(ty) => {
                 let layout = compiler.get_layout(ty)?;
 
-                let mut ty_ident = ty.short_ident();
-                ty_ident = ty_ident.strip_prefix('#')
-                    .unwrap_or(ty_ident);
+                let mut ty_ident = &*ty.llvm_ident();
+                if let Some(id) = ty_ident.strip_prefix('#') {
+                    ty_ident = id;
+                };
 
                 let ptr = compiler.builder.build_alloca(layout, &format!("alloca.{ty_ident}"));
                 Ok(GonValue::Basic(ptr.into()))
@@ -1376,7 +1377,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
             .map(|fd| compiler.get_layout(&fd.ty))
             .collect::<Result<_, _>>()?;
         
-        let struct_ty = compiler.ctx.opaque_struct_type(&ty.ident());
+        let struct_ty = compiler.ctx.opaque_struct_type(&ty.llvm_ident());
         struct_ty.set_body(&fields, false);
 
         compiler.define_type(ty.clone(), struct_ty);
