@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
@@ -162,9 +163,9 @@ impl TypeData {
         }
     }
 
-    pub fn type_view<'a>(&'a self, ty_args: &'a [plir::Type]) -> TypeDataView<&TypeData> {
+    pub fn type_view<'a>(&'a self, ty_args: &'a [plir::Type]) -> TypeDataView {
         assert_eq!(self.ty_shape.generic_args().len(), ty_args.len());
-        TypeDataView { data: self, args: ty_args }
+        View { data: self, args: ty_args, _subst_map: OnceCell::new() }
     }
     /// Add a method to the type's implementations.
     pub fn insert_method(&mut self, ty_args: impl IntoIterator<Item=Type>, id: String, metref: FunIdent) {
@@ -181,28 +182,21 @@ impl AsRef<TypeData> for TypeData {
     }
 }
 
-pub(super) struct TypeDataView<'a, T: AsRef<TypeData> + 'a>{
+pub(super) struct View<'a, T: AsRef<TypeData> + 'a>{
     data: T,
-    args: &'a [Type]
+    args: &'a [Type],
+    _subst_map: OnceCell<HashMap<TypeRef<'a>, TypeRef<'a>>>
 }
+type TypeDataView<'a> = View<'a, &'a TypeData>;
 
 // impl<'a, T: AsRef<TypeData> + 'a> TypeDataView<'a, T> {
-impl<'a> TypeDataView<'a, &TypeData> {
-    fn get_sub_map(&self) -> HashMap<TypeRef, TypeRef> {
-        let data = match &self.data.ty_shape {
-            TypeRef::Unk(_) | TypeRef::TypeVar(_, _) | TypeRef::Prim(_) => None,
-            TypeRef::Generic(_, p, _) => Some(p),
-            TypeRef::Tuple(_, _) | TypeRef::Fun(_) => None,
-        };
-
-        match data {
-            Some(t) => {
-                std::iter::zip(&**t, self.args)
-                    .map(|(t, u)| (t.downgrade(), u.downgrade()))
-                    .collect()
-            },
-            None => HashMap::new(),
-        }
+impl<'a> TypeDataView<'a> {
+    fn subst_map(&self) -> &HashMap<TypeRef, TypeRef> {
+        self._subst_map.get_or_init(|| {
+            std::iter::zip(self.data.ty_shape.generic_args(), self.args)
+                .map(|(k, v)| (k.downgrade(), v.downgrade()))
+                .collect()
+        })
     }
 
     /// Get a method defined in the type.
@@ -220,7 +214,8 @@ impl<'a> TypeDataView<'a, &TypeData> {
         self.get_method(id)
             .ok_or_else(|| {
                 // TODO: do type arg fill
-                let id = FunIdent::new_static(&self.data.ty_shape, id);
+                let ty = self.data.ty_shape.clone().substitute(self.subst_map());
+                let id = FunIdent::new_static(&ty, id);
                 super::PLIRErr::UndefinedVarAttr(id).at_range(range)
             })
     }
@@ -233,7 +228,7 @@ impl<'a> TypeDataView<'a, &TypeData> {
                 cls.fields.get_full(ident).map(|(i, _, v)| {
                     let ty = {
                         v.ty.clone()
-                            .substitute(&self.get_sub_map())
+                            .substitute(self.subst_map())
                     };
 
                     (i, ty)
@@ -248,14 +243,12 @@ impl<'a> TypeDataView<'a, &TypeData> {
         match &self.data.structure {
             TypeFields::Primitive => None,
             TypeFields::Class(cls) => Some({
-                let m = self.get_sub_map();
-
                 cls.fields.iter()
                     .map(|(k, v)| {
                         let k = k.clone();
                         
                         let mut v = v.clone();
-                        v.ty = v.ty.substitute(&m);
+                        v.ty = v.ty.substitute(self.subst_map());
 
                         (k, v)
                     })
