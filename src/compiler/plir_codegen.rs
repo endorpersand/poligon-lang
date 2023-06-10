@@ -2017,8 +2017,10 @@ impl PLIRCodegen {
     }
 
     fn with_generic_aliases<T>(&mut self, ty: &plir::Type, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
+        let arg_ty = |arg_name| plir::Type::new_type_var(ty.get_type_key().into_owned(), arg_name);
+        
         for (p, arg) in std::iter::zip(self.get_generic_params(ty).to_vec(), ty.generic_args()) {
-            self.peek_block().type_aliases.insert(plir::ty!(p), arg.clone());
+            self.peek_block().type_aliases.insert(arg_ty(p), arg.clone());
         }
             
         let result = f(self);
@@ -2026,7 +2028,7 @@ impl PLIRCodegen {
         // it is, in fact, necessary
         #[allow(clippy::unnecessary_to_owned)]
         for p in self.get_generic_params(ty).to_vec() {
-            self.peek_block().type_aliases.remove(&plir::ty!(p));
+            self.peek_block().type_aliases.remove(&arg_ty(p));
         }
 
         result
