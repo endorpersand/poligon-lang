@@ -1909,13 +1909,58 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    /// Verifies a [`plir::Type`] is valid, making changes to it if necessary.
+    /// Verifies a [`plir::Type`] is valid (and represents a valid class), making changes to it if necessary.
     pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<()> {
+        use plir::TypeRef;
+        use std::cmp::Ordering;
+
         if let Some(aliased_ty) = self.find_scoped(|ib| ib.type_aliases.get(lty.0)) {
             *lty.0 = aliased_ty.clone();
         }
 
-        self.get_class(lty.map(|t| &*t)).map(|_| ())
+        let Located(ty, range) = lty;
+        match ty {
+            // no verification is done for these,
+            // they do need to be resolved, however
+            TypeRef::Unk(_) => Ok(()),
+            TypeRef::TypeVar(_, _) => Ok(()),
+
+            TypeRef::Prim(id) | TypeRef::Generic(id, _, _) => {
+                let id = id.to_string();
+                let param_len = self.find_scoped(|ib| {
+                    match ib.types.get(&id) {
+                        Some(td) => Some(td.plir_ty.generic_args().len()),
+                        None => match ib.unres_types.get(&id)? {
+                            UnresolvedType::Class(cls) => Some(cls.generics.len()),
+                            UnresolvedType::Import(_) => todo!(),
+                        },
+                    }
+                }).ok_or_else(|| {
+                    PLIRErr::UndefinedType(ty.clone())
+                        .at_range(range.clone())
+                })?;
+
+                let arg_len = ty.generic_args().len();
+
+                match param_len.cmp(&arg_len) {
+                    Ordering::Less => {
+                        Err(PLIRErr::WrongTypeArity(param_len, arg_len).at_range(range))?
+                    },
+                    Ordering::Equal => {},
+                    Ordering::Greater => {
+                        let mut params = ty.generic_args().to_vec();
+                        params.resize_with(param_len, || self.resolver.new_unknown());
+                        *ty = TypeRef::new_generic(id, params);
+                    },
+                }
+
+                Ok(())
+            },
+
+            // TODO
+            TypeRef::Tuple(_, _) => Ok(()),
+            TypeRef::Fun(_) => Ok(()),
+        }
     }
 
     /// Consumes a located [`ast::Class`] into a located concrete [`plir::Type`].
