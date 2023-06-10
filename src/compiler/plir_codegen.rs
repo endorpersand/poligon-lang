@@ -1308,22 +1308,27 @@ impl PLIRCodegen {
 
     fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
-        use Cow::Borrowed;
         use indexmap::map::Entry;
 
         // resolve non-concrete types:
+        let range = lty.range();
+        let mut lty = lty.map(|ty| {
+            ty.clone().try_map(|unit| {
+                match unit {
+                    TypeRef::Unk(_) => {
+                        self.resolver.normalize_or_err(unit.upgrade())
+                            .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
+                    },
+                    TypeRef::TypeVar(_, _) => todo!("type var resolution"),
+                    TypeRef::Prim(_) => Ok(unit.upgrade()),
+                    TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => unreachable!(),
+                }
+            })
+        }).transpose_result()?;
+
+        // make sure right number of arguments are applied
+        self.verify_type(lty.as_mut())?;
         let Located(ty, range) = lty;
-        let ty = ty.clone().try_map(|unit| {
-            match unit {
-                TypeRef::Unk(_) => {
-                    self.resolver.normalize_or_err(unit.upgrade())
-                        .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
-                },
-                TypeRef::TypeVar(_, _) => todo!("type var resolution"),
-                TypeRef::Prim(_) => Ok(unit.upgrade()),
-                TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => unreachable!(),
-            }
-        })?;
 
         // resolve uninitialized types:
         {
@@ -1347,62 +1352,18 @@ impl PLIRCodegen {
         }
 
         match ty.downgrade() {
-            // HACK ll_array
-            TypeRef::Generic(Borrowed("#ll_array"), ty_args, ()) => {
-                if let Borrowed([t]) = ty_args {
-                    if self.find_scoped(|ib| ib.types.get("#ll_array")).is_none() {
-                        self.get_class(Located(t, range))?;
-                        self.program.types.insert(
-                            String::from("#ll_array"), 
-                            TypeData::primitive(ty.clone())
-                        );
-                    }
-    
-                    Ok(&self.program.types["#ll_array"])
-                } else {
-                    Err(PLIRErr::WrongTypeArity(1, ty_args.len()).at_range(range))
-                }
-            },
-
-            //
             TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
-            pg_ty @ (TypeRef::Prim(_) | TypeRef::Generic(_, _, _)) => {
-                let params = match pg_ty {
-                    TypeRef::Prim(_) => Cow::from(vec![]),
-                    TypeRef::Generic(_, params, _) => params,
-                    _ => unreachable!()
-                };
-
+            TypeRef::Prim(_) | TypeRef::Generic(_, _, _) => {
                 self.find_scoped(|ib| ib.types.get(&*ty.get_type_key()))
                     .ok_or_else(|| {
                         PLIRErr::UndefinedType(ty.clone())
                             .at_range(range.clone())
-                    })
-                    .and_then(|t| { // param existence check
-                        for p in params.iter() {
-                            if matches!(p, TypeRef::Unk(_)) { continue; }
-                            if self.concrete_type_exists(p) { continue; }
-                            Err({
-                                PLIRErr::UndefinedType(p.upgrade())
-                                    .at_range(range.clone())
-                            })?
-                        }
-
-                        Ok(t)
                     })
 
                     // TODO: param qty check
             },
             TypeRef::Tuple(_, _) | TypeRef::Fun(_) => todo!("getting type data for {ty}"),
         }
-    }
-
-    fn concrete_type_exists(&self, ty: &plir::TypeRef) -> bool {
-        let key = &*ty.get_type_key();
-
-        self.find_scoped_index(|ib| {
-            ib.types.get(key).is_some() || ib.unres_types.get(key).is_some()
-        }).is_some()
     }
 
     fn tmp_var_name(&mut self, ident: &str) -> String {
@@ -1910,6 +1871,7 @@ impl PLIRCodegen {
     }
 
     /// Verifies a [`plir::Type`] is valid (and represents a valid class), making changes to it if necessary.
+    /// The new value for the given type should be a valid `plir::Type` and therefore does not need to be checked further.
     pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<()> {
         use plir::TypeRef;
         use std::cmp::Ordering;
@@ -1926,6 +1888,17 @@ impl PLIRCodegen {
             TypeRef::TypeVar(_, _) => Ok(()),
 
             TypeRef::Prim(id) | TypeRef::Generic(id, _, _) => {
+                // HACK: #ll_array
+                if id == "#ll_array" && !self.program.types.contains_key("#ll_array") {
+                    let array_type = plir::ty!("#ll_array", [
+                        TypeRef::new_type_var("#ll_array", "E")
+                    ]);
+                    self.program.types.insert(
+                        String::from("#ll_array"), 
+                        TypeData::primitive(array_type)
+                    );
+                }
+
                 let id = id.to_string();
                 let param_len = self.find_scoped(|ib| {
                     match ib.types.get(&id) {
