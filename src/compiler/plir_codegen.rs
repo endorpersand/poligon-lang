@@ -386,7 +386,6 @@ struct InsertBlock {
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
 
-    generic_types: HashMap<String, ast::Class>,
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
     /// a type.
@@ -405,7 +404,6 @@ impl InsertBlock {
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types:  IndexMap::new(),
-            generic_types: HashMap::new(),
             expected_ty
         }
     }
@@ -431,7 +429,6 @@ impl InsertBlock {
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
-            generic_types: HashMap::new(),
             expected_ty: None
         }
     }
@@ -1555,8 +1552,7 @@ impl PLIRCodegen {
             mut block, last_stmt_loc, 
             exits, final_exit, 
             vars: _, types: _, type_aliases: _,
-            unres_values, unres_types, generic_types: _,
-            expected_ty
+            unres_values, unres_types, expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
@@ -1855,13 +1851,12 @@ impl PLIRCodegen {
                 self.declare(ident, ty.clone());
             }
     
-            self.with_generic_aliases(&sig.ident.resolution_type(), |this| {
-                // collect all the statements from this block
-                this.consume_stmts(old_block.0)?;
-        
-                let insert_block = this.pop_block().unwrap();
-                this.consume_insert_block(insert_block, BlockBehavior::Function)
-            })?
+            // collect all the statements from this block
+            self.consume_stmts(old_block.0)?;
+    
+            let insert_block = self.pop_block().unwrap();
+            self.consume_insert_block(insert_block, BlockBehavior::Function)?
+
         };
 
         let fun_decl = plir::FunDecl { sig, block };
@@ -1975,63 +1970,6 @@ impl PLIRCodegen {
         }
 
         self.push_global(cls)
-    }
-
-    pub(super) fn instantiate_generic_cls(&mut self, cls: ast::Class, ty: Located<&plir::Type>) -> PLIRResult<()> {
-        if cls.generics.len() != ty.generic_args().len() {
-            Err(PLIRErr::WrongTypeArity(cls.generics.len(), ty.generic_args().len()).at_range(ty.range()))?
-        };
-
-        let ast::Class { ident: _, generics: _, fields, methods } = cls;
-
-        let fields = self.with_generic_aliases(*ty, |this| {
-            fields.into_iter()
-                .map(|ast::FieldDecl { rt, mt, ident, ty }| -> PLIRResult<_> {
-                    this.consume_conc_type(ty).map(|ty| {
-                        (ident, plir::Field { rt, mt, ty })
-                    })
-                })
-                .collect::<Result<_, _>>()
-        })?;
-    
-        let cls = plir::Class { ty: ty.0.clone(), fields };
-        self.register_cls(cls, methods)
-    }
-
-    /// If this type is a generic type, it accesses the generic definition 
-    /// and returns the defined type parameters.
-    /// 
-    /// This will not allocate.
-    fn get_generic_params(&self, ty: &plir::Type) -> &[String] {
-        match ty {
-            plir::Type::Generic(id, _, ()) => {
-                let mgcls = self.find_scoped(|ib| ib.generic_types.get(&**id));
-
-                match mgcls {
-                    Some(gcls) => &gcls.generics,
-                    None => &[],
-                }
-            },
-            _ => &[]
-        }
-    }
-
-    fn with_generic_aliases<T>(&mut self, ty: &plir::Type, f: impl FnOnce(&mut PLIRCodegen) -> T) -> T {
-        let arg_ty = |arg_name| plir::Type::new_type_var(ty.get_type_key().into_owned(), arg_name);
-        
-        for (p, arg) in std::iter::zip(self.get_generic_params(ty).to_vec(), ty.generic_args()) {
-            self.peek_block().type_aliases.insert(arg_ty(p), arg.clone());
-        }
-            
-        let result = f(self);
-            
-        // it is, in fact, necessary
-        #[allow(clippy::unnecessary_to_owned)]
-        for p in self.get_generic_params(ty).to_vec() {
-            self.peek_block().type_aliases.remove(&arg_ty(p));
-        }
-
-        result
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
