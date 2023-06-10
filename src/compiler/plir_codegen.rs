@@ -1909,17 +1909,20 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<&TypeData> {
+    /// Verifies a [`plir::Type`] is valid, making changes to it if necessary.
+    pub(super) fn verify_type(&mut self, lty: Located<&mut plir::Type>) -> PLIRResult<()> {
         if let Some(aliased_ty) = self.find_scoped(|ib| ib.type_aliases.get(lty.0)) {
             *lty.0 = aliased_ty.clone();
         }
 
-        self.get_class(lty.map(|t| &*t))
+        self.get_class(lty.map(|t| &*t)).map(|_| ())
     }
-    fn consume_type_and_get_cls(&mut self, ty: Located<ast::Type>) -> PLIRResult<(plir::Type, &TypeData)> {
+
+    /// Consumes a located [`ast::Class`] into a located concrete [`plir::Type`].
+    fn consume_located_conc_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<Located<plir::Type>> {
         let Located(ast::Type(ty_ident, ty_params), range) = ty;
         
-        let mut ty = {
+        let ty = {
             if ty_params.is_empty() {
                 plir::Type::new_prim(ty_ident)
             } else {
@@ -1930,13 +1933,16 @@ impl PLIRCodegen {
                 plir::Type::new_generic(ty_ident, ty_params)
             }
         };
-        let cls = self.verify_type(Located::new(&mut ty, range))?;
-        Ok((ty, cls))
+
+        let mut lty = Located::new(ty, range);
+        self.verify_type(lty.as_mut())?;
+        Ok(lty)
     }
 
+    /// Consumes a located [`ast::Class`] into a concrete [`plir::Type`].
     fn consume_conc_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
-        self.consume_type_and_get_cls(ty)
-            .map(|(ty, _)| ty)
+        self.consume_located_conc_type(ty)
+            .map(|lty| lty.0)
     }
 
     pub(super) fn register_cls(
@@ -2050,7 +2056,7 @@ impl PLIRCodegen {
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
             ast::Expr::Literal(literal) => {
-                let ty = match literal {
+                let mut ty = match literal {
                     ast::Literal::Int(_)   => plir::ty!(plir::Type::S_INT),
                     ast::Literal::Float(_) => plir::ty!(plir::Type::S_FLOAT),
                     ast::Literal::Char(_)  => plir::ty!(plir::Type::S_CHAR),
@@ -2059,7 +2065,7 @@ impl PLIRCodegen {
                 };
 
                 // check type exists (for string, this may not happen if std isn't loaded)
-                self.get_class(Located::new(&ty, range))?;
+                self.verify_type(Located::new(&mut ty, range))?;
                 //
 
                 Ok(plir::Expr::new(
@@ -2235,7 +2241,9 @@ impl PLIRCodegen {
             },
             ast::Expr::StaticPath(sp) => {
                 let ast::StaticPath { ty, attr } = sp;
-                let (ty, cls) = self.consume_type_and_get_cls(ty)?;
+                let lty = self.consume_located_conc_type(ty)?;
+                let cls = self.get_class(lty.as_ref())?;
+                let ty = lty.0;
                 
                 let attrref = cls.get_method(&attr)
                     .ok_or_else(|| {

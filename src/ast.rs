@@ -72,6 +72,12 @@ impl<T> Located<T> {
     pub fn as_ref(&self) -> Located<&T> {
         Located::new(&self.0, self.range())
     }
+
+    /// Similar to [`Option::as_mut`].
+    pub fn as_mut(&mut self) -> Located<&mut T> {
+        let range = self.range();
+        Located::new(&mut self.0, range)
+    }
     
     /// Map a Located with a given type to a Located of another type.
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
