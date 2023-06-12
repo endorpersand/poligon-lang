@@ -2195,7 +2195,7 @@ impl PLIRCodegen {
                 let cls = self.get_class(lty.as_ref())?;
                 let ty = lty.0;
                 
-                let attrref = cls.get_method(&attr)
+                let attrref = cls.get_method_ref(&attr)
                     .ok_or_else(|| {
                         let id = plir::FunIdent::new_static(&ty, &attr);
                         PLIRErr::UndefinedVarAttr(id).at_range(range.clone())
@@ -2286,7 +2286,7 @@ impl PLIRCodegen {
 
                 // FIXME: cleanup
                 let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
-                let m = cls.get_method_or_err("next", itrange.clone())?;
+                let m = cls.get_method_ref_or_err("next", itrange.clone())?;
                 let itnext_ty = self.get_var_type_or_err(&m, itrange.clone())?;
                 let element_type = match itnext_ty.downgrade() {
                     plir::TypeRef::Fun(plir::FunTypeRef {
@@ -2451,7 +2451,7 @@ impl PLIRCodegen {
             let top_ty = path.ty();
             let cls = self.get_class(Located::new(&top_ty, expr_range.clone()))?;
 
-            if let Some(metref) = cls.get_method(&attr) {
+            if let Some(metref) = cls.get_method_ref(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
                     Err(PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
                 } else {

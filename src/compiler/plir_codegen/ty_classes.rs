@@ -212,7 +212,7 @@ impl<'a> TypeDataView<'a> {
     }
 
     /// Get a method defined in the type.
-    pub fn get_method(&self, id: &str) -> Option<FunIdent> {
+    pub fn get_method_ref(&self, id: &str) -> Option<FunIdent> {
         let key = SigKey::new(id, &[][..]);
 
         // TODO: specialization
@@ -222,8 +222,8 @@ impl<'a> TypeDataView<'a> {
     }
 
     /// Get a method defined in the type or produce an error.
-    pub fn get_method_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
-        self.get_method(id)
+    pub fn get_method_ref_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
+        self.get_method_ref(id)
             .ok_or_else(|| {
                 let ty = self.data.ty_shape.clone().substitute(self.subst_map());
                 let id = FunIdent::new_static(&ty, id);

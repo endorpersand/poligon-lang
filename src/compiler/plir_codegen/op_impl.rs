@@ -74,7 +74,7 @@ impl<'a> Cast<'a> {
                 // Load src class
                 let cls = cg.get_class(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
-                if let Some(met_ident) = cls.get_method("to_string") {
+                if let Some(met_ident) = cls.get_method_ref("to_string") {
                     cg.get_var_type(&met_ident)?
                         .filter(|t| matches!( t.downgrade(), 
                             Fun(FunTypeRef {
@@ -117,7 +117,7 @@ impl<'a> Cast<'a> {
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
                     let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
-                        .get_method_or_err("to_string", src_range.clone())?;
+                        .get_method_ref_or_err("to_string", src_range.clone())?;
                     
                     let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?;
                     
@@ -255,7 +255,7 @@ impl super::PLIRCodegen {
 
         let lrange = left.1.clone();
         let ident = self.get_class(left)?
-            .get_method_or_err(method_name, lrange)?;
+            .get_method_ref_or_err(method_name, lrange)?;
 
         let e = self.get_var_type(&ident)?
             .map(|fun_ty| ident.into_expr(fun_ty));
@@ -335,7 +335,7 @@ impl super::PLIRCodegen {
 
         let lrange = left.range();
         let ident = self.get_class(left)?
-            .get_method_or_err(&format!("{method_name}_{right}"), lrange)?;
+            .get_method_ref_or_err(&format!("{method_name}_{right}"), lrange)?;
 
         let e = self.get_var_type(&ident)?
             .map(|fun_ty| ident.into_expr(fun_ty));
