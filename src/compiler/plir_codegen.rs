@@ -1189,8 +1189,9 @@ impl PLIRCodegen {
         self.globals.declared.clone()
     }
 
-    fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::Type>) {
-        self.blocks.push(InsertBlock::new(block_range, expected_ty))
+    fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::Type>) -> &mut InsertBlock {
+        self.blocks.push(InsertBlock::new(block_range, expected_ty));
+        self.blocks.last_mut().unwrap()
     }
     fn pop_block(&mut self) -> Option<InsertBlock> {
         self.blocks.pop()
@@ -1336,6 +1337,7 @@ impl PLIRCodegen {
             Ok(())
         }
     }
+
     fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
 
@@ -1397,6 +1399,20 @@ impl PLIRCodegen {
         }
     }
 
+    fn get_generic_context(&self, generic: plir::TypeRef) -> GenericContext {
+        let plir::TypeRef::Generic(id, params, ()) = generic else { panic!("Expected generic type in get_generic_context") };
+
+        let td = self.find_scoped(|ib| ib.types.get(&*id)).unwrap_or_else(|| panic!("type '{id}' should have existed"));
+        let plir::Type::Generic(_, shape_params, ()) = &td.plir_ty else {
+            panic!("type '{id}' should have been generic")
+        };
+
+        let map = std::iter::zip(shape_params.iter(), params.iter())
+            .map(|(k, v)| (k.get_type_key().to_string(), v.upgrade()))
+            .collect();
+
+        GenericContext(id.to_string(), map)
+    }
     fn tmp_var_name(&mut self, ident: &str) -> String {
         let string = format!("_{ident}_{}", self.var_id);
         self.var_id += 1;
@@ -1481,7 +1497,7 @@ impl PLIRCodegen {
                     self.push_global(plir::HoistedStmt::IGlobal(id, s))?;
                 },
                 ast::Stmt::FitClassDecl(ty, methods) => {
-                    let ty = self.consume_conc_type(ty)?;
+                    let ty = self.consume_type(ty)?;
                     let block = self.peek_block();
                     for m in methods {
                         block.insert_unresolved_method(&ty, m);
@@ -1789,7 +1805,7 @@ impl PLIRCodegen {
         let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
         
         let ty = match ty {
-            Some(t) => self.consume_conc_type(t)?,
+            Some(t) => self.consume_type(t)?,
             None => self.resolver.new_unknown(),
         };
         let e = self.consume_located_expr(val, Some(ty.clone()))?;
@@ -1836,13 +1852,23 @@ impl PLIRCodegen {
     fn consume_fun_sig(&mut self, pi: PiFunSig) -> PLIRResult<plir::FunSignature> {
         let PiFunSig { ident, generics, params, varargs, ret } = pi;
         debug_assert!(generics.is_empty(), "todo: generic funs");
-        
+
+        let gctx = if let plir::FunIdent::Static(ty @ plir::Type::Generic(_, _, ()), _) = &ident {
+            Some(self.get_generic_context(ty.downgrade()))
+        } else {
+            None
+        };
+
+        // phantom block to encapsulate generic type context
+        let ib = self.push_block((0, 0) ..= (0, 0), None);
+        ib.generic_ctx = gctx;
+
         let params = params.into_iter()
             .map(|mp| -> PLIRResult<_> {
                 match mp {
                     MaybeInit::Uninit(ast::Param { rt, mt, ident, ty }) => {
                         let ty = match ty {
-                            Some(t) => self.consume_conc_type(t)?,
+                            Some(t) => self.consume_type(t)?,
                             None => plir::ty!(plir::Type::S_UNK),
                         };
     
@@ -1854,10 +1880,12 @@ impl PLIRCodegen {
             .collect::<Result<_, _>>()?;
         
         let ret = match ret {
-            MaybeInit::Uninit(ast_ty) => self.consume_conc_type(ast_ty)?,
+            MaybeInit::Uninit(ast_ty) => self.consume_type(ast_ty)?,
             MaybeInit::Init(plir_ty) => plir_ty,
         };
 
+        self.pop_block();
+        
         let fs = plir::FunSignature {
             /// Only globals should be accessible to external modules
             private: !self.blocks.is_empty(), 
@@ -1880,7 +1908,13 @@ impl PLIRCodegen {
             .unwrap_or_else(|ob| (*ob).clone());
     
         let block = {
-            self.push_block(block_range, Some(sig.ret.clone()));
+            let gctx = if let plir::FunIdent::Static(ty @ plir::Type::Generic(_, _, ()), _) = &sig.ident {
+                Some(self.get_generic_context(ty.downgrade()))
+            } else {
+                None
+            };
+            let ib = self.push_block(block_range, Some(sig.ret.clone()));
+            ib.generic_ctx = gctx;
 
             for plir::Param { ident, ty, .. } in sig.params.iter() {
                 self.declare(ident, ty.clone());
@@ -1972,10 +2006,17 @@ impl PLIRCodegen {
         
         let ty = {
             if ty_params.is_empty() {
-                plir::Type::new_prim(ty_ident)
+                self.find_scoped(|ib| {
+                    let ctx = ib.generic_ctx.as_ref()?;
+                    ctx.1.contains_key(&ty_ident).then(|| {
+                        plir::Type::new_type_var(ctx.0.to_string(), ty_ident.to_string())
+                    })
+                }).unwrap_or_else(|| {
+                    plir::Type::new_prim(ty_ident)
+                })
             } else {
                 let ty_params: Vec<_> = ty_params.into_iter()
-                    .map(|t| self.consume_conc_type(t))
+                    .map(|t| self.consume_type(t))
                     .collect::<Result<_, _>>()?;
                 
                 plir::Type::new_generic(ty_ident, ty_params)
@@ -1988,7 +2029,7 @@ impl PLIRCodegen {
     }
 
     /// Consumes a located [`ast::Class`] into a concrete [`plir::Type`].
-    fn consume_conc_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
         self.consume_located_conc_type(ty)
             .map(|lty| lty.0)
     }
@@ -2018,7 +2059,7 @@ impl PLIRCodegen {
                         plir::Type::new_type_var(cls_id.clone(), id)
                     }
                     // otherwise, consume concrete type
-                    ty => self.consume_conc_type(ty)?
+                    ty => self.consume_type(ty)?
                 };
 
                 Ok((field_id, plir::Field { rt, mt, ty }))
@@ -2144,7 +2185,7 @@ impl PLIRCodegen {
             },
             ast::Expr::ClassLiteral(ty, entries) => {
                 let tyrange = ty.range();
-                let ty = self.consume_conc_type(ty)?;
+                let ty = self.consume_type(ty)?;
                 
                 let cls_fields: IndexMap<_, _> = self.get_class(Located::new(&ty, tyrange.clone()))?
                     .fields()
@@ -2360,7 +2401,7 @@ impl PLIRCodegen {
                 let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
-                        let ty = self.consume_conc_type(sp.ty)?;
+                        let ty = self.consume_type(sp.ty)?;
 
                         let _ptr = plir::ty!("#ptr");
                         let _int = plir::ty!(plir::Type::S_INT);
@@ -2399,13 +2440,13 @@ impl PLIRCodegen {
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#alloca" => {
                         return Ok(plir::Expr::new(
                             plir::ty!("#ptr"),
-                            plir::ExprType::Alloca(self.consume_conc_type(sp.ty)?)
+                            plir::ExprType::Alloca(self.consume_type(sp.ty)?)
                         ))
                     },
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "size_of" => {
                         return Ok(plir::Expr::new(
                             plir::ty!(plir::Type::S_INT),
-                            plir::ExprType::SizeOf(self.consume_conc_type(sp.ty)?)
+                            plir::ExprType::SizeOf(self.consume_type(sp.ty)?)
                         ))
                     }
                     e => {
