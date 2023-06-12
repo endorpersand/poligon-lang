@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
 use crate::err::{CursorRange, GonErr};
@@ -98,21 +99,18 @@ fn type_align(target: &[Type], real: &[Type]) -> bool {
 
     if target.len() == real.len() {
         std::iter::zip(target, real)
-            .all(|pair| {
-                match pair {
-                    (Type::Unk(u1), Type::Unk(u2)) => u1 == u2,
-                    (Type::Unk(_), _) => todo!(),
-                    (_, Type::Unk(_)) => todo!(),
-                    (Type::Prim(p1), Type::Prim(p2)) => p1 == p2,
-                    (Type::Generic(i1, p1, _), Type::Generic(i2, p2, _)) => i1 == i2 && type_align(p1, p2),
-                    (Type::Tuple(p1, _), Type::Tuple(p2, _)) => type_align(p1, p2),
-                    (Type::Fun(f1), Type::Fun(f2)) => {
-                        type_align(&f1.params, &f2.params) 
-                        && type_align(from_ref(&**f1.ret), from_ref(&**f2.ret))
-                        && f1.varargs == f2.varargs
-                    },
-                    _ => false,
-                }
+            .all(|pair| match pair {
+                (TypeRef::TypeVar(_, _), _) => true,
+                (TypeRef::Unk(u1), TypeRef::Unk(u2)) => u1 == u2,
+                (TypeRef::Prim(p1), TypeRef::Prim(p2)) => p1 == p2,
+                (TypeRef::Generic(id1, p1, _), TypeRef::Generic(id2, p2, _)) => id1 == id2 && type_align(p1, p2),
+                (TypeRef::Tuple(p1, _), TypeRef::Tuple(p2, _)) => type_align(p1, p2),
+                (TypeRef::Fun(plir::FunTypeRef { params: p1, ret: r1, varargs: v1 }), TypeRef::Fun(plir::FunTypeRef { params: p2, ret: r2, varargs: v2 })) => {
+                    type_align(p1, p2) 
+                        && type_align(from_ref(&***r1), from_ref(&***r2))
+                        && v1 == v2
+                },
+                _ => false
             })
     } else {
         false
@@ -163,7 +161,20 @@ impl TypeData {
         }
     }
 
-    pub fn type_view<'a>(&'a self, ty_args: &'a [plir::Type]) -> TypeDataView {
+    pub fn type_shape(&self) -> &Type {
+        &self.ty_shape
+    }
+
+    /// Gets the generic parameters of this type data.
+    pub fn generic_params(&self) -> Vec<String> {
+        self.ty_shape.generic_args().iter()
+            .map(|t| match t {
+                TypeRef::TypeVar(_, p) => p.to_string(),
+                t => panic!("{t} in type shape {} is non-generic", self.ty_shape),
+            })
+            .collect()
+    }
+    pub fn type_view(&self, ty_args: Vec<plir::Type>) -> TypeDataView {
         assert_eq!(self.ty_shape.generic_args().len(), ty_args.len());
         View { data: self, args: ty_args, _subst_map: OnceCell::new() }
     }
@@ -182,19 +193,20 @@ impl AsRef<TypeData> for TypeData {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct View<'a, T: AsRef<TypeData> + 'a>{
     data: T,
-    args: &'a [Type],
+    args: Vec<Type>,
     _subst_map: OnceCell<HashMap<TypeRef<'a>, TypeRef<'a>>>
 }
-type TypeDataView<'a> = View<'a, &'a TypeData>;
+pub(super) type TypeDataView<'a> = View<'a, &'a TypeData>;
 
 // impl<'a, T: AsRef<TypeData> + 'a> TypeDataView<'a, T> {
 impl<'a> TypeDataView<'a> {
     fn subst_map(&self) -> &HashMap<TypeRef, TypeRef> {
         self._subst_map.get_or_init(|| {
-            std::iter::zip(self.data.ty_shape.generic_args(), self.args)
-                .map(|(k, v)| (k.downgrade(), v.downgrade()))
+            std::iter::zip(self.data.ty_shape.generic_args(), &self.args)
+                .map(|(k, v)| (k.downgrade(), v.upgrade()))
                 .collect()
         })
     }
@@ -204,7 +216,7 @@ impl<'a> TypeDataView<'a> {
         let key = SigKey::new(id, &[][..]);
 
         // TODO: specialization
-        self.data.methods.get_appl_maps(self.args)
+        self.data.methods.get_appl_maps(&self.args)
             .find_map(|m| m.get(&key))
             .cloned()
     }
@@ -213,7 +225,6 @@ impl<'a> TypeDataView<'a> {
     pub fn get_method_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
         self.get_method(id)
             .ok_or_else(|| {
-                // TODO: do type arg fill
                 let ty = self.data.ty_shape.clone().substitute(self.subst_map());
                 let id = FunIdent::new_static(&ty, id);
                 super::PLIRErr::UndefinedVarAttr(id).at_range(range)
@@ -255,5 +266,13 @@ impl<'a> TypeDataView<'a> {
                     .collect()
             })
         }
+    }
+}
+
+impl Deref for TypeDataView<'_> {
+    type Target = TypeData;
+
+    fn deref(&self) -> &Self::Target {
+        self.data
     }
 }

@@ -31,6 +31,7 @@ use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
 pub(crate) use self::op_impl::{CastFlags, OpErr};
+use self::ty_classes::{TypeData, TypeDataView};
 
 use super::plir::{self, Located};
 
@@ -643,7 +644,7 @@ impl InsertBlock {
         self.insert_unresolved(UnresolvedValue::Fun(preinit, block));
 
         if let Some(c) = self.types.get_mut(&*cls_ty.get_type_key()) {
-            c.insert_method(method_name, metref);
+            c.insert_method(cls_ty.generic_args().to_vec(), method_name, metref);
         }
     }
 
@@ -672,92 +673,6 @@ impl Var {
         let e = plir::Expr::new(t, plir::ExprType::Split(self.ident, sp));
         Ok(e)
     }
-}
-
-#[derive(PartialEq, Eq, Hash, Debug)]
-struct SigKey<'k> {
-    ident: Cow<'k, str>,
-    params: Cow<'k, [plir::Type]>
-}
-
-impl<'k> SigKey<'k> {
-    fn new(ident: impl Into<Cow<'k, str>>, params: impl Into<Cow<'k, [plir::Type]>>) -> Self {
-        Self { ident: ident.into(), params: params.into() }
-    }
-}
-
-/// Value type that holds the data of a type.
-/// 
-/// This allows the PLIR codegen to replace methods with functions
-/// and access type fields.
-#[derive(Debug)]
-pub(super) struct TypeData {
-    plir_ty: plir::Type,
-    structure: TypeStructure,
-    methods: HashMap<SigKey<'static>, plir::FunIdent>
-}
-impl TypeData {
-    /// Create a primitive type (a type whose fields are defined in LLVM instead of Poligon)
-    pub fn primitive(ty: plir::Type) -> Self {
-        Self {
-            plir_ty: ty,
-            structure: TypeStructure::Primitive,
-            methods: Default::default()
-        }
-    }
-
-    /// Create a structural type (a type whose fields are defined in Poligon)
-    pub fn structural(cls: plir::Class) -> Self {
-        Self {
-            plir_ty: cls.ty.clone(),
-            structure: TypeStructure::Class(cls),
-            methods: Default::default()
-        }
-    }
-
-    /// Get a method defined in the type.
-    pub fn get_method(&self, ident: &str, /* params: &[plir::Type] */) -> Option<plir::FunIdent> {
-        let k = SigKey::new(ident, vec![]);
-        
-        self.methods.get(&k).cloned()
-    }
-
-    /// Get a method defined in the type or produce an error.
-    pub fn get_method_or_err(&self, ident: &str, range: CursorRange) -> PLIRResult<plir::FunIdent> {
-        self.get_method(ident)
-            .ok_or_else(|| {
-                let id = plir::FunIdent::new_static(&self.plir_ty, ident);
-                PLIRErr::UndefinedVarAttr(id).at_range(range)
-            })
-    }
-
-    /// Add a method to the type.
-    pub fn insert_method(&mut self, ident: String, metref: plir::FunIdent) {
-        let k = SigKey::new(ident, vec![]);
-
-        self.methods.insert(k, metref);
-    }
-
-    /// Get a field on the type (if present).
-    pub fn get_field(&self, ident: &str) -> Option<(usize, &plir::Type)> {
-        match &self.structure {
-            TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => cls.fields.get_full(ident).map(|(i, _, v)| (i, &v.ty)),
-        }
-    }
-
-    fn fields(&self) -> Option<&indexmap::IndexMap<String, plir::Field>> {
-        match &self.structure {
-            TypeStructure::Primitive => None,
-            TypeStructure::Class(cls) => Some(&cls.fields)
-        }
-    }
-}
-
-#[derive(Debug)]
-enum TypeStructure {
-    Primitive,
-    Class(plir::Class)
 }
 
 /// A struct which holds the types declared by PLIR code generation.
@@ -968,7 +883,7 @@ impl TypeResolver {
         fn has_unks(ty: &Type) -> bool {
             match ty {
                 Type::Unk(_) => true,
-                Type::TypeVar(_, _) => todo!("checking if type var {ty} has unks"),
+                Type::TypeVar(_, _) => false,
                 Type::Prim(_) => false,
                 Type::Generic(_, t, ()) => t.iter().any(has_unks),
                 Type::Tuple(t, ()) => t.iter().any(has_unks),
@@ -1137,7 +1052,7 @@ impl PLIRCodegen {
             // register methods to cls data
             if let plir::FunIdent::Static(ty, attr) = ident {
                 if let Some(cls) = top.types.get_mut(&*ty.get_type_key()) {
-                    cls.insert_method(attr.clone(), ident.clone());
+                    cls.insert_method(ty.generic_args().to_vec(), attr.clone(), ident.clone());
                 }
             }
         }
@@ -1338,14 +1253,11 @@ impl PLIRCodegen {
         }
     }
 
-    fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
+    fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<TypeDataView> {
         use plir::TypeRef;
 
         // resolve non-concrete types:
         let range = lty.range();
-        // let contexts: Vec<_> = self.blocks.iter()
-        //     .filter_map(|ib| ib.generic_ctx.as_ref())
-        //     .collect();
 
         let mut lty = lty.map(|ty| {
             ty.clone().try_map(|unit| {
@@ -1368,7 +1280,10 @@ impl PLIRCodegen {
                         let ty = ctx.1.get(&*tv_param).ok_or_else(|| {
                             let td = self.find_scoped(|ib| ib.types.get(&*tv_type))
                                 .unwrap_or_else(|| panic!("{tv_type} to be defined"));
-                            PLIRErr::UndefinedTypeParam(td.plir_ty.upgrade(), tv_param.to_string())
+                            PLIRErr::UndefinedTypeParam(
+                                td.type_shape().upgrade(),
+                                tv_param.to_string()
+                            ).at_range(range.clone())
                         })?;
 
                         Ok(ty.upgrade())
@@ -1387,13 +1302,13 @@ impl PLIRCodegen {
         match ty.downgrade() {
             TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
             TypeRef::Prim(_) | TypeRef::Generic(_, _, _) => {
-                self.find_scoped(|ib| ib.types.get(&*ty.get_type_key()))
+                let td = self.find_scoped(|ib| ib.types.get(&*ty.get_type_key()))
                     .ok_or_else(|| {
                         PLIRErr::UndefinedType(ty.clone())
                             .at_range(range.clone())
-                    })
+                    })?;
 
-                    // TODO: param qty check
+                Ok(td.type_view(ty.generic_args().to_vec()))
             },
             TypeRef::Tuple(_, _) | TypeRef::Fun(_) => todo!("getting type data for {ty}"),
         }
@@ -1403,12 +1318,12 @@ impl PLIRCodegen {
         let plir::TypeRef::Generic(id, params, ()) = generic else { panic!("Expected generic type in get_generic_context") };
 
         let td = self.find_scoped(|ib| ib.types.get(&*id)).unwrap_or_else(|| panic!("type '{id}' should have existed"));
-        let plir::Type::Generic(_, shape_params, ()) = &td.plir_ty else {
+        let plir::Type::Generic(_, _, ()) = &td.type_shape() else {
             panic!("type '{id}' should have been generic")
         };
 
-        let map = std::iter::zip(shape_params.iter(), params.iter())
-            .map(|(k, v)| (k.get_type_key().to_string(), v.upgrade()))
+        let map = std::iter::zip(td.generic_params(), params.iter())
+            .map(|(k, v)| (k, v.upgrade()))
             .collect();
 
         GenericContext(id.to_string(), map)
@@ -1885,7 +1800,7 @@ impl PLIRCodegen {
         };
 
         self.pop_block();
-        
+
         let fs = plir::FunSignature {
             /// Only globals should be accessible to external modules
             private: !self.blocks.is_empty(), 
@@ -1966,7 +1881,7 @@ impl PLIRCodegen {
                 let id = id.to_string();
                 let param_len = self.find_scoped(|ib| {
                     match ib.types.get(&id) {
-                        Some(td) => Some(td.plir_ty.generic_args().len()),
+                        Some(td) => Some(td.generic_params().len()),
                         None => match ib.unres_types.get(&id)? {
                             UnresolvedType::Class(cls) => Some(cls.generics.len()),
                             UnresolvedType::Import(_) => todo!(),
@@ -2059,6 +1974,7 @@ impl PLIRCodegen {
                         plir::Type::new_type_var(cls_id.clone(), id)
                     }
                     // otherwise, consume concrete type
+                    // TODO: deep type check
                     ty => self.consume_type(ty)?
                 };
 
