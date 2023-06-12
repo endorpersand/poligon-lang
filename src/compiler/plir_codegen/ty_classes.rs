@@ -211,6 +211,10 @@ impl<'a> TypeDataView<'a> {
         })
     }
 
+    pub fn attach_type_vars_to(&self, t: Type) -> Type {
+        t.substitute(self.subst_map())
+    }
+
     /// Get a method defined in the type.
     pub fn get_method_ref(&self, id: &str) -> Option<FunIdent> {
         let key = SigKey::new(id, &[][..]);
@@ -225,7 +229,7 @@ impl<'a> TypeDataView<'a> {
     pub fn get_method_ref_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
         self.get_method_ref(id)
             .ok_or_else(|| {
-                let ty = self.data.ty_shape.clone().substitute(self.subst_map());
+                let ty = self.attach_type_vars_to(self.data.ty_shape.clone());
                 let id = FunIdent::new_static(&ty, id);
                 super::PLIRErr::UndefinedVarAttr(id).at_range(range)
             })
@@ -237,10 +241,7 @@ impl<'a> TypeDataView<'a> {
             TypeFields::Primitive => None,
             TypeFields::Class(cls) => {
                 cls.fields.get_full(ident).map(|(i, _, v)| {
-                    let ty = {
-                        v.ty.clone()
-                            .substitute(self.subst_map())
-                    };
+                    let ty = self.attach_type_vars_to(v.ty.clone());
 
                     (i, ty)
                 })
@@ -259,7 +260,7 @@ impl<'a> TypeDataView<'a> {
                         let k = k.clone();
                         
                         let mut v = v.clone();
-                        v.ty = v.ty.substitute(self.subst_map());
+                        v.ty = self.attach_type_vars_to(v.ty);
 
                         (k, v)
                     })

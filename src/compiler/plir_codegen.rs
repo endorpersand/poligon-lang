@@ -64,6 +64,8 @@ pub enum PLIRErr {
     UndefinedType(plir::Type),
     /// Parameter is not on this type
     UndefinedTypeParam(plir::Type, String),
+    /// Type var needs to be resolved, but there are no relevant contexts
+    ParamCannotBind(String, String),
     /// Tried to use . access on a method
     CannotAccessOnMethod,
     /// Tried to assign to a method
@@ -121,6 +123,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotResolveType
             | PLIRErr::UndefinedType(_)
             | PLIRErr::UndefinedTypeParam(_, _)
+            | PLIRErr::ParamCannotBind(_, _)
             | PLIRErr::CannotAccessOnMethod
             | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
@@ -166,6 +169,7 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::DuplicateTypeDefs(t)         => write!(f, "{t} has multiple definitions"),
             PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
             PLIRErr::UndefinedTypeParam(name, p)  => write!(f, "could not find param '{p}' on '{name}'"),
+            PLIRErr::ParamCannotBind(name, p)     => write!(f, "type parameter '{p}' on type '{name}' could not find sufficient context"),
             PLIRErr::CannotAccessOnMethod         => write!(f, "cannot access on method"),
             PLIRErr::CannotAssignToMethod         => write!(f, "cannot assign to method"),
             PLIRErr::CannotCall(t)                => write!(f, "cannot call value of type '{t}'"),
@@ -1209,11 +1213,25 @@ impl PLIRCodegen {
     fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<plir::Type>> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
-        self.resolve_ident(ident).map(|_| {
-            self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident()))
-                .cloned()
-                .map(|t| self.resolver.normalize(t))
-        })
+        self.resolve_ident(ident)?;
+
+        let id = ident.as_fun_ident();
+        let ty = self.find_scoped(|ib| ib.vars.get(&*id)).cloned();
+        match ty {
+            Some(mut t) => {
+                // resolve unks
+                t = self.resolver.normalize(t);
+
+                // resolve type vars
+                if let plir::FunIdent::Static(referent, _) = &*id {
+                    t = self.get_class(Located::new(referent, (0, 0) ..= (0, 0)))?
+                        .attach_type_vars_to(t);
+                }
+
+                Ok(Some(t))
+            },
+            None => Ok(None),
+        }
     }
 
     /// Gets the type of the identifier, raising an UndefinedVar error if not present.
@@ -1273,7 +1291,7 @@ impl PLIRCodegen {
                             ib.generic_ctx.as_ref()
                                 .filter(|ctx| ctx.0 == tv_type)
                         }).ok_or_else(|| {
-                            PLIRErr::UndefinedType(plir::ty!(tv_type.to_string()))
+                            PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
                                 .at_range(range.clone())
                         })?;
                         
