@@ -61,6 +61,8 @@ pub enum PLIRErr {
     UndefinedVarAttr(plir::FunIdent),
     /// Type/class is not defined
     UndefinedType(plir::Type),
+    /// Parameter is not on this type
+    UndefinedTypeParam(plir::Type, String),
     /// Tried to use . access on a method
     CannotAccessOnMethod,
     /// Tried to assign to a method
@@ -117,6 +119,7 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotIterateType(_)
             | PLIRErr::CannotResolveType
             | PLIRErr::UndefinedType(_)
+            | PLIRErr::UndefinedTypeParam(_, _)
             | PLIRErr::CannotAccessOnMethod
             | PLIRErr::CannotAssignToMethod
             | PLIRErr::CannotCall(_)
@@ -161,6 +164,7 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::DuplicateValueDefs(t)        => write!(f, "{t} has multiple definitions"),
             PLIRErr::DuplicateTypeDefs(t)         => write!(f, "{t} has multiple definitions"),
             PLIRErr::UndefinedType(name)          => write!(f, "could not find type '{name}'"),
+            PLIRErr::UndefinedTypeParam(name, p)  => write!(f, "could not find param '{p}' on '{name}'"),
             PLIRErr::CannotAccessOnMethod         => write!(f, "cannot access on method"),
             PLIRErr::CannotAssignToMethod         => write!(f, "cannot assign to method"),
             PLIRErr::CannotCall(t)                => write!(f, "cannot call value of type '{t}'"),
@@ -368,6 +372,9 @@ struct PiFunSig {
 }
 
 #[derive(Debug)]
+struct GenericContext(String, HashMap<String, plir::Type>);
+
+#[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::ProcStmt>,
     last_stmt_loc: CursorRange, 
@@ -386,6 +393,7 @@ struct InsertBlock {
     unres_values: IndexMap<plir::FunIdent, UnresolvedValue>,
     unres_types: IndexMap<String, UnresolvedType>,
 
+    generic_ctx: Option<GenericContext>,
     /// If this is not None, then this block is expected to return the provided type.
     /// This can be used as context for some functions to more effectively assign
     /// a type.
@@ -404,6 +412,7 @@ impl InsertBlock {
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types:  IndexMap::new(),
+            generic_ctx: None,
             expected_ty
         }
     }
@@ -429,6 +438,7 @@ impl InsertBlock {
             type_aliases: HashMap::new(),
             unres_values: IndexMap::new(),
             unres_types: IndexMap::new(),
+            generic_ctx: None,
             expected_ty: None
         }
     }
@@ -1303,12 +1313,38 @@ impl PLIRCodegen {
             })
     }
 
+    // Resolves the given type key.
+    fn resolve_type_key(&mut self, key: &str) -> PLIRResult<()> {
+        use indexmap::map::Entry;
+
+        // find if this key is present. if so, load unresolved type at the scope where it was declared
+        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(key)) {
+            self.execute_upwards(idx, |this| -> PLIRResult<_> {
+                let Entry::Occupied(entry) = this.peek_block().unres_types.entry(key.to_string()) else {
+                    unreachable!()
+                };
+    
+                match entry.get() {
+                    UnresolvedType::Class(_) => {
+                        let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
+                        this.consume_cls(cls)
+                    },
+                    UnresolvedType::Import(_) => todo!(),
+                }
+            })
+        } else {
+            Ok(())
+        }
+    }
     fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<&TypeData> {
         use plir::TypeRef;
-        use indexmap::map::Entry;
 
         // resolve non-concrete types:
         let range = lty.range();
+        // let contexts: Vec<_> = self.blocks.iter()
+        //     .filter_map(|ib| ib.generic_ctx.as_ref())
+        //     .collect();
+
         let mut lty = lty.map(|ty| {
             ty.clone().try_map(|unit| {
                 match unit {
@@ -1316,7 +1352,25 @@ impl PLIRCodegen {
                         self.resolver.normalize_or_err(unit.upgrade())
                             .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
                     },
-                    TypeRef::TypeVar(_, _) => todo!("type var resolution"),
+                    TypeRef::TypeVar(tv_type, tv_param) => {
+                        self.resolve_type_key(&tv_type)?;
+
+                        let ctx = self.find_scoped(|ib| {
+                            ib.generic_ctx.as_ref()
+                                .filter(|ctx| ctx.0 == tv_type)
+                        }).ok_or_else(|| {
+                            PLIRErr::UndefinedType(plir::ty!(tv_type.to_string()))
+                                .at_range(range.clone())
+                        })?;
+                        
+                        let ty = ctx.1.get(&*tv_param).ok_or_else(|| {
+                            let td = self.find_scoped(|ib| ib.types.get(&*tv_type))
+                                .unwrap_or_else(|| panic!("{tv_type} to be defined"));
+                            PLIRErr::UndefinedTypeParam(td.plir_ty.upgrade(), tv_param.to_string())
+                        })?;
+
+                        Ok(ty.upgrade())
+                    },
                     TypeRef::Prim(_) => Ok(unit.upgrade()),
                     TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => unreachable!(),
                 }
@@ -1325,29 +1379,9 @@ impl PLIRCodegen {
 
         // make sure right number of arguments are applied
         self.verify_type(lty.as_mut())?;
+        self.resolve_type_key(&lty.get_type_key())?;
+
         let Located(ty, range) = lty;
-
-        // resolve uninitialized types:
-        {
-            let key = ty.get_type_key();
-            // find if this key is present. if so, load unresolved type at the scope where it was declared
-            if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(&*key)) {
-                self.execute_upwards(idx, |this| -> PLIRResult<_> {
-                    let Entry::Occupied(entry) = this.peek_block().unres_types.entry(key.into_owned()) else {
-                        unreachable!()
-                    };
-        
-                    match entry.get() {
-                        UnresolvedType::Class(_) => {
-                            let UnresolvedType::Class(cls) = entry.remove() else { unreachable!() };
-                            this.consume_cls(cls)
-                        },
-                        UnresolvedType::Import(_) => todo!(),
-                    }
-                })?;
-            }
-        }
-
         match ty.downgrade() {
             TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
             TypeRef::Prim(_) | TypeRef::Generic(_, _, _) => {
@@ -1552,7 +1586,8 @@ impl PLIRCodegen {
             mut block, last_stmt_loc, 
             exits, final_exit, 
             vars: _, types: _, type_aliases: _,
-            unres_values, unres_types, expected_ty
+            unres_values, unres_types, generic_ctx: _,
+            expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
