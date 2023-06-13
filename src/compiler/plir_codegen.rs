@@ -1947,7 +1947,7 @@ impl PLIRCodegen {
     }
 
     /// Consumes a located [`ast::Class`] into a located concrete [`plir::Type`].
-    fn consume_located_conc_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<Located<plir::Type>> {
+    fn consume_located_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<Located<plir::Type>> {
         let Located(ast::Type(ty_ident, ty_params), range) = ty;
         
         let ty = {
@@ -1976,7 +1976,7 @@ impl PLIRCodegen {
 
     /// Consumes a located [`ast::Class`] into a concrete [`plir::Type`].
     fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
-        self.consume_located_conc_type(ty)
+        self.consume_located_type(ty)
             .map(|lty| lty.0)
     }
 
@@ -2131,13 +2131,12 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::ClassLiteral(ty, entries) => {
-                let tyrange = ty.range();
-                let ty = self.consume_type(ty)?;
+                let lty = self.consume_located_type(ty)?;
                 
-                let cls_key = self.get_class_key(Located::new(&ty, tyrange.clone()))?;
+                let cls_key = self.get_class_key(Located::new(&lty.0, lty.range()))?;
                 let cls_fields: IndexMap<_, _> = self.get_class(&cls_key).fields()
                     .ok_or_else(|| {
-                        PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
+                        PLIRErr::CannotInitialize(lty.0.clone()).at_range(lty.range())
                     })?
                     .iter()
                     .map(|(k, fd)| (k.clone(), fd.ty.clone()))
@@ -2151,8 +2150,8 @@ impl PLIRCodegen {
                     .map(|(k, field_ty)| {
                         let (_, ast_expr) = entries.remove(&k)
                             .ok_or_else(|| {
-                                PLIRErr::UninitializedField(ty.clone(), k)
-                                    .at_range(tyrange.clone())
+                                PLIRErr::UninitializedField(lty.0.clone(), k)
+                                    .at_range(lty.range())
                             })?;
                         
                         let lfield_expr = self.consume_located_expr(ast_expr, Some(field_ty.clone()))?;
@@ -2166,11 +2165,11 @@ impl PLIRCodegen {
                     .collect::<PLIRResult<_>>()?;
                 
                 if let Some((f, (krange, _))) = entries.into_iter().next() {
-                    Err(PLIRErr::UnexpectedField(ty, f).at_range(krange))
+                    Err(PLIRErr::UnexpectedField(lty.0, f).at_range(krange))
                 } else {
                     Ok(plir::Expr::new(
-                        ty.clone(), 
-                        plir::ExprType::ClassLiteral(ty, new_entries)
+                        lty.0.clone(), 
+                        plir::ExprType::ClassLiteral(lty.0, new_entries)
                     ))
                 }
             },
@@ -2223,7 +2222,7 @@ impl PLIRCodegen {
             ast::Expr::StaticPath(sp) => {
                 let ast::StaticPath { ty, attr } = sp;
 
-                let lty = self.consume_located_conc_type(ty)?;
+                let lty = self.consume_located_type(ty)?;
                 let cls_key = self.get_class_key(lty.as_ref())?;
                 let ty = lty.0;
                 
