@@ -72,9 +72,9 @@ impl<'a> Cast<'a> {
             (l, r) if l == r => true,
             (_, Prim(Borrowed(Type::S_STR))) if self.cf.allows(CastFlags::Stringify) => {
                 // Load src class
-                let cls = cg.get_class(self.src.as_ref().map(|e| &e.ty))?;
+                let src_key = cg.get_class_key(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
-                if let Some(met_ident) = cls.get_method_ref("to_string") {
+                if let Some(met_ident) = cg.get_class(&src_key).get_method_ref("to_string") {
                     cg.get_var_type(&met_ident)?
                         .filter(|t| matches!( t.downgrade(), 
                             Fun(FunTypeRef {
@@ -116,7 +116,9 @@ impl<'a> Cast<'a> {
                 (l, r) if l == r => self.src,
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
-                    let to_string = cg.get_class(Located::new(&src.ty, src_range.clone()))?
+                    
+                    let src_key = cg.get_class_key(Located::new(&src.ty, src_range.clone()))?;
+                    let to_string = cg.get_class(&src_key)
                         .get_method_ref_or_err("to_string", src_range.clone())?;
                     
                     let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?;
@@ -254,7 +256,9 @@ impl super::PLIRCodegen {
         };
 
         let lrange = left.1.clone();
-        let ident = self.get_class(left)?
+
+        let left_key = self.get_class_key(left)?; 
+        let ident = self.get_class(&left_key)
             .get_method_ref_or_err(method_name, lrange)?;
 
         let e = self.get_var_type(&ident)?
@@ -334,7 +338,9 @@ impl super::PLIRCodegen {
         };
 
         let lrange = left.range();
-        let ident = self.get_class(left)?
+        
+        let left_key = self.get_class_key(left)?;
+        let ident = self.get_class(&left_key)
             .get_method_ref_or_err(&format!("{method_name}_{right}"), lrange)?;
 
         let e = self.get_var_type(&ident)?

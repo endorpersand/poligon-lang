@@ -379,6 +379,13 @@ struct PiFunSig {
 #[derive(Debug)]
 struct GenericContext(String, HashMap<String, plir::Type>);
 
+#[derive(Clone)]
+struct ClassKey {
+    block: *const InsertBlock,
+    scope: usize,
+    referent: plir::Type
+}
+
 #[derive(Debug)]
 struct InsertBlock {
     block: Vec<plir::ProcStmt>,
@@ -1181,17 +1188,20 @@ impl PLIRCodegen {
         Ok(())
     }
 
-    /// Find a specific item, starting from the deepest scope and scaling out.
-    fn find_scoped<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
+    /// Returns an iterator of the codegen's insert blocks from most inner to most outer.
+    fn block_iter(&self) -> impl Iterator<Item = &InsertBlock> {
         self.blocks.iter().rev()
             .chain(std::iter::once(&self.program))
-            .find_map(f)
+    }
+
+    /// Find a specific item, starting from the deepest scope and scaling out.
+    fn find_scoped<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
+        self.block_iter().find_map(f)
     }
 
     /// Find the insert block matching the predicate, starting from the deepest scope and scaling out.
     fn find_scoped_index<'a>(&'a self, mut pred: impl FnMut(&'a InsertBlock) -> bool) -> Option<usize> {
-        self.blocks.iter().rev()
-            .chain(std::iter::once(&self.program))
+        self.block_iter()
             .enumerate()
             .find(|(_, t)| pred(t))
             .map(|(i, _)| i)
@@ -1258,7 +1268,7 @@ impl PLIRCodegen {
         }
     }
 
-    fn get_class(&mut self, lty: Located<&plir::Type>) -> PLIRResult<TypeDataView> {
+    fn get_class_key(&mut self, lty: Located<&plir::Type>) -> PLIRResult<ClassKey> {
         use plir::TypeRef;
 
         // resolve non-concrete types:
@@ -1307,16 +1317,32 @@ impl PLIRCodegen {
         match ty.downgrade() {
             TypeRef::Unk(_) | TypeRef::TypeVar(_, _) => unreachable!("did not expect get_class for {ty}"),
             TypeRef::Prim(_) | TypeRef::Generic(_, _, _) => {
-                let td = self.find_scoped(|ib| ib.types.get(&*ty.get_type_key()))
+                let (scope, block) = self.block_iter().enumerate()
+                    .find(|(_, ib)| ib.types.contains_key(&*ty.get_type_key()))
                     .ok_or_else(|| {
                         PLIRErr::UndefinedType(ty.clone())
                             .at_range(range.clone())
                     })?;
 
-                Ok(td.type_view(ty.generic_args().to_vec()))
+                Ok(ClassKey { block, scope, referent: ty })
             },
             TypeRef::Tuple(_, _) | TypeRef::Fun(_) => todo!("getting type data for {ty}"),
         }
+    }
+
+    fn get_class(&self, k: &ClassKey) -> TypeDataView {
+        let ClassKey { block, scope, referent } = k;
+
+        let ib = self.block_iter().nth(*scope)
+            .unwrap_or_else(|| panic!("class key requested scope {scope}, but that scope does not exist"));
+
+        assert_eq!(*block, ib, "block {scope} should have been {block:?}, but it was {:?}", ib as *const _);
+
+        let key = &*referent.get_type_key();
+        let td = ib.types.get(key)
+            .unwrap_or_else(|| panic!("expected type {key} to be defined on block {block:?}"));
+
+        td.type_view(referent.generic_args().to_vec())
     }
 
     fn get_generic_context(&self, generic: plir::TypeRef) -> GenericContext {
@@ -2108,8 +2134,8 @@ impl PLIRCodegen {
                 let tyrange = ty.range();
                 let ty = self.consume_type(ty)?;
                 
-                let cls_fields: IndexMap<_, _> = self.get_class(Located::new(&ty, tyrange.clone()))?
-                    .fields()
+                let cls_key = self.get_class_key(Located::new(&ty, tyrange.clone()))?;
+                let cls_fields: IndexMap<_, _> = self.get_class(&cls_key).fields()
                     .ok_or_else(|| {
                         PLIRErr::CannotInitialize(ty.clone()).at_range(tyrange.clone())
                     })?
@@ -2196,11 +2222,12 @@ impl PLIRCodegen {
             },
             ast::Expr::StaticPath(sp) => {
                 let ast::StaticPath { ty, attr } = sp;
+
                 let lty = self.consume_located_conc_type(ty)?;
-                let cls = self.get_class(lty.as_ref())?;
+                let cls_key = self.get_class_key(lty.as_ref())?;
                 let ty = lty.0;
                 
-                let attrref = cls.get_method_ref(&attr)
+                let attrref = self.get_class(&cls_key).get_method_ref(&attr)
                     .ok_or_else(|| {
                         let id = plir::FunIdent::new_static(&ty, &attr);
                         PLIRErr::UndefinedVarAttr(id).at_range(range.clone())
@@ -2290,8 +2317,8 @@ impl PLIRCodegen {
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup
-                let cls = self.get_class(Located::new(&iterator.ty, itrange.clone()))?;
-                let m = cls.get_method_ref_or_err("next", itrange.clone())?;
+                let cls_key = self.get_class_key(Located::new(&iterator.ty, itrange.clone()))?;
+                let m = self.get_class(&cls_key).get_method_ref_or_err("next", itrange.clone())?;
                 let itnext_ty = self.get_var_type_or_err(&m, itrange.clone())?;
                 let element_type = match itnext_ty.downgrade() {
                     plir::TypeRef::Fun(plir::FunTypeRef {
@@ -2454,7 +2481,9 @@ impl PLIRCodegen {
 
         for attr in attrs {
             let top_ty = path.ty();
-            let cls = self.get_class(Located::new(&top_ty, expr_range.clone()))?;
+
+            let cls_key = self.get_class_key(Located::new(&top_ty, expr_range.clone()))?;
+            let cls = self.get_class(&cls_key);
 
             if let Some(metref) = cls.get_method_ref(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
