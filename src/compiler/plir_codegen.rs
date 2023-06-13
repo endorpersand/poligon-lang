@@ -1488,9 +1488,18 @@ impl PLIRCodegen {
             }
         }
 
-        // in inner, we can drop because unused.
-        // however, we also need to typecheck & compile check unused areas,
-        // so we cannot optimize by dropping unused values/types
+        // resolve remaining unresolved types and values to check for
+        // any compiler errors within this code
+
+        let mut unres_types = &mut self.peek_block().unres_types;
+        while let Some(ident) = unres_types.keys().next() {
+            match unres_types.remove(&ident.clone()).unwrap() {
+                UnresolvedType::Class(cls) => self.consume_cls(cls)?,
+                UnresolvedType::Import(_) => todo!(),
+            }
+            unres_types = &mut self.peek_block().unres_types;
+        }
+
         let mut unres_values = &mut self.peek_block().unres_values;
         while let Some(ident) = unres_values.keys().next() {
             match unres_values.remove(&ident.clone()).unwrap() {
@@ -1508,15 +1517,6 @@ impl PLIRCodegen {
                 UnresolvedValue::Import(_) => todo!(),
             }
             unres_values = &mut self.peek_block().unres_values;
-        }
-
-        let mut unres_types = &mut self.peek_block().unres_types;
-        while let Some(ident) = unres_types.keys().next() {
-            match unres_types.remove(&ident.clone()).unwrap() {
-                UnresolvedType::Class(cls) => self.consume_cls(cls)?,
-                UnresolvedType::Import(_) => todo!(),
-            }
-            unres_types = &mut self.peek_block().unres_types;
         }
 
         Ok(())
@@ -1628,20 +1628,17 @@ impl PLIRCodegen {
                     match me.take() {
                         Some(e) => {
                             let le = Located::new(e, exit_range.clone());
-                            let _flags = match btype == BlockBehavior::Function {
-                                true  => CastFlags::Decl | CastFlags::Void,
-                                // FIXME: this should not allow void, however
-                                // when expected_ty == S_VOID, it is possible for 
-                                // assignment block to expect void and that cast will fail
-                                false => CastFlags::Implicit | CastFlags::Void,
-                            };
+                            // let flags = match btype == BlockBehavior::Function {
+                            //     true  => CastFlags::Decl | CastFlags::Void,
+                            //     // FIXME: this should not allow void, however
+                            //     // when expected_ty == S_VOID, it is possible for 
+                            //     // assignment block to expect void and that cast will fail
+                            //     false => CastFlags::Implicit | CastFlags::Void,
+                            // };
+
                             // TODO(cast): reinstate casts here
                             match self.resolver.add_constraint(le.ty.clone(), exp_ty) {
-                                Ok(_) => {
-                                    // // cast was successful so apply it
-                                    // me.replace(e.0);
-                                    // *exit_ty = exp_ty;
-                                },
+                                Ok(_) => { me.replace(le.0); },
                                 Err(e) => Err(PLIRErr::TypeConstraintErr(e).at_range(exit_range))?,
                             }
                         },
@@ -1898,7 +1895,6 @@ impl PLIRCodegen {
     
             let insert_block = self.pop_block().unwrap();
             self.consume_insert_block(insert_block, BlockBehavior::Function)?
-
         };
 
         let fun_decl = plir::FunDecl { sig, block };
@@ -2161,7 +2157,7 @@ impl PLIRCodegen {
             ast::Expr::ClassLiteral(ty, entries) => {
                 let lty = self.consume_located_type(ty)?;
                 
-                let cls_key = self.get_class_key(Located::new(&lty.0, lty.range()))?;
+                let cls_key = self.get_class_key(lty.as_ref())?;
                 let cls_fields: IndexMap<_, _> = self.get_class(&cls_key).fields()
                     .ok_or_else(|| {
                         PLIRErr::CannotInitialize(lty.0.clone()).at_range(lty.range())
