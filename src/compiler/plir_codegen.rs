@@ -951,10 +951,12 @@ impl TypeResolver {
         match (&left, &right) {
             (Type::Unk(l), r) => { self.set_unk_ty(*l, r.clone()); },
             (r, Type::Unk(l)) => { self.set_unk_ty(*l, r.clone()); },
-            (l @ Type::Prim(_), r @ Type::Prim(_)) => { 
-                if l != r { Err(ConstraintFail::Mono(left, right))? }
+            (Type::Prim(_), Type::Prim(_)) => { 
+                if left != right { Err(ConstraintFail::Mono(left, right))? }
             },
-
+            (Type::TypeVar(_, _), Type::TypeVar(_, _)) => {
+                if left != right { Err(ConstraintFail::Mono(left, right))? }
+            },
             (Type::Generic(ai, ap, ()), Type::Generic(bi, bp, ())) => {
                 if ai != bi { return Err(ConstraintFail::Generic(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
