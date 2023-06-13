@@ -2024,22 +2024,23 @@ impl PLIRCodegen {
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generics, fields, methods } = cls;
 
+        let ib = self.push_block((0, 0) ..= (0, 0), None);
+        ib.generic_ctx = Some(GenericContext(cls_id.to_string(), {
+            generics.iter()
+                .map(|p| {
+                    (p.to_string(), plir::Type::new_type_var(cls_id.to_string(), p.to_string()))
+                })
+                .collect()
+        }));
+
         let fields = fields.into_iter()
             .map(|ast::FieldDecl { rt, mt, ident: field_id, ty }| -> PLIRResult<_> {
-                let ty = match ty {
-                    // this is a class TypeVar
-                    Located(ast::Type(id, p), _) if generics.contains(&id) && p.is_empty() => {
-                        plir::Type::new_type_var(cls_id.clone(), id)
-                    }
-                    // otherwise, consume concrete type
-                    // TODO: deep type check
-                    ty => self.consume_type(ty)?
-                };
-
+                let ty = self.consume_type(ty)?;
                 Ok((field_id, plir::Field { rt, mt, ty }))
             })
             .collect::<Result<_, _>>()?;
         
+        self.pop_block();
         let params = generics.into_iter()
             .map(|p| plir::Type::new_type_var(cls_id.clone(), p));
         
