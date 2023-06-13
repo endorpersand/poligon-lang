@@ -806,7 +806,11 @@ struct TypeResolver {
     /// 
     /// The top root of a group should always contain a non-unknown.
     monos: dsds::UnionFind<plir::Type>,
-    next_unk: usize
+    
+    /// A Vec of the declared unknowns.
+    /// 
+    /// This indicates which range of characters represent the unknown type.
+    unk_positions: Vec<CursorRange>
 }
 #[derive(Debug)]
 enum ConstraintFail<T> {
@@ -862,13 +866,13 @@ impl TypeResolver {
     fn new() -> TypeResolver {
         Self {
             monos: dsds::UnionFind::new(),
-            next_unk: 0
+            unk_positions: vec![]
         }
     }
 
-    fn new_unknown(&mut self) -> plir::Type {
-        let unk = plir::Type::Unk(self.next_unk);
-        self.next_unk += 1;
+    fn new_unknown(&mut self, range: CursorRange) -> plir::Type {
+        let unk = plir::Type::Unk(self.unk_positions.len());
+        self.unk_positions.push(range);
         unk
     }
     fn normalize(&mut self, ty: plir::Type) -> plir::Type {
@@ -1105,8 +1109,12 @@ impl PLIRCodegen {
 
         let mut resolver = self.resolver;
         let mut program = plir::Program(stmts, block);
+
         ty_apply::TypeApplier(&mut resolver).walk_program(&mut program)
-            .unwrap_or_else(|CannotResolve(n)| panic!("cannot resolve ?{n}"));
+            .map_err(|e @ CannotResolve(n)| {
+                PLIRErr::from(e)
+                    .at_range(resolver.unk_positions[n].clone())
+            })?;
         Ok(program)
     }
 
@@ -1294,38 +1302,36 @@ impl PLIRCodegen {
         let range = lty.range();
 
         let mut lty = lty.map(|ty| {
-            ty.clone().try_map(|unit| {
-                match unit {
-                    TypeRef::Unk(_) => {
-                        self.resolver.normalize_or_err(unit.upgrade())
-                            .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
-                    },
-                    TypeRef::TypeVar(tv_type, tv_param) => {
-                        self.resolve_type_key(&tv_type)?;
+            // shallow resolve
+            match ty {
+                TypeRef::Unk(_) => {
+                    self.resolver.normalize_or_err(ty.upgrade())
+                        .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
+                },
+                TypeRef::TypeVar(tv_type, tv_param) => {
+                    self.resolve_type_key(tv_type)?;
 
-                        let ctx = self.find_scoped(|ib| {
-                            ib.generic_ctx.as_ref()
-                                .filter(|ctx| ctx.0 == tv_type)
-                        }).ok_or_else(|| {
-                            PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
-                                .at_range(range.clone())
-                        })?;
-                        
-                        let ty = ctx.1.get(&*tv_param).ok_or_else(|| {
-                            let td = self.find_scoped(|ib| ib.types.get(&*tv_type))
-                                .unwrap_or_else(|| panic!("{tv_type} to be defined"));
-                            PLIRErr::UndefinedTypeParam(
-                                td.type_shape().upgrade(),
-                                tv_param.to_string()
-                            ).at_range(range.clone())
-                        })?;
+                    let ctx = self.find_scoped(|ib| {
+                        ib.generic_ctx.as_ref()
+                            .filter(|ctx| &ctx.0 == tv_type)
+                    }).ok_or_else(|| {
+                        PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
+                            .at_range(range.clone())
+                    })?;
+                    
+                    let ty = ctx.1.get(&**tv_param).ok_or_else(|| {
+                        let td = self.find_scoped(|ib| ib.types.get(&**tv_type))
+                            .unwrap_or_else(|| panic!("{tv_type} to be defined"));
+                        PLIRErr::UndefinedTypeParam(
+                            td.type_shape().upgrade(),
+                            tv_param.to_string()
+                        ).at_range(range.clone())
+                    })?;
 
-                        Ok(ty.upgrade())
-                    },
-                    TypeRef::Prim(_) => Ok(unit.upgrade()),
-                    TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => unreachable!(),
-                }
-            })
+                    Ok(ty.upgrade())
+                },
+                TypeRef::Prim(_) | TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => Ok(ty.upgrade()),
+            }
         }).transpose_result()?;
 
         // make sure right number of arguments are applied
@@ -1771,7 +1777,7 @@ impl PLIRCodegen {
         
         let ty = match ty {
             Some(t) => self.consume_type(t)?,
-            None => self.resolver.new_unknown(),
+            None => self.resolver.new_unknown(pat.range()),
         };
         let e = self.consume_located_expr(val, Some(ty.clone()))?;
 
@@ -1951,7 +1957,7 @@ impl PLIRCodegen {
                     Ordering::Equal => {},
                     Ordering::Greater => {
                         let mut params = ty.generic_args().to_vec();
-                        params.resize_with(param_len, || self.resolver.new_unknown());
+                        params.resize_with(param_len, || self.resolver.new_unknown(range.clone()));
                         *ty = TypeRef::new_generic(id, params);
                     },
                 }

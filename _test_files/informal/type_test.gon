@@ -5,5 +5,12 @@ class generic<T> {
 }
 
 fun main() {
-    let g = <generic<int>>::new();
+    let g = generic::new();
+    let h = g;
+    let i = g;
+    let j = double(i);
+}
+
+fun double(j: generic<int>) -> generic<int> {
+    j;
 }

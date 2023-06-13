@@ -1,8 +1,14 @@
 class <generic<?<generic>::T>> { }
 fun main() -> void {
     let g: generic<int> = <generic<int>>(<() -> generic<int>>(<generic<int>>::new)());
+    let h: generic<int> = <generic<int>>(g);
+    let i: generic<int> = <generic<int>>(g);
+    let j: generic<int> = <generic<int>>(<(generic<int>) -> generic<int>>(double)(<generic<int>>(i)));
     return;
 }
 fun <generic<?<generic>::T>>::new() -> generic<?<generic>::T> {
     return generic<?<generic>::T> #{};
+}
+fun double(j: generic<int>) -> generic<int> {
+    return <generic<int>>(j);
 }
