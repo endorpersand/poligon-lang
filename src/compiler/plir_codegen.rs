@@ -1213,25 +1213,12 @@ impl PLIRCodegen {
     fn get_var_type<I>(&mut self, ident: &I) -> PLIRResult<Option<plir::Type>> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
-        self.resolve_ident(ident)?;
-
-        let id = ident.as_fun_ident();
-        let ty = self.find_scoped(|ib| ib.vars.get(&*id)).cloned();
-        match ty {
-            Some(mut t) => {
-                // resolve unks
-                t = self.resolver.normalize(t);
-
-                // resolve type vars
-                if let plir::FunIdent::Static(referent, _) = &*id {
-                    t = self.get_class(Located::new(referent, (0, 0) ..= (0, 0)))?
-                        .attach_type_vars_to(t);
-                }
-
-                Ok(Some(t))
-            },
-            None => Ok(None),
-        }
+        self.resolve_ident(ident)
+            .map(|_| {
+                self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident()))
+                    .cloned()
+                    .map(|t| self.resolver.normalize(t))
+            })
     }
 
     /// Gets the type of the identifier, raising an UndefinedVar error if not present.
