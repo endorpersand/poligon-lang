@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::ops::Deref;
 
 use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
-use crate::err::{CursorRange, GonErr};
 
 impl TypeRef<'_> {
     pub(super) fn get_type_key(&self) -> Cow<str> {
@@ -215,6 +214,13 @@ impl<'a> TypeDataView<'a> {
         t.substitute(self.subst_map())
     }
 
+    pub fn has_method(&self, id: &str) -> bool {
+        let key = SigKey::new(id, &[][..]);
+
+        // TODO: specialization
+        self.data.methods.get_appl_maps(&self.args)
+            .any(|m| m.get(&key).is_some())
+    }
     /// Get a method defined in the type.
     pub fn get_method_ref(&self, id: &str) -> Option<FunIdent> {
         let key = SigKey::new(id, &[][..]);
@@ -225,14 +231,8 @@ impl<'a> TypeDataView<'a> {
             .cloned()
     }
 
-    /// Get a method defined in the type or produce an error.
-    pub fn get_method_ref_or_err(&self, id: &str, range: CursorRange) -> super::PLIRResult<plir::FunIdent> {
-        self.get_method_ref(id)
-            .ok_or_else(|| {
-                let ty = self.attach_type_vars_to(self.data.ty_shape.clone());
-                let id = FunIdent::new_static(&ty, id);
-                super::PLIRErr::UndefinedVarAttr(id).at_range(range)
-            })
+    pub fn view_type(&self) -> Type {
+        self.ty_shape.clone().substitute(self.subst_map())
     }
 
     /// Get a field on the type (if present).

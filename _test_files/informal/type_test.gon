@@ -1,0 +1,9 @@
+class generic<T> {
+    fun ::new() -> generic<T> {
+        <generic<T>> #{};
+    }
+}
+
+fun main() {
+    let g = <generic<int>>::new();
+}

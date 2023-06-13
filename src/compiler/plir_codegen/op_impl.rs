@@ -74,19 +74,14 @@ impl<'a> Cast<'a> {
                 // Load src class
                 let src_key = cg.get_class_key(self.src.as_ref().map(|e| &e.ty))?;
                 // Check if it has to_string method (with correct signature)
-                if let Some(met_ident) = cg.get_class(&src_key).get_method_ref("to_string") {
-                    cg.get_var_type(&met_ident)?
-                        .filter(|t| matches!( t.downgrade(), 
-                            Fun(FunTypeRef {
-                                params: Cow::Borrowed([p1]), 
-                                ret, 
-                                varargs: false
-                            }) if p1 == &self.src.ty && &**ret == self.dest
-                        ))
-                        .is_some()
-                } else {
-                    false
-                }
+
+                cg.get_method(&src_key, "to_string")?.is_some_and(|(_, met_ty)| {
+                    matches!(met_ty, Fun(FunTypeRef {
+                        params: Cow::Borrowed([p1]), 
+                        ret, 
+                        varargs: false
+                    }) if p1 == &self.src.ty && &**ret == self.dest)
+                })
             },
             (_, Prim(Borrowed(Type::S_BOOL))) => self.cf.allows(CastFlags::Truth),
             (_, Prim(Borrowed(Type::S_VOID))) => self.cf.allows(CastFlags::Void),
@@ -118,13 +113,11 @@ impl<'a> Cast<'a> {
                     let Located(src, src_range) = self.src;
                     
                     let src_key = cg.get_class_key(Located::new(&src.ty, src_range.clone()))?;
-                    let to_string = cg.get_class(&src_key)
-                        .get_method_ref_or_err("to_string", src_range.clone())?;
-                    
-                    let fun_type = cg.get_var_type_or_err(&to_string, src_range.clone())?;
-                    
+                    let (to_str, to_str_ty) = cg.get_method_or_err(&src_key, "to_string", src_range.clone())?;
+                    let to_str_expr = to_str.into_expr(to_str_ty);
+
                     Located::new(Expr::call(
-                        Located::new(to_string.into_expr(fun_type), src_range.clone()), 
+                        Located::new(to_str_expr, src_range.clone()), 
                         vec![src]
                     )?, src_range)
                 },
@@ -255,14 +248,9 @@ impl super::PLIRCodegen {
             op::Unary::BitNot => "bitnot",
         };
 
-        let lrange = left.1.clone();
-
-        let left_key = self.get_class_key(left)?; 
-        let ident = self.get_class(&left_key)
-            .get_method_ref_or_err(method_name, lrange)?;
-
-        let e = self.get_var_type(&ident)?
-            .map(|fun_ty| ident.into_expr(fun_ty));
+        let left_key = self.get_class_key(left)?;
+        let e = self.get_method(&left_key, method_name)?
+            .map(|(fun_id, fun_ty)| fun_id.into_expr(fun_ty));
         
         Ok(e)
     }
@@ -337,14 +325,9 @@ impl super::PLIRCodegen {
             op::Binary::LogOr  => return Ok(None),
         };
 
-        let lrange = left.range();
-        
         let left_key = self.get_class_key(left)?;
-        let ident = self.get_class(&left_key)
-            .get_method_ref_or_err(&format!("{method_name}_{right}"), lrange)?;
-
-        let e = self.get_var_type(&ident)?
-            .map(|fun_ty| ident.into_expr(fun_ty));
+        let e = self.get_method(&left_key, &format!("{method_name}_{right}"))?
+            .map(|(fun_id, fun_ty)| fun_id.into_expr(fun_ty));
         
         Ok(e)
     }

@@ -1244,6 +1244,25 @@ impl PLIRCodegen {
             })
     }
 
+    fn get_method(&mut self, key: &ClassKey, attr: &str) -> PLIRResult<Option<(plir::FunIdent, plir::Type)>> {
+        let var = 'var: {
+            let Some(id) = self.get_class(key).get_method_ref(attr) else { break 'var None };
+            let Some(var) = self.get_var_type(&id)? else { break 'var None };
+
+            Some((id, self.get_class(key).attach_type_vars_to(var)))
+        };
+
+        Ok(var)
+    }
+    fn get_method_or_err(&mut self, key: &ClassKey, attr: &str, range: CursorRange) -> PLIRResult<(plir::FunIdent, plir::Type)> {
+        self.get_method(key, attr)?
+            .ok_or_else(|| {
+                let cls = self.get_class(key);
+                PLIRErr::UndefinedVarAttr(plir::FunIdent::new_static(&cls.view_type(), attr))
+                    .at_range(range)
+            })
+    }
+
     // Resolves the given type key.
     fn resolve_type_key(&mut self, key: &str) -> PLIRResult<()> {
         use indexmap::map::Entry;
@@ -2138,8 +2157,8 @@ impl PLIRCodegen {
                     .ok_or_else(|| {
                         PLIRErr::CannotInitialize(lty.0.clone()).at_range(lty.range())
                     })?
-                    .iter()
-                    .map(|(k, fd)| (k.clone(), fd.ty.clone()))
+                    .into_iter()
+                    .map(|(k, fd)| (k, fd.ty))
                     .collect();
                 
                 let mut entries: HashMap<_, _> = entries.into_iter()
@@ -2223,16 +2242,13 @@ impl PLIRCodegen {
                 let ast::StaticPath { ty, attr } = sp;
 
                 let lty = self.consume_located_type(ty)?;
+
                 let cls_key = self.get_class_key(lty.as_ref())?;
-                let ty = lty.0;
+                let (_, met_type) = self.get_method_or_err(
+                    &cls_key, &attr, range
+                )?;
                 
-                let attrref = self.get_class(&cls_key).get_method_ref(&attr)
-                    .ok_or_else(|| {
-                        let id = plir::FunIdent::new_static(&ty, &attr);
-                        PLIRErr::UndefinedVarAttr(id).at_range(range.clone())
-                    })?;
-                Ok(plir::Path::Static(ty, attr, self.get_var_type_or_err(&attrref, range)?))
-                    .map(Into::into)
+                Ok(plir::Path::Static(lty.0, attr, met_type).into())
             },
             ast::Expr::UnaryOps { ops, expr } => {
                 let le = self.consume_located_expr(*expr, None)?;
@@ -2312,14 +2328,14 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::For { ident, iterator, block } => {
-                let itrange = iterator.1.clone();
+                let itrange = iterator.range();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup
                 let cls_key = self.get_class_key(Located::new(&iterator.ty, itrange.clone()))?;
-                let m = self.get_class(&cls_key).get_method_ref_or_err("next", itrange.clone())?;
-                let itnext_ty = self.get_var_type_or_err(&m, itrange.clone())?;
-                let element_type = match itnext_ty.downgrade() {
+                let (_, it_next_ty) = self.get_method_or_err(&cls_key, "next", itrange.clone())?;
+
+                let element_type = match it_next_ty.downgrade() {
                     plir::TypeRef::Fun(plir::FunTypeRef {
                         params: Cow::Borrowed([a]),
                         ret,
@@ -2484,13 +2500,12 @@ impl PLIRCodegen {
             let cls_key = self.get_class_key(Located::new(&top_ty, expr_range.clone()))?;
             let cls = self.get_class(&cls_key);
 
-            if let Some(metref) = cls.get_method_ref(&attr) {
+            if cls.has_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
                     Err(PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
                 } else {
-                    let metref = metref.clone();
-                    let mut fun_ty: plir::FunType = self.get_var_type_or_err(&metref, expr_range.clone())?
-                        .try_into()?;
+                    let (_, fun_ty) = self.get_method_or_err(&cls_key, &attr, expr_range.clone())?;
+                    let mut fun_ty: plir::FunType = fun_ty.try_into()?;
                     fun_ty.pop_front();
 
                     path = plir::Path::Method(

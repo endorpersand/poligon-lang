@@ -1,0 +1,8 @@
+class <generic<?<generic>::T>> { }
+fun main() -> void {
+    let g: generic<int> = <generic<int>>(<() -> generic<int>>(<generic<int>>::new)());
+    return;
+}
+fun <generic<?<generic>::T>>::new() -> generic<?<generic>::T> {
+    return generic<?<generic>::T> #{};
+}
