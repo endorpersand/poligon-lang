@@ -292,22 +292,6 @@ impl FunIdent {
         Self::Static(ty.clone(), attr.to_string())
     }
 
-    /// Find the generic resolution type for this function identifier.
-    /// 
-    /// When resolving the function associated with this function ident,
-    /// it may need to resolve generic parameters.
-    /// 
-    /// If this function identifier is a method identifier, this accesses
-    /// the type the method comes from (which can be used to identify generic parameters).
-    /// 
-    /// Otherwise, this returns a type without any type parameters.
-    pub(super) fn resolution_type(&self) -> Cow<Type> {
-        match self {
-            FunIdent::Simple(_) => Cow::Owned(ty!(Type::S_VOID)),
-            FunIdent::Static(t, _) => Cow::Borrowed(t),
-        }
-    }
-
     /// Constructs a PLIR expression out of this function identifier.
     /// 
     /// This can either be an identifier expression or a static path.

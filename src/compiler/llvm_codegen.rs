@@ -942,7 +942,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let right = compiler.write_ref_value(right)?;
                 
                 match step.as_deref() {
-                    Some(st) => todo!("deal with step"),
+                    Some(_) => todo!("deal with step"),
                     None => {
                         let id = plir::FunIdent::new_static(expr_ty, "new");
                         let range_new = compiler.get_fn_by_plir_ident(&id)
