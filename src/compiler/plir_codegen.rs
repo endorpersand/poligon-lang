@@ -1155,7 +1155,7 @@ impl PLIRCodegen {
     {
         use indexmap::map::Entry;
 
-        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_values.contains_key(&*ident.as_fun_ident())) {
+        if let Some(idx) = self.find_scope_index(|ib| ib.unres_values.contains_key(&*ident.as_fun_ident())) {
             self.execute_upwards(idx, |this| -> PLIRResult<_> {
                 let fid = ident.as_fun_ident().into_owned();
                 let Entry::Occupied(entry) = this.peek_block().unres_values.entry(fid) else {
@@ -1204,13 +1204,8 @@ impl PLIRCodegen {
             .chain(std::iter::once(&self.program))
     }
 
-    /// Find a specific item, starting from the deepest scope and scaling out.
-    fn find_scoped<'a, T>(&'a self, f: impl FnMut(&'a InsertBlock) -> Option<T>) -> Option<T> {
-        self.block_iter().find_map(f)
-    }
-
     /// Find the insert block matching the predicate, starting from the deepest scope and scaling out.
-    fn find_scoped_index<'a>(&'a self, mut pred: impl FnMut(&'a InsertBlock) -> bool) -> Option<usize> {
+    fn find_scope_index<'a>(&'a self, mut pred: impl FnMut(&'a InsertBlock) -> bool) -> Option<usize> {
         self.block_iter()
             .enumerate()
             .find(|(_, t)| pred(t))
@@ -1235,9 +1230,11 @@ impl PLIRCodegen {
     {
         self.resolve_ident(ident)
             .map(|_| {
-                self.find_scoped(|ib| ib.vars.get(&*ident.as_fun_ident()))
-                    .cloned()
-                    .map(|t| self.resolver.normalize(t))
+                let var = self.block_iter()
+                    .find_map(|ib| ib.vars.get(&*ident.as_fun_ident()))
+                    .cloned();
+
+                var.map(|t| self.resolver.normalize(t))
             })
     }
 
@@ -1278,7 +1275,7 @@ impl PLIRCodegen {
         use indexmap::map::Entry;
 
         // find if this key is present. if so, load unresolved type at the scope where it was declared
-        if let Some(idx) = self.find_scoped_index(|ib| ib.unres_types.contains_key(key)) {
+        if let Some(idx) = self.find_scope_index(|ib| ib.unres_types.contains_key(key)) {
             self.execute_upwards(idx, |this| -> PLIRResult<_> {
                 let Entry::Occupied(entry) = this.peek_block().unres_types.entry(key.to_string()) else {
                     unreachable!()
@@ -1313,17 +1310,19 @@ impl PLIRCodegen {
                 TypeRef::TypeVar(tv_type, tv_param) => {
                     self.resolve_type_key(tv_type)?;
 
-                    let ctx = self.find_scoped(|ib| {
-                        ib.generic_ctx.as_ref()
-                            .filter(|ctx| &ctx.0 == tv_type)
-                    }).ok_or_else(|| {
-                        PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
-                            .at_range(range.clone())
-                    })?;
+                    let ctx = self.block_iter()
+                        .filter_map(|ib| ib.generic_ctx.as_ref())
+                        .find(|ctx| &ctx.0 == tv_type)
+                        .ok_or_else(|| {
+                            PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
+                                .at_range(range.clone())
+                        })?;
                     
                     let ty = ctx.1.get(&**tv_param).ok_or_else(|| {
-                        let td = self.find_scoped(|ib| ib.types.get(&**tv_type))
-                            .unwrap_or_else(|| panic!("{tv_type} to be defined"));
+                        let td = self.block_iter()
+                            .find_map(|ib| ib.types.get(&**tv_type))
+                            .unwrap_or_else(|| panic!("expected {tv_type} to be defined"));
+                        
                         PLIRErr::UndefinedTypeParam(
                             td.type_shape().upgrade(),
                             tv_param.to_string()
@@ -1375,7 +1374,10 @@ impl PLIRCodegen {
     fn get_generic_context(&self, generic: plir::TypeRef) -> GenericContext {
         let plir::TypeRef::Generic(id, params, ()) = generic else { panic!("Expected generic type in get_generic_context") };
 
-        let td = self.find_scoped(|ib| ib.types.get(&*id)).unwrap_or_else(|| panic!("type '{id}' should have existed"));
+        let td = self.block_iter()
+            .find_map(|ib| ib.types.get(&*id))
+            .unwrap_or_else(|| panic!("type '{id}' should have existed"));
+
         let plir::Type::Generic(_, _, ()) = &td.type_shape() else {
             panic!("type '{id}' should have been generic")
         };
@@ -1909,7 +1911,7 @@ impl PLIRCodegen {
         use plir::TypeRef;
         use std::cmp::Ordering;
 
-        if let Some(aliased_ty) = self.find_scoped(|ib| ib.type_aliases.get(lty.0)) {
+        if let Some(aliased_ty) = self.block_iter().find_map(|ib| ib.type_aliases.get(lty.0)) {
             *lty.0 = aliased_ty.clone();
         }
 
@@ -1933,7 +1935,7 @@ impl PLIRCodegen {
                 }
 
                 let id = id.to_string();
-                let param_len = self.find_scoped(|ib| {
+                let param_len = self.block_iter().find_map(|ib| {
                     match ib.types.get(&id) {
                         Some(td) => Some(td.generic_params().len()),
                         None => match ib.unres_types.get(&id)? {
@@ -1975,14 +1977,13 @@ impl PLIRCodegen {
         
         let ty = {
             if ty_params.is_empty() {
-                self.find_scoped(|ib| {
-                    let ctx = ib.generic_ctx.as_ref()?;
-                    ctx.1.contains_key(&ty_ident).then(|| {
-                        plir::Type::new_type_var(ctx.0.to_string(), ty_ident.to_string())
-                    })
-                }).unwrap_or_else(|| {
-                    plir::Type::new_prim(ty_ident)
-                })
+                self.block_iter()
+                    .filter_map(|ib| ib.generic_ctx.as_ref())
+                    .find(|ctx| ctx.1.contains_key(&ty_ident))
+                    .map_or_else(
+                        || plir::Type::new_prim(ty_ident.to_string()), 
+                        |ctx| plir::Type::new_type_var(ctx.0.to_string(), ty_ident.to_string())
+                    )
             } else {
                 let ty_params: Vec<_> = ty_params.into_iter()
                     .map(|t| self.consume_type(t))
