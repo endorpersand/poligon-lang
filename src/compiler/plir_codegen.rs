@@ -1645,10 +1645,7 @@ impl PLIRCodegen {
                             let le = Located::new(e, exit_range);
                             let flags = match btype == BlockBehavior::Function {
                                 true  => CastFlags::Decl | CastFlags::Void,
-                                // FIXME: this should not allow void, however
-                                // when expected_ty == S_VOID, it is possible for 
-                                // assignment block to expect void and that cast will fail
-                                false => CastFlags::Implicit | CastFlags::Void,
+                                false => CastFlags::Implicit,
                             };
 
                             let new_e = self.expect_type(le, exp_ty, flags)?;
