@@ -147,7 +147,7 @@ impl<T: Hash + Eq> UnionFind<T> {
     /// Gets the number of elements in the set.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.arena.len()
+        self.inner.len()
     }
 
     /// Add a new element to the set if it does not already exist.
@@ -169,6 +169,7 @@ impl<T: Hash + Eq> UnionFind<T> {
         self.arena.get_index(i.0).unwrap()
     }
     /// Gets the index associated with this value (or none if not present in set).
+    #[allow(dead_code)]
     pub fn get_idx_of<Q>(&self, i: &Q) -> Option<Idx<T>>
         where Q: ?Sized + Hash + Equivalent<T>
     {
@@ -215,6 +216,7 @@ impl<T: Hash + Eq> UnionFind<T> {
     /// * If the predicate returns Some(false), the left root becomes the root of the new group.
     /// * If the predicate returns Some(true), the right root becomes the root of the new group.
     /// * If the predicate returns None, nothing changes in the groups and a [`UnionSelectFail`] error is thrown.
+    #[allow(dead_code)]
     pub fn try_union_select(&mut self, x: Idx<T>, y: Idx<T>, f: impl FnOnce(&T, &T) -> Option<Selector>) -> Result<bool, UnionSelectFail>
     {
         let xr_idx = self.find(x);
