@@ -109,22 +109,6 @@ impl std::error::Error for CompileErr {
 /// A [`Result`] type for operations during the full compilation process.
 pub type CompileResult<T> = Result<T, CompileErr>;
 
-/// Indicates the files where [`Compiler::write_to_disk`] should save its results to.
-pub enum GonSaveTo<'p> {
-    /// Save the files to the same position in the file system as the provided path, 
-    /// using the same name (but different extension) as the provided path.
-    SameLoc(&'p Path),
-
-    /// Save to the provided file paths.
-    DiffLoc {
-        /// This path is where PLIR types should be saved.
-        plir: &'p Path,
-
-        /// This path is where LLVM .bc should be saved.
-        llvm: &'p Path
-    }
-}
-
 /// A compiler, which keeps track of multiple files being compiled.
 /// 
 /// To construct a compiler struct, one can use:
@@ -145,7 +129,7 @@ pub enum GonSaveTo<'p> {
 /// ```no_run
 /// use std::path::Path;
 /// use inkwell::context::Context;
-/// use poligon_lang::compiler::{Compiler, GonSaveTo};
+/// use poligon_lang::compiler::Compiler;
 /// 
 /// let path: &Path = "script.gon".as_ref();
 /// 
@@ -154,17 +138,15 @@ pub enum GonSaveTo<'p> {
 /// let mut compiler = Compiler::new(&ctx, "script.gon").unwrap();
 /// compiler.load_gon_file(path).unwrap();
 /// 
-/// compiler.write_to_disk(GonSaveTo::DiffLoc {
-///     plir: "script.d.plir.gon".as_ref(), // this saves type information for script
-///     llvm: "script.bc".as_ref(), // this is bitcode which can be executed by `lli` or `llc`
-/// }).unwrap();
+/// compiler.write_to_disk().unwrap();
 /// ```
 pub struct Compiler<'ctx> {
     declared_types: DeclaredTypes,
     ctx: &'ctx Context,
     llvm_codegen: LLVMCodegen<'ctx>,
     module: Module<'ctx>,
-    opt: OptimizationLevel
+    opt: OptimizationLevel,
+    in_path: PathBuf
 }
 
 lazy_static! {
@@ -185,8 +167,8 @@ impl<'ctx> Compiler<'ctx> {
     /// Create a new compiler. 
     /// 
     /// This includes the Poligon std library.
-    pub fn new(ctx: &'ctx Context, filename: &str) -> CompileResult<Self> {
-        let mut compiler = Self::no_std(ctx, filename);
+    pub fn new(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> CompileResult<Self> {
+        let mut compiler = Self::no_std(ctx, in_path);
 
         for (dfile, bc_file) in &*STD_FILES {
             compiler.load_bc(dfile, bc_file)?;
@@ -196,13 +178,20 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Creates a new compiler without the Poligon std library.
-    pub fn no_std(ctx: &'ctx Context, filename: &str) -> Self {
+    pub fn no_std(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> Self {
+        let in_path = in_path.as_ref().to_owned();
+        let filename = in_path.file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+
         Self {
             declared_types: Default::default(),
             ctx,
             llvm_codegen: LLVMCodegen::new(ctx),
             module: ctx.create_module(filename),
-            opt: Default::default()
+            opt: Default::default(),
+            in_path
         }
     }
 
@@ -226,8 +215,21 @@ impl<'ctx> Compiler<'ctx> {
             .map_err(Into::into)
     }
 
-    /// Sets the module's filename
-    pub fn set_filename(&mut self, filename: &str) {
+    /// Gets the module's filename (including file extension)
+    pub fn get_module_name(&self) -> &str {
+        self.module.get_name().to_str().unwrap()
+    }
+
+    /// Gets the module's file stem (which is the name excluding extension)
+    pub fn get_module_stem(&self) -> String {
+        AsRef::<Path>::as_ref(self.get_module_name())
+            .with_extension("")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Sets the module's filename (including extension)
+    pub fn set_module_name(&mut self, filename: &str) {
         self.llvm_codegen.set_filename(filename)
     }
 
@@ -255,7 +257,7 @@ impl<'ctx> Compiler<'ctx> {
     /// that holds this Poligon file is linked to the compiler's module.
     pub fn load_gon_str(&mut self, code: &str, filename: Option<&str>) -> CompileResult<()> {
         let (plir, dtypes) = self.generate_plir(code)?;
-        self.set_filename(filename.unwrap_or("eval"));
+        self.set_module_name(filename.unwrap_or("eval"));
         self.load_plir(&plir, dtypes)
     }
 
@@ -319,24 +321,30 @@ impl<'ctx> Compiler<'ctx> {
         pm.run_on(&self.module);
     }
 
-    /// Writes the type data and module to disk.
-    pub fn write_to_disk(&self, write_to: GonSaveTo) -> CompileResult<()> {
+    /// Gets the default output folder. This does not create it.
+    pub fn default_output_dir(&self) -> PathBuf {
+        self.in_path.with_extension("")
+    }
+
+    /// Writes the type data and module to the default output directory on disk.
+    pub fn write_to_disk(&self) -> CompileResult<()> {
+        self.write_to_disk_at(self.default_output_dir())
+    }
+
+    /// Writes the type data and module to a directory on disk.
+    fn write_to_disk_at(&self, dir: impl AsRef<Path>) -> CompileResult<()> {
         self.optimize_module();
-        match write_to {
-            GonSaveTo::SameLoc(path) => {
-                let mut llvm_path = path.to_owned();
-                llvm_path.set_extension("bc");
 
-                let plir_path = llvm_path.with_extension("d.plir.gon");
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir)?;
 
-                self.declared_types.to_file(plir_path)?;
-                llvm_codegen::module_to_bc(&self.module, llvm_path);
-            },
-            GonSaveTo::DiffLoc { plir, llvm } => {
-                self.declared_types.to_file(plir)?;
-                llvm_codegen::module_to_bc(&self.module, llvm);
-            },
-        };
+        let mod_name = self.get_module_name();
+        
+        let llvm_path = dir.join(format!("{mod_name}.bc"));
+        let plir_path = dir.join(format!("{mod_name}.d.plir.gon"));
+
+        self.declared_types.to_file(plir_path)?;
+        llvm_codegen::module_to_bc(&self.module, llvm_path);
 
         Ok(())
     }
