@@ -1,16 +1,11 @@
 class generic<T> {
-    fun ::new() -> generic<T> {
-        <generic<T>> #{};
-    }
+    t: T
+}
+
+fun out(t: float) -> float {
+    t;
 }
 
 fun main() {
-    let g = generic::new();
-    let h = g;
-    let i = g;
-    let j = double(i);
-}
-
-fun double(j: generic<int>) -> generic<int> {
-    j;
+    let a = 1;
 }
