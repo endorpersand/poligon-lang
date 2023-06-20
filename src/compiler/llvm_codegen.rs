@@ -489,17 +489,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Determines whether this type is copy-by-reference through functions.
     /// Errors if type does not have an LLVM representation.
     fn is_ref_layout(&self, ty: &plir::Type) -> LLVMResult<bool> {
-        use plir::{Type, TypeRef::*};
-        use Cow::Borrowed;
-
-        let layout = self.get_layout(ty)?;
+        let out = matches!(
+            self.get_layout_or_void(ty)?, 
+            ReturnableType::BasicTypeEnum(BasicTypeEnum::StructType(_))
+        );
         
-        let cond = match (ty.downgrade(), layout) {
-            (Prim(Borrowed(Type::S_VOID)), _) => false,
-            (_, BasicTypeEnum::StructType(_)) => true,
-            _ => false
-        };
-        Ok(cond)
+        Ok(out)
     }
 
     /// Get the LLVM layout of a given PLIR type, keeping track of copy-by-reference.
