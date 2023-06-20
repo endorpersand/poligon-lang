@@ -72,8 +72,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
     /// Create a new string value using a string slice from Rust.
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
-        let _int = layout!(self, S_INT).into_int_type();
-        let _str = layout!(self, S_STR).into_struct_type();
+        let int_ = layout!(self, S_INT).into_int_type();
 
         let ident = plir::FunIdent::new_static(&plir::ty!(plir::Type::S_STR), "from_raw");
         let str_from_raw = self.get_fn_by_plir_ident(&ident).unwrap();
@@ -83,7 +82,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         let content = self.builder.build_alloca(content_arr.get_type(), "");
         self.builder.build_store(content, content_arr);
         // get len:
-        let len = _int.const_int(content_arr.get_type().len() as _, false);
+        let len = int_.const_int(content_arr.get_type().len() as _, false);
 
         let string = self.builder.build_call(str_from_raw, params![content, len], "string_literal")
             .try_as_basic_value()
@@ -107,16 +106,16 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
         match (src.downgrade(), dest.downgrade()) {
             (Prim(Borrowed(Type::S_INT)), Prim(Borrowed(Type::S_FLOAT))) => {
-                let _float = self.get_layout(dest)?.into_float_type();
+                let float_ = self.get_layout(dest)?.into_float_type();
                 let GonValue::Basic(bv) = v else { unreachable!() };
-                let val = self.builder.build_signed_int_to_float(bv.into_int_value(), _float, "cast");
+                let val = self.builder.build_signed_int_to_float(bv.into_int_value(), float_, "cast");
                 
                 Ok(GonValue::Basic(val.into()))
             },
             (Prim(Borrowed(Type::S_FLOAT)), Prim(Borrowed(Type::S_INT))) => {
-                let _int = self.get_layout(dest)?.into_int_type();
+                let int_ = self.get_layout(dest)?.into_int_type();
                 let GonValue::Basic(bv) = v else { unreachable!() };
-                let val = self.builder.build_float_to_signed_int(bv.into_float_value(), _int, "cast");
+                let val = self.builder.build_float_to_signed_int(bv.into_float_value(), int_, "cast");
                 
                 Ok(GonValue::Basic(val.into()))
             },

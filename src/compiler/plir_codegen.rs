@@ -2307,10 +2307,10 @@ impl PLIRCodegen {
                     None => None,
                 };
                 
-                let _void = plir::ty!(plir::Type::S_VOID);
+                let void_ = plir::ty!(plir::Type::S_VOID);
                 let else_ty = last.as_ref()
                     .map(|b| &b.0)
-                    .unwrap_or(&_void);
+                    .unwrap_or(&void_);
 
                 let type_iter = conditionals.iter()
                     .map(|(_, block)| &block.0)
@@ -2370,22 +2370,22 @@ impl PLIRCodegen {
                     Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
                         let ty = self.consume_type(sp.ty)?;
 
-                        let _ptr = plir::ty!("#ptr");
-                        let _int = plir::ty!(plir::Type::S_INT);
+                        let ptr_ = plir::ty!("#ptr");
+                        let int_ = plir::ty!(plir::Type::S_INT);
 
                         let mut piter = params.into_iter();
                         let ptr = piter.next()
                             .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
-                            .and_then(|e| self.consume_located_expr(e, Some(_ptr.clone())))
-                            .and_then(|le| self.expect_type(le, _ptr, CastFlags::Decl))
+                            .and_then(|e| self.consume_located_expr(e, Some(ptr_.clone())))
+                            .and_then(|le| self.expect_type(le, ptr_, CastFlags::Decl))
                             .map(Box::new)?;
 
                         let params = piter.map(|expr| {
                             let lparam = self.consume_located_expr(
-                                expr, Some(_int.clone())
+                                expr, Some(int_.clone())
                             )?;
                             
-                            self.expect_type(lparam, _int.clone(), CastFlags::Decl)
+                            self.expect_type(lparam, int_.clone(), CastFlags::Decl)
                         })
                         .collect::<Result<_, _>>()?;
 

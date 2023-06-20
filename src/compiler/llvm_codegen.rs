@@ -340,8 +340,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         (None, None)
                     }
                     ProcStmt::Throw(msg) => {
-                        let _char = layout!(self, S_CHAR).into_int_type();
-                        let _int  = layout!(self, S_INT).into_int_type();
+                        let char_ = layout!(self, S_CHAR).into_int_type();
+                        let int_  = layout!(self, S_INT).into_int_type();
 
                         let msg_ptr = unsafe {
                             self.builder.build_global_string(msg, "throw_msg")
@@ -358,15 +358,15 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         let fdopen = self.import_intrinsic("#fdopen")?;
                         let exit = self.import_intrinsic("#exit")?;
                         
-                        let stderr = self.builder.build_call(fdopen, params![_int.const_int(2, false), w_ptr], "stderr")
+                        let stderr = self.builder.build_call(fdopen, params![int_.const_int(2, false), w_ptr], "stderr")
                             .try_as_basic_value()
                             .left()
                             .expect("stderr")
                             .into_pointer_value();
                         
                         self.builder.build_call(fputs, params![msg_ptr, stderr], "error_msg");
-                        self.builder.build_call(fputwc, params![_char.const_int('\n' as _, false), stderr], "");
-                        self.builder.build_call(exit, params![_int.const_int(1, false)], "");
+                        self.builder.build_call(fputwc, params![char_.const_int('\n' as _, false), stderr], "");
+                        self.builder.build_call(exit, params![int_.const_int(1, false)], "");
                         self.builder.build_unreachable();
                         (None, None)
                     },
@@ -648,8 +648,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         use plir::{HoistedStmt, FunIdent};
 
-        let _void = compiler.ctx.void_type();
-        let _i8 = compiler.ctx.i8_type();
+        let void_ = compiler.ctx.void_type();
+        let i8_ = compiler.ctx.i8_type();
 
         // split the functions from everything else:
         let mut main_fun = None;
@@ -687,7 +687,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             (None, stmts) => {
                 let main_fn = compiler.module.add_function(
                     "main", 
-                    fn_type![() -> _void],
+                    fn_type![() -> void_],
                     None
                 );
                 (main_fn, Some(stmts))
@@ -735,7 +735,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         let inner_main = main;
         let main = compiler.module.add_function(
             "main", 
-            _i8.fn_type(&[], false),
+            i8_.fn_type(&[], false),
             None
         );
 
@@ -744,13 +744,13 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         
         // register default locale
         let setlocale = compiler.import_intrinsic("#setlocale")?;
-        let _int = compiler.ctx.i64_type();
+        let int_ = compiler.ctx.i64_type();
         let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
-        compiler.builder.build_call(setlocale, params![_int.const_zero(), template.as_pointer_value()], "");
+        compiler.builder.build_call(setlocale, params![int_.const_zero(), template.as_pointer_value()], "");
 
         // wrap inner main
         compiler.builder.build_call(inner_main, &[], "");
-        compiler.builder.build_return(Some(&_i8.const_zero()));
+        compiler.builder.build_return(Some(&i8_.const_zero()));
 
         match compiler.module.verify() {
             Ok(_)  => Ok(main),
@@ -829,7 +829,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     panic!("expected list literal to return list, but actually returned {expr_ty}")
                 };
 
-                let _int = layout!(compiler, S_INT).into_int_type();
+                let int_ = layout!(compiler, S_INT).into_int_type();
                 let arr_ty = compiler.get_layout(t)?.array_type(exprs.len() as _);
                 let elements: Vec<_> = exprs.iter()
                 .map(|e| {
@@ -846,7 +846,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let list_from_raw = compiler.get_fn_by_plir_ident(&id)
                     .ok_or_else(|| LLVMErr::UndefinedFun(id))?;
 
-                let lst = compiler.builder.build_call(list_from_raw, params![alloca, _int.const_int(exprs.len() as _, false)], "list_literal")
+                let lst = compiler.builder.build_call(list_from_raw, params![alloca, int_.const_int(exprs.len() as _, false)], "list_literal")
                     .try_as_basic_value()
                     .left()
                     .unwrap();
@@ -1163,7 +1163,6 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                     BasicTypeEnum::StructType(t)  => t.size_of().expect("expected struct type size"),
                     BasicTypeEnum::VectorType(t)  => t.size_of().expect("expected vector type size"),
                 };
-                let _int = layout!(compiler, S_INT).into_int_type();
 
                 Ok(GonValue::Basic(size.into()))
             },
@@ -1240,7 +1239,7 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
             plir::Path::Static(_, _, _) => todo!(),
             plir::Path::Struct(e, attrs) => {
                 if !attrs.is_empty() {
-                    let _i32 = compiler.ctx.i32_type();
+                    let i32_ = compiler.ctx.i32_type();
                     
                     let ptr = e.write_ptr(compiler)?;
                     let ty = compiler.get_layout(&e.ty)?;
@@ -1249,9 +1248,9 @@ impl<'ctx> TraverseIRPtr<'ctx> for plir::Path {
                     .map(|&(i, _)| i)
                     .collect();
 
-                    let mut gep_indexes = vec![_i32.const_zero()];
+                    let mut gep_indexes = vec![i32_.const_zero()];
                     let iv_indexes = usize_indexes.iter()
-                        .map(|&i| _i32.const_int(i as u64, false));
+                        .map(|&i| i32_.const_int(i as u64, false));
                     gep_indexes.extend(iv_indexes);
 
                     let mut ssa_name = ptr.get_name()

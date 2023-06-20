@@ -404,8 +404,8 @@ impl super::PLIRCodegen {
                 )?.into_inner()
             },
             op::Binary::BitOr  => {
-                let _bool = ty!(Type::S_BOOL);
-                let mut bittypes = vec![&_bool];
+                let bool_ = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&bool_];
                 bittypes.extend(NumType::int_order());
 
                 self.cast_chain2(
@@ -415,8 +415,8 @@ impl super::PLIRCodegen {
                 )?.into_inner()
             },
             op::Binary::BitAnd => {
-                let _bool = ty!(Type::S_BOOL);
-                let mut bittypes = vec![&_bool];
+                let bool_ = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&bool_];
                 bittypes.extend(NumType::int_order());
 
                 self.cast_chain2(
@@ -426,8 +426,8 @@ impl super::PLIRCodegen {
                 )?.into_inner()
             },
             op::Binary::BitXor => {
-                let _bool = ty!(Type::S_BOOL);
-                let mut bittypes = vec![&_bool];
+                let bool_ = ty!(Type::S_BOOL);
+                let mut bittypes = vec![&bool_];
                 bittypes.extend(NumType::int_order());
 
                 self.cast_chain2(
