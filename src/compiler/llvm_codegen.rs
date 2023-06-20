@@ -162,6 +162,7 @@ pub struct LLVMCodegen<'ctx> {
     pub(super) ctx: &'ctx Context,
     pub(super) builder: Builder2<'ctx>,
     pub(super) module: Module<'ctx>,
+    pub(super) generic_modules: HashMap<String, Module<'ctx>>,
     pub(super) layouts: TypeLayouts<BasicTypeEnum<'ctx>>,
     pub(super) exit_pointers: Vec<ExitPointers<'ctx>>,
 
@@ -177,6 +178,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
             ctx,
             builder: Builder2::new(ctx.create_builder()),
             module: ctx.create_module("eval"),
+            generic_modules: Default::default(),
             layouts: TypeLayouts::with_builtins(ctx),
             exit_pointers: vec![],
 
@@ -255,6 +257,17 @@ impl<'ctx> LLVMCodegen<'ctx> {
         self.builder.get_insert_block()
             .and_then(BasicBlock::get_parent)
             .expect("No insert block found")
+    }
+
+    fn create_generic_module(&mut self, id: &str) {
+        let mod_name = self.module.get_name()
+            .to_str()
+            .unwrap();
+
+        self.generic_modules.entry(id.to_string())
+            .or_insert_with(|| {
+                self.ctx.create_module(&format!("{mod_name}::generic.{id}"))
+            });
     }
 
     /// Create an alloca instruction that can store a value of a given [`plir::Type`].
@@ -1373,14 +1386,61 @@ impl<'ctx> TraverseIR<'ctx> for plir::Class {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::Class { ty, fields } = self;
 
-        let fields: Vec<_> = fields.values()
-            .map(|fd| compiler.get_layout(&fd.ty))
-            .collect::<Result<_, _>>()?;
-        
-        let struct_ty = compiler.ctx.opaque_struct_type(&ty.llvm_ident());
-        struct_ty.set_body(&fields, false);
+        match ty {
+            plir::TypeRef::Prim(_) => {
+                let fields: Vec<_> = fields.values()
+                    .map(|fd| compiler.get_layout(&fd.ty))
+                    .collect::<Result<_, _>>()?;
+                
+                let struct_ty = compiler.ctx.opaque_struct_type(&ty.llvm_ident());
+                struct_ty.set_body(&fields, false);
 
-        compiler.define_type(ty.clone(), struct_ty);
+                compiler.define_type(ty.clone(), struct_ty);
+            },
+
+            plir::TypeRef::Generic(id, params, _) => {
+                compiler.create_generic_module(id);
+                let module = &compiler.generic_modules[&**id];
+
+                let type_vars: HashMap<_, _> = params.iter()
+                    .map(|t| {
+                        let plir::TypeRef::TypeVar(_, name) = t else {
+                            panic!("expected type var in generic class construction")
+                        };
+
+                        (&**name, compiler.ctx.opaque_struct_type(&t.llvm_ident()))
+                    })
+                    .collect();
+
+                let fields: Vec<_> = fields.values()
+                    .map(|fd| match &fd.ty {
+                        plir::TypeRef::TypeVar(_, name) => {
+                            type_vars.get(&**name)
+                                .ok_or_else(|| panic!("type var should have existed"))
+                                .map(|&st| st.into())
+                        },
+                        plir::TypeRef::Prim(_) => compiler.get_layout(&fd.ty),
+                        plir::TypeRef::Generic(_, _, _) => compiler.get_layout(&fd.ty),
+                        plir::TypeRef::Tuple(_, _) => compiler.get_layout(&fd.ty),
+                        plir::TypeRef::Fun(_) => compiler.get_layout(&fd.ty),
+                        plir::TypeRef::Unk(_) => panic!("should not have unknowns in LLVM codegen")
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                let struct_ty = compiler.ctx.opaque_struct_type(&ty.llvm_ident());
+                struct_ty.set_body(&fields, false);
+
+                // private function to assert existence of struct type
+                let f = module.add_function(
+                    "#assert_type_existence", 
+                    compiler.ctx.void_type().fn_type(params![struct_ty], false), 
+                    Some(Linkage::Private)
+                );
+                compiler.ctx.append_basic_block(f, "_empty");
+            },
+
+            _ => todo!("class resolution of structure {ty}")
+        }
 
         Ok(())
     }

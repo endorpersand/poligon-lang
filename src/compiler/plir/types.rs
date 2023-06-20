@@ -379,7 +379,7 @@ impl Type {
 
         match self.downgrade() {
             TypeRef::Unk(idx) => Cow::from(format!("#unk{idx}")),
-            TypeRef::TypeVar(ty, var) => Cow::from(format!("#tyvar<{ty}, {var}>")),
+            TypeRef::TypeVar(ty, var) => Cow::from(format!("#{ty}::{var}")),
             TypeRef::Prim(ident) => ident,
             TypeRef::Generic(ident, params, ()) => {
                 Cow::from(format!("{ident}<{}>", param_tuple(&params)))

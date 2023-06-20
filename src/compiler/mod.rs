@@ -338,10 +338,10 @@ impl<'ctx> Compiler<'ctx> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
 
-        let mod_name = self.get_module_name();
+        let mod_stem = self.get_module_stem();
         
-        let llvm_path = dir.join(format!("{mod_name}.bc"));
-        let plir_path = dir.join(format!("{mod_name}.d.plir.gon"));
+        let llvm_path = dir.join(format!("{mod_stem}.bc"));
+        let plir_path = dir.join(format!("{mod_stem}.d.plir.gon"));
 
         self.declared_types.to_file(plir_path)?;
         llvm_codegen::module_to_bc(&self.module, llvm_path);
