@@ -59,6 +59,11 @@ use self::plir_codegen::DeclaredTypes;
 
 use lazy_static::lazy_static;
 
+macro_rules! to_str {
+    ($e:expr) => { $e.to_str().expect("Expected UTF-8 str") }
+}
+pub(self) use to_str;
+
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
 pub enum CompileErr {
@@ -180,10 +185,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Creates a new compiler without the Poligon std library.
     pub fn no_std(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> Self {
         let in_path = in_path.as_ref().to_owned();
-        let filename = in_path.file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let filename = to_str!(in_path.file_name().unwrap());
 
         Self {
             declared_types: Default::default(),

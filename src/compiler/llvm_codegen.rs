@@ -64,7 +64,7 @@ pub(in crate::compiler) use fn_type;
 
 use super::llvm::Builder2;
 use super::llvm::types::{ReturnableType, BasicTypeEnumS};
-use super::plir;
+use super::{plir, to_str};
 
 
 /// Pointers to indicate where each exit statement type should send program flow.
@@ -260,9 +260,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     fn create_generic_module(&mut self, id: &str) {
-        let mod_name = self.module.get_name()
-            .to_str()
-            .unwrap();
+        let mod_name = to_str!(self.module.get_name());
 
         self.generic_modules.entry(id.to_string())
             .or_insert_with(|| {
@@ -421,9 +419,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     false => None,
                 };
                 let fun = self.module.add_function(&ident.as_llvm_ident(), fun_ty, linkage);
-                let fun_name = fun.get_name()
-                    .to_str()
-                    .expect("Expected UTF-8 function name")
+                let fun_name = to_str!(fun.get_name())
                     .to_string();
                 self.fn_aliases.insert(ident.clone(), fun_name);
 
@@ -444,9 +440,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         // TODO: type check?
         let intrinsic = self.import_intrinsic(&sig.ident.as_llvm_ident())?;
 
-        let llvm_name = intrinsic.get_name()
-            .to_str()
-            .expect("expected UTF-8 fn name")
+        let llvm_name = to_str!(intrinsic.get_name())
             .to_string();
         self.fn_aliases.insert(sig.ident.clone(), llvm_name);
         Ok(intrinsic)
@@ -1146,9 +1140,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let ptr = compiler.basic_value_of(ptr_gv)
                     .into_pointer_value();
 
-                let ptr_name = ptr.get_name()
-                    .to_str()
-                    .unwrap();
+                let ptr_name = to_str!(ptr.get_name());
                 let gep_ptr = unsafe {
                     compiler.builder.build_gep(layout, ptr, &params, &format!("{ptr_name}.gep"))
                 };
@@ -1309,9 +1301,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::IDeref {
         let ptr = self.write_ptr(compiler)?;
         let layout = compiler.get_layout(&self.ty)?;
 
-        let ptr_name = ptr.get_name()
-            .to_str()
-            .unwrap();
+        let ptr_name = to_str!(ptr.get_name());
         let bv = compiler.builder.build_load(layout, ptr, &format!("{ptr_name}.deref"));
         Ok(GonValue::Basic(bv))
     }

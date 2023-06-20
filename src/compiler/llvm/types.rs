@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use inkwell::types::{IntType, FloatType, PointerType, StructType, FunctionType, BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum, ArrayType, VectorType};
 
-use crate::compiler::LLVMCodegen;
+use crate::compiler::{LLVMCodegen, to_str};
 
 pub(in crate::compiler) trait Concretize<'ctx> {
     type Type;
@@ -105,10 +105,7 @@ impl<'ctx> Concretize<'ctx> for StructTypeS {
 }
 impl<'ctx> From<StructType<'ctx>> for StructTypeS {
     fn from(value: StructType<'ctx>) -> Self {
-        let name = value.get_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
+        let name = to_str! { value.get_name().unwrap() }
             .to_string();
         StructTypeS(name)
     }
