@@ -51,9 +51,6 @@ pub enum PLIRErr {
     CannotContinue,
     /// Cannot call `return` from this block.
     CannotReturn,
-    // TODO: split into Covariant, Invariant, and Contravariant
-    /// Expected one type, but found a different type
-    ExpectedType(plir::Type /* expected */, plir::Type /* found */),
     /// Cannot iterate over this type
     CannotIterateType(plir::Type),
     /// Could not determine the type of the expression
@@ -118,7 +115,6 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotSpread
             => "syntax error",
             
-            | PLIRErr::ExpectedType(_, _)
             | PLIRErr::CannotIterateType(_)
             | PLIRErr::CannotResolveType
             | PLIRErr::UndefinedType(_)
@@ -158,7 +154,6 @@ impl std::fmt::Display for PLIRErr {
             PLIRErr::CannotBreak                  => write!(f, "cannot 'break' here"),
             PLIRErr::CannotContinue               => write!(f, "cannot 'continue' here"),
             PLIRErr::CannotReturn                 => write!(f, "cannot 'return' here"),
-            PLIRErr::ExpectedType(e, g)           => write!(f, "expected type '{e}', but got '{g}'"),
             PLIRErr::CannotIterateType(t)         => write!(f, "cannot iterate over type '{t}'"),
             PLIRErr::CannotResolveType            => write!(f, "cannot determine type"),
             PLIRErr::UndefinedVarAttr(id)         => match id {
@@ -1396,7 +1391,7 @@ impl PLIRCodegen {
             Ok(le) => Ok(le.0),
             Err(le) => match self.resolver.add_constraint(le.ty.clone(), t.clone()) {
                 Ok(_) => Ok(le.0),
-                Err(_) => Err(PLIRErr::ExpectedType(t, le.0.ty).at_range(le.1)),
+                Err(e) => Err(PLIRErr::TypeConstraintErr(e).at_range(le.1)),
             },
         }
     }
@@ -1628,31 +1623,35 @@ impl PLIRCodegen {
         });
 
         // Type check block:
-        if let Some(exp_ty) = expected_ty {
+        if let Some(expected_ty) = expected_ty {
             let Located(fexit, exit_range) = &mut final_exit;
             let exit_range = exit_range.clone();
 
             match fexit {
                 | BlockExit::Return(exit_ty) 
                 | BlockExit::Exit(exit_ty) 
-                => if exit_ty.downgrade() != exp_ty.downgrade() {
-                    let Some(ProcStmt::Return(me) | ProcStmt::Exit(me)) = block.last_mut() else {
+                => if exit_ty.downgrade() != expected_ty.downgrade() {
+                    let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
                         unreachable!();
                     };
 
-                    match me.take() {
-                        Some(e) => {
-                            let le = Located::new(e, exit_range);
+                    match m_exit_expr.take() {
+                        Some(exit_expr) => {
+                            let l_exit_expr = Located::new(exit_expr, exit_range);
                             let flags = match btype == BlockBehavior::Function {
                                 true  => CastFlags::Decl | CastFlags::Void,
                                 false => CastFlags::Implicit,
                             };
 
-                            let new_e = self.expect_type(le, exp_ty, flags)?;
-                            me.replace(new_e);
+                            let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
+                            m_exit_expr.replace(new_e);
                         },
                         // exit_ty is void, and we already checked that exp_ty is not void
-                        None => Err(PLIRErr::ExpectedType(exp_ty, exit_ty.clone()).at_range(exit_range))?,
+                        // this should trigger a fail
+                        None => {
+                            self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
+                                .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
+                        },
                     }
                 },
                 // what is done here?
