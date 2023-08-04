@@ -567,6 +567,7 @@ impl InsertBlock {
     }
 
     /// Insert a class into the insert block's type register.
+    /// This allows the class to be accessed in the enclosing insert block.
     fn insert_class(&mut self, cls: plir::Class) {
         self.types.insert(
             cls.ty.get_type_key().into_owned(),
@@ -2006,17 +2007,10 @@ impl PLIRCodegen {
             .map(|lty| lty.0)
     }
 
-    pub(super) fn register_cls(
-        &mut self, cls: plir::Class, 
-        methods: impl IntoIterator<Item=ast::MethodDecl>
-    ) -> PLIRResult<()> {
-        let ib = self.peek_block();
-        
-        ib.insert_class(cls.clone());
-        for method in methods {
-            ib.insert_unresolved_method(&cls.ty, method);
-        }
-
+    /// Creates a global definition for the class 
+    /// and allows a class to be accessed by the enclosing block.
+    pub(super) fn register_cls(&mut self, cls: plir::Class) -> PLIRResult<()> {
+        self.peek_block().insert_class(cls.clone());
         self.push_global(cls)
     }
 
@@ -2044,7 +2038,12 @@ impl PLIRCodegen {
             .map(|p| plir::Type::new_type_var(cls_id.clone(), p));
         
         let cls = plir::Class { ty: plir::Type::new_generic(cls_id.clone(), params), fields };
-        self.register_cls(cls, methods)
+        for m in methods {
+            self.peek_block().insert_unresolved_method(&cls.ty, m);
+        }
+        self.register_cls(cls)?;
+
+        Ok(())
     }
     fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
         let Located(expr, range) = value;
