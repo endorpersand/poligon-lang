@@ -332,14 +332,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         let char_ = layout!(self, S_CHAR).into_int_type();
                         let int_  = layout!(self, S_INT).into_int_type();
 
-                        let msg_ptr = unsafe {
-                            self.builder.build_global_string(msg, "throw_msg")
-                                .as_pointer_value()
-                        };
+                        let msg_ptr = self.build_global_string(msg, "throw_msg")
+                            .as_pointer_value();
                         let w_ptr = self.module.get_global("_write")
-                            .unwrap_or_else(|| unsafe {
-                                self.builder.build_global_string("w", "_write")}
-                            )
+                            .unwrap_or_else(|| self.build_global_string("w", "_write"))
                             .as_pointer_value();
 
                         let fputs = self.import_intrinsic("#fputs")?;
@@ -390,6 +386,23 @@ impl<'ctx> LLVMCodegen<'ctx> {
         }
     }
 
+    /// Builds a new global string onto the current module without requiring a builder.
+    fn build_global_string(&self, value: &str, name: &str) -> GlobalValue<'ctx> {
+        let bytes = value.as_bytes()
+            .split(|&b| b == 0x00)
+            .next()
+            .expect("first value of slice::split should have existed");
+        
+        let str_constant = self.ctx.const_string(bytes, true);
+        let gv = self.module.add_global(str_constant.get_type(), None, name);
+        gv.set_constant(true);
+        gv.set_linkage(Linkage::Private);
+        gv.set_initializer(&str_constant);
+        gv.set_unnamed_addr(true);
+        gv.set_alignment(1);
+
+        gv
+    }
     /// Create a function value from the function's PLIR signature.
     fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<(FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { private, ident, params, ret, varargs } = sig;
@@ -643,7 +656,6 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         // split the functions from everything else:
         let mut main_fun = None;
         let mut fun_bodies = vec![];
-        let mut globals = vec![];
         let plir::Program(hoisted, proc) = &self;
 
         for stmt in hoisted {
@@ -665,7 +677,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                     cls.write_value(compiler)?;
                 },
                 HoistedStmt::IGlobal(id, value) => {
-                    globals.push((id, value));
+                    let global = compiler.build_global_string(value, id);
+                    compiler.globals.insert(id.to_string(), global);
                 },
             }
         }
@@ -682,22 +695,6 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
                 (main_fn, Some(stmts))
             }
         };
-        
-        let global_bb = compiler.ctx.append_basic_block(main, "globals");
-        compiler.builder.position_at_end(global_bb);
-
-        // load globals before loading fun bodies
-        // globals have to be loaded within a function, so we're doing it in main
-        for (id, value) in globals {
-            let global = unsafe {
-                compiler.builder.build_global_string(value, id)
-            };
-            compiler.globals.insert(id.to_string(), global);
-        }
-
-        // SAFETY: this basic block was just created
-        // and therefore cannot have been referenced.
-        unsafe { global_bb.delete().unwrap(); }
 
         // this is delayed until after all types are resolved
         for bodies in fun_bodies {
@@ -734,7 +731,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         // register default locale
         let setlocale = compiler.import_intrinsic("#setlocale")?;
         let int_ = compiler.ctx.i64_type();
-        let template = unsafe { compiler.builder.build_global_string("en_US.UTF-8\0", "locale")};
+        let template = compiler.build_global_string("en_US.UTF-8", "locale");
         compiler.builder.build_call(setlocale, params![int_.const_zero(), template.as_pointer_value()], "");
 
         // wrap inner main
