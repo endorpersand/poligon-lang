@@ -16,6 +16,7 @@
 mod op_impl;
 mod ty_apply;
 mod ty_classes;
+mod exit;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -30,6 +31,7 @@ use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
+use self::exit::{BlockTerminals, BlockBehavior, BlockExit};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
@@ -193,91 +195,6 @@ impl std::error::Error for PLIRErr {
     }
 }
 
-#[derive(Debug, Clone)]
-enum BlockExit {
-    /// This block exited by returning a value.
-    Return(plir::Type),
-
-    /// This block exited by `break`.
-    Break,
-
-    /// This block exited by `continue`.
-    Continue,
-
-    /// This block exited normally.
-    Exit(plir::Type),
-
-    /// An exception was thrown
-    Throw,
-}
-
-#[derive(PartialEq, Eq, Debug)]
-enum BlockBehavior {
-    /// This block is a function body.
-    Function,
-
-    /// This block is the body for a `while` or `for` loop.
-    Loop,
-
-    /// This block is on its own.
-    Bare,
-
-    /// This block is the body of an `if` statement.
-    Conditional
-}
-
-enum BlockExitHandle {
-    /// Continue running in the upper loop.
-    /// 
-    /// If a block exits here, it has a known value type.
-    Continue(plir::Type),
-    
-    /// This is either an `break` or `continue`.
-    /// 
-    /// If a block exits here, there is no type.
-    LoopExit,
-
-    /// Propagate the exit to the upper loop.
-    /// 
-    /// The second parameter is `true` if this is a conditional exit (it does not ALWAYS occur).
-    Propagate(BlockExit, bool /* conditional? */),
-}
-
-impl BlockBehavior {
-    fn handle_exit(&self, exit: BlockExit) -> Result<BlockExitHandle, PLIRErr> {
-        match self {
-            BlockBehavior::Function => match exit {
-                BlockExit::Return(t) => Ok(BlockExitHandle::Continue(t)),
-                BlockExit::Break     => Err(PLIRErr::CannotBreak),
-                BlockExit::Continue  => Err(PLIRErr::CannotContinue),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
-            },
-            BlockBehavior::Loop => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
-                BlockExit::Break     => Ok(BlockExitHandle::LoopExit),
-                BlockExit::Continue  => Ok(BlockExitHandle::LoopExit),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
-            },
-            BlockBehavior::Bare => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, false)),
-                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, false)),
-                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, false)),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, false)),
-            },
-            BlockBehavior::Conditional => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Propagate(exit, true)),
-                BlockExit::Break     => Ok(BlockExitHandle::Propagate(exit, true)),
-                BlockExit::Continue  => Ok(BlockExitHandle::Propagate(exit, true)),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Continue(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Propagate(exit, true)),
-            },
-        }
-    }
-}
-
 fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<String, TypeData> {
     prims.into_iter()
         .map(|t| {
@@ -385,13 +302,7 @@ struct ClassKey {
 struct InsertBlock {
     block: Vec<plir::ProcStmt>,
     last_stmt_loc: CursorRange, 
-
-    /// All conditional exits.
-    exits: Vec<Located<BlockExit>>,
-    /// The *unconditional* exit.
-    /// If this is present, this is the last statement of the block.
-    /// If a conditional exit does not pass, this exit is how the block exits.
-    final_exit: Option<Located<BlockExit>>,
+    block_terminals: BlockTerminals,
 
     vars: HashMap<plir::FunIdent, plir::Type>,
     types: HashMap<String, TypeData>,
@@ -412,8 +323,7 @@ impl InsertBlock {
         Self {
             block: vec![],
             last_stmt_loc: block_range,
-            exits: vec![],
-            final_exit: None,
+            block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: HashMap::new(),
             type_aliases: HashMap::new(),
@@ -430,8 +340,7 @@ impl InsertBlock {
         Self {
             block: vec![],
             last_stmt_loc: (0, 0) ..= (0, 0),
-            exits: vec![],
-            final_exit: None,
+            block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
@@ -492,7 +401,9 @@ impl InsertBlock {
                 None => plir::ty!(plir::Type::S_VOID),
             };
             self.block.push(plir::ProcStmt::Return(me));
-            self.final_exit.replace(Located::new(BlockExit::Return(ty), stmt_range));
+            self.block_terminals.add_exit(
+                Located::new(BlockExit::Return(ty), stmt_range), true
+            );
         }
 
         false
@@ -505,7 +416,9 @@ impl InsertBlock {
     fn push_break(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Break);
-            self.final_exit.replace(Located::new(BlockExit::Break, stmt_range));
+            self.block_terminals.add_exit(
+                Located::new(BlockExit::Break, stmt_range), true
+            );
         }
 
         false
@@ -518,7 +431,9 @@ impl InsertBlock {
     fn push_cont(&mut self, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Continue);
-            self.final_exit.replace(Located::new(BlockExit::Continue, stmt_range));
+            self.block_terminals.add_exit(
+                Located::new(BlockExit::Continue, stmt_range), true
+            );
         }
 
         false
@@ -531,7 +446,9 @@ impl InsertBlock {
     fn push_throw(&mut self, e: String, stmt_range: CursorRange) -> bool {
         if self.is_open() {
             self.block.push(plir::ProcStmt::Throw(e));
-            self.final_exit.replace(Located::new(BlockExit::Throw, stmt_range));
+            self.block_terminals.add_exit(
+                Located::new(BlockExit::Throw, stmt_range), true
+            );
         }
 
         false
@@ -548,7 +465,9 @@ impl InsertBlock {
                 None => plir::ty!(plir::Type::S_VOID),
             };
             self.block.push(plir::ProcStmt::Exit(me));
-            self.final_exit.replace(Located::new(BlockExit::Exit(ty), stmt_range));
+            self.block_terminals.add_exit(
+                Located::new(BlockExit::Exit(ty), stmt_range), true
+            );
         }
 
         false
@@ -1086,20 +1005,11 @@ impl PLIRCodegen {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, mut exits, unres_values, unres_types, .. } = self.program;
+        let InsertBlock {block, mut block_terminals, unres_values, unres_types, .. } = self.program;
+
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in program {}", unres_values.iter().next().unwrap().0);
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program {}", unres_types.iter().next().unwrap().0);
-
-        match exits.pop() {
-            None => Ok(()),
-            Some(Located(exit, range)) => match exit {
-                BlockExit::Break     => Err(PLIRErr::CannotBreak.at_range(range)),
-                BlockExit::Continue  => Err(PLIRErr::CannotContinue.at_range(range)),
-                BlockExit::Return(_) => Err(PLIRErr::CannotReturn.at_range(range)),
-                BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn.at_range(range)),
-                BlockExit::Throw     => Ok(()),
-            }
-        }?;
+        block_terminals.propagate(BlockBehavior::Top)?;
 
         let stmts = self.globals.stmts.into_values().collect();
 
@@ -1569,10 +1479,10 @@ impl PLIRCodegen {
         &mut self, 
         block: InsertBlock, 
         btype: BlockBehavior
-    ) -> PLIRResult<plir::Block> {
+    ) -> PLIRResult<(plir::Block, BlockTerminals)> {
         let InsertBlock { 
             mut block, last_stmt_loc, 
-            exits, final_exit, 
+            mut block_terminals, 
             vars: _, types: _, type_aliases: _,
             unres_values, unres_types, generic_ctx: _,
             expected_ty
@@ -1582,8 +1492,8 @@ impl PLIRCodegen {
 
         use plir::{ProcStmt, ty};
 
-        // fill the unconditional exit if necessary:
-        let mut final_exit = final_exit.unwrap_or_else(|| {
+        // make sure this block ends:
+        if !block_terminals.is_closed() {
             // we need to add an explicit exit statement.
 
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
@@ -1604,92 +1514,76 @@ impl PLIRCodegen {
 
             if btype == BlockBehavior::Function {
                 block.push(ProcStmt::Return(exit_expr));
-                Located::new(BlockExit::Return(exit_ty), last_stmt_loc)
+                block_terminals.add_exit(
+                    Located::new(BlockExit::Return(exit_ty), last_stmt_loc), true
+                );
             } else {
                 block.push(ProcStmt::Exit(exit_expr));
-                Located::new(BlockExit::Exit(exit_ty), last_stmt_loc)
+                block_terminals.add_exit(
+                    Located::new(BlockExit::Exit(exit_ty), last_stmt_loc), true
+                );
             }
-        });
+        }
 
         // Type check block:
         if let Some(expected_ty) = expected_ty {
-            let Located(fexit, exit_range) = &mut final_exit;
-            let exit_range = exit_range.clone();
-
-            match fexit {
-                | BlockExit::Return(exit_ty) 
-                | BlockExit::Exit(exit_ty) 
-                => if exit_ty.downgrade() != expected_ty.downgrade() {
-                    let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
-                        unreachable!();
-                    };
-
-                    match m_exit_expr.take() {
-                        Some(exit_expr) => {
-                            let l_exit_expr = Located::new(exit_expr, exit_range);
-                            let flags = match btype == BlockBehavior::Function {
-                                true  => CastFlags::Decl | CastFlags::Void,
-                                false => CastFlags::Implicit,
-                            };
-
-                            let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
-                            m_exit_expr.replace(new_e);
-                        },
-                        // exit_ty is void, and we already checked that exp_ty is not void
-                        // this should trigger a fail
-                        None => {
-                            self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
-                                .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
-                        },
-                    }
+            match btype {
+                BlockBehavior::Function
+                | BlockBehavior::Bare 
+                => {
+                    // if exit_ty.downgrade() != expected_ty.downgrade() {
+                    //     let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
+                    //         unreachable!();
+                    //     };
+    
+                    //     match m_exit_expr.take() {
+                    //         Some(exit_expr) => {
+                    //             let l_exit_expr = Located::new(exit_expr, exit_range);
+                    //             let flags = match btype == BlockBehavior::Function {
+                    //                 true  => CastFlags::Decl | CastFlags::Void,
+                    //                 false => CastFlags::Implicit,
+                    //             };
+    
+                    //             let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
+                    //             m_exit_expr.replace(new_e);
+                    //         },
+                    //         // exit_ty is void, and we already checked that exp_ty is not void
+                    //         // this should trigger a fail
+                    //         None => {
+                    //             self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
+                    //                 .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
+                    //         },
+                    //     }
+                    // }
                 },
-                // what is done here?
-                BlockExit::Break => {},
-                BlockExit::Continue => {},
-                BlockExit::Throw => {},
+                BlockBehavior::Loop
+                | BlockBehavior::Top => {
+                    panic!("did not expect block ({btype:?}) to have expected type '{expected_ty}")
+                },
             }
         }
 
         // resolve block's types and handle the methods of exiting the block
-        let mut type_branches = vec![];
-        for Located(exit, exit_range) in exits {
-            match btype.handle_exit(exit.clone())? {
-                BlockExitHandle::Continue(ty) => type_branches.push(ty),
-                BlockExitHandle::LoopExit => {},
-
-                // second parameter does not matter here because
-                // this is already conditional.
-                // as such, just propagate as a conditional exit.
-                BlockExitHandle::Propagate(exit, _) => {
-                    self.peek_block().exits.push(Located::new(exit, exit_range));
-                },
-            }
-        }
-
-        let Located(final_exit, exit_range) = final_exit;
-        match btype.handle_exit(final_exit)? {
-            BlockExitHandle::Continue(ty) => type_branches.push(ty),
-            BlockExitHandle::LoopExit => {},
-            BlockExitHandle::Propagate(exit, conditional) => {
-                let located_exit = Located::new(exit, exit_range.clone());
-                if conditional {
-                    self.peek_block().exits.push(located_exit);
-                } else {
-                    self.peek_block().final_exit.replace(located_exit);
-                }
-            },
-        }
+        let ltype_branches = block_terminals.propagate(btype)?;
+        let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = {
+            ltype_branches.into_iter()
+            .map(|Located(ty, range)| (ty, range))
+            .unzip()
+        };
 
         let bty = plir::Type::resolve_branches(&type_branches)
-            .ok_or_else(|| PLIRErr::CannotResolveType.at_range(exit_range))?;
-        Ok(plir::Block(bty, block))
+            .ok_or_else(|| {
+                let err = PLIRErr::CannotResolveType.at_unknown();
+                exit_ranges.into_iter().fold(err, |e, range| e.and_at_range(range))
+            })?;
+        Ok((plir::Block(bty, block), block_terminals))
     }
     fn consume_tree_block(
         &mut self, 
         block: Located<ast::Block>, 
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
-    ) -> PLIRResult<plir::Block> {
+    ) -> PLIRResult<(plir::Block, BlockTerminals)> {
         let Located(ast::Block(stmts), block_range) = block;
 
         self.push_block(block_range, expected_ty);
@@ -1915,7 +1809,10 @@ impl PLIRCodegen {
             self.consume_stmts(old_block.0)?;
     
             let insert_block = self.pop_block().unwrap();
-            self.consume_insert_block(insert_block, BlockBehavior::Function)?
+            let (block, term) = self.consume_insert_block(insert_block, BlockBehavior::Function)?;
+            self.peek_block().block_terminals.add_propagated(term); // TODO: ?
+
+            block
         };
 
         let fun_decl = plir::FunDecl { sig, block };
@@ -2067,8 +1964,9 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::Block(b) => {
-                let block = self.consume_tree_block(b, BlockBehavior::Bare, None)?;
-                
+                let (block, terms) = self.consume_tree_block(b, BlockBehavior::Bare, None)?;
+                self.peek_block().block_terminals.add_propagated(terms);
+
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
             ast::Expr::Literal(literal) => {
@@ -2244,8 +2142,10 @@ impl PLIRCodegen {
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
-                self.consume_insert_block(insert_block, BlockBehavior::Bare)
-                    .map(|b| plir::Expr::new(b.0.clone(), plir::ExprType::Block(b)))
+                let (block, term) = self.consume_insert_block(insert_block, BlockBehavior::Bare)?;
+                self.peek_block().block_terminals.add_propagated(term);
+
+                Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
             ast::Expr::Path(p) => {
                 self.consume_path(Located::new(p, range)).map(Into::into)
@@ -2302,19 +2202,26 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::If { conditionals, last } => {
-                let conditionals: Vec<_> = conditionals.into_iter()
+                let (conditionals, mut terms): (Vec<_>, Vec<_>) = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr_truth(cond)?;
-                        let b = self.consume_tree_block(block, BlockBehavior::Conditional, ctx_type.clone())?;
-                        Ok((c, b))
+                        let (b, term) = self.consume_tree_block(block, BlockBehavior::Bare, ctx_type.clone())?;
+                        Ok(((c, b), term))
                     })
-                    .collect::<PLIRResult<_>>()?;
+                    .collect::<PLIRResult<Vec<_>>>()?
+                    .into_iter()
+                    .unzip();
                 
-                let last = match last {
-                    Some(blk) => Some(self.consume_tree_block(blk, BlockBehavior::Conditional, ctx_type)?),
-                    None => None,
+                let (last, term) = match last {
+                    Some(blk) => {
+                        let (block, term) = self.consume_tree_block(blk, BlockBehavior::Bare, ctx_type)?;
+                        (Some(block), term)
+                    },
+                    None => (None, BlockTerminals::new()),
                 };
-                
+                terms.push(term);
+                self.peek_block().block_terminals.add_conditional(terms);
+
                 let void_ = plir::ty!(plir::Type::S_VOID);
                 let else_ty = last.as_ref()
                     .map(|b| &b.0)
@@ -2332,7 +2239,8 @@ impl PLIRCodegen {
             },
             ast::Expr::While { condition, block } => {
                 let condition = self.consume_expr_truth(*condition)?;
-                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                let (block, term) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                self.peek_block().block_terminals.add_propagated(term);
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_VOID),
@@ -2366,7 +2274,9 @@ impl PLIRCodegen {
                     _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?,
                 };
 
-                let block = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                let (block, term) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                self.peek_block().block_terminals.add_propagated(term);
+
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_VOID),
                     plir::ExprType::For { ident, element_type, iterator, block }

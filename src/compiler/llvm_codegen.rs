@@ -122,6 +122,7 @@ impl<'ctx> TypeLayouts<BasicTypeEnum<'ctx>> {
             ("#ptr",        ctx.i8_type().ptr_type(Default::default()).into()),
             ("#byte",       ctx.i8_type().into()),
             (Type::S_VOID,  ctx.struct_type(&[], false).into()),
+            (Type::S_NEVER, ctx.struct_type(&[], false).into())
         ] {
             layouts.insert(plir::ty!(id), layout);
         }
@@ -355,7 +356,16 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         self.builder.build_unreachable();
                         (None, None)
                     },
-                    _ => unreachable!("block should have ended with exit statement")
+                    e => {
+                        // This statement must be terminal, as it is last.
+                        // Therefore, write it and raise unreachable in the return block
+                        // because it cannot be reached.
+                        e.write_value(self)?;
+                        if self.get_insert_block().get_terminator().is_none() {
+                            self.builder.build_unreachable();
+                        }
+                        (None, None)
+                    }
                 }
             },
             None => unreachable!("block had no statements")

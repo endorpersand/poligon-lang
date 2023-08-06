@@ -70,6 +70,7 @@ impl<'a> Cast<'a> {
 
         let result = match (self.src.ty.downgrade(), self.dest.downgrade()) {
             (l, r) if l == r => true,
+            (Prim(Borrowed(Type::S_NEVER)), _) => true,
             (_, Prim(Borrowed(Type::S_STR))) if self.cf.allows(CastFlags::Stringify) => {
                 // Load src class
                 let src_key = cg.get_class_key(self.src.as_ref().map(|e| &e.ty))?;
