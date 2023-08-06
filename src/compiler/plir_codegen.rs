@@ -715,10 +715,10 @@ impl DeclaredTypes {
 
         match stmt {
             HoistedStmt::FunDecl(f) => {
-                self.values.insert(f.sig.ident.clone(), plir::Type::Fun(f.sig.ty()));
+                self.values.insert(f.sig.ident.clone(), f.sig.ty().into());
             },
             HoistedStmt::ExternFunDecl(f) => {
-                self.values.insert(f.ident.clone(), plir::Type::Fun(f.ty()));
+                self.values.insert(f.ident.clone(), f.ty().into());
             },
             HoistedStmt::ClassDecl(c) => {
                 self.types.insert(c.ty.clone(), c.clone());
@@ -1819,7 +1819,7 @@ impl PLIRCodegen {
     }
 
     pub(super) fn register_fun_sig(&mut self, fs: plir::FunSignature) -> PLIRResult<()> {
-        self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
+        self.declare(&fs.ident, fs.ty().into());
         self.push_global(fs)
     }
 
@@ -1870,7 +1870,7 @@ impl PLIRCodegen {
             varargs
         };
 
-        self.declare(&fs.ident, plir::Type::Fun(fs.ty()));
+        self.declare(&fs.ident, fs.ty().into());
         Ok(fs)
     }
 

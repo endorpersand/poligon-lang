@@ -296,12 +296,12 @@ impl<'a> From<FunTypeRef<'a>> for TypeRef<'a> {
     }
 }
 
-impl<'a, 'b> PartialEq<TypeRef<'a>> for FunTypeRef<'b> {
+impl<'a> PartialEq<TypeRef<'a>> for FunTypeRef<'a> {
     fn eq(&self, other: &TypeRef<'a>) -> bool {
         TypeRef::from(self.downgrade()).eq(other)
     }
 }
-impl<'a, 'b> PartialEq<FunTypeRef<'a>> for TypeRef<'b> {
+impl<'a> PartialEq<FunTypeRef<'a>> for TypeRef<'a> {
     fn eq(&self, other: &FunTypeRef<'a>) -> bool {
         self.eq(&TypeRef::from(other.downgrade()))
     }
