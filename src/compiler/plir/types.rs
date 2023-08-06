@@ -280,14 +280,30 @@ impl FunType {
     }
 }
 
-impl TryFrom<Type> for FunType {
+impl<'a> TryFrom<TypeRef<'a>> for FunTypeRef<'a> {
     type Error = PLIRErr;
 
-    fn try_from(value: Type) -> Result<Self, Self::Error> {
+    fn try_from(value: TypeRef<'a>) -> Result<Self, Self::Error> {
         match value {
-            Type::Fun(f) => Ok(f),
-            t => Err(PLIRErr::CannotCall(t))
+            TypeRef::Fun(f) => Ok(f),
+            t => Err(PLIRErr::CannotCall(t.upgrade()))
         }
+    }
+}
+impl<'a> From<FunTypeRef<'a>> for TypeRef<'a> {
+    fn from(value: FunTypeRef<'a>) -> Self {
+        Self::Fun(value)
+    }
+}
+
+impl<'a, 'b> PartialEq<TypeRef<'a>> for FunTypeRef<'b> {
+    fn eq(&self, other: &TypeRef<'a>) -> bool {
+        TypeRef::from(self.downgrade()).eq(other)
+    }
+}
+impl<'a, 'b> PartialEq<FunTypeRef<'a>> for TypeRef<'b> {
+    fn eq(&self, other: &FunTypeRef<'a>) -> bool {
+        self.eq(&TypeRef::from(other.downgrade()))
     }
 }
 
