@@ -557,6 +557,23 @@ impl InsertBlock {
         false
     }
 
+    /// Push an exit statement into this insert block.
+    /// 
+    /// The return will be false, indicating another statement cannot
+    /// be pushed into the insert block (as a final exit has been set).
+    fn push_exit(&mut self, me: Option<plir::Expr>, stmt_range: CursorRange) -> bool {
+        if self.is_open() {
+            let ty = match me {
+                Some(ref e) => e.ty.clone(),
+                None => plir::ty!(plir::Type::S_VOID),
+            };
+            self.block.push(plir::ProcStmt::Exit(me));
+            self.final_exit.replace(Located::new(BlockExit::Exit(ty), stmt_range));
+        }
+
+        false
+    }
+
     /// Insert an unresolved class/function into the insert block.
     fn insert_unresolved<U>(&mut self, unresolved: U) 
         where U: Unresolved,
@@ -1488,7 +1505,7 @@ impl PLIRCodegen {
         let peek_ctx_type = self.peek_block().expected_ty.clone();
         let len = eager_stmts.len();
         for (i, stmt) in eager_stmts.into_iter().enumerate() {
-            if !self.consume_eager_stmt(stmt, &peek_ctx_type, len - 1 - i)? {
+            if !self.consume_proc_stmt(stmt, &peek_ctx_type, len - 1 - i)? {
                 break;
             }
         }
@@ -1530,7 +1547,7 @@ impl PLIRCodegen {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_eager_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<bool> {
+    fn consume_proc_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<bool> {
         let Located(stmt, range) = stmt;
 
         match stmt {
@@ -1552,11 +1569,8 @@ impl PLIRCodegen {
                 Ok(self.peek_block().push_throw(msg, range))
             },
             ast::Stmt::Expr(e) => {
-                let ety = if index_til_end == 0 {
-                    ctx_type.clone()
-                } else {
-                    None
-                };
+                let ety = ctx_type.clone()
+                    .filter(|_| index_til_end == 0);
 
                 let e = self.consume_located_expr(e, ety)?;
                 Ok(self.peek_block().push_stmt(e))
