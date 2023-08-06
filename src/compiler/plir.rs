@@ -157,6 +157,24 @@ mod stmt {
                 | ProcStmt::Expr(Expr { expr: ExprType::For { .. }, .. })
             )
         }
+
+        /// Test if this statement is terminal.
+        /// 
+        /// A statement is terminal if when inserted into a block,
+        /// any statements after it are unreachable.
+        pub fn is_terminal(&self) -> bool {
+            match self {
+                | ProcStmt::Return(_)
+                | ProcStmt::Break    
+                | ProcStmt::Continue 
+                | ProcStmt::Throw(_) 
+                | ProcStmt::Exit(_)
+                => true,
+                ProcStmt::Expr(e)
+                | ProcStmt::Decl(Decl { val: e, .. })
+                => e.ty.is_never(),
+            }
+        }
     }
 
     pub(super) trait EndsWithBlock {

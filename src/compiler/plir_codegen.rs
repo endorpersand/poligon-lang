@@ -450,32 +450,12 @@ impl InsertBlock {
         }
     }
 
-    fn last_stmt_type(&self) -> plir::TypeRef {
-        use plir::{ProcStmt, Type, ty};
-
-        match self.block.last() {
-            Some(ProcStmt::Decl(d)) => {
-                let ty = &d.val.ty;
-
-                if ty.is_never() {
-                    ty.downgrade()
-                } else {
-                    ty!(Type::S_VOID)
-                }
-            },
-            Some(ProcStmt::Return(_)) => ty!(Type::S_NEVER),
-            Some(ProcStmt::Break)     => ty!(Type::S_NEVER),
-            Some(ProcStmt::Continue)  => ty!(Type::S_NEVER),
-            Some(ProcStmt::Throw(_))  => ty!(Type::S_NEVER),
-            Some(ProcStmt::Exit(_))   => ty!(Type::S_NEVER),
-            Some(ProcStmt::Expr(e))   => e.ty.downgrade(),
-            None => ty!(Type::S_VOID),
-        }
-    }
-
     /// Determine whether another statement can be pushed into the insert block.
     fn is_open(&self) -> bool {
-        !self.last_stmt_type().is_never()
+        match self.block.last() {
+            Some(s) => !s.is_terminal(),
+            None => true,
+        }
     }
 
     /// Push a singular statement into this insert block.
