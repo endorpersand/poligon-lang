@@ -177,12 +177,12 @@ impl DParser {
                 Some(token![class]) => {
                     let cls = self.expect_class_decl()?;
 
-                    self.codegen.register_cls(cls)
+                    self.codegen.declare_cls(cls)
                         .map_err(|e| e.map(DParseErr::PLIRErr))?;
                 },
                 Some(token![extern]) => {
                     let fs = self.expect_extern_decl()?;
-                    self.codegen.register_fun_sig(fs)
+                    self.codegen.declare_extern_fun(fs)
                         .map_err(|e| e.map(DParseErr::PLIRErr))?;
                 },
                 Some(_) => Err(DParseErr::UnexpectedToken.at_range(self.peek_loc()))?,

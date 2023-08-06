@@ -566,15 +566,6 @@ impl InsertBlock {
             .insert(unresolved.rez_key().into_owned(), unresolved);
     }
 
-    /// Insert a class into the insert block's type register.
-    /// This allows the class to be accessed in the enclosing insert block.
-    fn insert_class(&mut self, cls: plir::Class) {
-        self.types.insert(
-            cls.ty.get_type_key().into_owned(),
-            TypeData::structural(cls)
-        );
-    }
-
     // ty parameter must be a class shape.
     fn insert_unresolved_method(&mut self, cls_ty: &plir::Type, method: ast::MethodDecl) {
         use MaybeInit::*;
@@ -655,11 +646,21 @@ impl InsertBlock {
         }
     }
 
-    /// Declares a variable within this insert block.
+    /// Declares a variable in this insert block, 
+    /// allowing it to be accessed in the enclosing insert block.
     fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.vars.insert(ident.as_fun_ident().into_owned(), ty);
+    }
+
+    /// Declares a class in this insert block,
+    /// allowing it to be accessed in the enclosing insert block.
+    fn declare_cls(&mut self, cls: plir::Class) {
+        self.types.insert(
+            cls.ty.get_type_key().into_owned(),
+            TypeData::structural(cls)
+        );
     }
 }
 
@@ -1132,13 +1133,6 @@ impl PLIRCodegen {
         self.blocks.last_mut().unwrap_or(&mut self.program)
     }
 
-    /// Declares a variable with a given type.
-    fn declare<I>(&mut self, ident: &I, ty: plir::Type) 
-        where I: plir::AsFunIdent + std::hash::Hash + ?Sized
-    {
-        self.peek_block().declare(ident, ty)
-    }
-
     /// Resolves an identifier during PLIR traversal.
     /// 
     /// When an identifier is found during PLIR traversal,
@@ -1188,7 +1182,7 @@ impl PLIRCodegen {
             fs.private = true;
             self.push_global(fs)?;
 
-            self.declare(ident, plir::Type::Fun(t.clone()));
+            self.peek_block().declare(ident, plir::Type::Fun(t.clone()));
         }
 
         Ok(())
@@ -1805,7 +1799,7 @@ impl PLIRCodegen {
                 // Type check decl, casting if possible
                 let e = this.expect_type(le, ty.clone(), CastFlags::Decl)?;
 
-                this.declare(&ident, ty.clone());
+                this.peek_block().declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
                 this.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
 
@@ -1818,9 +1812,37 @@ impl PLIRCodegen {
         Ok(self.peek_block().is_open())
     }
 
-    pub(super) fn register_fun_sig(&mut self, fs: plir::FunSignature) -> PLIRResult<()> {
-        self.declare(&fs.ident, fs.ty().into());
+    /// Creates a global definition for the external function (allowing it to be generated in LLVM)
+    /// and allows the external function to be accessed by the enclosing block.
+    pub(super) fn declare_extern_fun(&mut self, fs: plir::FunSignature) -> PLIRResult<()> {
+        self.peek_block().declare(&fs.ident, fs.ty().into());
         self.push_global(fs)
+    }
+
+    /// Creates a global definition for the function (allowing it to be generated in LLVM)
+    /// and allows the function to be accessed by the enclosing block.
+    pub(super) fn declare_fun(&mut self, f: plir::FunDecl) -> PLIRResult<()> {
+        let ib = self.peek_block();
+
+        // only declare if not already on there
+        match ib.vars.get(&f.sig.ident) {
+            Some(t) if t != &f.sig.ty() => {
+                panic!("declared function {} overrides value of a different type", f.sig.ident)
+            }
+            None => {
+                ib.declare(&f.sig.ident, f.sig.ty().into());
+            }
+            _ => {}
+        }
+
+        self.push_global(f)
+    }
+
+    /// Creates a global definition for the class (allowing it to be generated in LLVM)
+    /// and allows a class to be accessed by the enclosing block.
+    pub(super) fn declare_cls(&mut self, cls: plir::Class) -> PLIRResult<()> {
+        self.peek_block().declare_cls(cls.clone());
+        self.push_global(cls)
     }
 
     /// Consume a function signature and convert it into a PLIR function signature.
@@ -1870,7 +1892,7 @@ impl PLIRCodegen {
             varargs
         };
 
-        self.declare(&fs.ident, fs.ty().into());
+        self.peek_block().declare(&fs.ident, fs.ty().into());
         Ok(fs)
     }
 
@@ -1892,7 +1914,7 @@ impl PLIRCodegen {
             ib.generic_ctx = gctx;
 
             for plir::Param { ident, ty, .. } in sig.params.iter() {
-                self.declare(ident, ty.clone());
+                self.peek_block().declare(ident, ty.clone());
             }
     
             // collect all the statements from this block
@@ -1903,8 +1925,8 @@ impl PLIRCodegen {
         };
 
         let fun_decl = plir::FunDecl { sig, block };
+        self.declare_fun(fun_decl)?;
         
-        self.push_global(fun_decl)?;
         Ok(self.peek_block().is_open())
     }
 
@@ -2007,13 +2029,6 @@ impl PLIRCodegen {
             .map(|lty| lty.0)
     }
 
-    /// Creates a global definition for the class 
-    /// and allows a class to be accessed by the enclosing block.
-    pub(super) fn register_cls(&mut self, cls: plir::Class) -> PLIRResult<()> {
-        self.peek_block().insert_class(cls.clone());
-        self.push_global(cls)
-    }
-
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generics, fields, methods } = cls;
 
@@ -2041,7 +2056,7 @@ impl PLIRCodegen {
         for m in methods {
             self.peek_block().insert_unresolved_method(&cls.ty, m);
         }
-        self.register_cls(cls)?;
+        self.declare_cls(cls)?;
 
         Ok(())
     }
@@ -2350,7 +2365,7 @@ impl PLIRCodegen {
                         let idty = rp.clone();
 
                         // FIXME: put this inside block scope
-                        self.declare(&ident, idty.clone());
+                        self.peek_block().declare(&ident, idty.clone());
 
                         idty
                     }
