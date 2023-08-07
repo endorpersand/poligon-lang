@@ -24,89 +24,105 @@ pub use self::types::*;
 pub mod op;
 mod types;
 
-/// AST node with a known location.
-#[derive(PartialEq, Eq, Clone)]
-pub struct Located<T>(pub T, pub CursorRange);
+mod located {
+    use crate::err::CursorRange;
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Located(node, loc) = self;
+    /// AST node with a known location.
+    #[derive(PartialEq, Eq, Clone)]
+    pub struct Located<T>(pub T, pub CursorRange);
 
-        write!(f, "[{:?} ..= {:?}]", loc.start(), loc.end())?;
-        write!(f, "{node:?}")
+    impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Located(node, loc) = self;
+
+            write!(f, "[{:?} ..= {:?}]", loc.start(), loc.end())?;
+            write!(f, "{node:?}")
+        }
     }
+    impl<T> std::ops::Deref for Located<T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl<T> std::ops::DerefMut for Located<T> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    pub(crate) type LocatedBox<T> = Box<Located<T>>;
+
+    impl<T: PartialEq> PartialEq<T> for Located<T> {
+        fn eq(&self, other: &T) -> bool {
+            &self.0 == other
+        }
+    }
+
+    impl<T> Located<T> {
+        /// Create a new located node.
+        pub fn new(t: T, loc: CursorRange) -> Self {
+            Self(t, loc)
+        }
+
+        /// Create a new boxed located node.
+        pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
+            Box::new(Located(t, loc))
+        }
+
+        /// Similar to [`Option::as_ref`].
+        pub fn as_ref(&self) -> Located<&T> {
+            Located::new(&self.0, self.range())
+        }
+
+        /// Similar to [`Option::as_mut`].
+        pub fn as_mut(&mut self) -> Located<&mut T> {
+            let range = self.range();
+            Located::new(&mut self.0, range)
+        }
+        
+        /// Map a Located with a given type to a Located of another type.
+        pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
+            let Located(node, loc) = self;
+            Located(f(node), loc)
+        }
+
+        /// Gets this located node's range.
+        pub fn range(&self) -> CursorRange {
+            self.1.clone()
+        }
+
+    }
+
+    impl<T> Located<Option<T>> {
+        /// Transpose a located Option into an Option of a located node.
+        pub fn transpose_option(self) -> Option<Located<T>> {
+            let Located(value, range) = self;
+            value.map(|v| Located(v, range))
+        }
+    }
+
+    impl<T, E> Located<Result<T, E>> {
+        /// Transpose a located Result into a Result of a located node.
+        pub fn transpose_result(self) -> Result<Located<T>, E> {
+            let Located(value, range) = self;
+            value.map(|v| Located(v, range))
+        }
+    }
+
+    /// Helper trait that converts a Located call for a method call
+    pub trait Locatable {
+        /// Add a range to this object
+        fn located_at(self, range: CursorRange) -> Located<Self> 
+            where Self: Sized
+        {
+            Located::new(self, range)
+        }
+    }
+    impl<T> Locatable for T {}
 }
-impl<T> std::ops::Deref for Located<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<T> std::ops::DerefMut for Located<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub(crate) type LocatedBox<T> = Box<Located<T>>;
-
-impl<T: PartialEq> PartialEq<T> for Located<T> {
-    fn eq(&self, other: &T) -> bool {
-        &self.0 == other
-    }
-}
-
-impl<T> Located<T> {
-    /// Create a new located node.
-    pub fn new(t: T, loc: CursorRange) -> Self {
-        Self(t, loc)
-    }
-
-    /// Create a new boxed located node.
-    pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
-        Box::new(Located(t, loc))
-    }
-
-    /// Similar to [`Option::as_ref`].
-    pub fn as_ref(&self) -> Located<&T> {
-        Located::new(&self.0, self.range())
-    }
-
-    /// Similar to [`Option::as_mut`].
-    pub fn as_mut(&mut self) -> Located<&mut T> {
-        let range = self.range();
-        Located::new(&mut self.0, range)
-    }
-    
-    /// Map a Located with a given type to a Located of another type.
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
-        let Located(node, loc) = self;
-        Located(f(node), loc)
-    }
-
-    /// Gets this located node's range.
-    pub fn range(&self) -> CursorRange {
-        self.1.clone()
-    }
-
-}
-
-impl<T> Located<Option<T>> {
-    /// Transpose a located Option into an Option of a located node.
-    pub fn transpose_option(self) -> Option<Located<T>> {
-        let Located(value, range) = self;
-        value.map(|v| Located(v, range))
-    }
-}
-
-impl<T, E> Located<Result<T, E>> {
-    /// Transpose a located Result into a Result of a located node.
-    pub fn transpose_result(self) -> Result<Located<T>, E> {
-        let Located(value, range) = self;
-        value.map(|v| Located(v, range))
-    }
-}
+pub use located::*;
 
 /// A complete program.
 /// 
