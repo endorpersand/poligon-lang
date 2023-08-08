@@ -115,83 +115,6 @@ impl BlockBehavior {
 /// Struct which handles all of the exits from a block.
 #[derive(Debug)]
 pub(super) struct BlockTerminals {
-    /// All exits which will cause an exit out of this block
-    branches: Vec<Located<BlockExit>>,
-
-    /// If closed, any statements added to the block should be
-    /// considered unreachable, as the block is known to exit
-    /// out of one of its branches.
-    closed: bool
-}
-
-impl BlockTerminals {
-    pub(super) fn new() -> Self {
-        Self {
-            branches: vec![],
-            closed: false
-        }
-    }
-
-    pub(super) fn is_closed(&self) -> bool {
-        self.closed
-    }
-
-    /// Exits the block and determines which exits will affect the enclosing block.
-    /// 
-    /// The block behavior indicates which type of block this BlockTerminals is from.
-    pub(super) fn propagate(&mut self, bb: BlockBehavior) -> PLIRResult<Vec<Located<Type>>> {
-        let len = self.branches.len();
-
-        let mut propagated = vec![];
-        let mut halted = vec![];
-
-        for Located(exit, exit_range) in std::mem::take(&mut self.branches) {
-            match bb.handle_exit(exit).map_err(|e| e.at_range(exit_range.clone()))? {
-                ControlFlow::Continue(ex) => propagated.push(Located::new(ex, exit_range)),
-                ControlFlow::Break(t)     => halted.push(Located::new(t, exit_range)),
-            }
-        }
-
-        if bb == BlockBehavior::Loop {
-            // assume loops are always open, because we don't know if the code executes
-            self.closed = false;
-        } else {
-            // if any branches were removed, that means they exit into the enclosing block,
-            // so statements can appear after this
-            self.closed &= len == propagated.len();
-        }
-        self.branches = propagated;
-
-        Ok(halted)
-    }
-
-    pub(super) fn add_exit(&mut self, exit: Located<BlockExit>, is_unconditional: bool) {
-        if !self.closed {
-            self.branches.push(exit);
-            self.closed = is_unconditional;
-        }
-    }
-    pub(super) fn add_propagated(&mut self, b: BlockTerminals) {
-        if !self.closed {
-            self.branches.extend(b.branches);
-            self.closed = b.closed;
-        }
-    }
-    pub(super) fn add_conditional(&mut self, blocks: Vec<BlockTerminals>) {
-        if !self.closed {
-            let mut closed = true;
-            for block in blocks {
-                self.branches.extend(block.branches);
-                closed &= block.closed;
-            }
-            self.closed = closed;
-        }
-    }
-}
-
-/// Struct which handles all of the exits from a block.
-#[derive(Debug)]
-pub(super) struct BlockTerminals2 {
     /// Each element represents a pointer to a terminating instruction
     /// in a [`InstrBlock`].
     /// 
@@ -205,7 +128,7 @@ pub(super) struct BlockTerminals2 {
     pub(super) closed: bool,
 }
 
-impl BlockTerminals2 {
+impl BlockTerminals {
     pub(super) fn new() -> Self {
         Self {
             branches: HashMap::new(),
@@ -256,13 +179,13 @@ impl BlockTerminals2 {
             self.closed = is_unconditional;
         }
     }
-    pub(super) fn add_propagated(&mut self, b: BlockTerminals2) {
+    pub(super) fn add_propagated(&mut self, b: BlockTerminals) {
         if !self.closed {
             self.branches.extend(b.branches);
             self.closed = b.closed;
         }
     }
-    pub(super) fn add_conditional(&mut self, blocks: Vec<BlockTerminals2>) {
+    pub(super) fn add_conditional(&mut self, blocks: Vec<BlockTerminals>) {
         if !self.closed {
             let mut closed = true;
             for block in blocks {
@@ -279,4 +202,4 @@ impl BlockTerminals2 {
 
 /// Struct which handles all of the exits from a block.
 #[derive(Debug)]
-pub(super) struct TerminalFrag(pub(super) BlockTerminals2);
+pub(super) struct TerminalFrag(pub(super) BlockTerminals);

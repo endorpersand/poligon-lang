@@ -31,7 +31,7 @@ use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
-use self::exit::{BlockTerminals, BlockBehavior, BlockTerminals2, TerminalFrag};
+use self::exit::{BlockTerminals, BlockBehavior, TerminalFrag};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
@@ -582,14 +582,14 @@ fn output_addr(addr: &[usize]) -> String {
 #[derive(Debug)]
 struct InstrBlock {
     instructions: Vec<Located<plir::ProcStmt>>,
-    terminals: BlockTerminals2,
+    terminals: BlockTerminals,
     next_block_no: usize
 }
 impl InstrBlock {
     fn new() -> InstrBlock {
         Self {
             instructions: vec![],
-            terminals: BlockTerminals2::new(),
+            terminals: BlockTerminals::new(),
             next_block_no: 0
         }
     }
@@ -749,7 +749,7 @@ impl InstrBlock {
         (instructions, terminals.into_fragmented())
     }
 
-    fn _prepare_fragment(&mut self, frag: TerminalFrag) -> BlockTerminals2 {
+    fn _prepare_fragment(&mut self, frag: TerminalFrag) -> BlockTerminals {
         let mut other = frag.0;
 
         other.branches = other.branches.drain()
@@ -787,8 +787,7 @@ struct InsertBlock {
     instrs: InstrBlock,
     /// The range of the whole block, 
     /// only used to append a location to custom exits
-    block_range: CursorRange, 
-    block_terminals: BlockTerminals,
+    block_range: CursorRange,
 
     vars: HashMap<plir::FunIdent, plir::Type>,
     types: HashMap<String, TypeData>,
@@ -809,7 +808,6 @@ impl InsertBlock {
         Self {
             instrs: InstrBlock::new(),
             block_range,
-            block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: HashMap::new(),
             type_aliases: HashMap::new(),
@@ -826,7 +824,6 @@ impl InsertBlock {
         Self {
             instrs: InstrBlock::new(),
             block_range: (0, 0) ..= (0, 0),
-            block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
@@ -1867,7 +1864,7 @@ impl PLIRCodegen {
     ) -> PLIRResult<(plir::Block, TerminalFrag)> {
         let InsertBlock { 
             mut instrs, block_range: last_stmt_loc, 
-            block_terminals: _, vars: _, types: _, type_aliases: _,
+            vars: _, types: _, type_aliases: _,
             unres_values, unres_types, generic_ctx: _,
             expected_ty
         } = block;
@@ -2006,59 +2003,6 @@ impl PLIRCodegen {
             .collect();
 
         Ok((plir::Block(block_value_ty, stmts), frag))
-
-        // // Type check block:
-        // if let Some(expected_ty) = expected_ty {
-        //     match btype {
-        //         BlockBehavior::Function
-        //         | BlockBehavior::Bare 
-        //         => {
-        //             // if exit_ty.downgrade() != expected_ty.downgrade() {
-        //             //     let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
-        //             //         unreachable!();
-        //             //     };
-    
-        //             //     match m_exit_expr.take() {
-        //             //         Some(exit_expr) => {
-        //             //             let l_exit_expr = Located::new(exit_expr, exit_range);
-        //             //             let flags = match btype == BlockBehavior::Function {
-        //             //                 true  => CastFlags::Decl | CastFlags::Void,
-        //             //                 false => CastFlags::Implicit,
-        //             //             };
-    
-        //             //             let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
-        //             //             m_exit_expr.replace(new_e);
-        //             //         },
-        //             //         // exit_ty is void, and we already checked that exp_ty is not void
-        //             //         // this should trigger a fail
-        //             //         None => {
-        //             //             self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
-        //             //                 .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
-        //             //         },
-        //             //     }
-        //             // }
-        //         },
-        //         BlockBehavior::Loop
-        //         | BlockBehavior::Top => {
-        //             panic!("did not expect block ({btype:?}) to have expected type '{expected_ty}")
-        //         },
-        //     }
-        // }
-
-        // // resolve block's types and handle the methods of exiting the block
-        // let ltype_branches = block_terminals.propagate(btype)?;
-        // let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = {
-        //     ltype_branches.into_iter()
-        //     .map(|Located(ty, range)| (ty, range))
-        //     .unzip()
-        // };
-
-        // let bty = plir::Type::resolve_branches(&type_branches)
-        //     .ok_or_else(|| {
-        //         let err = PLIRErr::CannotResolveType.at_unknown();
-        //         exit_ranges.into_iter().fold(err, |e, range| e.and_at_range(range))
-        //     })?;
-        // Ok((plir::Block(bty, instrs), block_terminals))
     }
 
     fn unpack_pat<T, E>(
@@ -2683,7 +2627,7 @@ impl PLIRCodegen {
                         let (block, frag) = self.consume_tree_block(blk, BlockBehavior::Bare, ctx_type)?;
                         (Some(block), frag)
                     },
-                    None => (None, BlockTerminals2::new().into_fragmented()),
+                    None => (None, BlockTerminals::new().into_fragmented()),
                 };
                 frags.push(frag);
                 self.peek_block().instrs.add_conditional_fragments(frags);
