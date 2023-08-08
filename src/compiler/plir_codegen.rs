@@ -15,7 +15,7 @@
 
 mod op_impl;
 mod ty_classes;
-mod exit;
+mod instrs;
 mod walkers;
 
 use std::borrow::Cow;
@@ -31,7 +31,7 @@ use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
-use self::exit::{BlockTerminals, BlockBehavior, TerminalFrag, InstrAddr};
+use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
@@ -296,204 +296,6 @@ struct ClassKey {
     block: *const InsertBlock,
     scope: usize,
     referent: plir::Type
-}
-
-#[derive(Debug)]
-struct InstrBlock {
-    instructions: Vec<Located<plir::ProcStmt>>,
-    terminals: BlockTerminals,
-    next_block_no: usize
-}
-impl InstrBlock {
-    fn new() -> InstrBlock {
-        Self {
-            instructions: vec![],
-            terminals: BlockTerminals::new(),
-            next_block_no: 0
-        }
-    }
-
-    /// Determine whether another statement can be pushed into the insert block.
-    fn is_open(&self) -> bool {
-        match self.instructions.last() {
-            Some(s) => !s.is_terminal(),
-            None => true,
-        }
-    }
-
-    /// Next instruction number
-    fn next_instr_no(&self) -> usize {
-        self.instructions.len()
-    }
-
-    /// Push a singular statement into this instruction block (if not open).
-    fn push(&mut self, stmt: Located<impl Into<plir::ProcStmt>>) {
-        if self.is_open() {
-            let stmt = stmt.map(Into::into);
-            if stmt.is_simple_terminal() {
-                let instr_no = self.next_instr_no();
-                self.terminals.add_exit(InstrAddr::new(instr_no), stmt.range(), true);
-            }
-            self.next_block_no = 0;
-
-            self.instructions.push(stmt);
-        }
-    }
-
-    /// Pop off the last instruction.
-    /// 
-    /// This does not update terminals.
-    fn pop(&mut self) -> Option<Located<plir::ProcStmt>> {
-        self.instructions.pop()
-        // let linstr = self.instructions.pop();
-        
-        // if linstr.is_some() {
-        //     let mfrag = self.terminals.remove_terminals_w_instr(self.next_instr_no());
-        //     Some((linstr, mfrag))
-        // } else {
-        //     linstr.map(|instr| (instr, None))
-        // }
-    }
-
-    /// Index instructions, and return a ref to the statement at the index if present.
-    fn get(&self, addr: &InstrAddr) -> Option<&plir::ProcStmt> {
-        let mut addr_scanner = addr.path_from_root();
-        
-        let top = addr_scanner.next().unwrap();
-        let mut stmt = &**self.instructions.get(top)?;
-
-        while let Some((block_idx, stmt_idx)) = Option::zip(addr_scanner.next(), addr_scanner.next()) {
-            let block = match stmt {
-                | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
-                | plir::ProcStmt::Return(Some(e))
-                | plir::ProcStmt::Exit(Some(e))
-                | plir::ProcStmt::Expr(e)
-                => walkers::ExprBlockIter::new(e).nth(block_idx),
-
-                | plir::ProcStmt::Return(None)
-                | plir::ProcStmt::Break
-                | plir::ProcStmt::Continue
-                | plir::ProcStmt::Throw(_)
-                | plir::ProcStmt::Exit(None)
-                => None
-            }?;
-
-            stmt = block.1.get(stmt_idx)?;
-        }
-
-        Some(stmt)
-    }
-
-    fn raw_get_mut<'a>(instrs: &'a mut [Located<plir::ProcStmt>], addr: &InstrAddr) -> Option<&'a mut plir::ProcStmt> {
-        let mut addr_scanner = addr.path_from_root();
-        
-        let top = addr_scanner.next().unwrap();
-        let mut stmt = &mut **instrs.get_mut(top)?;
-
-        while let Some((block_idx, stmt_idx)) = Option::zip(addr_scanner.next(), addr_scanner.next()) {
-            let block = match stmt {
-                | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
-                | plir::ProcStmt::Return(Some(e))
-                | plir::ProcStmt::Exit(Some(e))
-                | plir::ProcStmt::Expr(e)
-                => walkers::ExprBlockIterMut::new(e).nth(block_idx),
-
-                | plir::ProcStmt::Return(None)
-                | plir::ProcStmt::Break
-                | plir::ProcStmt::Continue
-                | plir::ProcStmt::Throw(_)
-                | plir::ProcStmt::Exit(None)
-                => None
-            }?;
-
-            stmt = block.1.get_mut(stmt_idx)?;
-        }
-
-        Some(stmt)
-    }
-
-    /// Index instructions, and return a mut ref to the statement at the index if present.
-    /// 
-    /// A lot of uses for this will be broken. 
-    /// 
-    /// Non-terminal statements replacing non-terminal statements,
-    /// and terminal statements replacing terminal statements will be valid.
-    /// 
-    /// However, other than that, the block status will not be updated properly.
-    fn get_mut(&mut self, addr: &InstrAddr) -> Option<&mut plir::ProcStmt> {
-        Self::raw_get_mut(&mut self.instructions, addr)
-    }
-
-    fn split_off_unpropagated_terminals(&mut self, btype: BlockBehavior) -> PLIRResult<Vec<Located<InstrAddr>>> {
-        let len = self.terminals.branches.len();
-
-        let mut propagated = vec![];
-        let mut not_propagated = vec![];
-
-        for (addr, loc) in self.terminals.branches.drain() {
-            let Some(term) = Self::raw_get_mut(&mut self.instructions, &addr) else {
-                panic!("address {addr:?} has no statement");
-            };
-
-            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc.clone()))?;
-            if is_propagating {
-                propagated.push((addr, loc));
-            } else {
-                not_propagated.push(Located::new(addr, loc));
-            }
-        }
-
-        let plen = propagated.len();
-        self.terminals.branches.extend(propagated);
-
-        if btype == BlockBehavior::Loop {
-            // assume loops are always open, because we don't know if the code executes
-            self.terminals.closed = false;
-        } else {
-            // if any branches were removed, that means they exit into the enclosing block,
-            // so statements can appear after this
-            self.terminals.closed &= len <= plen;
-        }
-
-        Ok(not_propagated)
-    }
-
-    fn unravel(self) -> (Vec<Located<plir::ProcStmt>>, TerminalFrag) {
-        let InstrBlock { instructions, terminals, next_block_no: _ } = self;
-        (instructions, terminals.into_fragmented())
-    }
-
-    fn _prepare_fragment(&mut self, frag: TerminalFrag) -> BlockTerminals {
-        let mut other = frag.0;
-
-        other.branches = other.branches.drain()
-            .map(|(mut addr, loc)| {
-                addr.add_parent(self.next_instr_no(), self.next_block_no);
-                (addr, loc)
-            })
-            .collect();
-
-        self.next_block_no += 1;
-        
-        other
-    }
-    fn add_fragment(&mut self, frag: TerminalFrag) {
-        let other = self._prepare_fragment(frag);
-        self.terminals.add_propagated(other);
-    }
-    fn add_conditional_fragments(&mut self, frags: Vec<TerminalFrag>) {
-        let others = frags.into_iter()
-            .map(|frag| self._prepare_fragment(frag))
-            .collect();
-        self.terminals.add_conditional(others);
-    }
-}
-impl std::ops::Deref for InstrBlock {
-    type Target = [Located<plir::ProcStmt>];
-
-    fn deref(&self) -> &Self::Target {
-        &self.instructions
-    }
 }
 
 #[derive(Debug)]
@@ -1588,7 +1390,7 @@ impl PLIRCodegen {
         use plir::ProcStmt;
 
         // make sure this block ends:
-        if !instrs.terminals.is_closed() {
+        if instrs.is_open() {
             // we need to add an explicit exit statement.
 
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
@@ -2341,7 +2143,7 @@ impl PLIRCodegen {
                         let (block, frag) = self.consume_tree_block(blk, BlockBehavior::Bare, ctx_type)?;
                         (Some(block), frag)
                     },
-                    None => (None, BlockTerminals::new().into_fragmented()),
+                    None => (None, TerminalFrag::new()),
                 };
                 frags.push(frag);
                 self.peek_block().instrs.add_conditional_fragments(frags);
