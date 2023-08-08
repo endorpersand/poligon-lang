@@ -25,13 +25,13 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 
-use crate::ast::{self, ReasgType, MutType};
+use crate::ast::{self, ReasgType, MutType, Locatable};
 use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
-use self::exit::{BlockTerminals, BlockBehavior, BlockExit};
+use self::exit::{BlockTerminals, BlockBehavior, BlockTerminals2, TerminalFrag};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
@@ -298,10 +298,496 @@ struct ClassKey {
     referent: plir::Type
 }
 
+struct ExprBlockIter<'e> {
+    exprs: Vec<(&'e plir::Expr, usize)>
+}
+impl<'e> ExprBlockIter<'e> {
+    fn new(e: &'e plir::Expr) -> Self {
+        Self { exprs: vec![(e, 0)] }
+    }
+    fn add_to_stack(&mut self, expr: &'e plir::Expr) {
+        self.exprs.push((expr, 0));
+    }
+}
+impl<'e> Iterator for ExprBlockIter<'e> {
+    type Item = &'e plir::Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let out = loop {
+            let (expr, i) = self.exprs.last_mut()?;
+            *i += 1; // the next index
+            let j = *i - 1; // the current index
+
+            match &expr.expr {
+                plir::ExprType::Block(b) if j == 0 => break b,
+                
+                plir::ExprType::ListLiteral(exprs) 
+                | plir::ExprType::SetLiteral(exprs) 
+                | plir::ExprType::ClassLiteral(_, exprs)
+                    if j < exprs.len() => {
+                        self.add_to_stack(&exprs[j]);
+                    },
+                plir::ExprType::DictLiteral(d) 
+                    if (j / 2) < d.len() => {
+                        let (vec_idx, pair_idx) = (j / 2, j % 2);
+                        
+                        let pair = &d[vec_idx];
+                        self.add_to_stack(if pair_idx == 0 { &pair.0 } else { &pair.1 });
+                    },
+                plir::ExprType::Assign(_, e) if j == 0 => { self.add_to_stack(e); }
+                
+                plir::ExprType::Path(plir::Path::Struct(e, _))
+                | plir::ExprType::Path(plir::Path::Method(e, _, _))
+                    if j == 0 => {
+                        self.add_to_stack(e);
+                    },
+                
+                plir::ExprType::UnaryOps { ops: _, expr } if j == 0 => self.add_to_stack(expr),
+
+                plir::ExprType::BinaryOp { op: _, left, right: _ } if j == 0 => self.add_to_stack(left),
+                plir::ExprType::BinaryOp { op: _, left: _, right } if j == 1 => self.add_to_stack(right),
+                
+                plir::ExprType::Comparison { left, rights: _ } if j == 0 => self.add_to_stack(left),
+                plir::ExprType::Comparison { left: _, rights } 
+                    if 1 <= j && j < rights.len() + 1 => {
+                        self.add_to_stack(&rights[j - 1].1);
+                    },
+                
+                plir::ExprType::Range { left, right: _, step: _ } if j == 0 => self.add_to_stack(left),
+                plir::ExprType::Range { left: _, right, step: _ } if j == 1 => self.add_to_stack(right),
+                plir::ExprType::Range { left: _, right: _, step } 
+                    if step.is_some() && j == 2 => {
+                        self.add_to_stack(step.as_ref().unwrap());
+                    },
+                
+                plir::ExprType::If { conditionals, last: _ }
+                    if (j / 2) < conditionals.len() => {
+                        let (vec_idx, pair_idx) = (j / 2, j % 2);
+                        
+                        let pair = &conditionals[vec_idx];
+                        if pair_idx == 0 {
+                            self.add_to_stack(&pair.0);
+                        } else {
+                            break &pair.1;
+                        }
+                    },
+                plir::ExprType::If { conditionals, last }
+                    if last.is_some() && j == conditionals.len() * 2 => {
+                        break last.as_ref().unwrap();
+                    }
+
+                plir::ExprType::While { condition, block: _ } if j == 0 => self.add_to_stack(condition),
+                plir::ExprType::While { condition: _, block } if j == 1 => break block,
+
+                plir::ExprType::For { ident: _, element_type: _, iterator, block: _ } 
+                    if j == 0 => {
+                        self.add_to_stack(iterator);
+                    },
+                plir::ExprType::For { ident: _, element_type: _, iterator: _, block } 
+                    if j == 1 => {
+                        break block;
+                    },
+
+                plir::ExprType::Call { funct, params: _ } if j == 0 => self.add_to_stack(funct),
+                plir::ExprType::Call { funct: _, params } 
+                    if 1 <= j && j < params.len() + 1 => {
+                        self.add_to_stack(&params[j - 1]);
+                    },
+
+                plir::ExprType::Index(plir::Index { expr, index: _ }) if j == 0 => self.add_to_stack(expr),
+                plir::ExprType::Index(plir::Index { expr: _, index }) if j == 1 => self.add_to_stack(index),
+
+                plir::ExprType::Spread(s) if s.is_some() && j == 0 => {
+                    self.add_to_stack(s.as_ref().unwrap());
+                },
+
+                plir::ExprType::Cast(expr) if j == 0 => self.add_to_stack(expr),
+
+                plir::ExprType::Deref(plir::IDeref { expr, ty: _ }) if j == 0 => self.add_to_stack(expr),
+
+                plir::ExprType::GEP(_, ptr, _) if j == 0 => self.add_to_stack(ptr),
+                plir::ExprType::GEP(_, _, indices) 
+                    if 1 <= j && j < indices.len() + 1 => {
+                        self.add_to_stack(&indices[j - 1]);
+                    },
+
+                | plir::ExprType::Ident(_)
+                | plir::ExprType::Block(_)
+                | plir::ExprType::Literal(_)
+                | plir::ExprType::ListLiteral(_)
+                | plir::ExprType::SetLiteral(_)
+                | plir::ExprType::DictLiteral(_)
+                | plir::ExprType::ClassLiteral(_, _)
+                | plir::ExprType::Assign(_, _)
+                | plir::ExprType::Path(_)
+                | plir::ExprType::UnaryOps { .. }
+                | plir::ExprType::BinaryOp { .. }
+                | plir::ExprType::Comparison { .. }
+                | plir::ExprType::Range { .. }
+                | plir::ExprType::If { .. }
+                | plir::ExprType::While { .. }
+                | plir::ExprType::For { .. }
+                | plir::ExprType::Call { .. }
+                | plir::ExprType::Index(_)
+                | plir::ExprType::Spread(_)
+                | plir::ExprType::Split(_, _)
+                | plir::ExprType::Cast(_)
+                | plir::ExprType::Deref(_)
+                | plir::ExprType::GEP(_, _, _)
+                | plir::ExprType::Alloca(_)
+                | plir::ExprType::SizeOf(_)
+                => { self.exprs.pop(); }
+            }
+        };
+
+        Some(out)
+    }
+}
+
+enum ExprOrBlock<'e> {
+    Expr(&'e mut plir::Expr),
+    Block(&'e mut plir::Block)
+}
+struct ExprBlockIterMut<'e> {
+    frontier: Vec<ExprOrBlock<'e>>
+}
+impl<'e> ExprBlockIterMut<'e> {
+    fn new(e: &'e mut plir::Expr) -> Self {
+        Self { frontier: vec![ExprOrBlock::Expr(e)] }
+    }
+    fn add_expr(&mut self, expr: &'e mut plir::Expr) {
+        self.frontier.push(ExprOrBlock::Expr(expr));
+    }
+    fn add_exprs(&mut self, expr: impl IntoIterator<Item=&'e mut plir::Expr>) {
+        self.frontier.extend(expr.into_iter().map(ExprOrBlock::Expr));
+    }
+    fn add_block(&mut self, block: &'e mut plir::Block) {
+        self.frontier.push(ExprOrBlock::Block(block));
+    }
+}
+impl<'e> Iterator for ExprBlockIterMut<'e> {
+    type Item = &'e mut plir::Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let out = loop {
+            match self.frontier.pop()? {
+                ExprOrBlock::Expr(e) => match &mut e.expr {
+                    | plir::ExprType::Ident(_)
+                    | plir::ExprType::Literal(_)
+                    => {},
+    
+                    plir::ExprType::Block(b) => break b,
+    
+                    | plir::ExprType::ListLiteral(exprs)
+                    | plir::ExprType::SetLiteral(exprs)
+                    | plir::ExprType::ClassLiteral(_, exprs) 
+                    => {
+                        self.add_exprs(
+                            exprs.iter_mut().rev()
+                        );
+                    },
+                    
+                    plir::ExprType::DictLiteral(entries) => {
+                        self.add_exprs(
+                            entries.iter_mut()
+                                .flat_map(|(k, v)| [k, v])
+                                .rev()
+                        );
+                    },
+
+                    plir::ExprType::Assign(_, e) => self.add_expr(e),
+                    
+                    plir::ExprType::Path(p) => match p {
+                        plir::Path::Static(_, _, _) => {},
+                        plir::Path::Struct(e, _) => self.add_expr(e),
+                        plir::Path::Method(m, _, _) => self.add_expr(m),
+                    },
+                    plir::ExprType::UnaryOps { ops: _, expr } => self.add_expr(expr),
+                    plir::ExprType::BinaryOp { op: _, left, right } => {
+                        self.add_expr(right);
+                        self.add_expr(left);
+                    },
+                    plir::ExprType::Comparison { left, rights } => {
+                        self.add_exprs(
+                            rights.iter_mut()
+                                .map(|(_, e)| e)
+                                .rev()
+                        );
+                        self.add_expr(left);
+                    },
+                    plir::ExprType::Range { left, right, step } => {
+                        if let Some(step) = step {
+                            self.add_expr(step);
+                        }
+                        self.add_expr(right);
+                        self.add_expr(left);
+                    },
+                    plir::ExprType::If { conditionals, last } => {
+                        if let Some(last) = last {
+                            self.add_block(last);
+                        }
+                        self.frontier.extend(
+                            conditionals.iter_mut()
+                                .flat_map(|(c, b)| [ExprOrBlock::Expr(c), ExprOrBlock::Block(b)])
+                                .rev()
+                        );
+                    },
+                    plir::ExprType::While { condition, block } => {
+                        self.add_block(block);
+                        self.add_expr(condition);
+                    },
+                    plir::ExprType::For { ident: _, element_type: _, iterator, block } => {
+                        self.add_block(block);
+                        self.add_expr(iterator);
+                    },
+                    plir::ExprType::Call { funct, params } => {
+                        self.add_exprs(params.iter_mut().rev());
+                        self.add_expr(funct);
+                    },
+                    plir::ExprType::Index(plir::Index { expr, index }) => {
+                        self.add_expr(index);
+                        self.add_expr(expr);
+                    },
+                    plir::ExprType::Spread(s) => {
+                        if let Some(expr) = s {
+                            self.add_expr(expr);
+                        }
+                    },
+                    plir::ExprType::Split(_, _) => {},
+                    plir::ExprType::Cast(e) => self.add_expr(e),
+                    plir::ExprType::Deref(plir::IDeref { expr, ty: _ }) => self.add_expr(expr),
+                    plir::ExprType::GEP(_, ptr, idx) => {
+                        self.add_exprs(idx.iter_mut().rev());
+                        self.add_expr(ptr);
+                    },
+                    plir::ExprType::Alloca(_) => {},
+                    plir::ExprType::SizeOf(_) => {},
+                },
+                ExprOrBlock::Block(b) => break b,
+            }
+        };
+
+        Some(out)
+    }
+}
+
+fn output_addr(addr: &[usize]) -> String {
+    addr.iter()
+        .rev()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+#[derive(Debug)]
+struct InstrBlock {
+    instructions: Vec<Located<plir::ProcStmt>>,
+    terminals: BlockTerminals2,
+    next_block_no: usize
+}
+impl InstrBlock {
+    fn new() -> InstrBlock {
+        Self {
+            instructions: vec![],
+            terminals: BlockTerminals2::new(),
+            next_block_no: 0
+        }
+    }
+
+    /// Determine whether another statement can be pushed into the insert block.
+    fn is_open(&self) -> bool {
+        match self.instructions.last() {
+            Some(s) => !s.is_terminal(),
+            None => true,
+        }
+    }
+
+    /// Next instruction number
+    fn next_instr_no(&self) -> usize {
+        self.instructions.len()
+    }
+
+    /// Push a singular statement into this instruction block (if not open).
+    fn push(&mut self, stmt: Located<impl Into<plir::ProcStmt>>) {
+        if self.is_open() {
+            let stmt = stmt.map(Into::into);
+            if stmt.is_simple_terminal() {
+                let instr_no = self.next_instr_no();
+                self.terminals.add_exit(vec![instr_no], stmt.range(), true);
+            }
+            // TODO; complex terminals
+            self.instructions.push(stmt);
+        }
+    }
+    // Pop off the last instruction.
+    fn pop(&mut self) -> Option<Located<plir::ProcStmt>> {
+        self.instructions.pop()
+        // TODO: terminals
+    }
+
+    /// Index instructions, and return a ref to the statement at the index if present.
+    fn get(&self, addr: &[usize]) -> Option<&plir::ProcStmt> {
+        assert!(!addr.is_empty(), "instruction pointer must have at least one index");
+        
+        let (&top, rest) = addr.split_last().unwrap();
+        let mut stmt = &**self.instructions.get(top)?;
+        
+        let mut addr_reader = rest.iter().rev();
+        while let Some((&block_idx, &stmt_idx)) = Option::zip(addr_reader.next(), addr_reader.next()) {
+            let block = match stmt {
+                | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
+                | plir::ProcStmt::Return(Some(e))
+                | plir::ProcStmt::Exit(Some(e))
+                | plir::ProcStmt::Expr(e)
+                => ExprBlockIter::new(e).nth(block_idx),
+
+                | plir::ProcStmt::Return(None)
+                | plir::ProcStmt::Break
+                | plir::ProcStmt::Continue
+                | plir::ProcStmt::Throw(_)
+                | plir::ProcStmt::Exit(None)
+                => None
+            }?;
+
+            stmt = block.1.get(stmt_idx)?;
+        }
+
+        Some(stmt)
+    }
+
+    fn raw_get_mut<'a>(instrs: &'a mut [Located<plir::ProcStmt>], addr: &[usize]) -> Option<&'a mut plir::ProcStmt> {
+        assert!(!addr.is_empty(), "instruction pointer must have at least one index");
+        
+        let (&top, rest) = addr.split_last().unwrap();
+        let mut stmt = &mut **instrs.get_mut(top)?;
+        
+        let mut addr_reader = rest.iter().rev();
+        while let Some((&block_idx, &stmt_idx)) = Option::zip(addr_reader.next(), addr_reader.next()) {
+            let block = match stmt {
+                | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
+                | plir::ProcStmt::Return(Some(e))
+                | plir::ProcStmt::Exit(Some(e))
+                | plir::ProcStmt::Expr(e)
+                => ExprBlockIterMut::new(e).nth(block_idx),
+
+                | plir::ProcStmt::Return(None)
+                | plir::ProcStmt::Break
+                | plir::ProcStmt::Continue
+                | plir::ProcStmt::Throw(_)
+                | plir::ProcStmt::Exit(None)
+                => None
+            }?;
+
+            stmt = block.1.get_mut(stmt_idx)?;
+        }
+
+        Some(stmt)
+    }
+
+    /// Index instructions, and return a mut ref to the statement at the index if present.
+    /// 
+    /// A lot of uses for this will be broken. 
+    /// 
+    /// Non-terminal statements replacing non-terminal statements,
+    /// and terminal statements replacing terminal statements will be valid.
+    /// 
+    /// However, other than that, the block status will not be updated properly.
+    fn get_mut(&mut self, addr: &[usize]) -> Option<&mut plir::ProcStmt> {
+        Self::raw_get_mut(&mut self.instructions, addr)
+    }
+
+    // Replace an instruction.
+    fn replace<F>(&mut self, instr_ptr: &[usize], f: F)
+        where F: FnOnce(plir::ProcStmt) -> plir::ProcStmt
+    {
+        let proc_stmt_ref = self.get_mut(instr_ptr)
+            .unwrap_or_else(|| panic!("instruction {instr_ptr:?} not present"));
+        
+        let proc_stmt = std::mem::replace(
+            proc_stmt_ref, 
+            plir::ProcStmt::Throw("this should never appear".to_string())
+        );
+        *proc_stmt_ref = f(proc_stmt);
+    }
+
+    fn split_off_unpropagated_terminals(&mut self, btype: BlockBehavior) -> PLIRResult<Vec<Located<Vec<usize>>>> {
+        let len = self.terminals.branches.len();
+
+        let mut propagated = vec![];
+        let mut not_propagated = vec![];
+
+        for (addr, loc) in self.terminals.branches.drain() {
+            let Some(term) = Self::raw_get_mut(&mut self.instructions, &addr) else {
+                panic!("address {} has no statement", output_addr(&addr));
+            };
+
+            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc.clone()))?;
+            if is_propagating {
+                propagated.push((addr, loc));
+            } else {
+                not_propagated.push(Located::new(addr, loc));
+            }
+        }
+
+        let plen = propagated.len();
+        self.terminals.branches.extend(propagated);
+
+        if btype == BlockBehavior::Loop {
+            // assume loops are always open, because we don't know if the code executes
+            self.terminals.closed = false;
+        } else {
+            // if any branches were removed, that means they exit into the enclosing block,
+            // so statements can appear after this
+            self.terminals.closed &= len <= plen;
+        }
+
+        Ok(not_propagated)
+    }
+
+    fn unravel(self) -> (Vec<Located<plir::ProcStmt>>, TerminalFrag) {
+        let InstrBlock { instructions, terminals, next_block_no: _ } = self;
+        (instructions, terminals.into_fragmented())
+    }
+
+    fn _prepare_fragment(&mut self, frag: TerminalFrag) -> BlockTerminals2 {
+        let mut other = frag.0;
+
+        other.branches = other.branches.drain()
+            .map(|(mut addr, loc)| {
+                addr.extend([self.next_block_no, self.next_instr_no()]);
+                (addr, loc)
+            })
+            .collect();
+
+        self.next_block_no += 1;
+        
+        other
+    }
+    fn add_fragment(&mut self, frag: TerminalFrag) {
+        let other = self._prepare_fragment(frag);
+        self.terminals.add_propagated(other);
+    }
+    fn add_conditional_fragments(&mut self, frags: Vec<TerminalFrag>) {
+        let others = frags.into_iter()
+            .map(|frag| self._prepare_fragment(frag))
+            .collect();
+        self.terminals.add_conditional(others);
+    }
+}
+impl std::ops::Deref for InstrBlock {
+    type Target = [Located<plir::ProcStmt>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.instructions
+    }
+}
+
 #[derive(Debug)]
 struct InsertBlock {
-    block: Vec<plir::ProcStmt>,
-    last_stmt_loc: CursorRange, 
+    instrs: InstrBlock,
+    /// The range of the whole block, 
+    /// only used to append a location to custom exits
+    block_range: CursorRange, 
     block_terminals: BlockTerminals,
 
     vars: HashMap<plir::FunIdent, plir::Type>,
@@ -321,8 +807,8 @@ struct InsertBlock {
 impl InsertBlock {
     fn new(block_range: CursorRange, expected_ty: Option<plir::Type>) -> Self {
         Self {
-            block: vec![],
-            last_stmt_loc: block_range,
+            instrs: InstrBlock::new(),
+            block_range,
             block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: HashMap::new(),
@@ -338,8 +824,8 @@ impl InsertBlock {
         use plir::{Type, ty};
 
         Self {
-            block: vec![],
-            last_stmt_loc: (0, 0) ..= (0, 0),
+            instrs: InstrBlock::new(),
+            block_range: (0, 0) ..= (0, 0),
             block_terminals: BlockTerminals::new(),
             vars: HashMap::new(),
             types: primitives([
@@ -357,120 +843,6 @@ impl InsertBlock {
             generic_ctx: None,
             expected_ty: None
         }
-    }
-
-    /// Determine whether another statement can be pushed into the insert block.
-    fn is_open(&self) -> bool {
-        match self.block.last() {
-            Some(s) => !s.is_terminal(),
-            None => true,
-        }
-    }
-
-    /// Push a singular statement into this insert block.
-    /// 
-    /// The return indicates whether or not another statement 
-    /// can be pushed into the insert block (whether a final exit has been set).
-    fn push_stmt(&mut self, stmt: Located<impl Into<plir::ProcStmt>>) -> bool {
-        use plir::ProcStmt;
-
-        let Located(stmt, stmt_range) = stmt;
-        match stmt.into() {
-            ProcStmt::Return(e) => self.push_return(e, stmt_range),
-            ProcStmt::Break => self.push_break(stmt_range),
-            ProcStmt::Continue => self.push_cont(stmt_range),
-            st => {
-                if self.is_open() {
-                    self.block.push(st);
-                    self.last_stmt_loc = stmt_range;
-                }
-
-                self.is_open()
-            }
-        }
-    }
-
-    /// Push a return statement into this insert block.
-    /// 
-    /// The return will be false, indicating another statement cannot
-    /// be pushed into the insert block (as a final exit has been set).
-    fn push_return(&mut self, me: Option<plir::Expr>, stmt_range: CursorRange) -> bool {
-        if self.is_open() {
-            let ty = match me {
-                Some(ref e) => e.ty.clone(),
-                None => plir::ty!(plir::Type::S_VOID),
-            };
-            self.block.push(plir::ProcStmt::Return(me));
-            self.block_terminals.add_exit(
-                Located::new(BlockExit::Return(ty), stmt_range), true
-            );
-        }
-
-        false
-    }
-
-    /// Push a break statement into this insert block.
-    /// 
-    /// The return will be false, indicating another statement cannot
-    /// be pushed into the insert block (as a final exit has been set).
-    fn push_break(&mut self, stmt_range: CursorRange) -> bool {
-        if self.is_open() {
-            self.block.push(plir::ProcStmt::Break);
-            self.block_terminals.add_exit(
-                Located::new(BlockExit::Break, stmt_range), true
-            );
-        }
-
-        false
-    }
-
-    /// Push a continue statement into this insert block.
-    /// 
-    /// The return will be false, indicating another statement cannot
-    /// be pushed into the insert block (as a final exit has been set).
-    fn push_cont(&mut self, stmt_range: CursorRange) -> bool {
-        if self.is_open() {
-            self.block.push(plir::ProcStmt::Continue);
-            self.block_terminals.add_exit(
-                Located::new(BlockExit::Continue, stmt_range), true
-            );
-        }
-
-        false
-    }
-
-    /// Push a throw statement into this insert block.
-    /// 
-    /// The return will be false, indicating another statement cannot
-    /// be pushed into the insert block (as a final exit has been set).
-    fn push_throw(&mut self, e: String, stmt_range: CursorRange) -> bool {
-        if self.is_open() {
-            self.block.push(plir::ProcStmt::Throw(e));
-            self.block_terminals.add_exit(
-                Located::new(BlockExit::Throw, stmt_range), true
-            );
-        }
-
-        false
-    }
-
-    /// Push an exit statement into this insert block.
-    /// 
-    /// The return will be false, indicating another statement cannot
-    /// be pushed into the insert block (as a final exit has been set).
-    fn push_exit(&mut self, me: Option<plir::Expr>, stmt_range: CursorRange) -> bool {
-        if self.is_open() {
-            let ty = match me {
-                Some(ref e) => e.ty.clone(),
-                None => plir::ty!(plir::Type::S_VOID),
-            };
-            self.block.push(plir::ProcStmt::Exit(me));
-            self.block_terminals.add_exit(
-                Located::new(BlockExit::Exit(ty), stmt_range), true
-            );
-        }
-
-        false
     }
 
     /// Insert an unresolved class/function into the insert block.
@@ -1005,17 +1377,22 @@ impl PLIRCodegen {
             "insert block was opened but not properly closed"
         );
 
-        let InsertBlock {block, mut block_terminals, unres_values, unres_types, .. } = self.program;
+        let InsertBlock {mut instrs, unres_values, unres_types, .. } = self.program;
 
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in program {}", unres_values.iter().next().unwrap().0);
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program {}", unres_types.iter().next().unwrap().0);
-        block_terminals.propagate(BlockBehavior::Top)?;
 
         let stmts = self.globals.stmts.into_values().collect();
+        
+        instrs.split_off_unpropagated_terminals(BlockBehavior::Top)?;
+        let block = instrs.unravel().0
+            .into_iter()
+            .map(|lstmt| lstmt.0)
+            .collect();
 
-        let mut resolver = self.resolver;
         let mut program = plir::Program(stmts, block);
-
+        
+        let mut resolver = self.resolver;
         ty_apply::TypeApplier(&mut resolver).walk_program(&mut program)
             .map_err(|e @ CannotResolve(n)| {
                 PLIRErr::from(e)
@@ -1316,7 +1693,7 @@ impl PLIRCodegen {
             val: e,
         };
 
-        self.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
+        self.peek_block().instrs.push(Located::new(decl, decl_range.clone()));
 
         Var {
             ident,
@@ -1395,7 +1772,8 @@ impl PLIRCodegen {
         let peek_ctx_type = self.peek_block().expected_ty.clone();
         let len = eager_stmts.len();
         for (i, stmt) in eager_stmts.into_iter().enumerate() {
-            if !self.consume_proc_stmt(stmt, &peek_ctx_type, len - 1 - i)? {
+            self.consume_proc_stmt(stmt, &peek_ctx_type, len - 1 - i)?;
+            if !self.peek_block().instrs.is_open() {
                 break;
             }
         }
@@ -1437,7 +1815,9 @@ impl PLIRCodegen {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_proc_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<bool> {
+    fn consume_proc_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<()> {
+        use plir::ProcStmt;
+
         let Located(stmt, range) = stmt;
 
         match stmt {
@@ -1447,29 +1827,34 @@ impl PLIRCodegen {
                     Some(e) => Some(self.consume_expr(e, ctx_type.clone())?),
                     None => None,
                 };
-                Ok(self.peek_block().push_return(maybe_expr, range))
+                self.peek_block().instrs.push(ProcStmt::Return(maybe_expr).located_at(range));
+                Ok(())
             },
             ast::Stmt::Break => {
-                Ok(self.peek_block().push_break(range))
+                self.peek_block().instrs.push(ProcStmt::Break.located_at(range));
+                Ok(())
             },
             ast::Stmt::Continue => {
-                Ok(self.peek_block().push_cont(range))
+                self.peek_block().instrs.push(ProcStmt::Continue.located_at(range));
+                Ok(())
             },
             ast::Stmt::Throw(msg) => {
-                Ok(self.peek_block().push_throw(msg, range))
+                self.peek_block().instrs.push(ProcStmt::Throw(msg).located_at(range));
+                Ok(())
             },
             ast::Stmt::Expr(e) => {
                 let ety = ctx_type.clone()
                     .filter(|_| index_til_end == 0);
 
                 let e = self.consume_located_expr(e, ety)?;
-                Ok(self.peek_block().push_stmt(e))
+                self.peek_block().instrs.push(e);
+                Ok(())
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
             ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
             ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
             ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
-            ast::Stmt::ImportIntrinsic => Ok(self.peek_block().is_open()), // no-op
+            ast::Stmt::ImportIntrinsic => Ok(()), // no-op
             ast::Stmt::IGlobal(_, _) => unimplemented!("global decl should not be resolved eagerly"),
             ast::Stmt::FitClassDecl(_, _) => unimplemented!("fit class decl should not be resolved eagerly"),
         }
@@ -1479,111 +1864,53 @@ impl PLIRCodegen {
         &mut self, 
         block: InsertBlock, 
         btype: BlockBehavior
-    ) -> PLIRResult<(plir::Block, BlockTerminals)> {
+    ) -> PLIRResult<(plir::Block, TerminalFrag)> {
         let InsertBlock { 
-            mut block, last_stmt_loc, 
-            mut block_terminals, 
-            vars: _, types: _, type_aliases: _,
+            mut instrs, block_range: last_stmt_loc, 
+            block_terminals: _, vars: _, types: _, type_aliases: _,
             unres_values, unres_types, generic_ctx: _,
             expected_ty
         } = block;
         debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
         debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
 
-        use plir::{ProcStmt, ty};
+        use plir::ProcStmt;
 
         // make sure this block ends:
-        if !block_terminals.is_closed() {
+        if !instrs.terminals.is_closed() {
             // we need to add an explicit exit statement.
 
             // if the stmt given is an Expr, we need to replace the Expr with an explicit `exit` stmt.
             // otherwise just append an `exit` stmt.
-            let exit_expr = match block.pop() {
-                Some(ProcStmt::Expr(e)) => Some(e),
-                Some(stmt) => {
-                    block.push(stmt);
-                    None
+            let exit_range = match instrs.last() {
+                Some(lstmt) => lstmt.range(),
+                None => last_stmt_loc,
+            };
+            let exit_mexpr = match instrs.last() {
+                Some(Located(ProcStmt::Expr(_), _)) => {
+                    let Some(Located(ProcStmt::Expr(e), _)) = instrs.pop() else { unreachable!() };
+                    Some(e)
                 },
-                None => None
+                Some(_) => None,
+                None => None,
             };
 
-            let exit_ty = match &exit_expr {
-                Some(e) => e.ty.clone(),
-                None => ty!(plir::Type::S_VOID),
-            };
-
-            if btype == BlockBehavior::Function {
-                block.push(ProcStmt::Return(exit_expr));
-                block_terminals.add_exit(
-                    Located::new(BlockExit::Return(exit_ty), last_stmt_loc), true
-                );
+            let term_instr = if btype == BlockBehavior::Function {
+                ProcStmt::Return(exit_mexpr)
             } else {
-                block.push(ProcStmt::Exit(exit_expr));
-                block_terminals.add_exit(
-                    Located::new(BlockExit::Exit(exit_ty), last_stmt_loc), true
-                );
-            }
+                ProcStmt::Exit(exit_mexpr)
+            };
+            instrs.push(term_instr.located_at(exit_range));
         }
 
-        // Type check block:
-        if let Some(expected_ty) = expected_ty {
-            match btype {
-                BlockBehavior::Function
-                | BlockBehavior::Bare 
-                => {
-                    // if exit_ty.downgrade() != expected_ty.downgrade() {
-                    //     let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
-                    //         unreachable!();
-                    //     };
-    
-                    //     match m_exit_expr.take() {
-                    //         Some(exit_expr) => {
-                    //             let l_exit_expr = Located::new(exit_expr, exit_range);
-                    //             let flags = match btype == BlockBehavior::Function {
-                    //                 true  => CastFlags::Decl | CastFlags::Void,
-                    //                 false => CastFlags::Implicit,
-                    //             };
-    
-                    //             let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
-                    //             m_exit_expr.replace(new_e);
-                    //         },
-                    //         // exit_ty is void, and we already checked that exp_ty is not void
-                    //         // this should trigger a fail
-                    //         None => {
-                    //             self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
-                    //                 .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
-                    //         },
-                    //     }
-                    // }
-                },
-                BlockBehavior::Loop
-                | BlockBehavior::Top => {
-                    panic!("did not expect block ({btype:?}) to have expected type '{expected_ty}")
-                },
-            }
-        }
-
-        // resolve block's types and handle the methods of exiting the block
-        let ltype_branches = block_terminals.propagate(btype)?;
-        let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = {
-            ltype_branches.into_iter()
-            .map(|Located(ty, range)| (ty, range))
-            .unzip()
-        };
-
-        let bty = plir::Type::resolve_branches(&type_branches)
-            .ok_or_else(|| {
-                let err = PLIRErr::CannotResolveType.at_unknown();
-                exit_ranges.into_iter().fold(err, |e, range| e.and_at_range(range))
-            })?;
-        Ok((plir::Block(bty, block), block_terminals))
+        self.consume_instr_block(instrs, expected_ty, btype)
     }
     fn consume_tree_block(
         &mut self, 
         block: Located<ast::Block>, 
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
-    ) -> PLIRResult<(plir::Block, BlockTerminals)> {
+    ) -> PLIRResult<(plir::Block, TerminalFrag)> {
         let Located(ast::Block(stmts), block_range) = block;
 
         self.push_block(block_range, expected_ty);
@@ -1591,6 +1918,147 @@ impl PLIRCodegen {
         self.consume_stmts(stmts)?;
         let insert_block = self.pop_block().unwrap();
         self.consume_insert_block(insert_block, btype)
+    }
+    fn consume_instr_block(
+        &mut self, 
+        mut instrs: InstrBlock, 
+        expected_ty: Option<plir::Type>,
+        btype: BlockBehavior
+    ) -> PLIRResult<(plir::Block, TerminalFrag)> {
+        use plir::ty;
+        let unpropagated_addrs = instrs.split_off_unpropagated_terminals(btype)?;
+
+        // Type check block:
+        if let Some(exp_ty) = expected_ty {
+            for laddr in &unpropagated_addrs {
+                let Some(stmt) = instrs.get_mut(&laddr) else {
+                    panic!("no statement at {:?}", output_addr(&laddr))
+                };
+
+                match stmt {
+                    | plir::ProcStmt::Return(me @ Some(_))
+                    | plir::ProcStmt::Exit(me @ Some(_))
+                    => {
+                        let flags = match btype == BlockBehavior::Function {
+                            true  => CastFlags::Decl | CastFlags::Void,
+                            false => CastFlags::Implicit,
+                        };
+
+                        let e = me.take().unwrap();
+                        let new_e = self.expect_type(e.located_at(laddr.range()), exp_ty.clone(), flags)?;
+                        me.replace(new_e);
+                    },
+
+                    | plir::ProcStmt::Return(None)
+                    | plir::ProcStmt::Exit(None)
+                    | plir::ProcStmt::Break
+                    | plir::ProcStmt::Continue => {
+                        self.resolver.add_constraint(ty!(plir::Type::S_VOID), exp_ty.clone())
+                            .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(laddr.range()))?;
+                    },
+                    plir::ProcStmt::Throw(_) => {},
+                    
+                    | plir::ProcStmt::Decl(_)
+                    | plir::ProcStmt::Expr(_)
+                    => panic!("not terminal at {:?}", output_addr(&laddr)),
+                }
+            }
+        }
+
+        let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = unpropagated_addrs.iter()
+            .map(|Located(addr, range)| {
+                let Some(stmt) = instrs.get(&addr) else {
+                    panic!("no statement at {:?}", output_addr(&addr))
+                };
+    
+                let ty = match stmt {
+                    | plir::ProcStmt::Return(Some(e))
+                    | plir::ProcStmt::Exit(Some(e))
+                    => e.ty.clone(),
+    
+                    | plir::ProcStmt::Return(None)
+                    | plir::ProcStmt::Exit(None)
+                    | plir::ProcStmt::Break
+                    | plir::ProcStmt::Continue
+                    => ty![plir::Type::S_VOID],
+    
+                    plir::ProcStmt::Throw(_) => ty![plir::Type::S_NEVER],
+    
+                    | plir::ProcStmt::Decl(_)
+                    | plir::ProcStmt::Expr(_)
+                    => panic!("not terminal at {:?}", output_addr(&addr)),
+                };
+
+                (ty, range.clone())
+            })
+            .unzip();
+
+        let block_value_ty = plir::Type::resolve_branches(&type_branches)
+            .ok_or_else(|| {
+                let err = PLIRErr::CannotResolveType.at_unknown();
+                exit_ranges.into_iter().fold(err, |e, range| e.and_at_range(range))
+            })?;
+        
+        let (instrs, frag) = instrs.unravel();
+        
+        let stmts = instrs.into_iter()
+            .map(|lstmt| lstmt.0)
+            .collect();
+
+        Ok((plir::Block(block_value_ty, stmts), frag))
+
+        // // Type check block:
+        // if let Some(expected_ty) = expected_ty {
+        //     match btype {
+        //         BlockBehavior::Function
+        //         | BlockBehavior::Bare 
+        //         => {
+        //             // if exit_ty.downgrade() != expected_ty.downgrade() {
+        //             //     let Some(ProcStmt::Return(m_exit_expr) | ProcStmt::Exit(m_exit_expr)) = block.last_mut() else {
+        //             //         unreachable!();
+        //             //     };
+    
+        //             //     match m_exit_expr.take() {
+        //             //         Some(exit_expr) => {
+        //             //             let l_exit_expr = Located::new(exit_expr, exit_range);
+        //             //             let flags = match btype == BlockBehavior::Function {
+        //             //                 true  => CastFlags::Decl | CastFlags::Void,
+        //             //                 false => CastFlags::Implicit,
+        //             //             };
+    
+        //             //             let new_e = self.expect_type(l_exit_expr, expected_ty, flags)?;
+        //             //             m_exit_expr.replace(new_e);
+        //             //         },
+        //             //         // exit_ty is void, and we already checked that exp_ty is not void
+        //             //         // this should trigger a fail
+        //             //         None => {
+        //             //             self.resolver.add_constraint(ty!(plir::Type::S_VOID), expected_ty)
+        //             //                 .map_err(|e| PLIRErr::TypeConstraintErr(e).at_range(exit_range))?;
+        //             //         },
+        //             //     }
+        //             // }
+        //         },
+        //         BlockBehavior::Loop
+        //         | BlockBehavior::Top => {
+        //             panic!("did not expect block ({btype:?}) to have expected type '{expected_ty}")
+        //         },
+        //     }
+        // }
+
+        // // resolve block's types and handle the methods of exiting the block
+        // let ltype_branches = block_terminals.propagate(btype)?;
+        // let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = {
+        //     ltype_branches.into_iter()
+        //     .map(|Located(ty, range)| (ty, range))
+        //     .unzip()
+        // };
+
+        // let bty = plir::Type::resolve_branches(&type_branches)
+        //     .ok_or_else(|| {
+        //         let err = PLIRErr::CannotResolveType.at_unknown();
+        //         exit_ranges.into_iter().fold(err, |e, range| e.and_at_range(range))
+        //     })?;
+        // Ok((plir::Block(bty, instrs), block_terminals))
     }
 
     fn unpack_pat<T, E>(
@@ -1652,7 +2120,7 @@ impl PLIRCodegen {
 
                 // On final statement, consume the var, and return its original value.
                 if consume_var {
-                    self.peek_block().push_stmt(Located::new(var.0.into_expr(), stmt_range));
+                    self.peek_block().instrs.push(Located::new(var.0.into_expr(), stmt_range));
                 }
                 Ok(())
             },
@@ -1662,7 +2130,7 @@ impl PLIRCodegen {
     /// Consume a declaration into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_decl(&mut self, decl: Located<ast::Decl>) -> PLIRResult<bool> {
+    fn consume_decl(&mut self, decl: Located<ast::Decl>) -> PLIRResult<()> {
         let Located(ast::Decl { rt, pat, ty, val }, decl_range) = decl;
         
         let ty = match ty {
@@ -1689,7 +2157,7 @@ impl PLIRCodegen {
 
                 this.peek_block().declare(&ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident, ty, val: e };
-                this.peek_block().push_stmt(Located::new(decl, decl_range.clone()));
+                this.peek_block().instrs.push(Located::new(decl, decl_range.clone()));
 
                 Ok(())
             },
@@ -1697,7 +2165,7 @@ impl PLIRCodegen {
             decl_range.clone()
         )?;
 
-        Ok(self.peek_block().is_open())
+        Ok(())
     }
 
     /// Creates a global definition for the external function (allowing it to be generated in LLVM)
@@ -1787,7 +2255,7 @@ impl PLIRCodegen {
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<bool> {
+    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<()> {
         let Located(block, block_range) = block;
         let old_block = Rc::try_unwrap(block)
             .unwrap_or_else(|ob| (*ob).clone());
@@ -1809,16 +2277,14 @@ impl PLIRCodegen {
             self.consume_stmts(old_block.0)?;
     
             let insert_block = self.pop_block().unwrap();
-            let (block, term) = self.consume_insert_block(insert_block, BlockBehavior::Function)?;
-            self.peek_block().block_terminals.add_propagated(term); // TODO: ?
+            let (block, frag) = self.consume_insert_block(insert_block, BlockBehavior::Function)?;
+            self.peek_block().instrs.add_fragment(frag);
 
             block
         };
 
         let fun_decl = plir::FunDecl { sig, block };
-        self.declare_fun(fun_decl)?;
-        
-        Ok(self.peek_block().is_open())
+        self.declare_fun(fun_decl)
     }
 
     /// Verifies a [`plir::Type`] is valid (and represents a valid class), making changes to it if necessary.
@@ -1964,8 +2430,8 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::Block(b) => {
-                let (block, terms) = self.consume_tree_block(b, BlockBehavior::Bare, None)?;
-                self.peek_block().block_terminals.add_propagated(terms);
+                let (block, frag) = self.consume_tree_block(b, BlockBehavior::Bare, None)?;
+                self.peek_block().instrs.add_fragment(frag);
 
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
@@ -2134,7 +2600,7 @@ impl PLIRCodegen {
                             plir::ExprType::Assign(unit, Box::new(e.0))
                         );
 
-                        this.peek_block().push_stmt(Located::new(asg, range));
+                        this.peek_block().instrs.push(Located::new(asg, range));
                         Ok(())
                     },
                     true,
@@ -2142,8 +2608,8 @@ impl PLIRCodegen {
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
-                let (block, term) = self.consume_insert_block(insert_block, BlockBehavior::Bare)?;
-                self.peek_block().block_terminals.add_propagated(term);
+                let (block, frag) = self.consume_insert_block(insert_block, BlockBehavior::Bare)?;
+                self.peek_block().instrs.add_fragment(frag);
 
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
@@ -2202,25 +2668,25 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::If { conditionals, last } => {
-                let (conditionals, mut terms): (Vec<_>, Vec<_>) = conditionals.into_iter()
+                let (conditionals, mut frags): (Vec<_>, Vec<_>) = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr_truth(cond)?;
-                        let (b, term) = self.consume_tree_block(block, BlockBehavior::Bare, ctx_type.clone())?;
-                        Ok(((c, b), term))
+                        let (b, frag) = self.consume_tree_block(block, BlockBehavior::Bare, ctx_type.clone())?;
+                        Ok(((c, b), frag))
                     })
                     .collect::<PLIRResult<Vec<_>>>()?
                     .into_iter()
                     .unzip();
                 
-                let (last, term) = match last {
+                let (last, frag) = match last {
                     Some(blk) => {
-                        let (block, term) = self.consume_tree_block(blk, BlockBehavior::Bare, ctx_type)?;
-                        (Some(block), term)
+                        let (block, frag) = self.consume_tree_block(blk, BlockBehavior::Bare, ctx_type)?;
+                        (Some(block), frag)
                     },
-                    None => (None, BlockTerminals::new()),
+                    None => (None, BlockTerminals2::new().into_fragmented()),
                 };
-                terms.push(term);
-                self.peek_block().block_terminals.add_conditional(terms);
+                frags.push(frag);
+                self.peek_block().instrs.add_conditional_fragments(frags);
 
                 let void_ = plir::ty!(plir::Type::S_VOID);
                 let else_ty = last.as_ref()
@@ -2239,8 +2705,8 @@ impl PLIRCodegen {
             },
             ast::Expr::While { condition, block } => {
                 let condition = self.consume_expr_truth(*condition)?;
-                let (block, term) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
-                self.peek_block().block_terminals.add_propagated(term);
+                let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                self.peek_block().instrs.add_fragment(frag);
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_VOID),
@@ -2274,8 +2740,8 @@ impl PLIRCodegen {
                     _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?,
                 };
 
-                let (block, term) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
-                self.peek_block().block_terminals.add_propagated(term);
+                let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
+                self.peek_block().instrs.add_fragment(frag);
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_VOID),

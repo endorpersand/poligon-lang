@@ -158,6 +158,16 @@ mod stmt {
             )
         }
 
+        /// Test if this statement is a statement which unconditionally terminates a block.
+        pub fn is_simple_terminal(&self) -> bool {
+            matches!(self,
+                | ProcStmt::Return(_)
+                | ProcStmt::Break    
+                | ProcStmt::Continue 
+                | ProcStmt::Throw(_) 
+                | ProcStmt::Exit(_)
+                )
+        }
         /// Test if this statement is terminal.
         /// 
         /// A statement is terminal if when inserted into a block,
