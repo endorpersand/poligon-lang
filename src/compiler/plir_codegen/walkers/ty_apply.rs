@@ -1,8 +1,7 @@
 use crate::compiler::plir;
+use crate::compiler::plir_codegen::{TypeResolver, CannotResolve};
 
-use super::{TypeResolver, CannotResolve};
-
-pub(super) struct TypeApplier<'a>(pub(super) &'a mut TypeResolver);
+pub(in crate::compiler::plir_codegen) struct TypeApplier<'a>(pub(in crate::compiler::plir_codegen) &'a mut TypeResolver);
 
 impl plir::walk::WalkerMut for TypeApplier<'_> {
     type Err = CannotResolve;

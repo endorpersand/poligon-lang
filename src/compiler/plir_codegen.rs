@@ -14,9 +14,9 @@
 //! which utilizes the [`PLIRCodegen`] struct.
 
 mod op_impl;
-mod ty_apply;
 mod ty_classes;
 mod exit;
+mod walkers;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -298,279 +298,6 @@ struct ClassKey {
     referent: plir::Type
 }
 
-struct ExprBlockIter<'e> {
-    exprs: Vec<(&'e plir::Expr, usize)>
-}
-impl<'e> ExprBlockIter<'e> {
-    fn new(e: &'e plir::Expr) -> Self {
-        Self { exprs: vec![(e, 0)] }
-    }
-    fn add_to_stack(&mut self, expr: &'e plir::Expr) {
-        self.exprs.push((expr, 0));
-    }
-}
-impl<'e> Iterator for ExprBlockIter<'e> {
-    type Item = &'e plir::Block;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let out = loop {
-            let (expr, i) = self.exprs.last_mut()?;
-            *i += 1; // the next index
-            let j = *i - 1; // the current index
-
-            match &expr.expr {
-                plir::ExprType::Block(b) if j == 0 => break b,
-                
-                plir::ExprType::ListLiteral(exprs) 
-                | plir::ExprType::SetLiteral(exprs) 
-                | plir::ExprType::ClassLiteral(_, exprs)
-                    if j < exprs.len() => {
-                        self.add_to_stack(&exprs[j]);
-                    },
-                plir::ExprType::DictLiteral(d) 
-                    if (j / 2) < d.len() => {
-                        let (vec_idx, pair_idx) = (j / 2, j % 2);
-                        
-                        let pair = &d[vec_idx];
-                        self.add_to_stack(if pair_idx == 0 { &pair.0 } else { &pair.1 });
-                    },
-                plir::ExprType::Assign(_, e) if j == 0 => { self.add_to_stack(e); }
-                
-                plir::ExprType::Path(plir::Path::Struct(e, _))
-                | plir::ExprType::Path(plir::Path::Method(e, _, _))
-                    if j == 0 => {
-                        self.add_to_stack(e);
-                    },
-                
-                plir::ExprType::UnaryOps { ops: _, expr } if j == 0 => self.add_to_stack(expr),
-
-                plir::ExprType::BinaryOp { op: _, left, right: _ } if j == 0 => self.add_to_stack(left),
-                plir::ExprType::BinaryOp { op: _, left: _, right } if j == 1 => self.add_to_stack(right),
-                
-                plir::ExprType::Comparison { left, rights: _ } if j == 0 => self.add_to_stack(left),
-                plir::ExprType::Comparison { left: _, rights } 
-                    if 1 <= j && j < rights.len() + 1 => {
-                        self.add_to_stack(&rights[j - 1].1);
-                    },
-                
-                plir::ExprType::Range { left, right: _, step: _ } if j == 0 => self.add_to_stack(left),
-                plir::ExprType::Range { left: _, right, step: _ } if j == 1 => self.add_to_stack(right),
-                plir::ExprType::Range { left: _, right: _, step } 
-                    if step.is_some() && j == 2 => {
-                        self.add_to_stack(step.as_ref().unwrap());
-                    },
-                
-                plir::ExprType::If { conditionals, last: _ }
-                    if (j / 2) < conditionals.len() => {
-                        let (vec_idx, pair_idx) = (j / 2, j % 2);
-                        
-                        let pair = &conditionals[vec_idx];
-                        if pair_idx == 0 {
-                            self.add_to_stack(&pair.0);
-                        } else {
-                            break &pair.1;
-                        }
-                    },
-                plir::ExprType::If { conditionals, last }
-                    if last.is_some() && j == conditionals.len() * 2 => {
-                        break last.as_ref().unwrap();
-                    }
-
-                plir::ExprType::While { condition, block: _ } if j == 0 => self.add_to_stack(condition),
-                plir::ExprType::While { condition: _, block } if j == 1 => break block,
-
-                plir::ExprType::For { ident: _, element_type: _, iterator, block: _ } 
-                    if j == 0 => {
-                        self.add_to_stack(iterator);
-                    },
-                plir::ExprType::For { ident: _, element_type: _, iterator: _, block } 
-                    if j == 1 => {
-                        break block;
-                    },
-
-                plir::ExprType::Call { funct, params: _ } if j == 0 => self.add_to_stack(funct),
-                plir::ExprType::Call { funct: _, params } 
-                    if 1 <= j && j < params.len() + 1 => {
-                        self.add_to_stack(&params[j - 1]);
-                    },
-
-                plir::ExprType::Index(plir::Index { expr, index: _ }) if j == 0 => self.add_to_stack(expr),
-                plir::ExprType::Index(plir::Index { expr: _, index }) if j == 1 => self.add_to_stack(index),
-
-                plir::ExprType::Spread(s) if s.is_some() && j == 0 => {
-                    self.add_to_stack(s.as_ref().unwrap());
-                },
-
-                plir::ExprType::Cast(expr) if j == 0 => self.add_to_stack(expr),
-
-                plir::ExprType::Deref(plir::IDeref { expr, ty: _ }) if j == 0 => self.add_to_stack(expr),
-
-                plir::ExprType::GEP(_, ptr, _) if j == 0 => self.add_to_stack(ptr),
-                plir::ExprType::GEP(_, _, indices) 
-                    if 1 <= j && j < indices.len() + 1 => {
-                        self.add_to_stack(&indices[j - 1]);
-                    },
-
-                | plir::ExprType::Ident(_)
-                | plir::ExprType::Block(_)
-                | plir::ExprType::Literal(_)
-                | plir::ExprType::ListLiteral(_)
-                | plir::ExprType::SetLiteral(_)
-                | plir::ExprType::DictLiteral(_)
-                | plir::ExprType::ClassLiteral(_, _)
-                | plir::ExprType::Assign(_, _)
-                | plir::ExprType::Path(_)
-                | plir::ExprType::UnaryOps { .. }
-                | plir::ExprType::BinaryOp { .. }
-                | plir::ExprType::Comparison { .. }
-                | plir::ExprType::Range { .. }
-                | plir::ExprType::If { .. }
-                | plir::ExprType::While { .. }
-                | plir::ExprType::For { .. }
-                | plir::ExprType::Call { .. }
-                | plir::ExprType::Index(_)
-                | plir::ExprType::Spread(_)
-                | plir::ExprType::Split(_, _)
-                | plir::ExprType::Cast(_)
-                | plir::ExprType::Deref(_)
-                | plir::ExprType::GEP(_, _, _)
-                | plir::ExprType::Alloca(_)
-                | plir::ExprType::SizeOf(_)
-                => { self.exprs.pop(); }
-            }
-        };
-
-        Some(out)
-    }
-}
-
-enum ExprOrBlock<'e> {
-    Expr(&'e mut plir::Expr),
-    Block(&'e mut plir::Block)
-}
-struct ExprBlockIterMut<'e> {
-    frontier: Vec<ExprOrBlock<'e>>
-}
-impl<'e> ExprBlockIterMut<'e> {
-    fn new(e: &'e mut plir::Expr) -> Self {
-        Self { frontier: vec![ExprOrBlock::Expr(e)] }
-    }
-    fn add_expr(&mut self, expr: &'e mut plir::Expr) {
-        self.frontier.push(ExprOrBlock::Expr(expr));
-    }
-    fn add_exprs(&mut self, expr: impl IntoIterator<Item=&'e mut plir::Expr>) {
-        self.frontier.extend(expr.into_iter().map(ExprOrBlock::Expr));
-    }
-    fn add_block(&mut self, block: &'e mut plir::Block) {
-        self.frontier.push(ExprOrBlock::Block(block));
-    }
-}
-impl<'e> Iterator for ExprBlockIterMut<'e> {
-    type Item = &'e mut plir::Block;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let out = loop {
-            match self.frontier.pop()? {
-                ExprOrBlock::Expr(e) => match &mut e.expr {
-                    | plir::ExprType::Ident(_)
-                    | plir::ExprType::Literal(_)
-                    => {},
-    
-                    plir::ExprType::Block(b) => break b,
-    
-                    | plir::ExprType::ListLiteral(exprs)
-                    | plir::ExprType::SetLiteral(exprs)
-                    | plir::ExprType::ClassLiteral(_, exprs) 
-                    => {
-                        self.add_exprs(
-                            exprs.iter_mut().rev()
-                        );
-                    },
-                    
-                    plir::ExprType::DictLiteral(entries) => {
-                        self.add_exprs(
-                            entries.iter_mut()
-                                .flat_map(|(k, v)| [k, v])
-                                .rev()
-                        );
-                    },
-
-                    plir::ExprType::Assign(_, e) => self.add_expr(e),
-                    
-                    plir::ExprType::Path(p) => match p {
-                        plir::Path::Static(_, _, _) => {},
-                        plir::Path::Struct(e, _) => self.add_expr(e),
-                        plir::Path::Method(m, _, _) => self.add_expr(m),
-                    },
-                    plir::ExprType::UnaryOps { ops: _, expr } => self.add_expr(expr),
-                    plir::ExprType::BinaryOp { op: _, left, right } => {
-                        self.add_expr(right);
-                        self.add_expr(left);
-                    },
-                    plir::ExprType::Comparison { left, rights } => {
-                        self.add_exprs(
-                            rights.iter_mut()
-                                .map(|(_, e)| e)
-                                .rev()
-                        );
-                        self.add_expr(left);
-                    },
-                    plir::ExprType::Range { left, right, step } => {
-                        if let Some(step) = step {
-                            self.add_expr(step);
-                        }
-                        self.add_expr(right);
-                        self.add_expr(left);
-                    },
-                    plir::ExprType::If { conditionals, last } => {
-                        if let Some(last) = last {
-                            self.add_block(last);
-                        }
-                        self.frontier.extend(
-                            conditionals.iter_mut()
-                                .flat_map(|(c, b)| [ExprOrBlock::Expr(c), ExprOrBlock::Block(b)])
-                                .rev()
-                        );
-                    },
-                    plir::ExprType::While { condition, block } => {
-                        self.add_block(block);
-                        self.add_expr(condition);
-                    },
-                    plir::ExprType::For { ident: _, element_type: _, iterator, block } => {
-                        self.add_block(block);
-                        self.add_expr(iterator);
-                    },
-                    plir::ExprType::Call { funct, params } => {
-                        self.add_exprs(params.iter_mut().rev());
-                        self.add_expr(funct);
-                    },
-                    plir::ExprType::Index(plir::Index { expr, index }) => {
-                        self.add_expr(index);
-                        self.add_expr(expr);
-                    },
-                    plir::ExprType::Spread(s) => {
-                        if let Some(expr) = s {
-                            self.add_expr(expr);
-                        }
-                    },
-                    plir::ExprType::Split(_, _) => {},
-                    plir::ExprType::Cast(e) => self.add_expr(e),
-                    plir::ExprType::Deref(plir::IDeref { expr, ty: _ }) => self.add_expr(expr),
-                    plir::ExprType::GEP(_, ptr, idx) => {
-                        self.add_exprs(idx.iter_mut().rev());
-                        self.add_expr(ptr);
-                    },
-                    plir::ExprType::Alloca(_) => {},
-                    plir::ExprType::SizeOf(_) => {},
-                },
-                ExprOrBlock::Block(b) => break b,
-            }
-        };
-
-        Some(out)
-    }
-}
-
 #[derive(Debug)]
 struct InstrBlock {
     instructions: Vec<Located<plir::ProcStmt>>,
@@ -641,7 +368,7 @@ impl InstrBlock {
                 | plir::ProcStmt::Return(Some(e))
                 | plir::ProcStmt::Exit(Some(e))
                 | plir::ProcStmt::Expr(e)
-                => ExprBlockIter::new(e).nth(block_idx),
+                => walkers::ExprBlockIter::new(e).nth(block_idx),
 
                 | plir::ProcStmt::Return(None)
                 | plir::ProcStmt::Break
@@ -669,7 +396,7 @@ impl InstrBlock {
                 | plir::ProcStmt::Return(Some(e))
                 | plir::ProcStmt::Exit(Some(e))
                 | plir::ProcStmt::Expr(e)
-                => ExprBlockIterMut::new(e).nth(block_idx),
+                => walkers::ExprBlockIterMut::new(e).nth(block_idx),
 
                 | plir::ProcStmt::Return(None)
                 | plir::ProcStmt::Break
@@ -1377,7 +1104,7 @@ impl PLIRCodegen {
         let mut program = plir::Program(stmts, block);
         
         let mut resolver = self.resolver;
-        ty_apply::TypeApplier(&mut resolver).walk_program(&mut program)
+        walkers::TypeApplier(&mut resolver).walk_program(&mut program)
             .map_err(|e @ CannotResolve(n)| {
                 PLIRErr::from(e)
                     .at_range(resolver.unk_positions[n].clone())
