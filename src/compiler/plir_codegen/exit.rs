@@ -87,15 +87,22 @@ impl InstrAddr {
     pub(super) fn path_from_root(&self) -> impl Iterator<Item = usize> + '_ {
         self.0.iter().rev().cloned()
     }
+
+    // pub(super) fn with_parent_removed(&self) -> Option<InstrAddr> {
+    //     (self.0.len() >= 3).then(|| {
+    //         InstrAddr(self.0[2..].to_vec())
+    //     })
+    // }
 }
 
 impl Debug for InstrAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (root_instr_idx, rest) = self.0.split_last()
-            .unwrap_or_else(|| panic!("InstrAddr should be instantiated with at least one element"));
+        let mut segs = self.path_from_root();
+        let top = segs.next()
+            .expect("InstrAddr should be instantiated with at least one element");
         
-        write!(f, "{root_instr_idx}")?;
-        for seg in rest.iter().rev() {
+        write!(f, "{top}")?;
+        for seg in segs {
             write!(f, ".{seg}")?;
         }
         Ok(())
@@ -181,6 +188,32 @@ impl BlockTerminals {
     pub(super) fn into_fragmented(self) -> TerminalFrag {
         TerminalFrag(self)
     }
+    // pub(super) fn remove_terminals_w_instr(&mut self, instr_no: usize) -> Option<TerminalFrag> {
+    //     let n_terminals = self.branches.len();
+    //     let mut removed_terminals = HashMap::new();
+    //     let mut kept_terminals = HashMap::new();
+
+    //     for (addr, loc) in self.branches.drain() {
+    //         if addr.path_from_root().next().unwrap() == instr_no {
+    //             if let Some(naddr) = addr.with_parent_removed() {
+    //                 removed_terminals.insert(naddr, loc);
+    //             }
+    //         } else {
+    //             kept_terminals.insert(addr, loc);
+    //         }
+    //     }
+
+    //     let old_closed = self.closed;
+    //     self.closed &= n_terminals >= kept_terminals.len();
+    //     self.branches = kept_terminals;
+
+    //     (!removed_terminals.is_empty()).then_some({
+    //         TerminalFrag(BlockTerminals {
+    //             branches: removed_terminals, 
+    //             closed: old_closed
+    //         })
+    //     })
+    // }
 }
 
 /// Struct which handles all of the exits from a block.

@@ -607,14 +607,25 @@ impl InstrBlock {
                 let instr_no = self.next_instr_no();
                 self.terminals.add_exit(InstrAddr::new(instr_no), stmt.range(), true);
             }
-            // TODO; complex terminals
+            self.next_block_no = 0;
+
             self.instructions.push(stmt);
         }
     }
-    // Pop off the last instruction.
+
+    /// Pop off the last instruction.
+    /// 
+    /// This does not update terminals.
     fn pop(&mut self) -> Option<Located<plir::ProcStmt>> {
         self.instructions.pop()
-        // TODO: terminals
+        // let linstr = self.instructions.pop();
+        
+        // if linstr.is_some() {
+        //     let mfrag = self.terminals.remove_terminals_w_instr(self.next_instr_no());
+        //     Some((linstr, mfrag))
+        // } else {
+        //     linstr.map(|instr| (instr, None))
+        // }
     }
 
     /// Index instructions, and return a ref to the statement at the index if present.
@@ -1839,7 +1850,7 @@ impl PLIRCodegen {
         btype: BlockBehavior
     ) -> PLIRResult<(plir::Block, TerminalFrag)> {
         let InsertBlock { 
-            mut instrs, block_range: last_stmt_loc, 
+            mut instrs, block_range, 
             vars: _, types: _, type_aliases: _,
             unres_values, unres_types, generic_ctx: _,
             expected_ty
@@ -1857,7 +1868,7 @@ impl PLIRCodegen {
             // otherwise just append an `exit` stmt.
             let exit_range = match instrs.last() {
                 Some(lstmt) => lstmt.range(),
-                None => last_stmt_loc,
+                None => block_range,
             };
             let exit_mexpr = match instrs.last() {
                 Some(Located(ProcStmt::Expr(_), _)) => {
