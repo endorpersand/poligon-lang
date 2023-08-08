@@ -696,20 +696,6 @@ impl InstrBlock {
         Self::raw_get_mut(&mut self.instructions, addr)
     }
 
-    // Replace an instruction.
-    fn replace<F>(&mut self, instr_ptr: &[usize], f: F)
-        where F: FnOnce(plir::ProcStmt) -> plir::ProcStmt
-    {
-        let proc_stmt_ref = self.get_mut(instr_ptr)
-            .unwrap_or_else(|| panic!("instruction {instr_ptr:?} not present"));
-        
-        let proc_stmt = std::mem::replace(
-            proc_stmt_ref, 
-            plir::ProcStmt::Throw("this should never appear".to_string())
-        );
-        *proc_stmt_ref = f(proc_stmt);
-    }
-
     fn split_off_unpropagated_terminals(&mut self, btype: BlockBehavior) -> PLIRResult<Vec<Located<Vec<usize>>>> {
         let len = self.terminals.branches.len();
 
@@ -1928,8 +1914,8 @@ impl PLIRCodegen {
         // Type check block:
         if let Some(exp_ty) = expected_ty {
             for laddr in &unpropagated_addrs {
-                let Some(stmt) = instrs.get_mut(&laddr) else {
-                    panic!("no statement at {:?}", output_addr(&laddr))
+                let Some(stmt) = instrs.get_mut(laddr) else {
+                    panic!("no statement at {:?}", output_addr(laddr))
                 };
 
                 match stmt {
@@ -1957,15 +1943,15 @@ impl PLIRCodegen {
                     
                     | plir::ProcStmt::Decl(_)
                     | plir::ProcStmt::Expr(_)
-                    => panic!("not terminal at {:?}", output_addr(&laddr)),
+                    => panic!("not terminal at {:?}", output_addr(laddr)),
                 }
             }
         }
 
         let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = unpropagated_addrs.iter()
             .map(|Located(addr, range)| {
-                let Some(stmt) = instrs.get(&addr) else {
-                    panic!("no statement at {:?}", output_addr(&addr))
+                let Some(stmt) = instrs.get(addr) else {
+                    panic!("no statement at {:?}", output_addr(addr))
                 };
     
                 let ty = match stmt {
@@ -1983,7 +1969,7 @@ impl PLIRCodegen {
     
                     | plir::ProcStmt::Decl(_)
                     | plir::ProcStmt::Expr(_)
-                    => panic!("not terminal at {:?}", output_addr(&addr)),
+                    => panic!("not terminal at {:?}", output_addr(addr)),
                 };
 
                 (ty, range.clone())

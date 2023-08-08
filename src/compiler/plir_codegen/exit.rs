@@ -1,29 +1,9 @@
-use std::collections::{HashSet, HashMap};
-use std::ops::ControlFlow;
+use std::collections::HashMap;
 
-use crate::compiler::plir::{self, Type, ty, Located};
-use crate::err::{GonErr, CursorRange};
+use crate::compiler::plir::ProcStmt;
+use crate::err::CursorRange;
 
-use super::{PLIRErr, PLIRResult};
-
-/// The types of methods in which a block can be exited.
-#[derive(Debug, Clone)]
-pub(super) enum BlockExit {
-    /// This block exited by returning a value.
-    Return(Type),
-
-    /// This block exited by `break`.
-    Break,
-
-    /// This block exited by `continue`.
-    Continue,
-
-    /// This block exited normally.
-    Exit(Type),
-
-    /// An exception was thrown
-    Throw,
-}
+use super::PLIRErr;
 
 /// The types of blocks.
 /// 
@@ -43,71 +23,36 @@ pub(super) enum BlockBehavior {
     Top
 }
 
-type BlockExitHandle = ControlFlow<Type, BlockExit>;
-
 impl BlockBehavior {
-    fn handle_exit(&self, exit: BlockExit) -> Result<BlockExitHandle, PLIRErr> {
-        match self {
-            BlockBehavior::Function => match exit {
-                BlockExit::Return(t) => Ok(BlockExitHandle::Break(t)),
-                BlockExit::Break     => Err(PLIRErr::CannotBreak),
-                BlockExit::Continue  => Err(PLIRErr::CannotContinue),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Break(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Continue(exit)),
-            },
-            BlockBehavior::Loop => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Continue(exit)),
-                BlockExit::Break     => Ok(BlockExitHandle::Break(ty![Type::S_VOID])),
-                BlockExit::Continue  => Ok(BlockExitHandle::Break(ty![Type::S_VOID])),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Break(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Continue(exit)),
-            },
-            BlockBehavior::Bare => match exit {
-                BlockExit::Return(_) => Ok(BlockExitHandle::Continue(exit)),
-                BlockExit::Break     => Ok(BlockExitHandle::Continue(exit)),
-                BlockExit::Continue  => Ok(BlockExitHandle::Continue(exit)),
-                BlockExit::Exit(t)   => Ok(BlockExitHandle::Break(t)),
-                BlockExit::Throw     => Ok(BlockExitHandle::Continue(exit)),
-            },
-            BlockBehavior::Top => match exit {
-                BlockExit::Return(_) => Err(PLIRErr::CannotBreak),
-                BlockExit::Break     => Err(PLIRErr::CannotContinue),
-                BlockExit::Continue  => Err(PLIRErr::CannotReturn),
-                BlockExit::Exit(_)   => Err(PLIRErr::CannotReturn),
-                BlockExit::Throw     => Ok(BlockExitHandle::Continue(exit)),
-            },
-        }
-    }
-
-    pub(super) fn propagates(&self, term_stmt: &plir::ProcStmt) -> Result<bool, PLIRErr> {
+    pub(super) fn propagates(&self, term_stmt: &ProcStmt) -> Result<bool, PLIRErr> {
         assert!(term_stmt.is_simple_terminal(), "expected statement to be terminal");
         match (self, term_stmt) {
-            (_, plir::ProcStmt::Decl(_)) => unreachable!("not terminal statement"),
-            (_, plir::ProcStmt::Expr(_)) => unreachable!("not terminal statement"),
+            (_, ProcStmt::Decl(_)) => unreachable!("not terminal statement"),
+            (_, ProcStmt::Expr(_)) => unreachable!("not terminal statement"),
 
-            (BlockBehavior::Function, plir::ProcStmt::Return(_)) => Ok(false),
-            (BlockBehavior::Function, plir::ProcStmt::Break)     => Err(PLIRErr::CannotBreak),
-            (BlockBehavior::Function, plir::ProcStmt::Continue)  => Err(PLIRErr::CannotContinue),
-            (BlockBehavior::Function, plir::ProcStmt::Throw(_))  => Ok(false),
-            (BlockBehavior::Function, plir::ProcStmt::Exit(_))   => Ok(false),
+            (BlockBehavior::Function, ProcStmt::Return(_)) => Ok(false),
+            (BlockBehavior::Function, ProcStmt::Break)     => Err(PLIRErr::CannotBreak),
+            (BlockBehavior::Function, ProcStmt::Continue)  => Err(PLIRErr::CannotContinue),
+            (BlockBehavior::Function, ProcStmt::Throw(_))  => Ok(false),
+            (BlockBehavior::Function, ProcStmt::Exit(_))   => Ok(false),
 
-            (BlockBehavior::Loop, plir::ProcStmt::Return(_)) => Ok(true),
-            (BlockBehavior::Loop, plir::ProcStmt::Break)     => Ok(false),
-            (BlockBehavior::Loop, plir::ProcStmt::Continue)  => Ok(false),
-            (BlockBehavior::Loop, plir::ProcStmt::Throw(_))  => Ok(true),
-            (BlockBehavior::Loop, plir::ProcStmt::Exit(_))   => Ok(false),
+            (BlockBehavior::Loop, ProcStmt::Return(_)) => Ok(true),
+            (BlockBehavior::Loop, ProcStmt::Break)     => Ok(false),
+            (BlockBehavior::Loop, ProcStmt::Continue)  => Ok(false),
+            (BlockBehavior::Loop, ProcStmt::Throw(_))  => Ok(true),
+            (BlockBehavior::Loop, ProcStmt::Exit(_))   => Ok(false),
 
-            (BlockBehavior::Bare, plir::ProcStmt::Return(_)) => Ok(true),
-            (BlockBehavior::Bare, plir::ProcStmt::Break)     => Ok(true),
-            (BlockBehavior::Bare, plir::ProcStmt::Continue)  => Ok(true),
-            (BlockBehavior::Bare, plir::ProcStmt::Throw(_))  => Ok(true),
-            (BlockBehavior::Bare, plir::ProcStmt::Exit(_))   => Ok(false),
+            (BlockBehavior::Bare, ProcStmt::Return(_)) => Ok(true),
+            (BlockBehavior::Bare, ProcStmt::Break)     => Ok(true),
+            (BlockBehavior::Bare, ProcStmt::Continue)  => Ok(true),
+            (BlockBehavior::Bare, ProcStmt::Throw(_))  => Ok(true),
+            (BlockBehavior::Bare, ProcStmt::Exit(_))   => Ok(false),
 
-            (BlockBehavior::Top, plir::ProcStmt::Return(_)) => Err(PLIRErr::CannotBreak),
-            (BlockBehavior::Top, plir::ProcStmt::Break)     => Err(PLIRErr::CannotContinue),
-            (BlockBehavior::Top, plir::ProcStmt::Continue)  => Err(PLIRErr::CannotReturn),
-            (BlockBehavior::Top, plir::ProcStmt::Throw(_))  => Ok(true),
-            (BlockBehavior::Top, plir::ProcStmt::Exit(_))   => Err(PLIRErr::CannotReturn),
+            (BlockBehavior::Top, ProcStmt::Return(_)) => Err(PLIRErr::CannotBreak),
+            (BlockBehavior::Top, ProcStmt::Break)     => Err(PLIRErr::CannotContinue),
+            (BlockBehavior::Top, ProcStmt::Continue)  => Err(PLIRErr::CannotReturn),
+            (BlockBehavior::Top, ProcStmt::Throw(_))  => Ok(true),
+            (BlockBehavior::Top, ProcStmt::Exit(_))   => Err(PLIRErr::CannotReturn),
         }
     }
 }
@@ -138,10 +83,6 @@ impl BlockTerminals {
 
     pub(super) fn is_closed(&self) -> bool {
         self.closed
-    }
-
-    pub(super) fn addresses(&self) -> impl Iterator<Item=&Vec<usize>> {
-        self.branches.keys()
     }
 
     // /// Exits the block and determines which exits will affect the enclosing block.
