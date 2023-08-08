@@ -31,7 +31,7 @@ use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
 
-use self::exit::{BlockTerminals, BlockBehavior, TerminalFrag};
+use self::exit::{BlockTerminals, BlockBehavior, TerminalFrag, InstrAddr};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
@@ -571,14 +571,6 @@ impl<'e> Iterator for ExprBlockIterMut<'e> {
     }
 }
 
-fn output_addr(addr: &[usize]) -> String {
-    addr.iter()
-        .rev()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
 #[derive(Debug)]
 struct InstrBlock {
     instructions: Vec<Located<plir::ProcStmt>>,
@@ -613,7 +605,7 @@ impl InstrBlock {
             let stmt = stmt.map(Into::into);
             if stmt.is_simple_terminal() {
                 let instr_no = self.next_instr_no();
-                self.terminals.add_exit(vec![instr_no], stmt.range(), true);
+                self.terminals.add_exit(InstrAddr::new(instr_no), stmt.range(), true);
             }
             // TODO; complex terminals
             self.instructions.push(stmt);
@@ -626,14 +618,13 @@ impl InstrBlock {
     }
 
     /// Index instructions, and return a ref to the statement at the index if present.
-    fn get(&self, addr: &[usize]) -> Option<&plir::ProcStmt> {
-        assert!(!addr.is_empty(), "instruction pointer must have at least one index");
+    fn get(&self, addr: &InstrAddr) -> Option<&plir::ProcStmt> {
+        let mut addr_scanner = addr.path_from_root();
         
-        let (&top, rest) = addr.split_last().unwrap();
+        let top = addr_scanner.next().unwrap();
         let mut stmt = &**self.instructions.get(top)?;
-        
-        let mut addr_reader = rest.iter().rev();
-        while let Some((&block_idx, &stmt_idx)) = Option::zip(addr_reader.next(), addr_reader.next()) {
+
+        while let Some((block_idx, stmt_idx)) = Option::zip(addr_scanner.next(), addr_scanner.next()) {
             let block = match stmt {
                 | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
                 | plir::ProcStmt::Return(Some(e))
@@ -655,14 +646,13 @@ impl InstrBlock {
         Some(stmt)
     }
 
-    fn raw_get_mut<'a>(instrs: &'a mut [Located<plir::ProcStmt>], addr: &[usize]) -> Option<&'a mut plir::ProcStmt> {
-        assert!(!addr.is_empty(), "instruction pointer must have at least one index");
+    fn raw_get_mut<'a>(instrs: &'a mut [Located<plir::ProcStmt>], addr: &InstrAddr) -> Option<&'a mut plir::ProcStmt> {
+        let mut addr_scanner = addr.path_from_root();
         
-        let (&top, rest) = addr.split_last().unwrap();
+        let top = addr_scanner.next().unwrap();
         let mut stmt = &mut **instrs.get_mut(top)?;
-        
-        let mut addr_reader = rest.iter().rev();
-        while let Some((&block_idx, &stmt_idx)) = Option::zip(addr_reader.next(), addr_reader.next()) {
+
+        while let Some((block_idx, stmt_idx)) = Option::zip(addr_scanner.next(), addr_scanner.next()) {
             let block = match stmt {
                 | plir::ProcStmt::Decl(plir::Decl { val: e, .. })
                 | plir::ProcStmt::Return(Some(e))
@@ -692,11 +682,11 @@ impl InstrBlock {
     /// and terminal statements replacing terminal statements will be valid.
     /// 
     /// However, other than that, the block status will not be updated properly.
-    fn get_mut(&mut self, addr: &[usize]) -> Option<&mut plir::ProcStmt> {
+    fn get_mut(&mut self, addr: &InstrAddr) -> Option<&mut plir::ProcStmt> {
         Self::raw_get_mut(&mut self.instructions, addr)
     }
 
-    fn split_off_unpropagated_terminals(&mut self, btype: BlockBehavior) -> PLIRResult<Vec<Located<Vec<usize>>>> {
+    fn split_off_unpropagated_terminals(&mut self, btype: BlockBehavior) -> PLIRResult<Vec<Located<InstrAddr>>> {
         let len = self.terminals.branches.len();
 
         let mut propagated = vec![];
@@ -704,7 +694,7 @@ impl InstrBlock {
 
         for (addr, loc) in self.terminals.branches.drain() {
             let Some(term) = Self::raw_get_mut(&mut self.instructions, &addr) else {
-                panic!("address {} has no statement", output_addr(&addr));
+                panic!("address {addr:?} has no statement");
             };
 
             let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc.clone()))?;
@@ -740,7 +730,7 @@ impl InstrBlock {
 
         other.branches = other.branches.drain()
             .map(|(mut addr, loc)| {
-                addr.extend([self.next_block_no, self.next_instr_no()]);
+                addr.add_parent(self.next_instr_no(), self.next_block_no);
                 (addr, loc)
             })
             .collect();
@@ -1915,7 +1905,7 @@ impl PLIRCodegen {
         if let Some(exp_ty) = expected_ty {
             for laddr in &unpropagated_addrs {
                 let Some(stmt) = instrs.get_mut(laddr) else {
-                    panic!("no statement at {:?}", output_addr(laddr))
+                    panic!("no statement at {:?}", &**laddr)
                 };
 
                 match stmt {
@@ -1943,7 +1933,7 @@ impl PLIRCodegen {
                     
                     | plir::ProcStmt::Decl(_)
                     | plir::ProcStmt::Expr(_)
-                    => panic!("not terminal at {:?}", output_addr(laddr)),
+                    => panic!("not terminal at {:?}", &**laddr),
                 }
             }
         }
@@ -1951,7 +1941,7 @@ impl PLIRCodegen {
         let (type_branches, exit_ranges): (Vec<_>, Vec<_>) = unpropagated_addrs.iter()
             .map(|Located(addr, range)| {
                 let Some(stmt) = instrs.get(addr) else {
-                    panic!("no statement at {:?}", output_addr(addr))
+                    panic!("no statement at {addr:?}")
                 };
     
                 let ty = match stmt {
@@ -1969,7 +1959,7 @@ impl PLIRCodegen {
     
                     | plir::ProcStmt::Decl(_)
                     | plir::ProcStmt::Expr(_)
-                    => panic!("not terminal at {:?}", output_addr(addr)),
+                    => panic!("not terminal at {addr:?}"),
                 };
 
                 (ty, range.clone())

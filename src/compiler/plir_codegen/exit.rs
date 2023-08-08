@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use crate::compiler::plir::ProcStmt;
 use crate::err::CursorRange;
@@ -57,15 +58,56 @@ impl BlockBehavior {
     }
 }
 
+/// This struct designates a path to some instruction in a tree.
+/// It is assumed that the tree is a block (vec of instructions).
+/// 
+/// This is typically of the format 14.3.43.0.14.9 etc.,
+/// or more generally `[instruction index](.[block index].[instruction index])*`.
+/// 
+/// InstrAddr must have at least one element at all times.
+/// 
+/// Note that blocks have instructions, and instructions contain expressions which can contain blocks!
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(super) struct InstrAddr(Vec<usize>);
+
+// Implementation note:
+// Since appending from the end of a stack is easier than the front,
+// indexes nearer to the end are actually indexing nearer to root.
+impl InstrAddr {
+    pub(super) fn new(instr_idx: usize) -> Self {
+        Self(vec![instr_idx])
+    }
+
+    /// Instruction addresses are built from depths to root, 
+    /// so this function allows appending a parent.
+    pub(super) fn add_parent(&mut self, instr_idx: usize, block_idx: usize) {
+        self.0.extend([block_idx, instr_idx])
+    }
+
+    pub(super) fn path_from_root(&self) -> impl Iterator<Item = usize> + '_ {
+        self.0.iter().rev().cloned()
+    }
+}
+
+impl Debug for InstrAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (root_instr_idx, rest) = self.0.split_last()
+            .unwrap_or_else(|| panic!("InstrAddr should be instantiated with at least one element"));
+        
+        write!(f, "{root_instr_idx}")?;
+        for seg in rest.iter().rev() {
+            write!(f, ".{seg}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Struct which handles all of the exits from a block.
 #[derive(Debug)]
 pub(super) struct BlockTerminals {
     /// Each element represents a pointer to a terminating instruction
     /// in a [`InstrBlock`].
-    /// 
-    /// This index is reversed. The rightmost element of the index refers to
-    /// the outermost statements of a program.
-    pub(super) branches: HashMap<Vec<usize>, CursorRange>,
+    pub(super) branches: HashMap<InstrAddr, CursorRange>,
 
     /// If closed, any statements added to the block should be
     /// considered unreachable, as the block is known to exit
@@ -114,7 +156,7 @@ impl BlockTerminals {
     //     Ok(halted)
     // }
 
-    pub(super) fn add_exit(&mut self, addr: Vec<usize>, loc: CursorRange, is_unconditional: bool) {
+    pub(super) fn add_exit(&mut self, addr: InstrAddr, loc: CursorRange, is_unconditional: bool) {
         if !self.closed {
             self.branches.insert(addr, loc);
             self.closed = is_unconditional;
