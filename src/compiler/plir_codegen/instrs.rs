@@ -111,7 +111,7 @@ impl Debug for InstrAddr {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct InstrBlock {
     instructions: Vec<Located<ProcStmt>>,
 
@@ -146,8 +146,12 @@ impl InstrBlock {
         !self.closed
     }
 
-    /// Next instruction number
-    pub(super) fn next_instr_no(&self) -> usize {
+    /// Determine whether the instruction block currently holds any instructions.
+    pub(super) fn is_empty(&self) -> bool {
+        self.instructions.is_empty()
+    }
+    /// The number of instructions currently in the instruction block.
+    pub(super) fn len(&self) -> usize {
         self.instructions.len()
     }
 
@@ -159,7 +163,7 @@ impl InstrBlock {
         if self.is_open() {
             let stmt = stmt.map(Into::into);
             if stmt.is_simple_terminal() {
-                let instr_no = self.next_instr_no();
+                let instr_no = self.len();
                 
                 self.terminals.insert(InstrAddr::new(instr_no), stmt.range());
                 self.closed = true;
@@ -301,7 +305,7 @@ impl InstrBlock {
     fn prepare_fragment(&mut self, frag: &mut TerminalFrag) {
         frag.terminals = frag.terminals.drain()
             .map(|(mut addr, loc)| {
-                addr.add_parent(self.next_instr_no(), self.next_block_no);
+                addr.add_parent(self.len(), self.next_block_no);
                 (addr, loc)
             })
             .collect();

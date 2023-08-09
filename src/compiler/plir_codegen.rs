@@ -94,7 +94,11 @@ pub enum PLIRErr {
     /// Type constraint failed
     TypeConstraintErr(ConstraintErr),
     /// Cannot resolve this monotype
-    CannotResolveUnk(usize)
+    CannotResolveUnk(usize),
+    /// Entry point could not be determined
+    CannotDetermineMain,
+    /// main() function has an incorrect type signature
+    InvalidMain,
 }
 
 type FullPLIRErr = FullGonErr<PLIRErr>;
@@ -115,6 +119,8 @@ impl GonErr for PLIRErr {
             | PLIRErr::CannotContinue
             | PLIRErr::CannotReturn 
             | PLIRErr::CannotSpread
+            | PLIRErr::CannotDetermineMain
+            | PLIRErr::InvalidMain
             => "syntax error",
             
             | PLIRErr::CannotIterateType(_)
@@ -182,6 +188,8 @@ impl std::fmt::Display for PLIRErr {
                 e.fmt(f)
             },
             PLIRErr::CannotResolveUnk(idx)        => write!(f, "type ?{idx} could not be resolved"),
+            PLIRErr::CannotDetermineMain          => write!(f, "modules can have a main function, or statements outside of functions, but not both"),
+            PLIRErr::InvalidMain                  => write!(f, "expected main to be of type {}", plir::ty![() -> plir::ty![plir::Type::S_VOID]]),
             PLIRErr::OpErr(e)                     => e.fmt(f),
         }
     }
@@ -885,25 +893,63 @@ impl PLIRCodegen {
     }
 
     /// Takes out the generated [`plir::Program`] from this struct.
-    pub fn unwrap(self) -> PLIRResult<plir::Program> {
+    pub fn unwrap(mut self) -> PLIRResult<plir::Program> {
         assert!(self.blocks.is_empty(),
             "insert block was opened but not properly closed"
         );
-
-        let InsertBlock {mut instrs, unres_values, unres_types, .. } = self.program;
-
-        debug_assert!(unres_values.is_empty(), "there was an unresolved value in program {}", unres_values.iter().next().unwrap().0);
-        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in program {}", unres_types.iter().next().unwrap().0);
-
-        let stmts = self.globals.stmts.into_values().collect();
+        debug_assert!(self.program.unres_values.is_empty(), 
+            "there was an unresolved value in program: {}", 
+            self.program.unres_values.keys().next().unwrap()
+        );
+        debug_assert!(self.program.unres_types.is_empty(),  
+            "there was an unresolved type in program: {}", 
+            self.program.unres_types.keys().next().unwrap()
+        );
         
-        instrs.split_off_unpropagated_terminals(BlockBehavior::Top)?;
-        let block = instrs.unravel().0
-            .into_iter()
-            .map(|lstmt| lstmt.0)
-            .collect();
+        {
+            // remove terminals from top level:
+            self.program.instrs.split_off_unpropagated_terminals(BlockBehavior::Top)?;
 
-        let mut program = plir::Program(stmts, block);
+            // assert valid main conditions:
+            let is_main_defined = match self.get_var_type("main")? {
+                Some(plir::Type::Fun(plir::FunType { params, ret: _, varargs: false })) 
+                    if params.is_empty() => true,
+                Some(_) => Err(PLIRErr::InvalidMain)?,
+                None => false,
+            };
+            
+            let instrs = &mut self.program.instrs;
+            if is_main_defined && !instrs.is_empty() {
+                Err(PLIRErr::CannotDetermineMain.at_range(instrs[0].range()))?;
+            }
+
+            if !is_main_defined {
+                // create main:
+                if instrs.is_open() {
+                    instrs.push({
+                        plir::ProcStmt::Return(None)
+                            .located_at((0, 0) ..= (0, 0))
+                    });
+                }
+                let (stmts, _) = std::mem::take(instrs).unravel();
+    
+                let sig = plir::FunSignature {
+                    private: false, 
+                    ident: plir::FunIdent::new_simple("main"), 
+                    params: vec![], 
+                    varargs: false, 
+                    ret: plir::ty![plir::Type::S_VOID]
+                };
+                let block = plir::Block(
+                    plir::ty![plir::Type::S_VOID],
+                    stmts.into_iter().map(|lstmt| lstmt.0).collect()
+                );
+                self.declare_fun(plir::FunDecl { sig, block })?;
+            }
+        }
+
+        let hoisted_stmts = self.globals.stmts.into_values().collect();
+        let mut program = plir::Program(hoisted_stmts, vec![]);
         
         let mut resolver = self.resolver;
         walkers::TypeApplier(&mut resolver).walk_program(&mut program)
@@ -911,6 +957,7 @@ impl PLIRCodegen {
                 PLIRErr::from(e)
                     .at_range(resolver.unk_positions[n].clone())
             })?;
+        
         Ok(program)
     }
 
@@ -1384,8 +1431,14 @@ impl PLIRCodegen {
             unres_values, unres_types, generic_ctx: _,
             expected_ty
         } = block;
-        debug_assert!(unres_values.is_empty(), "there was an unresolved value in block");
-        debug_assert!(unres_types.is_empty(),  "there was an unresolved type in block");
+        debug_assert!(unres_values.is_empty(), 
+            "there was an unresolved value in block: {}", 
+            unres_values.keys().next().unwrap()
+        );
+        debug_assert!(unres_types.is_empty(),  
+            "there was an unresolved type in block: {}", 
+            unres_types.keys().next().unwrap()
+        );
 
         use plir::ProcStmt;
 
