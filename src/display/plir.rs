@@ -38,8 +38,7 @@ fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, &self.0)?;
-        fmt_stmt_list(f, &self.1)
+        fmt_stmt_list(f, &self.0)
     }
 }
 

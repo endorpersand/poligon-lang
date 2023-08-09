@@ -949,7 +949,7 @@ impl PLIRCodegen {
         }
 
         let hoisted_stmts = self.globals.stmts.into_values().collect();
-        let mut program = plir::Program(hoisted_stmts, vec![]);
+        let mut program = plir::Program(hoisted_stmts);
         
         let mut resolver = self.resolver;
         walkers::TypeApplier(&mut resolver).walk_program(&mut program)

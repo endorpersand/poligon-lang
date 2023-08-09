@@ -24,7 +24,7 @@ pub(crate) use types::{ty, NumType};
 /// 
 /// This struct corresponds to [`ast::Program`].
 #[derive(Debug, PartialEq, Eq)]
-pub struct Program(pub Vec<HoistedStmt>, pub Vec<ProcStmt>);
+pub struct Program(pub Vec<HoistedStmt>);
 
 /// An enclosed scope with a list of statements.
 /// 

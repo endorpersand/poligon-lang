@@ -48,20 +48,6 @@ macro_rules! params {
 }
 pub(in crate::compiler) use params;
 
-/// A macro that makes the syntax for creating [`FunctionType`]s simpler.
-macro_rules! fn_type {
-    (($($e:expr),*) -> $r:expr) => {
-        $r.fn_type(params![$($e),*], false)
-    };
-    ((~) -> $r:expr) => {
-        $r.fn_type(params![], true)
-    };
-    (($($e:expr),+,~) -> $r:expr) => {
-        $r.fn_type(params![$($e),+], true)
-    };
-}
-pub(in crate::compiler) use fn_type;
-
 use super::llvm::Builder2;
 use super::llvm::types::{ReturnableType, BasicTypeEnumS};
 use super::{plir, to_str};
@@ -565,10 +551,6 @@ pub enum LLVMErr {
     CannotCmp(op::Cmp, BasicTypeEnumS, BasicTypeEnumS),
     /// Cannot perform a type cast from A to B
     CannotCast(plir::Type /* from */, plir::Type /* to */),
-    /// Endpoint for LLVM (main function) could not be resolved.
-    CannotDetermineMain,
-    /// Endpoint for LLVM (main function) had invalid parameters.
-    InvalidMain,
     /// An error occurred within LLVM.
     LLVMErr(LLVMString),
     /// Index out of bounds access on struct occurred
@@ -588,8 +570,6 @@ impl GonErr for LLVMErr {
             => "name error",
 
             | LLVMErr::InvalidFun
-            | LLVMErr::CannotDetermineMain
-            | LLVMErr::InvalidMain
             => "syntax error",
 
             LLVMErr::UnresolvedType(_)
@@ -622,8 +602,6 @@ impl std::fmt::Display for LLVMErr {
             LLVMErr::CannotCmp(op, t1, t2)    => write!(f, "cannot compare '{op}' between {t1} and {t2}"),
             LLVMErr::CannotCast(t1, t2)       => write!(f, "cannot perform type cast from {t1} to {t2}"),
             LLVMErr::StructIndexOOB(i)        => write!(f, "cannot index struct, does not have field {i}"),
-            LLVMErr::CannotDetermineMain      => write!(f, "could not determine entry point"),
-            LLVMErr::InvalidMain              => write!(f, "expected main to be of type {}", plir::ty!(() -> plir::ty!(plir::Type::S_VOID))),
             LLVMErr::LLVMErr(e)               => write!(f, "{e}"),
             LLVMErr::Generic(_, t)            => write!(f, "{t}"),
         }
@@ -658,26 +636,19 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
     /// -  Otherwise, all unhoisted statements are collected into a function (main).
     /// - If there is both a function named main and unhoisted statements present, this will error.
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
-        use plir::{HoistedStmt, FunIdent};
+        use plir::HoistedStmt;
 
-        let void_ = compiler.ctx.void_type();
         let i8_ = compiler.ctx.i8_type();
+        let int_ = compiler.ctx.i64_type();
 
         // split the functions from everything else:
-        let mut main_fun = None;
         let mut fun_bodies = vec![];
-        let plir::Program(hoisted, proc) = &self;
+        let plir::Program(hoisted) = &self;
 
         for stmt in hoisted {
             match stmt {
                 HoistedStmt::FunDecl(dcl) => {
-                    let fv = dcl.sig.write_value(compiler)?;
-                    match &dcl.sig.ident {
-                        FunIdent::Simple(s) if s == "main" => {
-                            main_fun.replace(fv);
-                        },
-                        _ => {}
-                    }
+                    dcl.sig.write_value(compiler)?;
                     fun_bodies.push(dcl);
                 },
                 HoistedStmt::ExternFunDecl(dcl) => {
@@ -693,42 +664,21 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
             }
         }
 
-        let (main, mstmts) = match (main_fun, proc.as_slice()) {
-            (Some(f), []) => (f, None),
-            (Some(_), _)  => Err(LLVMErr::CannotDetermineMain)?,
-            (None, stmts) => {
-                let main_fn = compiler.module.add_function(
-                    "main", 
-                    fn_type![() -> void_],
-                    None
-                );
-                (main_fn, Some(stmts))
-            }
-        };
-
         // this is delayed until after all types are resolved
         for bodies in fun_bodies {
             bodies.write_value(compiler)?;
         }
 
-        // resolve main if it hasn't been resolved yet:
-        if let Some(stmts) = mstmts {
-            let main_bb = compiler.ctx.append_basic_block(main, "main_body");
-            compiler.builder.position_at_end(main_bb);
-            for stmt in stmts {
-                stmt.write_value(compiler)?;
-            }
-            compiler.builder.build_return(None);
-        }
-
         // fix main
         // 1. currently, main is () -> void. we need it to be () -> #byte.
         // 2. a locale needs to be registered so that wchar_t functions properly
-
+        let main = compiler.get_fn_by_plir_ident(&plir::FunIdent::new_simple("main"))
+            .expect("main() should have been defined");
+        
         main.as_global_value().set_name("main.inner");
         main.set_linkage(Linkage::Private);
 
-        let inner_main = main;
+        let main_inner = main;
         let main = compiler.module.add_function(
             "main", 
             i8_.fn_type(&[], false),
@@ -740,12 +690,11 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         
         // register default locale
         let setlocale = compiler.import_intrinsic("#setlocale")?;
-        let int_ = compiler.ctx.i64_type();
         let template = compiler.build_global_string("en_US.UTF-8", "locale");
         compiler.builder.build_call(setlocale, params![int_.const_zero(), template.as_pointer_value()], "");
 
         // wrap inner main
-        compiler.builder.build_call(inner_main, &[], "");
+        compiler.builder.build_call(main_inner, &[], "");
         compiler.builder.build_return(Some(&i8_.const_zero()));
 
         match compiler.module.verify() {

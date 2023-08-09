@@ -32,12 +32,9 @@ pub(crate) trait Walker {
     fn visit_field(&mut self, el: &super::Field) -> Result<(), Self::Err>;
 
     fn walk_program(&mut self, el: &super::Program) -> Result<(), Self::Err> {
-        let super::Program(hoisted, procs) = el;
+        let super::Program(hoisted) = el;
         for st in hoisted {
             self.walk_hoisted_stmt(st)?;
-        }
-        for st in procs {
-            self.walk_proc_stmt(st)?;
         }
         Ok(())
     }
@@ -333,12 +330,9 @@ pub(crate) trait WalkerMut {
     fn visit_field(&mut self, el: &mut super::Field) -> Result<(), Self::Err>;
 
     fn walk_program(&mut self, el: &mut super::Program) -> Result<(), Self::Err> {
-        let super::Program(hoisted, procs) = el;
+        let super::Program(hoisted) = el;
         for st in hoisted {
             self.walk_hoisted_stmt(st)?;
-        }
-        for st in procs {
-            self.walk_proc_stmt(st)?;
         }
         Ok(())
     }
