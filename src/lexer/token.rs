@@ -101,7 +101,7 @@ mod pat {
     /// 
     /// [`Token`] == verify if that token is in the given output
     /// [`[Token]`] == verify if any one of those tokens are in the given input
-    pub trait TokenPattern: Sized {
+    pub trait TokenPattern {
         /// Tests if this pattern matches the token pattern exactly.
         fn fully_accepts(&self, t: &Token) -> bool;
         /// Tests if this pattern strictly prefixes the token.
@@ -113,47 +113,14 @@ mod pat {
         /// 
         /// This will not work if the pattern encompasses the token fully.
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken>;
+        
         /// Provides which tokens this pattern expects.
-        fn expected_tokens(self) -> Vec<Token>;
+        fn expected_tokens(&self) -> Vec<Token>;
     }
     
     impl TokenPattern for Token {
         fn fully_accepts(&self, t: &Token) -> bool {
-            (&self).fully_accepts(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            (&self).is_strict_prefix_of(t)
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            (&self).strip_strict_prefix_of(t)
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            vec![self]
-        }
-    }
-    impl<const N: usize> TokenPattern for [Token; N] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            (&self[..]).fully_accepts(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            (&self[..]).is_strict_prefix_of(t)
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            (&self[..]).strip_strict_prefix_of(t)
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            self.into()
-        }
-    }
-    impl<'a> TokenPattern for &'a Token {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self == &t
+            self == t
         }
 
         fn is_strict_prefix_of(&self, t: &Token) -> bool {
@@ -175,11 +142,11 @@ mod pat {
             }
         }
 
-        fn expected_tokens(self) -> Vec<Token> {
-            self.clone().expected_tokens()
+        fn expected_tokens(&self) -> Vec<Token> {
+            std::slice::from_ref(self).to_vec()
         }
     }
-    impl<'a> TokenPattern for &'a [Token] {
+    impl TokenPattern for [Token] {
         fn fully_accepts(&self, t: &Token) -> bool {
             self.contains(t)
         }
@@ -192,25 +159,42 @@ mod pat {
             self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
         }
 
-        fn expected_tokens(self) -> Vec<Token> {
+        fn expected_tokens(&self) -> Vec<Token> {
             self.to_vec()
         }
     }
-    impl<'a, const N: usize> TokenPattern for &'a [Token; N] {
+    impl<const N: usize> TokenPattern for [Token; N] {
         fn fully_accepts(&self, t: &Token) -> bool {
-            self[..].contains(t)
+            self.contains(t)
         }
 
         fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            self[..].iter().any(|pat| pat.is_strict_prefix_of(t))
+            self.iter().any(|pat| pat.is_strict_prefix_of(t))
         }
     
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            self[..].iter().find_map(|pat| pat.strip_strict_prefix_of(t))
+            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
         }
 
-        fn expected_tokens(self) -> Vec<Token> {
-            self[..].to_vec()
+        fn expected_tokens(&self) -> Vec<Token> {
+            self.to_vec()
+        }
+    }
+    impl<'a, P: TokenPattern> TokenPattern for &'a P {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            (*self).fully_accepts(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            (*self).is_strict_prefix_of(t)
+        }
+
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            (*self).strip_strict_prefix_of(t)
+        }
+
+        fn expected_tokens(&self) -> Vec<Token> {
+            (*self).expected_tokens()
         }
     }
 }
