@@ -570,32 +570,33 @@ impl DParser {
     fn expect_fun_ident(&mut self) -> DParseResult<plir::FunIdent> {
         let loc = self.peek_loc();
 
-        if let Some(size) = self.has_ident() {
-            // ident OR Type::attr
+        todo!();
+        // if let Some(size) = self.has_ident() {
+        //     // ident OR Type::attr
 
-            if let Some(token![::]) = self.peek_nth_token(size) {
-                // Type::attr
-                let ty = self.expect_type(true)?;
-                self.expect(token![::])?;
-                let attr = self.expect_ident()?.0;
+        //     if let Some(token![::]) = self.peek_nth_token(size) {
+        //         // Type::attr
+        //         let ty = self.expect_type(true)?;
+        //         self.expect(token![::])?;
+        //         let attr = self.expect_ident()?.0;
 
-                Ok(plir::FunIdent::Static(ty, attr))
-            } else {
-                self.expect_ident().map(|id| id.0).map(plir::FunIdent::Simple)
-            }
-        } else if let Some(token![<] | token![<<]) = self.peek_token() {
-            // <Type>::attr
-            self.expect(token![<])?;
-            let ty = self.expect_type(true)?;
-            self.expect(token![>])?;
+        //         Ok(plir::FunIdent::Static(ty, attr))
+        //     } else {
+        //         self.expect_ident().map(|id| id.0).map(plir::FunIdent::Simple)
+        //     }
+        // } else if let Some(token![<] | token![<<]) = self.peek_token() {
+        //     // <Type>::attr
+        //     self.expect(token![<])?;
+        //     let ty = self.expect_type(true)?;
+        //     self.expect(token![>])?;
 
-            self.expect(token![::])?;
-            let attr = self.expect_ident()?.0;
+        //     self.expect(token![::])?;
+        //     let attr = self.expect_ident()?.0;
 
-            Ok(plir::FunIdent::Static(ty, attr))
-        } else {
-            Err(expected_tokens![<].at_range(loc))
-        }
+        //     Ok(plir::FunIdent::Static(ty, attr))
+        // } else {
+        //     Err(expected_tokens![<].at_range(loc))
+        // }
     }
 
     /// Match the next tokens if they represent a field declaration.
@@ -654,12 +655,12 @@ impl DParser {
 
         self.expect(token!["("])?;
         let (params, end_comma) = self.expect_tuple_of(DParser::match_param)?;
-        let varargs = end_comma && self.match_(token![..]).is_some();
+        let varargs = end_comma; // && self.match_(token![..]).is_some(); TODO
         if varargs {
             self.match_(token![,]);
         }
         self.expect(token![")"])?;
-        self.expect(token![->])?;
+        // self.expect(token![->])?; // TODO
         let ret = self.expect_type(true)?;
         self.expect(token![;])?;
 
