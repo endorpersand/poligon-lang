@@ -402,6 +402,23 @@ lazy_static! {
         m
     };
 }
+lazy_static! {
+    /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
+    pub(crate) static ref SPLITTABLES2: HashMap<Token, (Token, Token)> = {
+        let mut m = HashMap::new();
+        m.insert(token![..], (token![.], token![.]));
+        m.insert(token![&&], (token![&], token![&]));
+        m.insert(token![||], (token![|], token![|]));
+        m.insert(token![<=], (token![<], token![=]));
+        m.insert(token![>=], (token![>], token![=]));
+        m.insert(token![==], (token![=], token![=]));
+        m.insert(token![<<], (token![<], token![<]));
+        m.insert(token![>>], (token![>], token![>]));
+        m.insert(token![::], (token![:], token![:]));
+        m.insert(token![->], (token![-], token![>]));
+        m
+    };
+}
 
 /// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
 #[macro_export]
