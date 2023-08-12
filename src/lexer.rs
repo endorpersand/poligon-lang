@@ -861,8 +861,6 @@ impl Lexer {
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
-        let mut buf = String::new();
-
         while let Some(c) = self.match_cls(CharClass::Punct) {
             if c == '/' {
                 match self.peek() {
