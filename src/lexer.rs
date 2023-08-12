@@ -15,7 +15,7 @@ use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr, CursorRange, Cursor};
 
-use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
+use self::token::{Token, Keyword, Delimiter, token, FullToken};
 pub mod token;
 
 /// Convert a string and lex it into a sequence of tokens.
@@ -1069,10 +1069,12 @@ mod tests {
         assert_lex("!~==!~&&.=+-*<><<3", &[
             token![!],
             token![~],
-            token![==],
+            token![=],
+            token![=],
             token![!],
             token![~],
-            token![&&],
+            token![&],
+            token![&],
             token![.],
             token![=],
             token![+],
@@ -1080,11 +1082,12 @@ mod tests {
             token![*],
             token![<],
             token![>],
-            token![<<],
+            token![<],
+            token![<],
             Token::Numeric("3".to_string())
         ]);
 
-        assert_lex("<<<", &[token![<<], token![<]]);
+        assert_lex("<<<", &[token![<], token![<], token![<]]);
     }
 
     /// Tests keywords, multiple lines, semicolon detection.
@@ -1143,7 +1146,8 @@ mod tests {
         ]);
         assert_lex("123..444", &[
             Token::Numeric("123".to_string()),
-            token![..],
+            token![.],
+            token![.],
             Token::Numeric("444".to_string())
         ]);
         assert_lex("123. + 444", &[
