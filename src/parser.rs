@@ -196,7 +196,7 @@ macro_rules! left_assoc_op {
             if let Some(mut e) = self.$ds()? {
                 while let Some(op) = self.match_([$(token![$op]),+]) {
                     let binop = ast::Expr::BinaryOp {
-                        op: todo!("op.tt.try_into().unwrap()"),
+                        op: op.tt.try_into().unwrap(),
                         left: Box::new(e),
                         right: self.$ds()?
                             .map(Box::new)
@@ -726,14 +726,13 @@ impl Parser {
 
                 Located::new(ast::Pat::List(tpl), self.pop_loc_block("match_decl_pat list").unwrap())
             },
-            // TODO
-            // token![..] => {
-            //     self.push_loc_block("match_decl_pat spread");
-            //     self.expect(token![..])?;
-            //     let item = self.match_decl_pat()?.map(Box::new);
+            token![..] => {
+                self.push_loc_block("match_decl_pat spread");
+                self.expect(token![..])?;
+                let item = self.match_decl_pat()?.map(Box::new);
 
-            //     Located::new(ast::Pat::Spread(item), self.pop_loc_block("match_decl_pat spread").unwrap())
-            // }
+                Located::new(ast::Pat::Spread(item), self.pop_loc_block("match_decl_pat spread").unwrap())
+            }
             token![mut] | token![#] | Token::Ident(_) => {
                 self.push_loc_block("match_decl_pat unit");
                 let mt = match self.match_(token![mut]) {
@@ -847,7 +846,7 @@ impl Parser {
             ParseErr::ExpectedParam
         )?;
 
-        let ret = match None::<u8> { // TODO: self.match_(token![->])
+        let ret = match self.match_(token![->]) {
             Some(_) => Some(self.expect_type()?),
             None    => None,
         };
@@ -926,9 +925,9 @@ impl Parser {
     pub fn expect_method_ident(&mut self) -> ParseResult<(Option<String>, String, bool)> {
         let referent = self.match_ident()?.map(|ls| ls.0);
 
-        let is_static = match self.expect(&[token![.]/* , token![::] TODO */])?.tt {
+        let is_static = match self.expect(&[token![.], token![::]])?.tt {
             token![.] => false,
-            // token![::] => true,
+            token![::] => true,
             _ => unreachable!()
         };
         let method = self.expect_ident()?.0;
@@ -956,7 +955,7 @@ impl Parser {
             ParseErr::ExpectedParam
         )?;
 
-        let ret = match None::<u8> { // TODO: self.match_(token![->])
+        let ret = match self.match_(token![->]) {
             Some(_) => Some(self.expect_type()?),
             None    => None,
         };
@@ -994,7 +993,7 @@ impl Parser {
             self.intrinsic_mode = true;
             Ok(None)
         } else {
-            // self.expect(token![::])?; TODO
+            self.expect(token![::])?;
             let sub = self.expect_ident()?.0;
             Ok(Some(ast::Stmt::Import(ast::StaticPath {
                 ty: ident,
@@ -1224,8 +1223,8 @@ impl Parser {
     // logical OR, logical AND
     // These have a similar structure and don't need to be repeated several times.
     left_assoc_rules! { 
-        match_lor  = match_land  ( | match_land )*; // TODO ||
-        match_land = match_cmp   ( & match_cmp  )*; // TODO &&
+        match_lor  = match_land  ( || match_land )*;
+        match_land = match_cmp   ( && match_cmp  )*;
     }
 
     /// Match the next tokens in input if they represent an comparison operation (`a < b`)
@@ -1241,17 +1240,17 @@ impl Parser {
 
         if let Some(mut e) = me {
             lazy_static! {
-                static ref CMP_OPS: [Token; 2] = [
+                static ref CMP_OPS: [Token; 6] = [
                     token![<], token![>], 
-                    // token![<=], token![>=], TODO
-                    // token![==], token![!=]
+                    token![<=], token![>=], 
+                    token![==], token![!=]
                 ];
             }
 
             // check if there's a comparison here
             let mut rights = vec![];
             while let Some(t) = self.match_(&*CMP_OPS) {
-                let op = todo!("t.tt.try_into().unwrap()");
+                let op = t.tt.try_into().unwrap();
                 let rexpr = self.match_spread()?
                     .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
                 
@@ -1282,9 +1281,7 @@ impl Parser {
     /// The next expression above in precedence is [`Parser::match_range`].
     pub fn match_spread(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_spread");
-
-        // TODO: token![..]
-        if self.match_(token![.]).is_some() {
+        if self.match_(token![..]).is_some() {
             let me = self.match_range()?;
             let inner = me.map(Box::new);
 
@@ -1304,9 +1301,7 @@ impl Parser {
     pub fn match_range(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
         self.push_loc_block("match_range");
         if let Some(mut e) = self.match_bor()? {
-
-            // TODO: token![.]
-            if self.match_(token![.]).is_some() {
+            if self.match_(token![..]).is_some() {
                 let right = self.match_bor()?
                 .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
 
@@ -1342,13 +1337,11 @@ impl Parser {
         match_bxor = match_band  ( ^ match_band  )*;
         match_band = match_shift ( & match_shift )*;
     }
-
-    // TODO:
     // shifting (<<, >>)
     // addition/subtraction (+, -)
     // multiplication, division, modulo (+, -, %)
     left_assoc_rules! {
-        match_shift  = match_addsub ( ( < , > ) match_addsub )* ;
+        match_shift  = match_addsub ( ( << , >> ) match_addsub )* ;
         match_addsub = match_muldiv ( ( + , - ) match_muldiv )* ;
         match_muldiv = match_unary ( ( * , / , % ) match_unary )* ;
     }
@@ -1365,7 +1358,7 @@ impl Parser {
         self.push_loc_block("match_unary");
         let mut ops = vec![];
         while let Some(t) = self.match_(&*UNARY_OPS) {
-            ops.push(todo!("t.tt.try_into().unwrap()"));
+            ops.push(t.tt.try_into().unwrap());
         }
 
         let me = if ops.is_empty() {
@@ -1504,7 +1497,7 @@ impl Parser {
 
         let unit = match peek {
             token![#] | Token::Ident(_) => self.expect_identoid()?,
-            token![<] /*| token![<<] TODO */      => self.expect_diamondoid()?,
+            token![<] | token![<<]      => self.expect_diamondoid()?,
             Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => self.expect_literal()? ,
             token!["["]       => self.expect_list()?,
             token!["{"]       => self.expect_block().map(ast::Expr::Block)?,
@@ -1621,10 +1614,9 @@ impl Parser {
                     }
                 }
             },
-            // TODO: token![::]
-            Some(FullToken { tt: token![:], .. }) => {
+            Some(FullToken { tt: token![::], .. }) => {
                 let ty = self.expect_type()?;
-                // self.expect(token![::])?;
+                self.expect(token![::])?;
                 let attr = self.expect_ident()?.0;
 
                 ast::Expr::StaticPath(ast::StaticPath { ty, attr })
@@ -1656,14 +1648,12 @@ impl Parser {
                 )?;
                 ast::Expr::ClassLiteral(ty, params)
             },
-            // TODO: token![::]
-            Some(token![:]) => {
+            Some(token![::]) => {
                 let attr = self.expect_ident()?.0;
     
                 ast::Expr::StaticPath(ast::StaticPath { ty, attr })
             },
-            // TODO: token![::]
-            _ => Err(expected_tokens![:, #].at_range(loc))?
+            _ => Err(expected_tokens![::, #].at_range(loc))?
         };
 
         Ok(e)
@@ -1723,479 +1713,478 @@ impl Parser {
     }
 }
 
-// TODO
-// #[cfg(test)]
-// mod tests {
-//     use crate::err::{FullGonErr, GonErr};
-//     use crate::lexer::token::token;
-//     use crate::lexer::tokenize;
-//     use crate::ast::*;
+#[cfg(test)]
+mod tests {
+    use crate::err::{FullGonErr, GonErr};
+    use crate::lexer::token::token;
+    use crate::lexer::tokenize;
+    use crate::ast::*;
 
-//     use super::*;
+    use super::*;
 
-//     macro_rules! program {
-//         ($($e:expr),*) => {
-//             Program(vec![$($e),*])
-//         }
-//     }
-//     macro_rules! block {
-//         ($($e:expr),*; $loc:expr) => {
-//             Located::new(Block(vec![$($e),*]), $loc)
-//         }
-//     }
-//     macro_rules! block_expr {
-//         ($($e:expr),*; $loc:expr) => {
-//             Expr::Block(block![$($e),*; $loc])
-//         }
-//     }
+    macro_rules! program {
+        ($($e:expr),*) => {
+            Program(vec![$($e),*])
+        }
+    }
+    macro_rules! block {
+        ($($e:expr),*; $loc:expr) => {
+            Located::new(Block(vec![$($e),*]), $loc)
+        }
+    }
+    macro_rules! block_expr {
+        ($($e:expr),*; $loc:expr) => {
+            Expr::Block(block![$($e),*; $loc])
+        }
+    }
     
-//     macro_rules! expr_stmt {
-//         ($e:expr, $loc:expr) => {
-//             Located::new(Stmt::Expr(Located::new($e, $loc)), $loc)
-//         }
-//     }
-//     fn add_one(cr: CursorRange) -> CursorRange {
-//         let &(el, ec) = cr.end();
-//         *cr.start() ..= (el, ec + 1)
-//     }
-//     macro_rules! expr_stmt_with_semi {
-//         ($e:expr, $loc:expr) => {
-//             Located::new(Stmt::Expr(Located::new($e, $loc)), add_one($loc))
-//         }
-//     }
-//     macro_rules! binop {
-//         ($op:ident, $eloc:expr, $left:expr, $right:expr) => {
-//             Located::new(Expr::BinaryOp {
-//                 op: op::Binary::$op,
-//                 left: Box::new($left),
-//                 right: Box::new($right)
-//             }, $eloc)
-//         };
-//     }
+    macro_rules! expr_stmt {
+        ($e:expr, $loc:expr) => {
+            Located::new(Stmt::Expr(Located::new($e, $loc)), $loc)
+        }
+    }
+    fn add_one(cr: CursorRange) -> CursorRange {
+        let &(el, ec) = cr.end();
+        *cr.start() ..= (el, ec + 1)
+    }
+    macro_rules! expr_stmt_with_semi {
+        ($e:expr, $loc:expr) => {
+            Located::new(Stmt::Expr(Located::new($e, $loc)), add_one($loc))
+        }
+    }
+    macro_rules! binop {
+        ($op:ident, $eloc:expr, $left:expr, $right:expr) => {
+            Located::new(Expr::BinaryOp {
+                op: op::Binary::$op,
+                left: Box::new($left),
+                right: Box::new($right)
+            }, $eloc)
+        };
+    }
 
-//     macro_rules! ident {
-//         ($ident:literal, $range:expr) => {
-//             Located::new(Expr::Ident(String::from($ident)), $range)
-//         }
-//     }
+    macro_rules! ident {
+        ($ident:literal, $range:expr) => {
+            Located::new(Expr::Ident(String::from($ident)), $range)
+        }
+    }
 
-//     macro_rules! literal {
-//         ($ident:ident($e:expr), $range:expr) => {
-//             Located::new(Expr::Literal(Literal::$ident($e)), $range)
-//         };
-//         ($l:literal, $range:expr) => {
-//             Located::new(Expr::Literal(Literal::Str(String::from($l))), $range)
-//         }
-//     }
+    macro_rules! literal {
+        ($ident:ident($e:expr), $range:expr) => {
+            Located::new(Expr::Literal(Literal::$ident($e)), $range)
+        };
+        ($l:literal, $range:expr) => {
+            Located::new(Expr::Literal(Literal::Str(String::from($l))), $range)
+        }
+    }
 
-//     macro_rules! asg_unit {
-//         ($id:literal) => {
-//             AsgUnit::Ident(String::from($id))
-//         }
+    macro_rules! asg_unit {
+        ($id:literal) => {
+            AsgUnit::Ident(String::from($id))
+        }
 
-//     }
-//     macro_rules! decl_unit {
-//         (mut $id:literal) => {
-//             DeclUnit(String::from($id), MutType::Mut)
-//         };
-//         ($id:literal) => {
-//             DeclUnit(String::from($id), MutType::Immut)
-//         }
-//     }
-//     /// Unwrap the result (or print error if not possible).
-//     fn unwrap_fe<T>(result: Result<T, FullGonErr<impl GonErr>>, input: &str) -> T {
-//         match result {
-//             Ok(t) => t,
-//             Err(e) => panic!("{}", e.full_msg(input)),
-//         }
-//     }
-//     /// Lex and parse string.
-//     fn parse_str(s: &str) -> ParseResult<Program> {
-//         parse(unwrap_fe(tokenize(s), s))
-//     }
-//     /// Assert that the string provided parses into the program.
-//     #[allow(unused)]
-//     fn assert_parse(input: &str, r: Program) {
-//         assert_eq!(unwrap_fe(parse_str(input), input), r)
-//     }
-//     /// Assert that the string provided errors with the given error when parsed.
-//     #[allow(unused)]
-//     fn assert_parse_fail<E>(input: &str, result: E) 
-//         where E: std::fmt::Debug,
-//             FullParseErr: PartialEq<E>
-//     {
-//         match parse_str(input) {
-//             Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
-//             Err(e) => assert_eq!(e, result)
-//         }
-//     }
+    }
+    macro_rules! decl_unit {
+        (mut $id:literal) => {
+            DeclUnit(String::from($id), MutType::Mut)
+        };
+        ($id:literal) => {
+            DeclUnit(String::from($id), MutType::Immut)
+        }
+    }
+    /// Unwrap the result (or print error if not possible).
+    fn unwrap_fe<T>(result: Result<T, FullGonErr<impl GonErr>>, input: &str) -> T {
+        match result {
+            Ok(t) => t,
+            Err(e) => panic!("{}", e.full_msg(input)),
+        }
+    }
+    /// Lex and parse string.
+    fn parse_str(s: &str) -> ParseResult<Program> {
+        parse(unwrap_fe(tokenize(s), s))
+    }
+    /// Assert that the string provided parses into the program.
+    #[allow(unused)]
+    fn assert_parse(input: &str, r: Program) {
+        assert_eq!(unwrap_fe(parse_str(input), input), r)
+    }
+    /// Assert that the string provided errors with the given error when parsed.
+    #[allow(unused)]
+    fn assert_parse_fail<E>(input: &str, result: E) 
+        where E: std::fmt::Debug,
+            FullParseErr: PartialEq<E>
+    {
+        match parse_str(input) {
+            Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
+            Err(e) => assert_eq!(e, result)
+        }
+    }
 
-//     #[test]
-//     fn bin_op_test() {
-//         assert_parse("2 + 3;", program![
-//             Located::new(Stmt::Expr(binop! {
-//                 Add, (0, 0) ..= (0, 4),
-//                 literal!(Int(2), (0, 0) ..= (0, 0)),
-//                 literal!(Int(3), (0, 4) ..= (0, 4))
-//             }), (0, 0) ..= (0, 5))
-//         ]);
+    #[test]
+    fn bin_op_test() {
+        assert_parse("2 + 3;", program![
+            Located::new(Stmt::Expr(binop! {
+                Add, (0, 0) ..= (0, 4),
+                literal!(Int(2), (0, 0) ..= (0, 0)),
+                literal!(Int(3), (0, 4) ..= (0, 4))
+            }), (0, 0) ..= (0, 5))
+        ]);
 
-//         assert_parse("2 + 3 * 4;", program![
-//             Located::new(Stmt::Expr(binop! {
-//                 Add, (0, 0) ..= (0, 8),
-//                 literal!(Int(2), (0, 0) ..= (0, 0)),
-//                 binop! {
-//                     Mul, (0, 4) ..= (0, 8),
-//                     literal!(Int(3), (0, 4) ..= (0, 4)),
-//                     literal!(Int(4), (0, 8) ..= (0, 8))
-//                 }
-//             }), (0, 0) ..= (0, 9))
-//         ]);
-//     }
+        assert_parse("2 + 3 * 4;", program![
+            Located::new(Stmt::Expr(binop! {
+                Add, (0, 0) ..= (0, 8),
+                literal!(Int(2), (0, 0) ..= (0, 0)),
+                binop! {
+                    Mul, (0, 4) ..= (0, 8),
+                    literal!(Int(3), (0, 4) ..= (0, 4)),
+                    literal!(Int(4), (0, 8) ..= (0, 8))
+                }
+            }), (0, 0) ..= (0, 9))
+        ]);
+    }
 
-//     #[test]
-//     fn block_test() {
-//         assert_parse("{}", program![
-//             expr_stmt!(block_expr![;(0, 0)..=(0, 1)], (0, 0)..=(0, 1))
-//         ]);
+    #[test]
+    fn block_test() {
+        assert_parse("{}", program![
+            expr_stmt!(block_expr![;(0, 0)..=(0, 1)], (0, 0)..=(0, 1))
+        ]);
 
-//         assert_parse("{{}}", program![
-//             expr_stmt!(block_expr![
-//                 expr_stmt!(block_expr![;(0, 1) ..= (0, 2)], (0, 1) ..= (0, 2));
-//             (0, 0) ..= (0, 3)], (0, 0)..=(0, 3))
-//         ])
-//     }
+        assert_parse("{{}}", program![
+            expr_stmt!(block_expr![
+                expr_stmt!(block_expr![;(0, 1) ..= (0, 2)], (0, 1) ..= (0, 2));
+            (0, 0) ..= (0, 3)], (0, 0)..=(0, 3))
+        ])
+    }
 
-//     /// Tests if statements.
-//     #[test]
-//     fn if_else_test() {
-//         assert_parse("
-//             if true {
-//                 // :)
-//             }
-//         ", program![
-//             expr_stmt!(Expr::If {
-//                 conditionals: vec![
-//                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
-//                 ],
-//                 last: None
-//             }, (1, 12)..=(3, 12))
-//         ]);
+    /// Tests if statements.
+    #[test]
+    fn if_else_test() {
+        assert_parse("
+            if true {
+                // :)
+            }
+        ", program![
+            expr_stmt!(Expr::If {
+                conditionals: vec![
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
+                ],
+                last: None
+            }, (1, 12)..=(3, 12))
+        ]);
 
-//         assert_parse("
-//             if true {
-//                 // :)
-//             } else {
-//                 // :(
-//             }
-//         ", program![
-//             expr_stmt!(Expr::If { 
-//                 conditionals: vec![
-//                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
-//                 ],
-//                 last: Some(block![; (3, 19) ..= (5, 12)])
-//             }, (1, 12) ..= (5, 12))
-//         ]);
+        assert_parse("
+            if true {
+                // :)
+            } else {
+                // :(
+            }
+        ", program![
+            expr_stmt!(Expr::If { 
+                conditionals: vec![
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
+                ],
+                last: Some(block![; (3, 19) ..= (5, 12)])
+            }, (1, 12) ..= (5, 12))
+        ]);
 
-//         assert_parse("
-//             if true {
-//                 // :)
-//             } else if condition {
-//                 // :|
-//             } else {
-//                 // :(
-//             }
-//         ", program![
-//             expr_stmt!(Expr::If { 
-//                 conditionals: vec![
-//                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
-//                     (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)])
-//                 ],
-//                 last: Some(block![; (5, 19) ..= (7, 12)])
-//             }, (1, 12) ..= (7, 12))
-//         ]);
+        assert_parse("
+            if true {
+                // :)
+            } else if condition {
+                // :|
+            } else {
+                // :(
+            }
+        ", program![
+            expr_stmt!(Expr::If { 
+                conditionals: vec![
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
+                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)])
+                ],
+                last: Some(block![; (5, 19) ..= (7, 12)])
+            }, (1, 12) ..= (7, 12))
+        ]);
 
-//         assert_parse("
-//             if true {
-//                 // :)
-//             } else if condition {
-//                 // :|
-//             } else if condition {
-//                 // :|
-//             } else if condition {
-//                 // :|
-//             } else if condition {
-//                 // :|
-//             } else {
-//                 // :(
-//             }
-//         ", program![
-//             expr_stmt!(Expr::If { 
-//                 conditionals: vec![
-//                     (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
-//                     (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)]),
-//                     (ident!("condition", (5, 22) ..= (5, 30)), block![; (5, 32) ..= (7, 12)]),
-//                     (ident!("condition", (7, 22) ..= (7, 30)), block![; (7, 32) ..= (9, 12)]),
-//                     (ident!("condition", (9, 22) ..= (9, 30)), block![; (9, 32) ..= (11, 12)]),
-//                 ],
-//                 last: Some(block![; (11, 19) ..= (13, 12)])
-//             }, (1, 12) ..= (13, 12))
-//         ]);
-//     }
+        assert_parse("
+            if true {
+                // :)
+            } else if condition {
+                // :|
+            } else if condition {
+                // :|
+            } else if condition {
+                // :|
+            } else if condition {
+                // :|
+            } else {
+                // :(
+            }
+        ", program![
+            expr_stmt!(Expr::If { 
+                conditionals: vec![
+                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
+                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)]),
+                    (ident!("condition", (5, 22) ..= (5, 30)), block![; (5, 32) ..= (7, 12)]),
+                    (ident!("condition", (7, 22) ..= (7, 30)), block![; (7, 32) ..= (9, 12)]),
+                    (ident!("condition", (9, 22) ..= (9, 30)), block![; (9, 32) ..= (11, 12)]),
+                ],
+                last: Some(block![; (11, 19) ..= (13, 12)])
+            }, (1, 12) ..= (13, 12))
+        ]);
+    }
 
-//     /// Tests while and for loop as well as 
-//     /// declarations, function calls, conditionals, assignment, ranges, and literals.
-//     #[test]
-//     fn loop_test() {
-//         // barebones
-//         assert_parse("while true {}", program![
-//             expr_stmt!(Expr::While {
-//                 condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
-//                 block: block![; (0, 11) ..= (0, 12)]
-//             }, (0, 0) ..= (0, 12))
-//         ]);
-//         assert_parse("for i in it {}", program![
-//             expr_stmt!(Expr::For {
-//                 ident: String::from("i"),
-//                 iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
-//                 block: block![; (0, 12) ..= (0, 13)]
-//             }, (0, 0) ..= (0, 13))
-//         ]);
+    /// Tests while and for loop as well as 
+    /// declarations, function calls, conditionals, assignment, ranges, and literals.
+    #[test]
+    fn loop_test() {
+        // barebones
+        assert_parse("while true {}", program![
+            expr_stmt!(Expr::While {
+                condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
+                block: block![; (0, 11) ..= (0, 12)]
+            }, (0, 0) ..= (0, 12))
+        ]);
+        assert_parse("for i in it {}", program![
+            expr_stmt!(Expr::For {
+                ident: String::from("i"),
+                iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
+                block: block![; (0, 12) ..= (0, 13)]
+            }, (0, 0) ..= (0, 13))
+        ]);
 
-//         // full examples
-//         assert_parse("
-//             let i = 0;
-//             while i < 10 {
-//                 print(i);
-//                 i = i + 1;
-//             }
-//         ", program![
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("i")), (1, 16) ..= (1, 16)), 
-//                 ty: None, 
-//                 val: literal!(Int(0), (1, 20) ..= (1, 20))
-//             }), (1, 12) ..= (1, 21)),
-//             expr_stmt!(Expr::While {
-//                 condition: Located::boxed(Expr::Comparison {
-//                     left: Box::new(ident!("i", (2, 18) ..= (2, 18))), 
-//                     rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))]
-//                 }, (2, 18) ..= (2, 23)), 
-//                 block: block![
-//                     expr_stmt_with_semi!(Expr::Call {
-//                         funct: Box::new(ident!("print", (3, 16) ..= (3, 20))),
-//                         params: vec![ident!("i", (3, 22) ..= (3, 22))]
-//                     }, (3, 16) ..= (3, 23)),
-//                     expr_stmt_with_semi!(Expr::Assign(
-//                         Located::new(Pat::Unit(asg_unit!("i")), (4, 16) ..= (4, 16)), 
-//                         Box::new(binop! {
-//                             Add, (4, 20) ..= (4, 24),
-//                             ident!("i", (4, 20) ..= (4, 20)),
-//                             literal!(Int(1), (4, 24) ..= (4, 24))
-//                         })
-//                     ), (4, 16) ..= (4, 24));
-//                 (2, 25) ..= (5, 12)]
-//             }, (2, 12) ..= (5, 12))
-//         ]);
+        // full examples
+        assert_parse("
+            let i = 0;
+            while i < 10 {
+                print(i);
+                i = i + 1;
+            }
+        ", program![
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!("i")), (1, 16) ..= (1, 16)), 
+                ty: None, 
+                val: literal!(Int(0), (1, 20) ..= (1, 20))
+            }), (1, 12) ..= (1, 21)),
+            expr_stmt!(Expr::While {
+                condition: Located::boxed(Expr::Comparison {
+                    left: Box::new(ident!("i", (2, 18) ..= (2, 18))), 
+                    rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))]
+                }, (2, 18) ..= (2, 23)), 
+                block: block![
+                    expr_stmt_with_semi!(Expr::Call {
+                        funct: Box::new(ident!("print", (3, 16) ..= (3, 20))),
+                        params: vec![ident!("i", (3, 22) ..= (3, 22))]
+                    }, (3, 16) ..= (3, 23)),
+                    expr_stmt_with_semi!(Expr::Assign(
+                        Located::new(Pat::Unit(asg_unit!("i")), (4, 16) ..= (4, 16)), 
+                        Box::new(binop! {
+                            Add, (4, 20) ..= (4, 24),
+                            ident!("i", (4, 20) ..= (4, 20)),
+                            literal!(Int(1), (4, 24) ..= (4, 24))
+                        })
+                    ), (4, 16) ..= (4, 24));
+                (2, 25) ..= (5, 12)]
+            }, (2, 12) ..= (5, 12))
+        ]);
 
-//         assert_parse("for i in 1..10 { print(i); }", program![
-//             expr_stmt!(Expr::For {
-//                 ident: String::from("i"), 
-//                 iterator: Located::boxed(Expr::Range {
-//                     left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
-//                     right: Box::new(literal!(Int(10), (0, 12) ..= (0, 13))), 
-//                     step: None 
-//                 }, (0, 9) ..= (0, 13)), 
-//                 block: block![
-//                     expr_stmt_with_semi!(Expr::Call {
-//                         funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
-//                         params: vec![ident!("i", (0, 23) ..= (0, 23))]
-//                     }, (0, 17) ..= (0, 24));
-//                 (0, 15) ..= (0, 27)]
-//             }, (0, 0) ..= (0, 27))
-//         ]);
-//     }
+        assert_parse("for i in 1..10 { print(i); }", program![
+            expr_stmt!(Expr::For {
+                ident: String::from("i"), 
+                iterator: Located::boxed(Expr::Range {
+                    left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
+                    right: Box::new(literal!(Int(10), (0, 12) ..= (0, 13))), 
+                    step: None 
+                }, (0, 9) ..= (0, 13)), 
+                block: block![
+                    expr_stmt_with_semi!(Expr::Call {
+                        funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
+                        params: vec![ident!("i", (0, 23) ..= (0, 23))]
+                    }, (0, 17) ..= (0, 24));
+                (0, 15) ..= (0, 27)]
+            }, (0, 0) ..= (0, 27))
+        ]);
+    }
 
-//     #[test]
-//     fn semicolon_test() {
-//         assert_parse_fail("2 2", expected_tokens![;]);
+    #[test]
+    fn semicolon_test() {
+        assert_parse_fail("2 2", expected_tokens![;]);
 
-//         assert_parse("if cond {}", program![
-//             expr_stmt!(Expr::If {
-//                 conditionals: vec![
-//                     (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
-//                 ],
-//                 last: None
-//             }, (0, 0) ..= (0, 9))
-//         ]);
-//         assert_parse("if cond {};", program![
-//             expr_stmt_with_semi!(Expr::If {
-//                 conditionals: vec![
-//                     (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
-//                 ],
-//                 last: None
-//             }, (0, 0) ..= (0, 9))
-//         ]);
+        assert_parse("if cond {}", program![
+            expr_stmt!(Expr::If {
+                conditionals: vec![
+                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
+                ],
+                last: None
+            }, (0, 0) ..= (0, 9))
+        ]);
+        assert_parse("if cond {};", program![
+            expr_stmt_with_semi!(Expr::If {
+                conditionals: vec![
+                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
+                ],
+                last: None
+            }, (0, 0) ..= (0, 9))
+        ]);
 
-//         assert_parse("
-//             let a = 1;
-//             let b = 2;
-//             let c = 3;
-//             if cond {
-//                 let d = 5;
-//             }
-//         ", program![
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
-//                 ty: None, 
-//                 val: literal!(Int(1), (1, 20) ..= (1, 20))
-//             }), (1, 12) ..= (1, 21)),
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("b")), (2, 16) ..= (2, 16)), 
-//                 ty: None, 
-//                 val: literal!(Int(2), (2, 20) ..= (2, 20))
-//             }), (2, 12) ..= (2, 21)),
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 16) ..= (3, 16)), 
-//                 ty: None, 
-//                 val: literal!(Int(3), (3, 20) ..= (3, 20))
-//             }), (3, 12) ..= (3, 21)),
-//             expr_stmt!(Expr::If {
-//                 conditionals: vec![(
-//                     ident!("cond", (4, 15) ..= (4, 18)),
-//                     block![
-//                         Located::new(Stmt::Decl(Decl { 
-//                             rt: ReasgType::Let, 
-//                             pat: Located::new(Pat::Unit(decl_unit!("d")), (5, 20) ..= (5, 20)), 
-//                             ty: None, 
-//                             val: literal!(Int(5), (5, 24) ..= (5, 24))
-//                         }), (5, 16) ..= (5, 25));
-//                     (4, 20) ..= (6, 12)]
-//                 )],
-//                 last: None
-//             }, (4, 12) ..= (6, 12))
-//         ])
-//     }
+        assert_parse("
+            let a = 1;
+            let b = 2;
+            let c = 3;
+            if cond {
+                let d = 5;
+            }
+        ", program![
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
+                ty: None, 
+                val: literal!(Int(1), (1, 20) ..= (1, 20))
+            }), (1, 12) ..= (1, 21)),
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!("b")), (2, 16) ..= (2, 16)), 
+                ty: None, 
+                val: literal!(Int(2), (2, 20) ..= (2, 20))
+            }), (2, 12) ..= (2, 21)),
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 16) ..= (3, 16)), 
+                ty: None, 
+                val: literal!(Int(3), (3, 20) ..= (3, 20))
+            }), (3, 12) ..= (3, 21)),
+            expr_stmt!(Expr::If {
+                conditionals: vec![(
+                    ident!("cond", (4, 15) ..= (4, 18)),
+                    block![
+                        Located::new(Stmt::Decl(Decl { 
+                            rt: ReasgType::Let, 
+                            pat: Located::new(Pat::Unit(decl_unit!("d")), (5, 20) ..= (5, 20)), 
+                            ty: None, 
+                            val: literal!(Int(5), (5, 24) ..= (5, 24))
+                        }), (5, 16) ..= (5, 25));
+                    (4, 20) ..= (6, 12)]
+                )],
+                last: None
+            }, (4, 12) ..= (6, 12))
+        ])
+    }
 
-//     #[test]
-//     fn type_test() {
-//         fn assert_parse_type(input: &str, ty: Type) {
-//             let tokens = unwrap_fe(tokenize(input), input);
-//             assert_eq!(
-//                 unwrap_fe(Parser::new(tokens, false).expect_type(), input),
-//                 ty
-//             )
-//         }
+    #[test]
+    fn type_test() {
+        fn assert_parse_type(input: &str, ty: Type) {
+            let tokens = unwrap_fe(tokenize(input), input);
+            assert_eq!(
+                unwrap_fe(Parser::new(tokens, false).expect_type(), input),
+                ty
+            )
+        }
 
-//         assert_parse_type(
-//             "int",
-//             Type("int".to_string(), vec![])
-//         );
+        assert_parse_type(
+            "int",
+            Type("int".to_string(), vec![])
+        );
 
-//         assert_parse_type(
-//             "dict<a, b>",
-//             Type("dict".to_string(), vec![
-//                 Located::new(Type("a".to_string(), vec![]), (0, 5) ..= (0, 5)),
-//                 Located::new(Type("b".to_string(), vec![]), (0, 8) ..= (0, 8))
-//             ])
+        assert_parse_type(
+            "dict<a, b>",
+            Type("dict".to_string(), vec![
+                Located::new(Type("a".to_string(), vec![]), (0, 5) ..= (0, 5)),
+                Located::new(Type("b".to_string(), vec![]), (0, 8) ..= (0, 8))
+            ])
 
-//         );
+        );
 
-//         assert_parse_type(
-//             "dict<list<list<int>>, str>",
-//             Type("dict".to_string(), vec![
-//                 Located::new(Type("list".to_string(), vec![
-//                     Located::new(Type("list".to_string(), vec![
-//                         Located::new(Type("int".to_string(), vec![]), (0, 15) ..= (0,17))
-//                     ]), (0, 10) ..= (0, 18))
-//                 ]), (0, 5) ..= (0, 19)),
-//                 Located::new(Type("str".to_string(), vec![]), (0, 22) ..= (0, 24))
-//             ])
-//         );
-//     }
+        assert_parse_type(
+            "dict<list<list<int>>, str>",
+            Type("dict".to_string(), vec![
+                Located::new(Type("list".to_string(), vec![
+                    Located::new(Type("list".to_string(), vec![
+                        Located::new(Type("int".to_string(), vec![]), (0, 15) ..= (0,17))
+                    ]), (0, 10) ..= (0, 18))
+                ]), (0, 5) ..= (0, 19)),
+                Located::new(Type("str".to_string(), vec![]), (0, 22) ..= (0, 24))
+            ])
+        );
+    }
 
-//     #[test]
-//     fn unary_ops_test() {
-//         assert_parse("+3;", program![
-//             expr_stmt_with_semi!(Expr::UnaryOps {
-//                 ops: vec![token![+].try_into().unwrap()],
-//                 expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1)))
-//             }, (0, 0) ..= (0, 1))
-//         ]);
+    #[test]
+    fn unary_ops_test() {
+        assert_parse("+3;", program![
+            expr_stmt_with_semi!(Expr::UnaryOps {
+                ops: vec![token![+].try_into().unwrap()],
+                expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1)))
+            }, (0, 0) ..= (0, 1))
+        ]);
 
-//         assert_parse("+++++++3;", program![
-//             expr_stmt_with_semi!(Expr::UnaryOps {
-//                 ops: vec![token![+].try_into().unwrap()].repeat(7),
-//                 expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7)))
-//             }, (0, 0) ..= (0, 7))
-//         ]);
+        assert_parse("+++++++3;", program![
+            expr_stmt_with_semi!(Expr::UnaryOps {
+                ops: vec![token![+].try_into().unwrap()].repeat(7),
+                expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7)))
+            }, (0, 0) ..= (0, 7))
+        ]);
 
-//         assert_parse("+-+-+-+-3;", program![
-//             expr_stmt_with_semi!(Expr::UnaryOps {
-//                 ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
-//                 expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8)))
-//             }, (0, 0) ..= (0, 8))
-//         ]);
+        assert_parse("+-+-+-+-3;", program![
+            expr_stmt_with_semi!(Expr::UnaryOps {
+                ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
+                expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8)))
+            }, (0, 0) ..= (0, 8))
+        ]);
 
-//         assert_parse("!+-+-+-+-3;", program![
-//             expr_stmt_with_semi!(Expr::UnaryOps {
-//                 ops: vec![
-//                     token![!].try_into().unwrap(), 
-//                     token![+].try_into().unwrap(), 
-//                     token![-].try_into().unwrap(), 
-//                     token![+].try_into().unwrap(), 
-//                     token![-].try_into().unwrap(), 
-//                     token![+].try_into().unwrap(), 
-//                     token![-].try_into().unwrap(), 
-//                     token![+].try_into().unwrap(), 
-//                     token![-].try_into().unwrap()],
-//                 expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9)))
-//             }, (0, 0) ..= (0, 9))
-//         ]);
+        assert_parse("!+-+-+-+-3;", program![
+            expr_stmt_with_semi!(Expr::UnaryOps {
+                ops: vec![
+                    token![!].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap(), 
+                    token![+].try_into().unwrap(), 
+                    token![-].try_into().unwrap()],
+                expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9)))
+            }, (0, 0) ..= (0, 9))
+        ]);
 
-//         assert_parse("+(+2);", program![
-//             expr_stmt_with_semi!(Expr::UnaryOps {
-//                 ops: vec![token![+].try_into().unwrap()].repeat(2),
-//                 expr: Box::new(literal!(Int(2), (0, 3) ..= (0, 3)))
-//             }, (0, 0) ..= (0, 4))
-//         ])
-//     }
+        assert_parse("+(+2);", program![
+            expr_stmt_with_semi!(Expr::UnaryOps {
+                ops: vec![token![+].try_into().unwrap()].repeat(2),
+                expr: Box::new(literal!(Int(2), (0, 3) ..= (0, 3)))
+            }, (0, 0) ..= (0, 4))
+        ])
+    }
 
-//     #[test]
-//     fn decl_test() {
-//         assert_parse("
-//             let a       = 0;
-//             let mut b   = 1;
-//             const c     = 2;
-//             const mut d = 3;
-//         ", program![
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
-//                 ty: None, 
-//                 val: literal!(Int(0), (1, 26) ..= (1, 26))
-//             }), (1, 12) ..= (1, 27)),
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Let, 
-//                 pat: Located::new(Pat::Unit(decl_unit!(mut "b")), (2, 16) ..= (2, 20)), 
-//                 ty: None, 
-//                 val: literal!(Int(1), (2, 26) ..= (2, 26))
-//             }), (2, 12) ..= (2, 27)),
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Const, 
-//                 pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 18) ..= (3, 18)), 
-//                 ty: None, 
-//                 val: literal!(Int(2), (3, 26) ..= (3, 26))
-//             }), (3, 12) ..= (3, 27)),
-//             Located::new(Stmt::Decl(Decl { 
-//                 rt: ReasgType::Const, 
-//                 pat: Located::new(Pat::Unit(decl_unit!(mut "d")), (4, 18) ..= (4, 22)), 
-//                 ty: None, 
-//                 val: literal!(Int(3), (4, 26) ..= (4, 26))
-//             }), (4, 12) ..= (4, 27))
-//         ])
-//     }
-// }
+    #[test]
+    fn decl_test() {
+        assert_parse("
+            let a       = 0;
+            let mut b   = 1;
+            const c     = 2;
+            const mut d = 3;
+        ", program![
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
+                ty: None, 
+                val: literal!(Int(0), (1, 26) ..= (1, 26))
+            }), (1, 12) ..= (1, 27)),
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Let, 
+                pat: Located::new(Pat::Unit(decl_unit!(mut "b")), (2, 16) ..= (2, 20)), 
+                ty: None, 
+                val: literal!(Int(1), (2, 26) ..= (2, 26))
+            }), (2, 12) ..= (2, 27)),
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Const, 
+                pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 18) ..= (3, 18)), 
+                ty: None, 
+                val: literal!(Int(2), (3, 26) ..= (3, 26))
+            }), (3, 12) ..= (3, 27)),
+            Located::new(Stmt::Decl(Decl { 
+                rt: ReasgType::Const, 
+                pat: Located::new(Pat::Unit(decl_unit!(mut "d")), (4, 18) ..= (4, 22)), 
+                ty: None, 
+                val: literal!(Int(3), (4, 26) ..= (4, 26))
+            }), (4, 12) ..= (4, 27))
+        ])
+    }
+}

@@ -6,105 +6,84 @@
 
 use std::fmt::Display;
 
-macro_rules! define_ops {
-    (#[$mm:meta] $t:ident {$(#[$m:meta] $id:ident: $ex:literal),*}) => {
-        #[$mm]
-        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
-        pub enum $t {
-            $(
-                #[$m] $id
-            ),*
-        }
+use crate::lexer::token::{Token, token};
 
-        impl Display for $t {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(match self {
-                    $(Self::$id => $ex),*
-                })
-            }
-        }
-    }
+/// A unary operator AST node.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Unary {
+    /// Unary plus (`+x`)
+    Plus,
+
+    /// Unary minus (`-x`)
+    Minus,
+
+    /// Logical not (`!x`)
+    LogNot,
+
+    /// Bitwise not (`~x`)
+    BitNot
 }
 
-define_ops! {
-    #[doc = "A unary operator AST node."]
-    Unary {
-        #[doc = "Unary plus (`+x`)"]
-        Plus: "+",
-        
-        #[doc = "Unary minus (`-x`)"]
-        Minus: "-",
+/// A binary operator AST node.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Binary {
+    /// Binary plus (`x + y`)
+    Add,
+
+    /// Binary subtract (`x - y`)
+    Sub,
+
+    /// Multiplication (`x * y`) 
+    Mul,
+
+    /// Division (`x / y`)
+    Div,
+
+    /// Modulo (`x % y`)
+    Mod,
+
+    /// Shift left (`x << y`)
+    Shl,
+
+    /// Shift right (`x >> y`)
+    Shr,
+
+    /// Bitwise or (`x | y`)
+    BitOr,
+
+    /// Bitwise and (`x & y`)
+    BitAnd,
+
+    /// Bitwise xor (`x ^ y`)
+    BitXor,
+
+    /// Logical and (`x && y`)
+    LogAnd,
+
+    /// Logical or (`x || y`)
+    LogOr
+}
+
+/// A comparison operator AST node.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Cmp {
+    /// Less than (`<`)
+    Lt, 
     
-        #[doc = "Logical not (`!x`)"]
-        LogNot: "!",
+    /// Greater than (`>`)
+    Gt, 
     
-        #[doc = "Bitwise not (`~x`)"]
-        BitNot: "~"
-    }
-}
-
-define_ops! {
-    #[doc = "A binary operator AST node."]
-    Binary {
-        #[doc = "Binary plus (`x + y`)"]
-        Add: "+",
-
-        #[doc = "Binary subtract (`x - y`)"]
-        Sub: "-",
-
-        #[doc = "Multiplication (`x * y`)"]
-        Mul: "*",
-
-        #[doc = "Division (`x / y`)"]
-        Div: "/",
-
-        #[doc = "Modulo (`x % y`)"]
-        Mod: "%",
-
-        #[doc = "Shift left (`x << y`)"]
-        Shl: "<<",
-
-        #[doc = "Shift right (`x >> y`)"]
-        Shr: ">>",
-
-        #[doc = "Bitwise or (`x | y`)"]
-        BitOr: "|",
-
-        #[doc = "Bitwise and (`x & y`)"]
-        BitAnd: "&",
-
-        #[doc = "Bitwise xor (`x ^ y`)"]
-        BitXor: "^",
-
-        #[doc = "Logical and (`x && y`)"]
-        LogAnd: "&&",
-
-        #[doc = "Logical or (`x || y`)"]
-        LogOr: "||"
-    }
-}
-
-define_ops! {
-    #[doc = "A comparison operator AST node."]
-    Cmp {
-        #[doc = "Less than (`<`)"]
-        Lt: "<", 
-        
-        #[doc = "Greater than (`>`)"]
-        Gt: ">", 
-        
-        #[doc = "Less than or equal (`<=`)"]
-        Le: "<=", 
-        
-        #[doc = "Greater than or equal (`>=`)"]
-        Ge: ">=", 
-        
-        #[doc = "Equal (`==`)"]
-        Eq: "==", 
-        
-        #[doc = "Not equal (`!=`)"]
-        Ne: "!="
-    }
+    /// Less than or equal (`<=`)
+    Le, 
+    
+    /// Greater than or equal (`>=`)
+    Ge, 
+    
+    /// Equal (`==`)
+    Eq, 
+    
+    /// Not equal (`!=`)
+    Ne
 }
 
 impl Cmp {
@@ -126,5 +105,103 @@ impl Cmp {
     /// or an equality comparison (`false`).
     pub fn is_ord_cmp(&self) -> bool {
         matches!(self, Cmp::Lt | Cmp::Gt | Cmp::Le | Cmp::Ge)
+    }
+}
+
+/// Casting a token to an operator node failed.
+#[derive(Debug)]
+pub struct TokenOpCastErr(&'static str);
+
+impl TryFrom<Token> for Unary {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![+]  => Ok(Unary::Plus),
+            token![-]  => Ok(Unary::Minus),
+            token![!]  => Ok(Unary::LogNot),
+            token![~]  => Ok(Unary::BitNot),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a unary operator"))
+        }
+        
+    }
+}
+impl TryFrom<Token> for Binary {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![+]  => Ok(Binary::Add),
+            token![-]  => Ok(Binary::Sub),
+            token![*]  => Ok(Binary::Mul),
+            token![/]  => Ok(Binary::Div),
+            token![%]  => Ok(Binary::Mod),
+            token![<<] => Ok(Binary::Shl),
+            token![>>] => Ok(Binary::Shr),
+            token![|]  => Ok(Binary::BitOr),
+            token![&]  => Ok(Binary::BitAnd),
+            token![^]  => Ok(Binary::BitXor),
+            token![&&] => Ok(Binary::LogAnd),
+            token![||] => Ok(Binary::LogOr),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a binary operator"))
+        }
+    }
+}
+impl TryFrom<Token> for Cmp {
+    type Error = TokenOpCastErr;
+    
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            token![<]  => Ok(Cmp::Lt),
+            token![<=] => Ok(Cmp::Le),
+            token![>]  => Ok(Cmp::Gt),
+            token![>=] => Ok(Cmp::Ge),
+            token![==] => Ok(Cmp::Eq),
+            token![!=] => Ok(Cmp::Ne),
+            _ => Err(TokenOpCastErr("Token cannot be converted into a comparison operator"))
+        }
+    }
+}
+
+impl Display for Unary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Unary::Plus   => "+",
+            Unary::Minus  => "-",
+            Unary::LogNot => "!",
+            Unary::BitNot => "~",
+        })
+    }
+}
+
+impl Display for Binary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Binary::Add => "+",
+            Binary::Sub => "-",
+            Binary::Mul => "*",
+            Binary::Div => "/",
+            Binary::Mod => "%",
+            Binary::Shl => "<<",
+            Binary::Shr => ">>",
+            Binary::BitOr => "|",
+            Binary::BitAnd => "&",
+            Binary::BitXor => "^",
+            Binary::LogAnd => "&&",
+            Binary::LogOr => "||",
+        })
+    }
+}
+
+impl Display for Cmp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Cmp::Lt => "<",
+            Cmp::Gt => ">",
+            Cmp::Le => "<=",
+            Cmp::Ge => ">=",
+            Cmp::Eq => "==",
+            Cmp::Ne => "!=",
+        })
     }
 }

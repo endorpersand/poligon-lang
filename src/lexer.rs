@@ -15,7 +15,7 @@ use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr, CursorRange, Cursor};
 
-use self::token::{Token, Keyword, Delimiter, token, FullToken, Punct};
+use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
 
 /// Convert a string and lex it into a sequence of tokens.
@@ -861,39 +861,57 @@ impl Lexer {
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
+        let mut buf = String::new();
+
         while let Some(c) = self.match_cls(CharClass::Punct) {
-            if c == '/' {
-                match self.peek() {
-                    Some('/') => {
-                        debug_assert_eq!(self.next(), Some('/'));
-                        self.push_line_comment(String::new())?;
-                    },
-                    Some('*') => {
-                        self.delimiters.push((self.token_start, Delimiter::LComment));
-                        debug_assert_eq!(self.next(), Some('*'));
-                        self.push_multi_comment(String::new())?;
-                    },
-                    _ => {
-                        let tok = Punct::get_punct('/')
-                            .expect("Expected '/' to be a punctuation mark");
-
-                        self.push_token(tok);
-                    }
-                }
-            } else if let Some(tok) = Punct::get_punct(c) {
-                if let Ok(del) = Delimiter::try_from(tok.clone()) {
-                    match del.is_right() {
-                        false => self.delimiters.push((self.token_start, del)),
-                        true  => self.match_delimiter(self.token_start, del)?
-                    }
-                }
-
-                self.push_token(tok);
-            } else {
-                Err(LexErr::UnknownChar(c).at_range(self.token_start ..= self.cursor))?;
-            }
+            buf.push(c);
         }
 
+        while !buf.is_empty() {
+            let left = &buf[..1];
+            let right = &buf[..];
+    
+            // Find the largest length operator that matches the start of the operator buffer.
+            let (op, token) = OPMAP.range(left..=right)
+                .rev() // largest length
+                .find(|(&op, _)| buf.starts_with(op)) // that occurs in the text
+                .ok_or_else(|| {
+                    LexErr::UnknownOp(buf.clone())
+                        .at_range(self.token_start..=self.cursor)
+                })?;
+            
+            // Keep track of the delimiters.
+            // If left delimiter, add to delimiter stack.
+            // If right delimiter, verify the top of the stack is the matching left delimiter 
+            //      (or error if mismatch).
+            if let Token::Delimiter(d) = token {
+                let pos = self.token_start;
+                
+                if !d.is_right() {
+                    self.delimiters.push((pos, *d));
+                } else {
+                    self.match_delimiter(pos, *d)?;
+                }
+            }
+
+            // Stop tokenizing when we're dealing with comments:
+            if token == &token!["//"] {
+                buf.drain(..2);
+                return self.push_line_comment(buf);
+            } else if token == &token!["/*"] {
+                buf.drain(..2);
+                return self.push_multi_comment(buf);
+            }
+            
+            
+            let len = op.len();
+
+            let token_end = cur_shift(self.token_start, len - 1);
+            self.push_token_with_range(token.clone(), self.token_start..=token_end);
+
+            self.token_start = cur_shift(self.token_start, len);
+            buf.drain(..len);
+        }
         Ok(())
     }
 
@@ -1051,12 +1069,10 @@ mod tests {
         assert_lex("!~==!~&&.=+-*<><<3", &[
             token![!],
             token![~],
-            token![=],
-            token![=],
+            token![==],
             token![!],
             token![~],
-            token![&],
-            token![&],
+            token![&&],
             token![.],
             token![=],
             token![+],
@@ -1064,12 +1080,11 @@ mod tests {
             token![*],
             token![<],
             token![>],
-            token![<],
-            token![<],
+            token![<<],
             Token::Numeric("3".to_string())
         ]);
 
-        assert_lex("<<<", &[token![<], token![<], token![<]]);
+        assert_lex("<<<", &[token![<<], token![<]]);
     }
 
     /// Tests keywords, multiple lines, semicolon detection.
@@ -1128,8 +1143,7 @@ mod tests {
         ]);
         assert_lex("123..444", &[
             Token::Numeric("123".to_string()),
-            token![.],
-            token![.],
+            token![..],
             Token::Numeric("444".to_string())
         ]);
         assert_lex("123. + 444", &[

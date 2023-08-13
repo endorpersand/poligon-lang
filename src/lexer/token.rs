@@ -3,6 +3,8 @@
 //! See [`Token`] for more information.
 
 use std::fmt::{Debug, Display};
+use std::collections::{BTreeMap, HashMap};
+use lazy_static::lazy_static;
 use crate::err::CursorRange;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
@@ -30,8 +32,11 @@ pub enum Token {
     /// These cannot be identifiers in any circumstance.
     Keyword(Keyword),
 
-    /// Punctuation (e.g. `+`, `-`, `/`)
-    Punct(Punct),
+    /// Operators (e.g. `+`, `-`, `/`)
+    Operator(Operator),
+
+    /// Delimiters (e.g. `()`, `[]`)
+    Delimiter(Delimiter),
 
     /// End of line (`;`)
     LineSep
@@ -87,7 +92,7 @@ impl PartialEq<FullToken> for Token {
 }
 
 mod pat {
-    use super::{Token, FullToken};
+    use super::{Token, FullToken, SPLITTABLES};
 
     /// A token pattern.
     /// 
@@ -118,16 +123,13 @@ mod pat {
             self == t
         }
 
-        fn is_strict_prefix_of(&self, _: &Token) -> bool {
-            todo!()
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            SPLITTABLES.contains_key(&(t, self))
         }
     
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            use std::collections::HashMap;
-            let _splittables_deprecated: HashMap<(&Token, &Token), Token> = HashMap::new();
-
             let FullToken { tt, loc } = t;
-            if let Some(rhs) = _splittables_deprecated.get(&(tt, self)) {
+            if let Some(rhs) = SPLITTABLES.get(&(tt, self)) {
                 let (&(slno, scno), &(elno, ecno)) = (loc.start(), loc.end());
     
                 let lloc = (slno, scno) ..= (slno, scno);
@@ -231,49 +233,33 @@ macro_rules! define_keywords {
     };
 }
 
-macro_rules! define_punct {
-    ($($id:ident: $ex:literal, $c:literal),*) => {
-        /// Punctuation that can be used in Poligon.
+macro_rules! define_operators_and_delimiters {
+    (
+        operators: {$($id:ident: $ex:literal),*},
+        delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
+    ) => {
+        /// The defined Poligon operators.
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
-        pub enum Punct {
+        pub enum Operator {
             $(
                 #[allow(missing_docs)] $id
             ),*
         }
 
-        impl Punct {
-            /// If the char is a punct, return the `Token` it represents 
-            /// or `None` if it does not represent a token.
-            pub fn get_punct(s: char) -> Option<Token> {
-                match s {
-                    $(
-                        $c => Some(Token::Punct(Self::$id))
-                    ),+ ,
-                    _ => None
-                }
-            }
-        }
-
-        impl Display for Punct {
+        impl Display for Operator {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str(match self {
                     $(Self::$id => $ex),*
                 })
             }
         }
-    }
-}
 
-macro_rules! define_delimiters {
-    ($($idl:ident: $exl:literal, $idr:ident: $exr:literal),*) => {
         /// The defined Poligon delimiters (`()`, `[]`, etc.).
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Delimiter {
             $(
-                #[allow(missing_docs)]
-                $idl,
-                #[allow(missing_docs)] 
-                $idr
+                #[allow(missing_docs)] $idl,
+                #[allow(missing_docs)] $idr
             ),*
         }
 
@@ -304,6 +290,18 @@ macro_rules! define_delimiters {
                     $(Self::$idr => $exr),*
                 })
             }
+        }
+
+        lazy_static! {
+            pub(super) static ref OPMAP: BTreeMap<&'static str, Token> = {
+                let mut m = BTreeMap::new();
+
+                $(m.insert($ex, Token::Operator(Operator::$id));)*
+                $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
+                $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
+
+                m
+            };
         }
     };
 }
@@ -340,66 +338,89 @@ define_keywords! {
     Throw:    "throw"
 }
 
-define_punct! {
-    Tilde:   "~", '~',
-    Excl:    "!", '!',
-    At:      "@", '@',
-    Hash:    "#", '#',
-    Dollar:  "$", '$',
-    Percent: "%", '%',
-    Caret:   "^", '^',
-    And:     "&", '&',
-    Star:    "*", '*',
-    Minus:   "-", '-',
-    Plus:    "+", '+',
-    Equal:   "=", '=',
-
-    Lt:     "<", '<',
-    Gt:     ">", '>',
-    Comma:  ",", ',',
-    Dot:    ".", '.',
-    Slash:  "/", '/',
+define_operators_and_delimiters! {
+    operators: {
+        Plus:    "+",
+        Minus:   "-",
+        Star:    "*",
+        Slash:   "/",
+        Percent: "%",
+        
+        Dot:   ".",
+        DDot:  "..",
+        Or:    "|",
+        And:   "&",
+        Tilde: "~",
+        Caret: "^",
     
-    Or:     "|", '|',
-    Colon:  ":", ':',
+        DAnd: "&&",
+        DOr:  "||",
+        Excl: "!",
+    
+        Lt:     "<",
+        Le:     "<=",
+        Gt:     ">",
+        Ge:     ">=",
+        Equal:  "=",
+        DEqual: "==",
+        Ne:     "!=",
+    
+        Shl: "<<",
+        Shr: ">>",
+    
+        Comma:  ",",
+        Comment: "//",
+        Colon: ":",
+        DColon: "::",
+    
+        Hash: "#",
+        Arrow: "->"
+    },
 
-    LParen: "(", '(',
-    RParen: ")", ')',
-    LSquare: "[", '[',
-    RSquare: "]", ']',
-    LCurly: "{", '{',
-    RCurly: "}", '}'
-}
-
-define_delimiters! {
-    LParen: "(",    RParen: ")",
-    LSquare: "[",   RSquare: "]",
-    LCurly: "{",    RCurly: "}",
-    LComment: "/*", RComment: "*/"
-}
-
-/// Error for when a Token is cast to Delimiter, but is not one.
-pub struct NotADelimiter(());
-impl TryFrom<Token> for Delimiter {
-    type Error = NotADelimiter;
-
-    fn try_from(t: Token) -> Result<Self, Self::Error> {
-        match t {
-            Token::Punct(pct) => match pct {
-                Punct::LParen  => Ok(Self::LParen),
-                Punct::RParen  => Ok(Self::RParen),
-                Punct::LSquare => Ok(Self::LSquare),
-                Punct::RSquare => Ok(Self::RSquare),
-                Punct::LCurly  => Ok(Self::LCurly),
-                Punct::RCurly  => Ok(Self::RCurly),
-                _ => Err(NotADelimiter(()))
-            }
-            _ => Err(NotADelimiter(()))
-        }
+    delimiters: {
+        LParen: "(",    RParen: ")",
+        LSquare: "[",   RSquare: "]",
+        LCurly: "{",    RCurly: "}",
+        LComment: "/*", RComment: "*/"
     }
 }
 
-/// Utility macro that can be used as a shorthand for [`Keyword`], [`Punct`], or [`Delimiter`] tokens.
+lazy_static! {
+    /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
+    static ref SPLITTABLES: HashMap<(&'static Token, &'static Token), Token> = {
+        let mut m = HashMap::new();
+        // m.insert((&token![..], &token![.]), token![.]);
+        // m.insert((&token![&&], &token![&]), token![&]);
+        // m.insert((&token![||], &token![|]), token![|]);
+        // m.insert((&token![<=], &token![<]), token![=]);
+        // m.insert((&token![>=], &token![>]), token![=]);
+        // m.insert((&token![==], &token![=]), token![=]);
+        m.insert((&token![<<], &token![<]), token![<]);
+        m.insert((&token![>>], &token![>]), token![>]);
+        // m.insert((&token![::], &token![:]), token![:]);
+        // m.insert((&token![->], &token![-]), token![>]);
+        m
+    };
+}
+lazy_static! {
+    /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
+    pub(crate) static ref SPLITTABLES2: HashMap<Token, (Token, Token)> = {
+        let mut m = HashMap::new();
+        m.insert(token![..], (token![.], token![.]));
+        m.insert(token![&&], (token![&], token![&]));
+        m.insert(token![||], (token![|], token![|]));
+        m.insert(token![<=], (token![<], token![=]));
+        m.insert(token![>=], (token![>], token![=]));
+        m.insert(token![==], (token![=], token![=]));
+        m.insert(token![<<], (token![<], token![<]));
+        m.insert(token![>>], (token![>], token![>]));
+        m.insert(token![::], (token![:], token![:]));
+        m.insert(token![->], (token![-], token![>]));
+        m
+    };
+}
+
+/// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
 #[macro_export]
 macro_rules! token {
     (let)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Let)      };
@@ -431,32 +452,44 @@ macro_rules! token {
     (import)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Import)   };
     (global)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Global)   };
     (throw)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Throw)    };
-    
-    (~)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Tilde)   };
-    (!)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Excl)    };
-    (@)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::At)      };
-    (#)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Hash)    };
-    ($)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Dollar)  };
-    (%)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Percent) };
-    (^)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Caret)   };
-    (&)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::And)     };
-    (*)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Star)    };
-    (-)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Minus)   };
-    (+)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Plus)    };
-    (=)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Equal)   };
-    (<)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Lt)      };
-    (>)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Gt)      };
-    (,)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Comma)   };
-    (.)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Dot)     };
-    (/)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Slash)   };
-    (|)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Or)      };
-    (:)    => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::Colon)   };
-    ("(")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::LParen)  };
-    (")")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::RParen)  };
-    ("[")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::LSquare) };
-    ("]")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::RSquare) };
-    ("{")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::LCurly)  };
-    ("}")  => { $crate::lexer::token::Token::Punct($crate::lexer::token::Punct::RCurly)  };
+    (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
+    (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
+    (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };
+    (/)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Slash)   };
+    (%)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Percent) };
+    (.)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Dot)     };
+    (..)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DDot)    };
+    (|)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Or)      };
+    (&)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::And)     };
+    (~)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Tilde)   };
+    (^)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Caret)   };
+    (&&)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DAnd)    };
+    (||)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DOr)     };
+    (!)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Excl)    };
+    (<)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Lt)      };
+    (<=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Le)      };
+    (>)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Gt)      };
+    (>=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ge)      };
+    (=)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Equal)   };
+    (==)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DEqual)  };
+    (!=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ne)      };
+    (<<)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shl)     };
+    (>>)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shr)     };
+    (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)   };
+    ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment) };
+    (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)   };
+    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)  };
+    (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)    };
+    (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)   };
+
+    ("(")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LParen)   };
+    (")")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RParen)   };
+    ("[")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LSquare)  };
+    ("]")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RSquare)  };
+    ("{")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LCurly)   };
+    ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RCurly)   };
+    ("/*") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LComment) };
+    ("*/") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RComment) };
 
     (;) => { $crate::lexer::token::Token::LineSep };
 }
@@ -475,8 +508,9 @@ impl Display for Token {
             } else {
                 write!(f, "/* {} */", c)
             },
-            Token::Keyword(kw) => Display::fmt(kw, f),
-            Token::Punct(p) => Display::fmt(p, f),
+            Token::Keyword(kw)  => Display::fmt(kw, f),
+            Token::Operator(op) => Display::fmt(op, f),
+            Token::Delimiter(d) => Display::fmt(d, f),
             Token::LineSep => f.write_str(";"),
         }
     }

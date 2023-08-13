@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use crate::GonErr;
 use crate::err::{FullGonErr, CursorRange};
-use crate::lexer::token::{Token, token, FullToken};
+use crate::lexer::token::{Token, token, FullToken, SPLITTABLES2};
 use crate::ast::{self, PatErr};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
@@ -154,7 +154,10 @@ pub trait TokenPattern2<const L: usize> {
 
 impl TokenPattern2<1> for Token {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
-        cur.peek().is_some_and(|tok| self == tok)
+        cur.peek().is_some_and(|tok| {
+            // matches the first token, or matches the first half
+            (self == tok) || (SPLITTABLES2.get(tok).is_some_and(|(l, _)| l == self))
+        })
     }
 
     fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; 1]> {
