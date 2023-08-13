@@ -101,23 +101,20 @@ impl<'s> ParCursor<'s> {
         p.at_range(self.pointing_at())
     }
 
-    pub fn partition(&self, mut f: impl FnMut(&FullToken) -> bool) -> Option<(ParCursor<'s>, FullToken, ParCursor<'s>)> {
-        let sp = (0 .. self.stream.len())
-            .find(|&i| f(&self.stream[i]))?;
+    // pub fn partition(&self, mut f: impl FnMut(&FullToken) -> bool) -> Option<(ParCursor<'s>, FullToken, ParCursor<'s>)> {
+    //     let sp = (0 .. self.stream.len())
+    //         .find(|&i| f(&self.stream[i]))?;
 
-        let left = ParCursor {
-            stream: &self.stream[0..sp],
-            eof: self.stream[sp].loc.clone(),
-        };
-        let mid   = self.stream[sp].clone();
-        let right = ParCursor::new(&self.stream[sp + 1..]);
+    //     let left = ParCursor {
+    //         stream: &self.stream[0..sp],
+    //         half: self.half.clone(),
+    //         eof: self.stream[sp].loc.clone(),
+    //     };
+    //     let mid   = self.stream[sp].clone();
+    //     let right = ParCursor::new(&self.stream[sp + 1..]);
 
-        Some((left, mid, right))
-    }
-
-    fn stream_iter(&self) -> std::slice::Iter<FullToken> {
-        self.stream.iter()
-    }
+    //     Some((left, mid, right))
+    // }
 }
 
 impl<'s> Iterator for ParCursor<'s> {
@@ -135,24 +132,22 @@ impl<'s> Iterator for ParCursor<'s> {
 /// Similar to std [`std::str::pattern::Pattern`], this can be used to
 /// search a pattern in a given Token.
 /// 
-/// L designates the number of tokens that are read ahead.
-/// 
 /// [`Token`] == verify if that token is in the given output
 /// [`[Token]`] == verify if any one of those tokens are in the given input
-pub trait TokenPattern2<const L: usize> {
+pub trait TokenPattern2 {
     /// Tests if the start of the cursor matches the pattern.
     fn is_prefix_of(&self, cur: &ParCursor) -> bool;
 
     /// Removes the token pattern from the cursor if it matches.
     /// 
     /// This function returns the prefix stripped.
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; L]>;
+    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken>;
 
     /// Provides which tokens this pattern expects.
     fn expected_tokens(&self) -> Vec<Token>;
 }
 
-impl TokenPattern2<1> for Token {
+impl TokenPattern2 for Token {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
         cur.peek().is_some_and(|tok| {
             // matches the first token, or matches the first half
@@ -160,10 +155,14 @@ impl TokenPattern2<1> for Token {
         })
     }
 
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; 1]> {
-        match self == cur.peek()? {
-            true  => cur.next().cloned().map(|t| [t]),
-            false => None,
+    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
+        let tok = cur.peek()?.clone();
+        
+        if self == &tok {
+            cur.next();
+            Some(tok)
+        } else {
+            None
         }
     }
 
@@ -171,26 +170,25 @@ impl TokenPattern2<1> for Token {
         std::slice::from_ref(self).to_vec()
     }
 }
-impl TokenPattern2<1> for [Token] {
+impl TokenPattern2 for [Token] {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
         self.iter().any(|t| t.is_prefix_of(cur))
     }
 
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; 1]> {
-        self.iter()
-            .find_map(|t| t.strip_prefix_of(cur))
+    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
+        self.iter().find_map(|t| t.strip_prefix_of(cur))
     }
 
     fn expected_tokens(&self) -> Vec<Token> {
         self.to_vec()
     }
 }
-impl<const N: usize> TokenPattern2<1> for [Token; N] {
+impl<const N: usize> TokenPattern2 for [Token; N] {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
         self.as_slice().is_prefix_of(cur)
     }
 
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; 1]> {
+    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
         self.as_slice().strip_prefix_of(cur)
     }
 
@@ -198,12 +196,12 @@ impl<const N: usize> TokenPattern2<1> for [Token; N] {
         self.as_slice().expected_tokens()
     }
 }
-impl<'a, const L: usize, P: TokenPattern2<L>> TokenPattern2<L> for &'a P {
+impl<'a, P: TokenPattern2> TokenPattern2 for &'a P {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
         (*self).is_prefix_of(cur)
     }
 
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<[FullToken; L]> {
+    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
         (*self).strip_prefix_of(cur)
     }
 
@@ -258,9 +256,7 @@ impl<'s> Parser2<'s> {
     /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
     /// ```
-    pub fn expect<const L: usize, P>(&mut self, pat: P) -> ParseResult<[FullToken; L]> 
-        where P: TokenPattern2<L>
-    {
+    pub fn expect<P: TokenPattern2>(&mut self, pat: P) -> ParseResult<FullToken> {
         self.match_(&pat)
             .ok_or_else(|| {
                 self.cursor.error(ParseErr::ExpectedTokens(pat.expected_tokens()))
@@ -319,15 +315,11 @@ impl<'s> Parser2<'s> {
     /// assert_eq!(parser.match_(&[token![&&], token![||]]), None);
     /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
-    pub fn match_<const L: usize, P>(&mut self, pat: P) -> Option<[FullToken; L]> 
-        where P: TokenPattern2<L>
-    {
+    pub fn match_<P: TokenPattern2>(&mut self, pat: P) -> Option<FullToken> {
         pat.strip_prefix_of(&mut self.cursor)
     }
 
-    pub fn peek<const L: usize, P>(&self, pat: P) -> bool 
-        where P: TokenPattern2<L>
-    {
+    pub fn peek<P: TokenPattern2>(&self, pat: P) -> bool {
         pat.is_prefix_of(&self.cursor)
     }
 }
