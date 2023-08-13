@@ -210,6 +210,99 @@ impl<'a, P: TokenPattern2> TokenPattern2 for &'a P {
     }
 }
 
+/// An error that occurs in the parsing process.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParseErr {
+    /// The parser expected one of the tokens.
+    ExpectedTokens(Vec<Token>),
+
+    /// The parser expected an identifier.
+    ExpectedIdent,
+
+    /// The parser expected an expression here, but failed to match an expression.
+    ExpectedExpr,
+
+    /// The parser expected a str literal here, but got something else.
+    ExpectedStrLiteral,
+
+    /// The string provided could not be parsed into a numeric value.
+    CannotParseNumeric,
+
+    /// The parser expected a block (e.g. `{ code; code; }`).
+    ExpectedBlock,
+
+    /// The parser expected a type expression (e.g. `list<str>`).
+    ExpectedType,
+    
+    /// The parser expected an assignment or declaration pattern, but failed to match one.
+    ExpectedPattern,
+
+    /// The parser expected a dictionary entry (e.g. `expr: expr`).
+    ExpectedEntry,
+
+    /// The parser expected a function parameter.
+    ExpectedParam,
+
+    /// An error occurred in creating an assignment pattern.
+    AsgPatErr(PatErr),
+
+    /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
+    NoIntrinsicIdents,
+
+    /// Parser is not in intrinsic mode and therefore this statement cannot be defined
+    NoIntrinsicStmts
+}
+impl GonErr for ParseErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
+    }
+}
+
+impl std::fmt::Display for ParseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseErr::ExpectedTokens(tokens) => match tokens.len() {
+                0 => write!(f, "expected eof"),
+                1 => write!(f, "expected '{}'", tokens[0]),
+                _ => {
+                    let (first, rest) = tokens.split_first().unwrap();
+                    write!(f, "expected one of '{first}'")?;
+
+                    for t in rest {
+                        write!(f, ", '{t}'")?;
+                    }
+
+                    Ok(())
+                }
+            },
+            ParseErr::ExpectedIdent      => write!(f, "expected identifier"),
+            ParseErr::ExpectedExpr       => write!(f, "expected expression"),
+            ParseErr::ExpectedStrLiteral => write!(f, "expected string literal"),
+            ParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
+            ParseErr::ExpectedBlock      => write!(f, "expected block"),
+            ParseErr::ExpectedType       => write!(f, "expected type expression"),
+            ParseErr::ExpectedPattern    => write!(f, "expected pattern"),
+            ParseErr::ExpectedEntry      => write!(f, "expected entry"),
+            ParseErr::ExpectedParam      => write!(f, "expected param"),
+            ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
+            ParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
+            ParseErr::AsgPatErr(e)       => e.fmt(f),
+        }
+    }
+}
+impl std::error::Error for ParseErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            ParseErr::AsgPatErr(t) => Some(t),
+            _ => None
+        }
+    }
+}
+
+/// A [`Result`] type for operations in the parsing process.
+pub type ParseResult<T> = Result<T, FullParseErr>;
+type FullParseErr = FullGonErr<ParseErr>;
+
 pub struct Parser2<'s> {
     cursor: ParCursor<'s>
 }
@@ -362,99 +455,6 @@ pub struct Parser {
 
 #[derive(Clone, Debug)]
 struct RangeBlock(&'static str, Option<CursorRange>);
-
-/// An error that occurs in the parsing process.
-#[derive(Debug, PartialEq, Eq)]
-pub enum ParseErr {
-    /// The parser expected one of the tokens.
-    ExpectedTokens(Vec<Token>),
-
-    /// The parser expected an identifier.
-    ExpectedIdent,
-
-    /// The parser expected an expression here, but failed to match an expression.
-    ExpectedExpr,
-
-    /// The parser expected a str literal here, but got something else.
-    ExpectedStrLiteral,
-
-    /// The string provided could not be parsed into a numeric value.
-    CannotParseNumeric,
-
-    /// The parser expected a block (e.g. `{ code; code; }`).
-    ExpectedBlock,
-
-    /// The parser expected a type expression (e.g. `list<str>`).
-    ExpectedType,
-    
-    /// The parser expected an assignment or declaration pattern, but failed to match one.
-    ExpectedPattern,
-
-    /// The parser expected a dictionary entry (e.g. `expr: expr`).
-    ExpectedEntry,
-
-    /// The parser expected a function parameter.
-    ExpectedParam,
-
-    /// An error occurred in creating an assignment pattern.
-    AsgPatErr(PatErr),
-
-    /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
-    NoIntrinsicIdents,
-
-    /// Parser is not in intrinsic mode and therefore this statement cannot be defined
-    NoIntrinsicStmts
-}
-impl GonErr for ParseErr {
-    fn err_name(&self) -> &'static str {
-        "syntax error"
-    }
-}
-
-impl std::fmt::Display for ParseErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseErr::ExpectedTokens(tokens) => match tokens.len() {
-                0 => write!(f, "expected eof"),
-                1 => write!(f, "expected '{}'", tokens[0]),
-                _ => {
-                    let (first, rest) = tokens.split_first().unwrap();
-                    write!(f, "expected one of '{first}'")?;
-
-                    for t in rest {
-                        write!(f, ", '{t}'")?;
-                    }
-
-                    Ok(())
-                }
-            },
-            ParseErr::ExpectedIdent      => write!(f, "expected identifier"),
-            ParseErr::ExpectedExpr       => write!(f, "expected expression"),
-            ParseErr::ExpectedStrLiteral => write!(f, "expected string literal"),
-            ParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
-            ParseErr::ExpectedBlock      => write!(f, "expected block"),
-            ParseErr::ExpectedType       => write!(f, "expected type expression"),
-            ParseErr::ExpectedPattern    => write!(f, "expected pattern"),
-            ParseErr::ExpectedEntry      => write!(f, "expected entry"),
-            ParseErr::ExpectedParam      => write!(f, "expected param"),
-            ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
-            ParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
-            ParseErr::AsgPatErr(e)       => e.fmt(f),
-        }
-    }
-}
-impl std::error::Error for ParseErr {
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        match self {
-            ParseErr::AsgPatErr(t) => Some(t),
-            _ => None
-        }
-    }
-}
-
-/// A [`Result`] type for operations in the parsing process.
-pub type ParseResult<T> = Result<T, FullParseErr>;
-type FullParseErr = FullGonErr<ParseErr>;
 
 // macro_rules! left_assoc_op {
 //     ($n:ident = $ds:ident (($($op:tt),+) $_:ident)*;) => {
