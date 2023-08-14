@@ -13,11 +13,11 @@ use ast::Located;
 use lazy_static::lazy_static;
 
 use std::collections::VecDeque;
-use std::ops::RangeInclusive;
+use std::ops::{RangeInclusive, RangeFrom, RangeBounds};
 use std::rc::Rc;
 
 use crate::GonErr;
-use crate::err::{FullGonErr, CursorRange};
+use crate::err::{FullGonErr, CursorRange, Cursor};
 use crate::lexer::token::{Token, token, FullToken, SPLITTABLES2};
 use crate::ast::{self, PatErr};
 
@@ -47,7 +47,7 @@ use crate::ast::{self, PatErr};
 pub trait Parseable: Sized {
     type Err;
 
-    fn read(p: &mut Parser2<'_>) -> Result<Self, Self::Err>;
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err>;
 }
 
 /// A cursor that allows simple scanning and traversing over a stream of tokens.
@@ -303,8 +303,82 @@ impl std::error::Error for ParseErr {
 pub type ParseResult<T> = Result<T, FullParseErr>;
 type FullParseErr = FullGonErr<ParseErr>;
 
+#[derive(Clone)]
+pub enum Span {
+    Closed(RangeInclusive<Cursor>),
+    Open(RangeFrom<Cursor>)
+}
+impl Span {
+    fn from_bounds(start: Cursor, end: Option<Cursor>) -> Span {
+        match end {
+            Some(end) => Span::from(start ..= end),
+            None => Span::from(start ..),
+        }
+    }
+
+    fn start(&self) -> Cursor {
+        match self {
+            Span::Closed(r) => *r.start(),
+            Span::Open(r) => r.start,
+        }
+    }
+
+    fn end(&self) -> Option<Cursor> {
+        match self {
+            Span::Closed(r) => Some(*r.end()),
+            Span::Open(_) => None,
+        }
+    }
+    /// Merges a span into another span.
+    /// 
+    /// Spans are contiguous, so merging spans will
+    /// also collect all tokens between the two spans
+    /// which may not have originally been part of the spans.
+    fn append(&self, span: &Span) -> Span {
+        let (left1, right1) = (self.start(), self.end());
+        let (left2, right2) = (span.start(), span.end());
+
+        let left = left1.min(left2);
+        let right = right1.zip(right2).map(|(r1, r2)| r1.max(r2));
+
+        Span::from_bounds(left, right)
+    }
+}
+impl std::ops::RangeBounds<Cursor> for Span {
+    fn start_bound(&self) -> std::ops::Bound<&Cursor> {
+        match self {
+            Span::Closed(r) => r.start_bound(),
+            Span::Open(r) => r.start_bound(),
+        }
+    }
+
+    fn end_bound(&self) -> std::ops::Bound<&Cursor> {
+        match self {
+            Span::Closed(r) => r.end_bound(),
+            Span::Open(r) => r.end_bound(),
+        }
+    }
+}
+impl From<RangeInclusive<Cursor>> for Span {
+    fn from(value: RangeInclusive<Cursor>) -> Self {
+        Span::Closed(value)
+    }
+}
+impl From<RangeFrom<Cursor>> for Span {
+    fn from(value: RangeFrom<Cursor>) -> Self {
+        Span::Open(value)
+    }
+}
+
+macro_rules! expected_tokens {
+    ($($t:tt),*) => {
+        ParseErr::ExpectedTokens(<[_]>::expected_tokens(&[$(token![$t]),*]))
+    }
+}
+
 pub struct Parser2<'s> {
-    cursor: ParCursor<'s>
+    cursor: ParCursor<'s>,
+    span_collectors: Vec<Option<Span>>
 }
 
 impl<'s> Parser2<'s> {
@@ -409,14 +483,129 @@ impl<'s> Parser2<'s> {
     /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
     pub fn match_<P: TokenPattern2>(&mut self, pat: P) -> Option<FullToken> {
-        pat.strip_prefix_of(&mut self.cursor)
+        let mat = pat.strip_prefix_of(&mut self.cursor);
+
+        // Attach to span collector:
+        if let Some((collector, m)) = Option::zip(self.span_collectors.last_mut(), mat.as_ref()) {
+            let loc = Span::from(m.loc.clone());
+            
+            let ns = match collector {
+                Some(s) => s.append(&loc),
+                None => loc,
+            };
+            collector.replace(ns);
+        }
+
+        mat
     }
 
-    pub fn peek<P: TokenPattern2>(&self, pat: P) -> bool {
-        pat.is_prefix_of(&self.cursor)
+    pub fn peek(&self) -> Option<&FullToken> {
+        self.cursor.peek()
+    }
+
+    pub fn spanned<T>(&mut self, f: impl FnOnce(&mut Parser2<'s>) -> T) -> Located<T> {
+        self.span_collectors.push(None);
+        let out = f(self);
+        let span = self.span_collectors.pop()
+            .expect("span block should have existed");
+        
+        if let Some(Span::Closed(c)) = span {
+            Located::new(out, c)
+        } else {
+            todo!("extended span")
+        }
     }
 }
 
+fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<Located<ast::Stmt>>> {
+    use std::ops::ControlFlow::{self, Break, Continue};
+
+    let mut stmts = vec![];
+    /*
+        SAMPLE:
+        let a = 1;
+        if a == 1 {}
+        let b = 2;
+        
+        [let a = 1][;]
+        [if a == 1 {}][no semi]
+        [let b = 2][;]
+        [NONE][no semi] <-- terminate
+    */
+    
+    let mut cf: ControlFlow<()> = Continue(());
+    while let Continue(()) = cf {
+        // outside of REPL mode:
+        // if statement exists, check for semicolon
+        // - for statements with blocks, semi can be ignored
+        // - semicolon MUST appear otherwise
+
+        // in REPL mode:
+        // same rules apply, however:
+        // - semicolon may be omitted at the end of a block
+        // - therefore, an omitted semicolon indicates the end of the block
+
+        let Located((mstmt, flow), stmt_range) = parser.spanned(|parser| -> ParseResult<_> {
+            let out = {
+                let stmt = parser.try_parse::<ast::Stmt>()?;
+                let semi = parser.match_(token![;]);
+
+                let stop_reading = match stmt.as_ref() {
+                    // for block-terminating statements, semi isn't needed
+                    // drop the semi if it exists, but don't do anything with it
+                    Some(st) if st.ends_with_block() => false,
+
+                    // in REPL mode, semicolon does not need to appear at the end of
+                    // the last statement of a block
+                    Some(_) if false => semi.is_none(), // TODO: parser.repl_mode
+
+                    // outside of REPL mode, semicolon does need to appear.
+                    Some(_) => match semi.is_some() {
+                        true => false,
+                        false => Err(parser.cursor.error(expected_tokens![;]))?,
+                    },
+                    
+                    // end if there is no statement and no semi
+                    None => semi.is_none()
+                };
+                
+                (stmt, if stop_reading { Break(()) } else { Continue(()) })
+            };
+            Ok(out)
+        }).transpose()?;
+        
+        if let Some(stmt) = mstmt {
+            stmts.push(Located::new(stmt, stmt_range));
+        }
+        cf = flow;
+    }
+
+    Ok(stmts)
+}
+
+impl Parseable for ast::Program {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let program = parse_stmts_closed(parser)?;
+
+        if parser.cursor.is_empty() {
+            Ok(ast::Program(program))
+        } else {
+            // there are more tokens left that couldn't be parsed as a program.
+            // we have an issue.
+            Err(parser.cursor.error(expected_tokens![;]))
+        }
+    }
+}
+
+impl Parseable for Option<ast::Stmt> {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        todo!()
+    }
+}
 /// A struct that does the conversion of tokens to a parseable program tree.
 /// 
 /// This struct uses some terminology in its function declarations:
@@ -510,12 +699,6 @@ struct RangeBlock(&'static str, Option<CursorRange>);
 //             left_assoc_op!($n = $ds (($op) $_)*;);
 //         )+
 //     };
-// }
-
-// macro_rules! expected_tokens {
-//     ($($t:tt),*) => {
-//         ParseErr::ExpectedTokens(vec![$(token![$t]),*])
-//     }
 // }
 
 // /// Combine two ranges, such that the new range at least spans over the two provided ranges.

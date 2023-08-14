@@ -95,6 +95,16 @@ mod located {
 
     }
 
+    impl<T: transposable::LTranspose> Located<T> {
+        /// Transposes various types wrapped in Located out.
+        /// 
+        /// - `Located<Option<T>> => Option<Located<T>>`
+        /// - `Located<Result<T, E>> => Result<Located<T>, E>`
+        /// - `Located<Box<T>> => LocatedBox<T>`
+        pub fn transpose(self) -> T::Transposed {
+            T::ltranspose(self)
+        }
+    }
     impl<T> Located<Option<T>> {
         /// Transpose a located Option into an Option of a located node.
         pub fn transpose_option(self) -> Option<Located<T>> {
@@ -121,6 +131,39 @@ mod located {
         }
     }
     impl<T> Locatable for T {}
+
+    mod transposable {
+        use super::Located;
+
+        pub trait LTranspose: Sized {
+            type Transposed;
+    
+            fn ltranspose(located: Located<Self>) -> Self::Transposed;
+        }
+
+        impl<T> LTranspose for Option<T> {
+            type Transposed = Option<Located<T>>;
+
+            fn ltranspose(located: Located<Self>) -> Self::Transposed {
+                located.0.map(|v| Located::new(v, located.1))
+            }
+        }
+        impl<T, E> LTranspose for Result<T, E> {
+            type Transposed = Result<Located<T>, E>;
+
+            fn ltranspose(located: Located<Self>) -> Self::Transposed {
+                located.0.map(|v| Located::new(v, located.1))
+            }
+        }
+        impl<T> LTranspose for Box<T> {
+            type Transposed = Box<Located<T>>;
+
+            fn ltranspose(located: Located<Self>) -> Self::Transposed {
+                let Located(val, range) = located;
+                Box::new(Located::new(*val, range))
+            }
+        }
+    }
 }
 pub use located::*;
 
