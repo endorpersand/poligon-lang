@@ -105,21 +105,6 @@ mod located {
             T::ltranspose(self)
         }
     }
-    impl<T> Located<Option<T>> {
-        /// Transpose a located Option into an Option of a located node.
-        pub fn transpose_option(self) -> Option<Located<T>> {
-            let Located(value, range) = self;
-            value.map(|v| Located(v, range))
-        }
-    }
-
-    impl<T, E> Located<Result<T, E>> {
-        /// Transpose a located Result into a Result of a located node.
-        pub fn transpose_result(self) -> Result<Located<T>, E> {
-            let Located(value, range) = self;
-            value.map(|v| Located(v, range))
-        }
-    }
 
     /// Helper trait that converts a Located call for a method call
     pub trait Locatable {

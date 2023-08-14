@@ -1167,7 +1167,7 @@ impl PLIRCodegen {
                 },
                 TypeRef::Prim(_) | TypeRef::Generic(_, _, _) | TypeRef::Tuple(_, _) | TypeRef::Fun(_) => Ok(ty.upgrade()),
             }
-        }).transpose_result()?;
+        }).transpose()?;
 
         // make sure right number of arguments are applied
         self.verify_type(lty.as_mut())?;
@@ -1624,8 +1624,7 @@ impl PLIRCodegen {
                 let (extra, split_extra) = extra;
 
                 for (idx, pat) in std::iter::zip(create_splits(&delocated), pats) {
-                    let rhs = var.clone().map(|v| v.split(idx))
-                        .transpose_result()?;
+                    let rhs = var.clone().map(|v| v.split(idx)).transpose()?;
 
                     let extr = split_extra(&extra, idx)?;
                     self.unpack_pat_inner(pat, rhs, (extr, split_extra), map, false, stmt_range.clone())?;
