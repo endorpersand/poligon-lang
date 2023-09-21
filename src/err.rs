@@ -1,4 +1,4 @@
-//! Underlying core behind the error printing for the interpreter.
+//! Underlying core behind the error printing for the compiler.
 //! 
 //! This module unifies the several different types of errors output by the other modules.
 //! Other error types (e.g. [`LexErr`]) can implement the [`GonErr`] trait to keep track of the 
@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
 
-/// Errors that can be printed by the Poligon interpreter.
+/// Errors that can be output by the Poligon compiler.
 /// 
 /// This trait requires that the struct provides the name of the error type and the message of the error (in Display).
 /// Implementing these enables functionality to designate *where* an error occurred and to produce 
@@ -56,10 +56,14 @@ impl<E: GonErr> From<E> for FullGonErr<E> {
         err.at_unknown()
     }
 }
-
+impl GonErr for std::io::Error {
+    fn err_name(&self) -> &'static str {
+        "io error"
+    }
+}
 /// An error that has an associated position.
 /// 
-/// This struct is used by the Poligon interpreter to format and print interpreter errors.
+/// This struct is used by the Poligon compiler to format and print compiler errors.
 #[derive(PartialEq, Eq, Debug)]
 pub struct FullGonErr<E: GonErr> {
     pub(crate) err: E,

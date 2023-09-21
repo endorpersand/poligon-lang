@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -8,13 +10,11 @@ use std::path::Path;
 
 use crate::compiler::CompileErr;
 use crate::err::{FullGonErr, GonErr};
-use crate::interpreter::runtime::{RtContext, self};
-use crate::interpreter::runtime::value::Value;
 use crate::{lexer, ast, parser};
 use crate::lexer::token::{FullToken, Token};
 
 pub mod prelude {
-    pub use super::{TestLoader, Test, TestResult, IoExtract, TestErr};
+    pub use super::{TestLoader, Test, TestResult, TestErr};
 
     macro_rules! load_tests {
         ($f:literal) => {
@@ -123,21 +123,6 @@ impl Test<'_> {
 
     fn running(&self, loader_id: &str) -> bool {
         !self.header.ignore.iter().any(|id| id == loader_id)
-    }
-
-    #[allow(unused)]
-    pub fn interpret(&self) -> TestResult<Value> {
-        let mut ctx = RtContext::new();
-
-        self.parse()?.run_with_ctx(&mut ctx)
-            .map_err(|e| self.wrap_err(e))
-    }
-
-    pub fn interpret_with_io(&self, hook: runtime::IoHook) -> TestResult<Value> {
-        let mut ctx = RtContext::new_with_io(hook);
-
-        self.parse()?.run_with_ctx(&mut ctx)
-            .map_err(|e| self.wrap_err(e))
     }
 }
 
@@ -292,75 +277,9 @@ fn split_tests(t: impl IntoIterator<Item=FullToken>) -> TestResult<Vec<(Header, 
     Ok(tests)
 }
 
-mod exio {
-    use std::collections::VecDeque;
-    use std::io::{BufReader, prelude::*};
-
-    use crate::interpreter::runtime::IoHook;
-
-    pub struct IoExtract {
-        inner: BufReader<VecDeque<u8>>
-    }
-
-    impl IoExtract {
-        pub fn new() -> Self {
-            Self {
-                inner: BufReader::new(Default::default())
-            }
-        }
-
-        pub fn write_hook(&mut self) -> IoHook {
-            IoHook::new_w(self.inner.get_mut())
-        }
-    }
-
-    impl Read for IoExtract {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            self.inner.read(buf)
-        }
-    }
-    impl BufRead for IoExtract {
-        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-            self.inner.fill_buf()
-        }
-
-        fn consume(&mut self, amt: usize) {
-            self.inner.consume(amt)
-        }
-    }
-    impl Write for IoExtract {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.inner.get_mut().write(buf)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            self.inner.get_mut().flush()
-        }
-    }
-}
-pub use exio::IoExtract;
-
-
 #[cfg(test)]
 mod tests {
-    use std::io::BufRead;
-
     use super::prelude::*;
 
     load_tests!("_test_files/test_utils.gon");
-
-    #[test]
-    fn hello() -> TestResult<()> {
-        let t = TESTS.get("add")?;
-
-        let mut io = IoExtract::new();
-
-        t.interpret_with_io(io.write_hook())?;
-        
-        let mut lines = io.lines().map(Result::unwrap);
-        assert_eq!(lines.next().unwrap(), "4");
-        assert!(lines.next().is_none());
-        
-        Ok(())
-    }
 }

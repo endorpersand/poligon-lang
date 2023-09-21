@@ -5,8 +5,8 @@
 //! makes it easier to later convert into LLVM.
 //! 
 //! As well as reducing the complexity of the language, this
-//! module plays the role of static resolution 
-//! (similar to the interpreter's [`crate::interpreter::semantic`]).
+//! module plays the role of static resolution.
+//! 
 //! It does type resolution, variable resolution, break/continue/return checks, 
 //! and simply verifies AST code is correct.
 //! 
