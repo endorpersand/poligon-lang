@@ -427,7 +427,7 @@ impl Lexer {
     /// Create a new lexer with an initial string input.
     /// 
     /// The `repl_mode` parameter alters some parser functionality 
-    /// to better support the [REPL][`crate::interpreter::Repl`].
+    /// to better support REPLs.
     /// In particular, string literals and comments do not immediately error in REPL mode.
     /// 
     /// # Example
@@ -543,7 +543,7 @@ impl Lexer {
     /// - There are any unclosed delimiters.
     /// - There is anything left in the buffers.
     /// 
-    /// This is used by [`Repl`][`crate::interpreter::Repl`] 
+    /// This can be used by REPLs
     /// to determine whether or not the lexer should be preserved between lines.
     /// 
     /// # Example

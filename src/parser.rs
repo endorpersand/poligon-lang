@@ -271,7 +271,7 @@ impl Parser {
     /// Create a new Parser to read a given set of tokens.
     /// 
     /// The `repl_mode` parameter alters some parser functionality 
-    /// to better support the [REPL][`crate::interpreter::Repl`].
+    /// to better support REPLs.
     /// In particular, semicolons are not required at the end of blocks.
     /// 
     /// # Example
