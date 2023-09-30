@@ -10,7 +10,6 @@
 //! - [`Parser`]: The struct that does all the parsing.
 
 use ast::Located;
-use lazy_static::lazy_static;
 
 use std::collections::VecDeque;
 use std::ops::{RangeInclusive, RangeFrom, RangeBounds};
