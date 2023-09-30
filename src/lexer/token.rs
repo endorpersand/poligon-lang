@@ -4,7 +4,7 @@
 
 use std::fmt::{Debug, Display};
 use std::collections::{BTreeMap, HashMap};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use crate::err::CursorRange;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
@@ -308,17 +308,15 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
-        lazy_static! {
-            pub(super) static ref OPMAP: BTreeMap<&'static str, Token> = {
-                let mut m = BTreeMap::new();
+        pub(super) static OPMAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
+            let mut m = BTreeMap::new();
 
-                $(m.insert($ex, Token::Operator(Operator::$id));)*
-                $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
-                $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
+            $(m.insert($ex, Token::Operator(Operator::$id));)*
+            $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
+            $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
 
-                m
-            };
-        }
+            m
+        });
     };
 }
 
@@ -401,23 +399,21 @@ define_operators_and_delimiters! {
     }
 }
 
-lazy_static! {
-    /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
-    static ref SPLITTABLES: HashMap<(&'static Token, &'static Token), Token> = {
-        let mut m = HashMap::new();
-        // m.insert((&token![..], &token![.]), token![.]);
-        // m.insert((&token![&&], &token![&]), token![&]);
-        // m.insert((&token![||], &token![|]), token![|]);
-        // m.insert((&token![<=], &token![<]), token![=]);
-        // m.insert((&token![>=], &token![>]), token![=]);
-        // m.insert((&token![==], &token![=]), token![=]);
-        m.insert((&token![<<], &token![<]), token![<]);
-        m.insert((&token![>>], &token![>]), token![>]);
-        // m.insert((&token![::], &token![:]), token![:]);
-        // m.insert((&token![->], &token![-]), token![>]);
-        m
-    };
-}
+/// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
+static SPLITTABLES: Lazy<HashMap<(&'static Token, &'static Token), Token>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    // m.insert((&token![..], &token![.]), token![.]);
+    // m.insert((&token![&&], &token![&]), token![&]);
+    // m.insert((&token![||], &token![|]), token![|]);
+    // m.insert((&token![<=], &token![<]), token![=]);
+    // m.insert((&token![>=], &token![>]), token![=]);
+    // m.insert((&token![==], &token![=]), token![=]);
+    m.insert((&token![<<], &token![<]), token![<]);
+    m.insert((&token![>>], &token![>]), token![>]);
+    // m.insert((&token![::], &token![:]), token![:]);
+    // m.insert((&token![->], &token![-]), token![>]);
+    m
+});
 
 /// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
 #[macro_export]

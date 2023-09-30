@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use indexmap::IndexMap;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 use crate::ast;
 use crate::compiler::plir_codegen::{OpErr, PLIRErr};
@@ -422,17 +422,16 @@ pub(crate) struct NumType {
     pub floating: bool,
     pub bit_len: usize
 }
-lazy_static! {
-    static ref NUM_TYPE_ORDER: IndexMap<Type, NumType> = {
-        let mut m = IndexMap::new();
+static NUM_TYPE_ORDER: Lazy<IndexMap<Type, NumType>> = Lazy::new(|| {
+    let mut m = IndexMap::new();
 
-        m.insert(ty!("#byte"),       NumType { floating: false, bit_len: 8  });
-        m.insert(ty!(Type::S_INT),   NumType { floating: false, bit_len: 64 });
-        m.insert(ty!(Type::S_FLOAT), NumType { floating: true,  bit_len: 64 });
-        
-        m
-    };
-}
+    m.insert(ty!("#byte"),       NumType { floating: false, bit_len: 8  });
+    m.insert(ty!(Type::S_INT),   NumType { floating: false, bit_len: 64 });
+    m.insert(ty!(Type::S_FLOAT), NumType { floating: true,  bit_len: 64 });
+    
+    m
+});
+
 impl NumType {
     pub fn new(ty: &TypeRef) -> Option<Self> {
         NUM_TYPE_ORDER.get(ty).copied()

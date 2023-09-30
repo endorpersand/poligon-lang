@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
 
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr, CursorRange, Cursor};
@@ -269,21 +269,19 @@ impl<'lx> LiteralBuffer<'lx> {
 
     /// Parse an escape at the front of the lexer buffer and add to the literal buffer.
     fn try_add_esc(&mut self) -> LiteralCharResult<()> {
-        lazy_static! {
-            static ref BASIC_ESCAPES: HashMap<char, &'static str> = {
-                let mut m = HashMap::new();
-    
-                m.insert('0',  "\0");
-                m.insert('\\', "\\");
-                m.insert('n',  "\n");
-                m.insert('t',  "\t");
-                m.insert('r',  "\r");
-                m.insert('\'', "'");
-                m.insert('"',  "\"");
-                m.insert('\n', "");
-                m
-            };
-        }
+        static BASIC_ESCAPES: Lazy<HashMap<char, &'static str>> = Lazy::new(|| {
+            let mut m = HashMap::new();
+
+            m.insert('0',  "\0");
+            m.insert('\\', "\\");
+            m.insert('n',  "\n");
+            m.insert('t',  "\t");
+            m.insert('r',  "\r");
+            m.insert('\'', "'");
+            m.insert('"',  "\"");
+            m.insert('\n', "");
+            m
+        });
 
         match self.next_raw(false)? {
             '\\' => {
@@ -937,9 +935,7 @@ impl Lexer {
     /// This function consumes characters from the input and adds a multi-line comment 
     /// (`/* this kind of comment */`) to the output.
     fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
-        lazy_static! {
-            static ref RE: Regex = Regex::new(r"/\*|\*/").unwrap();
-        }
+        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/\*|\*/").unwrap());
 
         // is used in this function only, because the uses here are ensured not to run into \n
         fn cur_shift_back((lno, cno): Cursor, chars: usize) -> Cursor {

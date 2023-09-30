@@ -28,9 +28,9 @@ pub mod prelude {
         };
         ($id:literal, $($name:ident = $f:literal)+) => {
             $(
-                lazy_static::lazy_static! {
-                    static ref $name: $crate::test_utils::TestLoader = $crate::test_utils::TestLoader::new($id.trim(), $f).unwrap();
-                }
+                static $name: ::once_cell::sync::Lazy<$crate::test_utils::TestLoader> = ::once_cell::sync::Lazy::new(|| {
+                    $crate::test_utils::TestLoader::new($id.trim(), $f).unwrap()
+                });
             )+
         };
     }

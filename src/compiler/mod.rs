@@ -47,6 +47,7 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::{PassManagerBuilder, PassManager};
+use once_cell::sync::Lazy;
 pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
 pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
@@ -57,7 +58,6 @@ use crate::parser;
 use self::d_parser::DParser;
 use self::plir_codegen::DeclaredTypes;
 
-use lazy_static::lazy_static;
 
 macro_rules! to_str {
     ($e:expr) => { $e.to_str().expect("Expected UTF-8 str") }
@@ -154,10 +154,10 @@ pub struct Compiler<'ctx> {
     in_path: PathBuf
 }
 
-lazy_static! {
-    static ref STD_PATH: &'static Path = "std".as_ref();
-    static ref STD_FILES: Vec<(PathBuf, PathBuf)> = {
-        fs::read_dir(*STD_PATH).unwrap()
+static STD_FILES: Lazy<Vec<(PathBuf, PathBuf)>> = Lazy::new(|| {
+    let std_path = "std";
+    
+    fs::read_dir(std_path).unwrap()
             .filter_map(|me| {
                 let path = me.ok()?.path();
 
@@ -166,8 +166,8 @@ lazy_static! {
             })
             .map(|bc| (bc.with_extension("d.plir.gon"), bc))
             .collect()
-    };
-}
+});
+
 impl<'ctx> Compiler<'ctx> {
     /// Create a new compiler. 
     /// 

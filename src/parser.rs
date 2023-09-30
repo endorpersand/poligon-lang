@@ -10,7 +10,6 @@
 //! - [`Parser`]: The struct that does all the parsing.
 
 use ast::Located;
-use lazy_static::lazy_static;
 
 use std::collections::VecDeque;
 use std::ops::RangeInclusive;
@@ -1239,17 +1238,15 @@ impl Parser {
         let me = self.match_spread()?;
 
         if let Some(mut e) = me {
-            lazy_static! {
-                static ref CMP_OPS: [Token; 6] = [
-                    token![<], token![>], 
-                    token![<=], token![>=], 
-                    token![==], token![!=]
-                ];
-            }
+            const CMP_OPS: [Token; 6] = [
+                token![<], token![>], 
+                token![<=], token![>=], 
+                token![==], token![!=]
+            ];
 
             // check if there's a comparison here
             let mut rights = vec![];
-            while let Some(t) = self.match_(&*CMP_OPS) {
+            while let Some(t) = self.match_(CMP_OPS) {
                 let op = t.tt.try_into().unwrap();
                 let rexpr = self.match_spread()?
                     .ok_or_else(|| ParseErr::ExpectedExpr.at_range(self.peek_loc()))?;
@@ -1351,13 +1348,11 @@ impl Parser {
     /// 
     /// The next expression above in precedence is [`Parser::match_deref`].
     pub fn match_unary(&mut self) -> ParseResult<Option<Located<ast::Expr>>> {
-        lazy_static! {
-            static ref UNARY_OPS: [Token; 4] = [token![!], token![~], token![-], token![+]];
-        }
+        const UNARY_OPS: [Token; 4] = [token![!], token![~], token![-], token![+]];
 
         self.push_loc_block("match_unary");
         let mut ops = vec![];
-        while let Some(t) = self.match_(&*UNARY_OPS) {
+        while let Some(t) = self.match_(UNARY_OPS) {
             ops.push(t.tt.try_into().unwrap());
         }
 

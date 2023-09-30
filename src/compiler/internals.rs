@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use inkwell::values::FunctionValue;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 use crate::compiler::llvm::types::{FnTypeS, IntTypeS, PtrTypeS, VoidTypeS, RetTypeS, Concretize, FloatTypeS};
 use crate::compiler::{LLVMCodegen, LLVMResult, LLVMErr, plir};
@@ -66,84 +66,78 @@ fn build_ptrnull<'ctx>(builder: Builder2<'ctx>, _: FunctionValue<'ctx>) {
 
 macro_rules! c_intrinsics {
     ($($c:ident: {$alias:expr, $f1:expr, $f2:expr$(, $f3:ident)?}),* $(,)?) => {
-        lazy_static! {
-            pub(in crate::compiler) static ref C_INTRINSICS_LLVM: HashMap<&'static str, (&'static str, FnTypeS, Option<for <'ctx> fn(Builder2<'ctx>, FunctionValue<'ctx>)>)> = map! {
-                $(concat!("#", stringify!($c)) => ($alias, $f2, add_body!($($f3)?))),*
-            };
-        }
-        lazy_static! {
-            pub(in crate::compiler) static ref C_INTRINSICS_PLIR: HashMap<&'static str, plir::FunType> = map! {
-                $(concat!("#", stringify!($c)) => $f1),*
-            };
-        }
+        pub(in crate::compiler) static C_INTRINSICS_LLVM: Lazy<HashMap<&'static str, (&'static str, FnTypeS, Option<for <'ctx> fn(Builder2<'ctx>, FunctionValue<'ctx>)>)>> = Lazy::new(|| map! {
+            $(concat!("#", stringify!($c)) => ($alias, $f2, add_body!($($f3)?))),*
+        });
+        pub(in crate::compiler) static C_INTRINSICS_PLIR: Lazy<HashMap<&'static str, plir::FunType>> = Lazy::new(|| map! {
+            $(concat!("#", stringify!($c)) => $f1),*
+        });
     }
 }
 
-lazy_static! {
-    static ref BOOL_L:  IntTypeS   = IntTypeS::Bool;
-    static ref CHAR_L:  IntTypeS   = IntTypeS::I32;
-    static ref INT_L:   IntTypeS   = IntTypeS::I64;
-    static ref FLOAT_L: FloatTypeS = FloatTypeS;
-    static ref PTR_L:   PtrTypeS   = PtrTypeS;
-    static ref VOID_L:  VoidTypeS  = VoidTypeS;
-    
-    static ref BOOL_P:  plir::Type = plir::ty!(plir::Type::S_BOOL);
-    static ref CHAR_P:  plir::Type = plir::ty!(plir::Type::S_CHAR);
-    static ref INT_P:   plir::Type = plir::ty!(plir::Type::S_INT);
-    static ref FLOAT_P: plir::Type = plir::ty!(plir::Type::S_FLOAT);
-    static ref PTR_P:   plir::Type = plir::ty!("#ptr");
-    static ref VOID_P:  plir::Type = plir::ty!(plir::Type::S_VOID);
-}
+const BOOL_L:  IntTypeS   = IntTypeS::Bool;
+const CHAR_L:  IntTypeS   = IntTypeS::I32;
+const INT_L:   IntTypeS   = IntTypeS::I64;
+const FLOAT_L: FloatTypeS = FloatTypeS;
+const PTR_L:   PtrTypeS   = PtrTypeS;
+const VOID_L:  VoidTypeS  = VoidTypeS;
+static BOOL_P:  Lazy<plir::Type> = Lazy::new(|| plir::ty!(plir::Type::S_BOOL));
+static CHAR_P:  Lazy<plir::Type> = Lazy::new(|| plir::ty!(plir::Type::S_CHAR));
+static INT_P:   Lazy<plir::Type> = Lazy::new(|| plir::ty!(plir::Type::S_INT));
+static FLOAT_P: Lazy<plir::Type> = Lazy::new(|| plir::ty!(plir::Type::S_FLOAT));
+static PTR_P:   Lazy<plir::Type> = Lazy::new(|| plir::ty!("#ptr"));
+static VOID_P:  Lazy<plir::Type> = Lazy::new(|| plir::ty!(plir::Type::S_VOID));
+
 c_intrinsics! {
     putwchar: { // (char) -> int
         "putwchar",
         fun_type![(CHAR_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*CHAR_L) -> *INT_L]
+        fn_type_s![(CHAR_L) -> INT_L]
     },
     printf: { // (char*, ..) -> int
         "printf",
         fun_type![(PTR_P.clone(), ~) -> INT_P.clone()],
-        fn_type_s![(*PTR_L, ~) -> *INT_L]
+        fn_type_s![(PTR_L, ~) -> INT_L]
     },
     malloc: { // (int) -> void*
         "malloc",
         fun_type![(INT_P.clone()) -> PTR_P.clone()],
-        fn_type_s![(*INT_L) -> *PTR_L]
+        fn_type_s![(INT_L) -> PTR_L]
     },
     free: { // (void*) -> void
         "free",
         fun_type![(PTR_P.clone()) -> VOID_P.clone()],
-        fn_type_s![(*PTR_L) -> *VOID_L]
+        fn_type_s![(PTR_L) -> VOID_L]
     },
     memcpy: { // (void*, void*, int) -> void* /// (dest, src, len) -> dest
         "memcpy",
         fun_type![(PTR_P.clone(), PTR_P.clone(), INT_P.clone()) -> PTR_P.clone()],
-        fn_type_s![(*PTR_L, *PTR_L, *INT_L) -> *PTR_L]
+        fn_type_s![(PTR_L, PTR_L, INT_L) -> PTR_L]
     },
     asprintf: { // (char**, char*, ..) -> int
         "asprintf",
         fun_type![(PTR_P.clone(), PTR_P.clone(), ~) -> INT_P.clone()],
-        fn_type_s![(*PTR_L, *PTR_L, ~) -> *INT_L]
+        fn_type_s![(PTR_L, PTR_L, ~) -> INT_L]
     },
     mbtowc: { // (wchar_t*, char*, int) -> int
         "mbtowc",
         fun_type![(PTR_P.clone(), PTR_P.clone(), INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*PTR_L, *PTR_L, *INT_L) -> *INT_L]
+        fn_type_s![(PTR_L, PTR_L, INT_L) -> INT_L]
     },
     setlocale: { // (int, char*) -> char* /// (cat, locale) -> locale
         "setlocale",
         fun_type![(INT_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
-        fn_type_s![(*INT_L, *PTR_L) -> *PTR_L]
+        fn_type_s![(INT_L, PTR_L) -> PTR_L]
     },
     abs: { // (int, bool) -> int
         "llvm.abs.i64",
         fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
+        fn_type_s![(INT_L, BOOL_L) -> INT_L]
     },
     fabs: { // (float) -> float
         "llvm.fabs.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     // ldiv: { // (int, int) -> (int, int)
 
@@ -151,27 +145,27 @@ c_intrinsics! {
     fma: { // (float, float, float) -> float
         "llvm.fma.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     smax: { // (int, int) -> int
         "llvm.smax.i64",
         fun_type![(INT_P.clone(), INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *INT_L) -> *INT_L]
+        fn_type_s![(INT_L, INT_L) -> INT_L]
     },
     smin: { // (int, int) -> int
         "llvm.smin.i64",
         fun_type![(INT_P.clone(), INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *INT_L) -> *INT_L]
+        fn_type_s![(INT_L, INT_L) -> INT_L]
     },
     maxnum: { // (float, float) -> float
         "llvm.maxnum.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     minnum: { // (float, float) -> float
         "llvm.minnum.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     // nanl: {
 
@@ -179,172 +173,172 @@ c_intrinsics! {
     exp: { // (float) -> float
         "llvm.exp.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     exp2: { // (float) -> float
         "llvm.exp2.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     expm1: { // (float) -> float
         "expm1",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     log: { // (float) -> float
         "llvm.log.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     log2: { // (float) -> float
         "llvm.log2.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     log10: { // (float) -> float
         "llvm.log10.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     log1p: { // (float) -> float
         "log1p",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     sqrt: { // (float) -> float
         "llvm.sqrt.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     cbrt: { // (float) -> float
         "cbrt",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     hypot: { // (float, float) -> float
         "hypot",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     pow: { // (float, float) -> float
         "llvm.pow.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     powi: { // (float, int) -> float
         "llvm.powi.f64.i64",
         fun_type![(FLOAT_P.clone(), INT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *INT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, INT_L) -> FLOAT_L]
     },
     sin: { // (float) -> float
         "llvm.sin.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     cos: { // (float) -> float
         "llvm.cos.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     tan: { // (float) -> float
         "tan",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     asin: { // (float) -> float
         "asin",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     acos: { // (float) -> float
         "acos",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     atan: { // (float) -> float
         "atan",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     atan2: { // (float, float) -> float
         "atan2",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     sinh: { // (float) -> float
         "sinh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     cosh: { // (float) -> float
         "cosh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     tanh: { // (float) -> float
         "tanh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     asinh: { // (float) -> float
         "asinh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     acosh: { // (float) -> float
         "acosh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     atanh: { // (float) -> float
         "atanh",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     erf: { // (float) -> float
         "erf",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     erfc: { // (float) -> float
         "erfc",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     lgamma: { // (float) -> float
         "lgamma",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     tgamma: { // (float) -> float
         "tgamma",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     ceil: { // (float) -> float
         "llvm.ceil.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     floor: { // (float) -> float
         "llvm.floor.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     trunc: { // (float) -> float
         "llvm.trunc.f64",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     round: { // (float) -> float
         "round",
         fun_type![(FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L) -> FLOAT_L]
     },
     lround: { // (float) -> int
         "lround",
         fun_type![(FLOAT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *INT_L]
+        fn_type_s![(FLOAT_L) -> INT_L]
     },
     // nearbyint: {
 
@@ -367,22 +361,22 @@ c_intrinsics! {
     nexttoward: { // (float, float) -> float
         "nexttoward",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     copysign: { // (float, float) -> float
         "llvm.copysign.f64",
         fun_type![(FLOAT_P.clone(), FLOAT_P.clone()) -> FLOAT_P.clone()],
-        fn_type_s![(*FLOAT_L, *FLOAT_L) -> *FLOAT_L]
+        fn_type_s![(FLOAT_L, FLOAT_L) -> FLOAT_L]
     },
     isinf: { // (float) -> bool
         "isinf",
         fun_type![(FLOAT_P.clone()) -> BOOL_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *BOOL_L]
+        fn_type_s![(FLOAT_L) -> BOOL_L]
     },
     isnan: { // (float) -> bool
         "isnan",
         fun_type![(FLOAT_P.clone()) -> BOOL_P.clone()],
-        fn_type_s![(*FLOAT_L) -> *BOOL_L]
+        fn_type_s![(FLOAT_L) -> BOOL_L]
     },
     // signbit: {
 
@@ -390,63 +384,63 @@ c_intrinsics! {
     ctpop: { // (int) -> int
         "llvm.ctpop.i64",
         fun_type![(INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L) -> *INT_L]
+        fn_type_s![(INT_L) -> INT_L]
     },
     bitreverse: { // (int) -> int
         "llvm.bitreverse.i64",
         fun_type![(INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L) -> *INT_L]
+        fn_type_s![(INT_L) -> INT_L]
     },
     bswap: { // (int) -> int
         "llvm.bswap.i64",
         fun_type![(INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L) -> *INT_L]
+        fn_type_s![(INT_L) -> INT_L]
     },
     ctlz: { // (int, bool) -> int
         "llvm.ctlz.i64",
         fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
+        fn_type_s![(INT_L, BOOL_L) -> INT_L]
     },
     cttz: { // (int, bool) -> int
         "llvm.cttz.i64",
         fun_type![(INT_P.clone(), BOOL_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *BOOL_L) -> *INT_L]
+        fn_type_s![(INT_L, BOOL_L) -> INT_L]
     },
     idiv: { // (int, int) -> int
         "#idiv",
         fun_type![(INT_P.clone(), INT_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*INT_L, *INT_L) -> *INT_L],
+        fn_type_s![(INT_L, INT_L) -> INT_L],
         build_idiv
     },
     fopen: { // (char*, char*) -> File*
         "fopen",
         fun_type![(PTR_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
-        fn_type_s![(*PTR_L, *PTR_L) -> *PTR_L]
+        fn_type_s![(PTR_L, PTR_L) -> PTR_L]
     },
     fdopen: { // (char*, char*) -> File*
         "fdopen",
         fun_type![(INT_P.clone(), PTR_P.clone()) -> PTR_P.clone()],
-        fn_type_s![(*INT_L, *PTR_L) -> *PTR_L]
+        fn_type_s![(INT_L, PTR_L) -> PTR_L]
     },
     fputs: { // (char*, File*) -> int
         "fputs",
         fun_type![(PTR_P.clone(), PTR_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*PTR_L, *PTR_L) -> *INT_L]
+        fn_type_s![(PTR_L, PTR_L) -> INT_L]
     },
     fputwc: { // (char, File*) -> int
         "fputwc",
         fun_type![(CHAR_P.clone(), PTR_P.clone()) -> INT_P.clone()],
-        fn_type_s![(*CHAR_L, *PTR_L) -> *INT_L]
+        fn_type_s![(CHAR_L, PTR_L) -> INT_L]
     },
     exit: { // (int) -> never
         "exit",
         fun_type![(INT_P.clone()) -> VOID_P.clone()],
-        fn_type_s![(*INT_L) -> *VOID_L]
+        fn_type_s![(INT_L) -> VOID_L]
     },
     ptrnull: { // () -> ptr
         "#ptrnull",
         fun_type![() -> PTR_P.clone()],
-        fn_type_s![() -> *PTR_L],
+        fn_type_s![() -> PTR_L],
         build_ptrnull
     }
 }
