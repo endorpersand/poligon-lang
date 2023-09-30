@@ -16,9 +16,10 @@ use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use crate::GonErr;
-use crate::err::{FullGonErr, CursorRange};
+use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{self, PatErr};
+use crate::span::CursorRange;
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 

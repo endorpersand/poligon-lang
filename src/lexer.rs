@@ -13,7 +13,8 @@ use std::collections::{VecDeque, HashMap};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::err::{GonErr, FullGonErr, CursorRange, Cursor};
+use crate::err::{GonErr, FullGonErr};
+use crate::span::{Cursor, CursorRange};
 
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;

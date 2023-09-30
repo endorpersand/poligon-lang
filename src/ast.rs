@@ -13,15 +13,15 @@
 
 use std::rc::Rc;
 
-use crate::err::{CursorRange, FullGonErr, GonErr};
-
+use crate::err::{FullGonErr, GonErr};
+use crate::span::CursorRange;
 pub use self::types::*;
 
 pub mod op;
 mod types;
 
 mod located {
-    use crate::err::CursorRange;
+    use crate::span::CursorRange;
 
     /// AST node with a known location.
     #[derive(PartialEq, Eq, Clone)]

@@ -5,7 +5,7 @@
 use std::fmt::{Debug, Display};
 use std::collections::{BTreeMap, HashMap};
 use once_cell::sync::Lazy;
-use crate::err::CursorRange;
+use crate::span::CursorRange;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 /// A specific unit that carries some graphemic value in Poligon.

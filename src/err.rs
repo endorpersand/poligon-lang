@@ -12,7 +12,8 @@
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
+use std::ops::{RangeFrom, RangeBounds, Bound};
+use crate::span::{Cursor, CursorRange};
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -69,12 +70,6 @@ pub struct FullGonErr<E: GonErr> {
     pub(crate) err: E,
     pos: BTreeSet<ErrPos>
 }
-
-/// Indicates a specific character in given code.
-pub type Cursor = (usize /* line */, usize /* character */);
-
-/// Indicates a contiguous range of characters in given code.
-pub type CursorRange = RangeInclusive<Cursor>;
 
 #[derive(PartialEq, Eq, Debug)]
 enum ErrPos {

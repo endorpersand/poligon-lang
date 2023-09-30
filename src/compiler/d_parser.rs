@@ -13,9 +13,10 @@ use std::collections::VecDeque;
 use std::ops::RangeInclusive;
 
 use crate::GonErr;
-use crate::err::{FullGonErr, CursorRange};
+use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{Located, ReasgType, MutType};
+use crate::span::CursorRange;
 
 use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;

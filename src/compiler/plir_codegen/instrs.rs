@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::compiler::plir::{ProcStmt, self, Located};
-use crate::err::{CursorRange, GonErr};
+use crate::err::GonErr;
+use crate::span::CursorRange;
 
 use super::walkers::{ExprBlockIter, ExprBlockIterMut};
 use super::{PLIRErr, PLIRResult};

@@ -29,7 +29,8 @@ use crate::ast::{self, ReasgType, MutType, Locatable};
 use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
-use crate::err::{GonErr, FullGonErr, full_gon_cast_impl, CursorRange};
+use crate::err::{GonErr, FullGonErr, full_gon_cast_impl};
+use crate::span::CursorRange;
 
 use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};

@@ -2,7 +2,8 @@ use std::borrow::Cow;
 
 use crate::ast::{op, Literal};
 use crate::compiler::plir::*;
-use crate::err::{GonErr, CursorRange};
+use crate::err::GonErr;
+use crate::span::CursorRange;
 
 use super::PLIRResult;
 

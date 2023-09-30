@@ -41,3 +41,4 @@ pub mod err;
 mod test_utils;
 mod display;
 mod parser2;
+pub mod span;
