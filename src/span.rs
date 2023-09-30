@@ -6,7 +6,7 @@ pub type Cursor = (usize /* line */, usize /* character */);
 /// Indicates a contiguous range of characters in given code.
 pub type CursorRange = RangeInclusive<Cursor>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Span {
     Closed(RangeInclusive<Cursor>),
     Open(RangeFrom<Cursor>)
@@ -74,5 +74,10 @@ impl From<RangeFrom<Cursor>> for Span {
 }
 
 pub trait Spanned {
-    fn span(&self) -> Span;
+    fn span(&self) -> &Span;
+}
+impl Spanned for Span {
+    fn span(&self) -> &Span {
+        self
+    }
 }

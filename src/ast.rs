@@ -14,12 +14,13 @@
 use std::rc::Rc;
 
 use crate::err::{FullGonErr, GonErr};
-use crate::span::CursorRange;
+use crate::span::{Span, Spanned};
 pub use self::types::*;
 
 pub mod op;
 mod types;
 
+#[deprecated]
 mod located {
     use crate::span::CursorRange;
 
@@ -165,7 +166,15 @@ pub use located::*;
 ///  }
 /// ```
 #[derive(Debug, PartialEq, Eq)]
-pub struct Program(pub Vec<Located<Stmt>>);
+pub struct Program {
+    pub stmts: Vec<Stmt>,
+    pub span: Span
+}
+impl Spanned for Program {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
 
 /// An enclosed scope with a list of statements.
 /// 
@@ -183,14 +192,13 @@ pub struct Program(pub Vec<Located<Stmt>>);
 /// }
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Block(pub Vec<Located<Stmt>>);
-
-impl Block {
-    /// Gets the statements of this block.
-    /// 
-    /// This helps prevent `Located<Block>.0` from resolving as `Block`.
-    pub fn stmts(&self) -> &[Located<Stmt>] {
-        &self.0
+pub struct Block {
+    pub stmts: Vec<Located<Stmt>>,
+    pub span: Span
+}
+impl Spanned for Block {
+    fn span(&self) -> &Span {
+        &self.span
     }
 }
 
@@ -212,16 +220,26 @@ pub enum Stmt {
     /// return; // no expr
     /// return 2; // with expr
     /// ```
-    Return(Option<Located<Expr>>),
+    Return {
+        expr: Option<Expr>,
+        span: Span
+    },
     
     /// `break`
-    Break,
+    Break {
+        span: Span
+    },
 
     /// `continue`
-    Continue,
+    Continue {
+        span: Span
+    },
     
     /// `throw` statements (a very primitive version)
-    Throw(String),
+    Throw {
+        message: StrLiteral,
+        span: Span
+    },
 
     /// A function declaration with a defined body.
     /// 
@@ -236,25 +254,33 @@ pub enum Stmt {
     /// ```text
     /// extern fun puts(s: string) -> int;
     /// ```
-    ExternFunDecl(FunSignature),
+    ExternFunDecl {
+        sig: FunSignature,
+        span: Span
+    },
 
     /// An expression.
-    Expr(Located<Expr>),
+    Expr(Expr),
 
     /// A struct declaration.
     ClassDecl(Class),
 
     /// An import declaration.
-    Import(StaticPath),
+    Import {
+        path: StaticPath,
+        span: Span
+    },
 
     /// `import intrinsic`. Enables intrinsic functionality.
-    ImportIntrinsic,
+    ImportIntrinsic {
+        span: Span
+    },
 
     /// A global declaration. This is part of intrinsic functionality.
-    IGlobal(String /* ident */, String /* value */),
+    IGlobal(IGlobal),
 
     /// An intrinsic `fit class` declaration. This is part of intrinsic functionality.
-    FitClassDecl(Located<Type> /* type */, Vec<MethodDecl> /* methods */)
+    FitClassDecl(FitClassDecl),
 }
 
 impl Stmt {
@@ -263,12 +289,56 @@ impl Stmt {
         matches!(self, 
             | Stmt::FunDecl(_)
             | Stmt::ClassDecl(_)
-            | Stmt::FitClassDecl(_, _)
-            | Stmt::Expr(Located(Expr::Block(_), _))
-            | Stmt::Expr(Located(Expr::If { .. }, _))
-            | Stmt::Expr(Located(Expr::While { .. }, _))
-            | Stmt::Expr(Located(Expr::For { .. }, _))
+            | Stmt::FitClassDecl(_)
+            | Stmt::Expr(Expr::Block(_))
+            | Stmt::Expr(Expr::If { .. })
+            | Stmt::Expr(Expr::While { .. })
+            | Stmt::Expr(Expr::For { .. })
         )
+    }
+}
+impl Spanned for Stmt {
+    fn span(&self) -> &Span {
+        match self {
+            Stmt::Decl(d) => d.span(),
+            
+            | Stmt::Return { span, .. }
+            | Stmt::Break { span }
+            | Stmt::Continue { span }
+            | Stmt::Throw { span, .. }
+            | Stmt::ExternFunDecl { span, .. }
+            | Stmt::Import { span, .. }
+            | Stmt::ImportIntrinsic { span }
+            => span,
+
+            Stmt::FunDecl(d) => d.span(),
+            Stmt::Expr(e) => e.span(),
+            Stmt::ClassDecl(d) => d.span(),
+            Stmt::IGlobal(d) => d.span(),
+            Stmt::FitClassDecl(d) => d.span(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Ident {
+    ident: String,
+    span: Span
+}
+impl Spanned for Ident {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct StrLiteral {
+    literal: String,
+    span: Span
+}
+impl Spanned for StrLiteral {
+    fn span(&self) -> &Span {
+        &self.span
     }
 }
 
@@ -302,10 +372,17 @@ pub struct Decl {
     pub pat: DeclPat,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Option<Located<Type>>,
+    pub ty: Option<Type>,
 
     /// The value to declare the variable to
-    pub val: Located<Expr>
+    pub val: Expr,
+
+    pub span: Span
+}
+impl Spanned for Decl {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// A function parameter.
@@ -336,10 +413,17 @@ pub struct Param {
     pub mt: MutType,
 
     /// The parameter variable
-    pub ident: String,
+    pub ident: Ident,
 
     /// The type of the parameter variable (inferred if not present)
-    pub ty: Option<Located<Type>>
+    pub ty: Option<Type>,
+
+    pub span: Span
+}
+impl Spanned for Param {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// Reassignment types for variables, parameters, etc.
@@ -379,15 +463,22 @@ pub enum MutType {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FunSignature {
     /// The function's identifier
-    pub ident: String,
+    pub ident: Ident,
     /// Generic parameters
-    pub generics: Vec<String>,
+    pub generics: Vec<Ident>,
     /// The function's parameters
     pub params: Vec<Param>,
     /// Whether the function is varargs
     pub varargs: bool,
     /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Located<Type>>,
+    pub ret: Option<Type>,
+
+    pub span: Span
+}
+impl Spanned for FunSignature {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// A complete function declaration with a function body.
@@ -408,19 +499,50 @@ pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
     /// The function's body
-    pub block: Located<Rc<Block>>
+    pub block: Rc<Block>,
+
+    pub span: Span
+}
+impl Spanned for FunDecl {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct IGlobal {
+    pub ident: Ident,
+    pub value: StrLiteral,
+    pub span: Span
+}
+impl Spanned for IGlobal {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct FitClassDecl {
+    pub ty: Type,
+    pub methods: MethodDecl,
+    pub span: Span
+}
+impl Spanned for FitClassDecl {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// An expression.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     /// Variable access.
-    Ident(String),
+    Ident(Ident),
 
     /// A block of statements.
     /// 
     /// See [`Block`] for examples.
-    Block(Located<Block>),
+    Block(Block),
 
     /// An int, float, char, or string literal.
     /// 
@@ -428,16 +550,29 @@ pub enum Expr {
     Literal(Literal),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
-    ListLiteral(Vec<Located<Expr>>),
+    ListLiteral{
+        values: Vec<Expr>,
+        span: Span
+    },
 
     /// A set literal (e.g. `set {1, 2, 3, 4}`).
-    SetLiteral(Vec<Located<Expr>>),
+    SetLiteral {
+        values: Vec<Expr>,
+        span: Span
+    },
     
     /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
-    DictLiteral(Vec<(Located<Expr>, Located<Expr>)>),
+    DictLiteral {
+        entries: Vec<(Expr, Expr)>,
+        span: Span
+    },
 
     /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral(Located<Type>, Vec<(Located<String>, Located<Expr>)>),
+    ClassLiteral {
+        ty: Type,
+        entries: Vec<(Ident, Expr)>,
+        span: Span
+    },
     
     /// An assignment operation.
     /// 
@@ -447,7 +582,11 @@ pub enum Expr {
     /// b[0] = 3;
     /// [a, b, c] = [1, 2, 3];
     /// ```
-    Assign(AsgPat, LocatedBox<Expr>),
+    Assign {
+        target: AsgPat,
+        value: Box<Expr>,
+        span: Span
+    },
 
     /// A path.
     /// 
@@ -458,13 +597,15 @@ pub enum Expr {
     /// 
     /// This does a static access on a type (e.g. `Type::attr`).
     StaticPath(StaticPath),
+    
     /// A chain of unary operations (e.g. `+-+-~!+e`).
     UnaryOps {
         /// The operators applied. These are in display order 
         /// (i.e. they are applied to the expression from right to left).
         ops: Vec<op::Unary>,
         /// Expression to apply the unary operations to.
-        expr: LocatedBox<Expr>
+        expr: Box<Expr>,
+        span: Span
     },
 
     /// A binary operation (e.g. `a + b`).
@@ -472,9 +613,10 @@ pub enum Expr {
         /// Operator to apply.
         op: op::Binary,
         /// The left expression.
-        left: LocatedBox<Expr>,
+        left: Box<Expr>,
         /// The right expression.
-        right: LocatedBox<Expr>
+        right: Box<Expr>,
+        span: Span
     },
 
     /// A comparison operation (e.g. `a < b < c < d`).
@@ -483,65 +625,117 @@ pub enum Expr {
     /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
     Comparison {
         /// The left expression
-        left: LocatedBox<Expr>,
+        left: Box<Expr>,
         /// A list of comparison operators and a right expressions to apply.
-        rights: Vec<(op::Cmp, Located<Expr>)>
+        rights: Vec<(op::Cmp, Expr)>,
+        
+        span: Span
     },
 
     /// A range (e.g. `1..10` or `1..10 step 1`).
     Range {
         /// The left expression
-        left: LocatedBox<Expr>,
+        left: Box<Expr>,
         /// The right expression
-        right: LocatedBox<Expr>,
+        right: Box<Expr>,
         /// The expression for the step if it exists
-        step: Option<LocatedBox<Expr>>
+        step: Option<Box<Expr>>,
+
+        span: Span
     },
 
     /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
     If {
         /// The condition and block connected to each `if` of the chain
-        conditionals: Vec<(Located<Expr>, Located<Block>)>,
+        conditionals: Vec<(Expr, Block)>,
         /// The final bare `else` block (if it exists)
-        last: Option<Located<Block>>
+        last: Option<Block>,
+        span: Span
     },
 
     /// A `while` loop.
     While {
         /// The condition to check before each iteration.
-        condition: LocatedBox<Expr>,
+        condition: Box<Expr>,
         /// The block to run in each iteration.
-        block: Located<Block>
+        block: Block,
+        span: Span
     },
 
     /// A `for` loop.
     For {
         /// Variable to bind elements of the iterator to.
-        ident: String,
+        ident: Ident,
         /// The iterator.
-        iterator: LocatedBox<Expr>,
+        iterator: Box<Expr>,
         /// The block to run in each iteration.
-        block: Located<Block>
+        block: Block,
+        span: Span
     },
 
     /// A function call.
     Call {
         /// The function to call.
-        funct: LocatedBox<Expr>,
+        funct: Box<Expr>,
         /// The parameters to the function call.
-        params: Vec<Located<Expr>>
+        args: Vec<Expr>,
+
+        span: Span
     },
     /// An index operation.
     /// 
     /// See [`Index`] for examples.
     Index(Index),
     /// A spread operation (e.g. `..`, `..lst`).
-    Spread(Option<LocatedBox<Expr>>),
+    Spread {
+        expr: Option<Box<Expr>>,
+        span: Span
+    },
 
     /// Dereferencing intrinsic pointers.
     /// 
     /// See [`IDeref`] for examples.
     Deref(IDeref)
+}
+impl Spanned for Expr {
+    fn span(&self) -> &Span {
+        match self {
+            | Expr::ListLiteral { span, .. }
+            | Expr::SetLiteral { span, .. }
+            | Expr::DictLiteral { span, .. }
+            | Expr::ClassLiteral { span, .. }
+            | Expr::Assign { span, .. }
+            | Expr::UnaryOps { span, .. }
+            | Expr::BinaryOp { span, .. }
+            | Expr::Comparison { span, .. }
+            | Expr::Range { span, .. }
+            | Expr::If { span, .. }
+            | Expr::While { span, .. }
+            | Expr::For { span, .. }
+            | Expr::Call { span, .. }
+            | Expr::Spread { span, .. }
+            => span,
+            
+            Expr::Ident(e) => e.span(),
+            Expr::Block(e) => e.span(),
+            Expr::Literal(e) => e.span(),
+            Expr::Path(e) => e.span(),
+            Expr::StaticPath(e) => e.span(),
+            Expr::Index(e) => e.span(),
+            Expr::Deref(e) => e.span(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Literal {
+    pub kind: LitKind,
+    pub span: Span
+}
+impl Spanned for Literal {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// A primitive literal.
@@ -555,7 +749,7 @@ pub enum Expr {
 /// true  // bool
 /// ```
 #[derive(Debug, Clone)]
-pub enum Literal {
+pub enum LitKind {
     #[allow(missing_docs)] Int(isize),
     #[allow(missing_docs)] Float(f64),
     #[allow(missing_docs)] Char(char),
@@ -563,35 +757,30 @@ pub enum Literal {
     #[allow(missing_docs)] Bool(bool)
 }
 
-impl Literal {
+impl LitKind {
     /// Create a literal from a string representing a numeric value.
     pub fn from_numeric(s: &str) -> Option<Self> {
-        s.parse::<isize>()
-            .map(Literal::Int)
-            .ok()
-            .or_else(|| s.parse::<f64>()
-                .map(Literal::Float)
-                .ok()
-            )
-        
+        s.parse::<isize>().ok().map(LitKind::Int)
+            .or_else(|| s.parse::<f64>().ok().map(LitKind::Float))
     }
 }
 
-impl PartialEq for Literal {
+impl PartialEq for LitKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Int(l0), Self::Int(r0))     => l0 == r0,
             // since this is an AST, we want the EXACT values of floats to be the same
             // hence, we can compare the bits
             (Self::Float(l0), Self::Float(r0)) => l0.to_bits() == r0.to_bits(),
-            (Self::Char(l0), Self::Char(r0))   => l0 == r0,
-            (Self::Str(l0), Self::Str(r0))     => l0 == r0,
-            (Self::Bool(l0), Self::Bool(r0))   => l0 == r0,
+            (Self::Char(l0),  Self::Char(r0))  => l0 == r0,
+            (Self::Str(l0),   Self::Str(r0))   => l0 == r0,
+            (Self::Bool(l0),  Self::Bool(r0))  => l0 == r0,
             _ => false,
         }
     }
 }
-impl Eq for Literal {}
+impl Eq for LitKind {}
+
 /// A path, which accesses attributes from an expression.
 /// 
 /// # Syntax
@@ -607,10 +796,17 @@ impl Eq for Literal {}
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Path {
     /// The expression to access an attribute of
-    pub obj: LocatedBox<Expr>,
+    pub obj: Box<Expr>,
 
     /// The chain of attributes
-    pub attrs: Vec<String>
+    pub attrs: Vec<Ident>,
+
+    pub span: Span
+}
+impl Spanned for Path {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// A path, which accesses attributes from an expression.
@@ -628,10 +824,17 @@ pub struct Path {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StaticPath {
     /// The type to access an attribute of
-    pub ty: Located<Type>,
+    pub ty: Type,
 
     /// The attribute to access
-    pub attr: String
+    pub attr: Ident,
+
+    pub span: Span
+}
+impl Spanned for StaticPath {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// Value indexing.
@@ -649,9 +852,15 @@ pub struct StaticPath {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Index {
     /// The expression to index
-    pub expr: LocatedBox<Expr>,
+    pub expr: Box<Expr>,
     /// The index
-    pub index: LocatedBox<Expr>
+    pub index: Box<Expr>,
+    pub span: Span
+}
+impl Spanned for Index {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 /// Dereferencing of an intrinsic pointer.
@@ -661,17 +870,35 @@ pub struct Index {
 /// *ptr
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct IDeref(pub LocatedBox<Expr>);
+pub struct IDeref {
+    pub reference: Box<Expr>,
+    pub span: Span
+}
+impl Spanned for IDeref {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
 
 /// A unit to assign to.
 /// 
 /// See [`Expr::Assign`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AsgUnit {
-    #[allow(missing_docs)] Ident(String),
+    #[allow(missing_docs)] Ident(Ident),
     #[allow(missing_docs)] Path(Path),
     #[allow(missing_docs)] Index(Index),
     #[allow(missing_docs)] Deref(IDeref),
+}
+impl Spanned for AsgUnit {
+    fn span(&self) -> &Span {
+        match self {
+            AsgUnit::Ident(e) => e.span(),
+            AsgUnit::Path(e)  => e.span(),
+            AsgUnit::Index(e) => e.span(),
+            AsgUnit::Deref(e) => e.span(),
+        }
+    }
 }
 
 /// A unit to declare to.
@@ -679,7 +906,16 @@ pub enum AsgUnit {
 /// 
 /// See [`Decl`].
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DeclUnit(pub String, pub MutType);
+pub struct DeclUnit {
+    pub ident: Ident, 
+    pub mt: MutType,
+    pub span: Span
+}
+impl Spanned for DeclUnit {
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
 
 /// A pattern.
 /// 
@@ -698,20 +934,34 @@ pub enum Pat<T> {
     /// 
     /// This collects the remainder of the current pattern 
     /// and assigns it to its parameter (if present).
-    Spread(Option<LocatedBox<Self>>),
+    Spread {
+        inner: Option<Box<Self>>,
+        span: Span
+    },
 
     /// A list of patterns.
     /// 
     /// The values of the RHS are aligned by index.
-    List(Vec<Located<Self>>)
+    List {
+        values: Vec<Self>,
+        span: Span
+    }
+}
+impl<T: Spanned> Spanned for Pat<T> {
+    fn span(&self) -> &Span {
+        match self {
+            Pat::Unit(t) => t.span(),
+            | Pat::Spread { span, .. }
+            | Pat::List { span, .. }
+            => span,
+        }
+    }
 }
 
-/// A pattern with a known location.
-pub type LocatedPat<T> = Located<Pat<T>>;
 /// An assignment [pattern][`Pat`] (used for [assignments][`Expr::Assign`]).
-pub type AsgPat = LocatedPat<AsgUnit>;
+pub type AsgPat = Pat<AsgUnit>;
 /// A declaration [pattern][`Pat`] (used for [declarations][`Decl`]).
-pub type DeclPat = LocatedPat<DeclUnit>;
+pub type DeclPat = Pat<DeclUnit>;
 
 /// An error with converting an expression to a pattern.
 #[derive(Debug, PartialEq, Eq)]
@@ -755,53 +1005,46 @@ impl TryFrom<Located<Expr>> for Located<AsgUnit> {
     }
 }
 
-impl<T> TryFrom<Located<Expr>> for LocatedPat<T> 
-    where Located<T>: TryFrom<Located<Expr>, Error = FullPatErr>
+impl<T> TryFrom<Expr> for Pat<T>
+    where T: TryFrom<Expr, Error = FullPatErr>
 {
     type Error = FullPatErr;
 
     /// Patterns can be created if the unit type of the pattern can 
     /// fallibly be parsed from an expression.
-    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
-        #[inline]
-        fn ok_located<T, E>(t: T, range: CursorRange) -> Result<Located<T>, E> {
-            Ok(Located::new(t, range))
-        }
+    fn try_from(value: Expr) -> Result<Self, Self::Error> {
+        match value {
+            Expr::Spread { expr, span } => {
+                let inner = match expr {
+                    Some(e) => {
+                        let pat = Self::try_from(*e)?;
+                        Some(Box::new(pat))
+                    },
+                    None => None
+                };
 
-        let Located(expr, range) = value;
-
-        match expr {
-            Expr::Spread(me) => match me {
-                Some(e) => {
-                    let pat = Self::try_from(*e)?;
-                    let inner = Some(Box::new(pat));
-                    
-                    ok_located(Pat::Spread(inner), range)
-                },
-                None => ok_located(Pat::Spread(None), range),
-            }
-            Expr::ListLiteral(lst) => {
-                let vec: Vec<Self> = lst.into_iter()
+                Ok(Pat::Spread { inner, span })
+            },
+            Expr::ListLiteral { values, span } => {
+                let pats: Vec<Self> = values.into_iter()
                     .map(TryFrom::try_from)
                     .collect::<Result<_, _>>()?;
 
                 // check spread count is <2
-                let mut it = vec.iter()
-                    .filter(|pat| matches!(&***pat, Pat::Spread(_)));
+                let mut it = pats.iter()
+                    .filter(|pat| matches!(pat, Pat::Spread { .. }));
                 
                 it.next(); // skip 
 
                 if it.next().is_some() {
-                    Err(PatErr::CannotSpreadMultiple.at_range(range))
+                    Err(PatErr::CannotSpreadMultiple.at_range(span))
                 } else {
-                    ok_located(Pat::List(vec), range)
+                    Ok(Pat::List { values: pats, span })
                 }
             }
-            e => {
-                let value = Located::new(e, range);
-                let Located(unit, range) = Located::<T>::try_from(value)?;
-
-                ok_located(Pat::Unit(unit), range)
+            expr => {
+                let unit = T::try_from(expr)?;
+                Ok(Pat::Unit(unit))
             }
         }
     }
