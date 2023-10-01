@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr};
-use crate::span::{Cursor, CursorRange};
+use crate::span::{Cursor, CursorRange, Span};
 
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
@@ -355,7 +355,7 @@ impl<'lx> LiteralBuffer<'lx> {
     }
 
     fn cursor_range(&self) -> CursorRange {
-        self.lexer.token_start ..= self.lexer.cursor
+        Span::new(self.lexer.token_start ..= self.lexer.cursor)
     }
 }
 
@@ -671,7 +671,7 @@ impl Lexer {
 
     /// Get the range of the current token being generated.
     fn token_range(&self) -> CursorRange {
-        self.token_start ..= self.cursor
+        Span::new(self.token_start ..= self.cursor)
     }
 
     /// Add token to the token buffer, using the default range
@@ -906,7 +906,7 @@ impl Lexer {
             let len = op.len();
 
             let token_end = cur_shift(self.token_start, len - 1);
-            self.push_token_with_range(token.clone(), self.token_start..=token_end);
+            self.push_token_with_range(token.clone(), Span::new(self.token_start..=token_end));
 
             self.token_start = cur_shift(self.token_start, len);
             buf.drain(..len);
@@ -1223,31 +1223,31 @@ mod tests {
         }
 
         // basic char checks
-        assert_lex("'a'", literal![Char('a'), (0, 0) ..= (0, 2)]);
+        assert_lex("'a'", literal![Char('a'), Span::new((0, 0) ..= (0, 2))]);
         assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
         assert_lex_fail("''", LexErr::EmptyChar.at((0, 0)));
 
         // length check
-        assert_lex("\"abc\"", literal![Str("abc"), (0, 0) ..= (0, 4)]); // "abc"
-        assert_lex("\"abc\n\"", literal![Str("abc\n"), (0, 0) ..= (1, 0)]); // "abc[new line]"
-        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), (0, 0) ..= (1, 2)]); // "abc[new line]de"
+        assert_lex("\"abc\"", literal![Str("abc"), Span::new((0, 0) ..= (0, 4))]); // "abc"
+        assert_lex("\"abc\n\"", literal![Str("abc\n"), Span::new((0, 0) ..= (1, 0))]); // "abc[new line]"
+        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), Span::new((0, 0) ..= (1, 2))]); // "abc[new line]de"
 
         // basic escape tests
-        assert_lex("'\\''", literal![Char('\''), (0, 0) ..= (0, 3)]); // '\''
-        assert_lex("'\\n'", literal![Char('\n'), (0, 0) ..= (0, 3)]); // '\n'
-        assert_lex("\"\\e\"", literal![Str("\\e"), (0, 0) ..= (0, 3)]); // "\e"
+        assert_lex("'\\''", literal![Char('\''), Span::new((0, 0) ..= (0, 3))]); // '\''
+        assert_lex("'\\n'", literal![Char('\n'), Span::new((0, 0) ..= (0, 3))]); // '\n'
+        assert_lex("\"\\e\"", literal![Str("\\e"), Span::new((0, 0) ..= (0, 3))]); // "\e"
         assert_lex_fail("'\\n", LexErr::UnclosedQuote); // '\n
         assert_lex_fail("'\\\n'", LexErr::UnclosedQuote); // '\[new line]'
         
         // \x test
-        assert_lex("'\\x14'", literal![Char('\x14'), (0, 0) ..= (0, 5)]);   // '\x14'
+        assert_lex("'\\x14'", literal![Char('\x14'), Span::new((0, 0) ..= (0, 5))]);   // '\x14'
         assert_lex_fail("'\\x'", LexErr::InvalidX);   // '\x'
         assert_lex_fail("'\\x0'", LexErr::InvalidX);  // '\x0'
         assert_lex_fail("'\\xqq'", LexErr::InvalidX); // '\xqq'
 
         // \u test
-        assert_lex("'\\u{0}'", literal![Char('\0'), (0, 0) ..= (0, 6)]); // '\u{0}'
-        assert_lex("'\\u{1f97a}'", literal![Char('\u{1f97a}'), (0, 0) ..= (0, 10)]); // '\u{1f97a}'
+        assert_lex("'\\u{0}'", literal![Char('\0'), Span::new((0, 0) ..= (0, 6))]); // '\u{0}'
+        assert_lex("'\\u{1f97a}'", literal![Char('\u{1f97a}'), Span::new((0, 0) ..= (0, 10))]); // '\u{1f97a}'
         assert_lex_fail("'\\u{21f97a}'", LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
         assert_lex_fail("'\\u{0000000}'", LexErr::InvalidU); // '\u{0000000}'
     }

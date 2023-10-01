@@ -10,13 +10,12 @@
 //! - [`Parser`]: The struct that does all the parsing.
 
 use std::collections::VecDeque;
-use std::ops::RangeInclusive;
 
 use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{Located, ReasgType, MutType};
-use crate::span::CursorRange;
+use crate::span::{CursorRange, Span};
 
 use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;
@@ -127,31 +126,12 @@ macro_rules! expected_tokens {
     }
 }
 
-/// Combine two ranges, such that the new range at least spans over the two provided ranges.
-/// `l` should be left of `r`.
-fn merge_ranges<T>(l: RangeInclusive<T>, r: RangeInclusive<T>) -> RangeInclusive<T> {
-    let (start, _) = l.into_inner();
-    let (_, end) = r.into_inner();
-    
-    start ..= end
-}
-
-/// Combine two ranges, such that `l` spans over the two provided ranges.
-fn merge_ranges_in_place<T: Clone>(mr1: &mut Option<RangeInclusive<T>>, r2: RangeInclusive<T>) {
-    let new_range = match mr1.as_ref() {
-        Some(r1) => merge_ranges(r1.clone(), r2),
-        None => r2
-    };
-
-    mr1.replace(new_range);
-}
-
 impl Iterator for DParser {
     type Item = FullToken;
 
     fn next(&mut self) -> Option<Self::Item> {
         let ft = self.tokens.pop_front()?;
-        self.append_range(ft.loc.clone());
+        self.append_span(ft.loc.clone());
         Some(ft)
     }
 }
@@ -163,7 +143,7 @@ impl DParser {
             .collect();
         
         let eof = if let Some(FullToken { loc, ..}) = tokens.make_contiguous().last() {
-            let &(lno, cno) = loc.end();
+            let (lno, cno) = loc.end();
             (lno, cno + 1)
         } else {
             (0, 0)
@@ -296,7 +276,7 @@ impl DParser {
                 let mprefix = u.strip_strict_prefix_of(t);
                 
                 if let Some(prefix) = &mprefix {
-                    self.append_range(prefix.loc.clone());
+                    self.append_span(prefix.loc.clone());
                 }
 
                 mprefix
@@ -326,7 +306,7 @@ impl DParser {
     pub fn peek_loc(&self) -> CursorRange {
         self.tokens.get(0)
             .map_or(
-                self.eof..=self.eof,
+                Span::one(self.eof),
                 |FullToken {loc, ..}| loc.clone()
             )
     }
@@ -353,7 +333,7 @@ impl DParser {
         assert_eq!(pushed, name, "requested {name}, popped {pushed}");
 
         let r2 = mr2?;
-        self.append_range(r2.clone());
+        self.append_span(r2.clone());
 
         Some(r2)
     }
@@ -413,9 +393,13 @@ impl DParser {
     }
 
     /// Extends the range of the top cursor-tracking block to reach the bounds of new_range.
-    fn append_range(&mut self, new_range: CursorRange) {
+    fn append_span(&mut self, new_span: CursorRange) {
         if let Some(rb) = self.tree_locs.last_mut() {
-            merge_ranges_in_place(&mut rb.1, new_range);
+            rb.1.replace(if let Some(span) = rb.1 {
+                span.append(new_span)
+            } else {
+                new_span
+            });
         }
     }
 

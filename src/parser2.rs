@@ -19,7 +19,7 @@ use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, SPLITTABLES2};
 use crate::ast::{self, PatErr};
-use crate::span::{Span, CursorRange};
+use crate::span::{Span, CursorRange, Cursor};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
@@ -55,22 +55,19 @@ pub struct ParCursor<'s> {
     stream: &'s [FullToken],
     
     /// The end character's range
-    eof: CursorRange
+    eof: Cursor
 }
 impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
     pub fn new(stream: &'s [FullToken]) -> Self {
         let eof = if let Some(tok) = stream.last() {
-            let &(lno, cno) = tok.loc.end();
-            (lno, cno + 1) ..= (lno, cno + 1)
+            let (lno, cno) = tok.loc.end();
+            (lno, cno + 1)
         } else {
-            (0, 0) ..= (0, 0)
+            (0, 0)
         };
 
-        ParCursor { 
-            stream, 
-            eof
-        }
+        ParCursor { stream, eof }
     }
 
     /// Peeks the current token.
@@ -85,7 +82,7 @@ impl<'s> ParCursor<'s> {
     pub fn peek_span(&self) -> Span {
         match self.peek() {
             Some(t) => Span::from(t.loc.clone()),
-            None => Span::from(self.eof.clone()),
+            None => Span::one(self.eof),
         }
     }
 
@@ -100,7 +97,7 @@ impl<'s> ParCursor<'s> {
     pub fn pointing_at(&self) -> CursorRange {
         match self.peek() {
             Some(tok) => tok.loc.clone(),
-            None => self.eof.clone(),
+            None => Span::one(self.eof),
         }
     }
     /// Creates an error at the current position.
@@ -451,8 +448,8 @@ impl<'s> Parser2<'s> {
 
         // Attach to span collector:
         if let Some((collector, m)) = Option::zip(self.span_collectors.last_mut(), mat.as_ref()) {
-            let loc = Span::from(m.loc.clone());
-            let new_span = collector.append(&loc);
+            let span = Span::from(m.loc.clone());
+            let new_span = collector.append(span);
             *collector = new_span;
         }
 

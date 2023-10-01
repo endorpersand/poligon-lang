@@ -29,7 +29,7 @@ use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl};
-use crate::span::{CursorRange, Spanned};
+use crate::span::{CursorRange, Spanned, Span};
 
 use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
@@ -347,7 +347,7 @@ impl InsertBlock {
 
         Self {
             instrs: InstrBlock::new(),
-            block_range: (0, 0) ..= (0, 0),
+            block_range: Span::one((0, 0)),
             vars: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
@@ -934,7 +934,7 @@ impl PLIRCodegen {
                 if instrs.is_open() {
                     instrs.push({
                         plir::ProcStmt::Return(None)
-                            .located_at((0, 0) ..= (0, 0))
+                            .located_at(Span::one((0, 0)))
                     });
                 }
                 let (stmts, _) = std::mem::take(instrs).unravel();
@@ -1652,7 +1652,7 @@ impl PLIRCodegen {
         
         let ty = match ty {
             Some(t) => self.consume_type(t)?,
-            None => self.resolver.new_unknown(pat.span()),
+            None => self.resolver.new_unknown(*pat.span()),
         };
         let e = self.consume_located_expr(val, Some(ty.clone()))?;
 
@@ -1730,7 +1730,7 @@ impl PLIRCodegen {
         };
 
         // phantom block to encapsulate generic type context
-        let ib = self.push_block((0, 0) ..= (0, 0), None);
+        let ib = self.push_block(Span::one((0, 0)), None);
         ib.generic_ctx = gctx;
 
         let params = params.into_iter()
@@ -1904,7 +1904,7 @@ impl PLIRCodegen {
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generic_params, fields, methods, span: _ } = cls;
 
-        let ib = self.push_block((0, 0) ..= (0, 0), None);
+        let ib = self.push_block(Span::one((0, 0)), None);
         ib.generic_ctx = Some(GenericContext(cls_id.to_string(), {
             generic_params.iter()
                 .map(|p| {
@@ -2090,7 +2090,7 @@ impl PLIRCodegen {
                 self.push_block(span.clone(), ctx_type);
                 self.unpack_pat(target, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
-                        let span = unit.span();
+                        let &span = unit.span();
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident.ident),
                             ast::AsgUnit::Path(p) => {
@@ -2366,7 +2366,7 @@ impl PLIRCodegen {
     }
 
     fn consume_located_expr(&mut self, expr: ast::Expr, ctx_type: Option<plir::Type>) -> PLIRResult<Located<plir::Expr>> {
-        let span = expr.span();
+        let &span = expr.span();
         self.consume_expr(expr, ctx_type)
             .map(|e| Located::new(e, span))
     }

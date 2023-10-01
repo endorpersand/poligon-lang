@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ops::{RangeFrom, RangeBounds, Bound};
-use crate::span::{Cursor, CursorRange};
+use crate::span::{Cursor, CursorRange, Span};
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -95,11 +95,11 @@ impl ErrPos {
         };
         
         match range.end_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => {
-                if p == &start {
+            Bound::Included(&p) | Bound::Excluded(&p) => {
+                if p == start {
                     ErrPos::Point(start)
                 } else {
-                    ErrPos::Range(start..=(*p))
+                    ErrPos::Range(Span::new(start ..= p))
                 }
             },
             Bound::Unbounded => ErrPos::RangeFrom(start..),
@@ -143,9 +143,9 @@ impl Ord for ErrPos {
 
         fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
             match pos {
-                ErrPos::Point(p)     => (*p,         Some(*p)),
-                ErrPos::Range(r)     => (*r.start(), Some(*r.end())),
-                ErrPos::RangeFrom(r) => (r.start,    None),
+                ErrPos::Point(p)     => (*p,        Some(*p)),
+                ErrPos::Range(r)     => (r.start(), Some(r.end())),
+                ErrPos::RangeFrom(r) => (r.start,   None),
             }
         }
 

@@ -92,6 +92,8 @@ impl PartialEq<FullToken> for Token {
 }
 
 mod pat {
+    use crate::span::Span;
+
     use super::{Token, FullToken, SPLITTABLES};
 
     /// A token pattern.
@@ -130,10 +132,10 @@ mod pat {
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
             let FullToken { tt, loc } = t;
             if let Some(rhs) = SPLITTABLES.get(&(tt, self)) {
-                let (&(slno, scno), &(elno, ecno)) = (loc.start(), loc.end());
+                let ((slno, scno), (elno, ecno)) = (loc.start(), loc.end());
     
-                let lloc = (slno, scno) ..= (slno, scno);
-                let rloc = (elno, ecno) ..= (elno, ecno);
+                let lloc = Span::new((slno, scno) ..= (slno, scno));
+                let rloc = Span::new((elno, ecno) ..= (elno, ecno));
     
                 *t = FullToken { tt: rhs.clone(), loc: rloc };
                 Some(FullToken { tt: (*self).clone(), loc: lloc })

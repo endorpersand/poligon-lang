@@ -84,8 +84,8 @@ impl Test<'_> {
     pub fn source(&self) -> &str {
         match self.tokens.first().zip(self.tokens.last()) {
             Some((first, last)) => {
-                let &(sl, sc) = first.loc.start();
-                let &(el, ec) = last.loc.end();
+                let (sl, sc) = first.loc.start();
+                let (el, ec) = last.loc.end();
 
                 let schar = self.code.split('\n')
                     .take(sl)
