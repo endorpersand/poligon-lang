@@ -84,8 +84,8 @@ impl Test<'_> {
     pub fn source(&self) -> &str {
         match self.tokens.first().zip(self.tokens.last()) {
             Some((first, last)) => {
-                let (sl, sc) = first.loc.start();
-                let (el, ec) = last.loc.end();
+                let (sl, sc) = first.span.start();
+                let (el, ec) = last.span.end();
 
                 let schar = self.code.split('\n')
                     .take(sl)
@@ -197,12 +197,12 @@ impl Header {
         let mut name = None;
         let mut ignore = vec![];
 
-        while let Some(FullToken { tt: Token::Comment(c, _), ..}) = t.peek() {
+        while let Some(FullToken { kind: Token::Comment(c, _), ..}) = t.peek() {
             if !c.trim().starts_with('!') {
                 break;
             }
 
-            let Some(FullToken { tt: Token::Comment(c, _), ..}) = t.next() else { unreachable!() };
+            let Some(FullToken { kind: Token::Comment(c, _), ..}) = t.next() else { unreachable!() };
 
             let data = c.trim()
                 .strip_prefix('!')

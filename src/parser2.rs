@@ -61,7 +61,7 @@ impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
     pub fn new(stream: &'s [FullToken]) -> Self {
         let eof = if let Some(tok) = stream.last() {
-            let (lno, cno) = tok.loc.end();
+            let (lno, cno) = tok.span.end();
             (lno, cno + 1)
         } else {
             (0, 0)
@@ -81,7 +81,7 @@ impl<'s> ParCursor<'s> {
     
     pub fn peek_span(&self) -> Span {
         match self.peek() {
-            Some(t) => Span::from(t.loc.clone()),
+            Some(t) => t.span,
             None => Span::one(self.eof),
         }
     }
@@ -96,7 +96,7 @@ impl<'s> ParCursor<'s> {
     }
     pub fn pointing_at(&self) -> Span {
         match self.peek() {
-            Some(tok) => tok.loc.clone(),
+            Some(tok) => tok.span,
             None => Span::one(self.eof),
         }
     }
@@ -448,7 +448,7 @@ impl<'s> Parser2<'s> {
 
         // Attach to span collector:
         if let Some((collector, m)) = Option::zip(self.span_collectors.last_mut(), mat.as_ref()) {
-            let span = Span::from(m.loc.clone());
+            let span = m.span;
             let new_span = collector.append(span);
             *collector = new_span;
         }

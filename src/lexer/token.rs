@@ -5,7 +5,7 @@
 use std::fmt::{Debug, Display};
 use std::collections::{BTreeMap, HashMap};
 use once_cell::sync::Lazy;
-use crate::span::Span;
+use crate::span::{Span, Spanned};
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 /// A specific unit that carries some graphemic value in Poligon.
@@ -52,14 +52,14 @@ impl Token {
 /// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pub(crate) loc: Span,
-    pub(crate) tt: Token
+    pub(crate) kind: Token,
+    pub(crate) span: Span,
 }
 
 impl FullToken {
     /// Create a FullToken using a token and its given position.
-    pub fn new(tt: Token, loc: Span) -> Self {
-        Self { loc, tt }
+    pub fn new(kind: Token, span: Span) -> Self {
+        Self { kind, span }
     }
 
     /// Attempts to split the full token into two. 
@@ -76,18 +76,23 @@ impl std::ops::Deref for FullToken {
     type Target = Token;
 
     fn deref(&self) -> &Self::Target {
-        &self.tt
+        &self.kind
     }
 }
 
 impl PartialEq<Token> for FullToken {
     fn eq(&self, other: &Token) -> bool {
-        &self.tt == other
+        &self.kind == other
     }
 }
 impl PartialEq<FullToken> for Token {
     fn eq(&self, other: &FullToken) -> bool {
-        self == &other.tt
+        self == &other.kind
+    }
+}
+impl Spanned for FullToken {
+    fn span(&self) -> &Span {
+        &self.span
     }
 }
 
@@ -130,15 +135,15 @@ mod pat {
         }
     
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            let FullToken { tt, loc } = t;
-            if let Some(rhs) = SPLITTABLES.get(&(tt, self)) {
-                let ((slno, scno), (elno, ecno)) = (loc.start(), loc.end());
+            let FullToken { kind: fkind, span: fspan } = t;
+            if let Some(rhs) = SPLITTABLES.get(&(fkind, self)) {
+                let ((slno, scno), (elno, ecno)) = (fspan.start(), fspan.end());
     
-                let lloc = Span::new((slno, scno) ..= (slno, scno));
-                let rloc = Span::new((elno, ecno) ..= (elno, ecno));
+                let lspan = Span::new((slno, scno) ..= (slno, scno));
+                let rspan = Span::new((elno, ecno) ..= (elno, ecno));
     
-                *t = FullToken { tt: rhs.clone(), loc: rloc };
-                Some(FullToken { tt: (*self).clone(), loc: lloc })
+                *t = FullToken { kind: rhs.clone(),     span: rspan };
+                Some(FullToken { kind: (*self).clone(), span: lspan })
             } else {
                 None
             }

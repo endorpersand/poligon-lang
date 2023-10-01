@@ -131,7 +131,7 @@ impl Iterator for DParser {
 
     fn next(&mut self) -> Option<Self::Item> {
         let ft = self.tokens.pop_front()?;
-        self.append_span(ft.loc.clone());
+        self.append_span(ft.span);
         Some(ft)
     }
 }
@@ -139,11 +139,11 @@ impl Iterator for DParser {
 impl DParser {
     pub fn new(tokens: impl IntoIterator<Item=FullToken>, dtypes: DeclaredTypes) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
-            .filter(|FullToken { tt, ..} | !matches!(tt, Token::Comment(_, _)))
+            .filter(|FullToken { kind, .. } | !matches!(kind, Token::Comment(_, _)))
             .collect();
         
-        let eof = if let Some(FullToken { loc, ..}) = tokens.make_contiguous().last() {
-            let (lno, cno) = loc.end();
+        let eof = if let Some(FullToken { span, .. }) = tokens.make_contiguous().last() {
+            let (lno, cno) = span.end();
             (lno, cno + 1)
         } else {
             (0, 0)
@@ -211,7 +211,7 @@ impl DParser {
             Some(t) if u.fully_accepts(t) => self.next().ok_or_else(|| unreachable!()),
             Some(t) => match u.strip_strict_prefix_of(t) {
                 Some(prefix) => Ok(prefix),
-                None => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at_range(t.loc.clone()))
+                None => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at_range(t.span))
             },
             _ => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at(self.eof))
         }
@@ -276,7 +276,7 @@ impl DParser {
                 let mprefix = u.strip_strict_prefix_of(t);
                 
                 if let Some(prefix) = &mprefix {
-                    self.append_span(prefix.loc.clone());
+                    self.append_span(prefix.span);
                 }
 
                 mprefix
@@ -287,19 +287,19 @@ impl DParser {
 
     /// Read the next token in the input if present.
     pub fn peek_token(&self) -> Option<&Token> {
-        self.tokens.get(0).map(|FullToken {tt, ..}| tt)
+        self.tokens.get(0).map(|FullToken { kind, .. }| kind)
     }
 
     /// Read the nth following token in the input if present.
     pub fn peek_nth_token(&self, i: usize) -> Option<&Token> {
-        self.tokens.get(i).map(|FullToken {tt, ..}| tt)
+        self.tokens.get(i).map(|FullToken { kind, .. }| kind)
     }
 
     /// Consumes the next token in input.
     /// 
     /// If you want a FullToken, see [`Parser::next`].
     pub fn next_token(&mut self) -> Option<Token> {
-        self.next().map(|FullToken {tt, ..}| tt)
+        self.next().map(|FullToken { kind, .. }| kind)
     }
 
     /// Look at the range of the next token in the input (or return EOF).
@@ -307,7 +307,7 @@ impl DParser {
         self.tokens.get(0)
             .map_or(
                 Span::one(self.eof),
-                |FullToken {loc, ..}| loc.clone()
+                |FullToken { span, .. }| *span
             )
     }
 
@@ -458,8 +458,8 @@ impl DParser {
             None => Ok(None),
             Some(1) => {
                 match self.next() {
-                    Some(FullToken { tt: Token::Ident(s) | Token::Str(s), loc }) => {
-                        Ok(Some(Located::new(s, loc)))
+                    Some(FullToken { kind: Token::Ident(s) | Token::Str(s), span }) => {
+                        Ok(Some(Located::new(s, span)))
                     }
                     _ => unreachable!()
                 }
