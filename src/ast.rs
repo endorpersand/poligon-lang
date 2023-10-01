@@ -11,141 +11,38 @@
 //! An AST *can* be built manually by using these structs, but that is very painful.
 //! Instead, [`crate::lexer`] and [`crate::parser`] should be used to create one from a string.
 
-use crate::err::{FullGonErr, GonErr};
-use crate::span::{Span, Spanned};
-pub use self::types::*;
-
-pub mod op;
-mod types;
-
-// #[deprecated]
-mod located {
-    use crate::span::Span;
-
-    /// AST node with a known location.
-    #[derive(PartialEq, Eq, Clone)]
-    pub struct Located<T>(pub T, pub Span);
-
-    impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let Located(node, loc) = self;
-
-            write!(f, "[{:?} ..= {:?}]", loc.start(), loc.end())?;
-            write!(f, "{node:?}")
-        }
-    }
-    impl<T> std::ops::Deref for Located<T> {
-        type Target = T;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl<T> std::ops::DerefMut for Located<T> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.0
-        }
-    }
-
-    pub(crate) type LocatedBox<T> = Box<Located<T>>;
-
-    impl<T: PartialEq> PartialEq<T> for Located<T> {
-        fn eq(&self, other: &T) -> bool {
-            &self.0 == other
-        }
-    }
-
-    impl<T> Located<T> {
-        /// Create a new located node.
-        pub fn new(t: T, loc: Span) -> Self {
-            Self(t, loc)
+macro_rules! define_enum {
+    ($(#[$ta:meta])* $vis:vis enum $n:ident {$($(#[$a:meta])* $e:ident),*}) => {
+        $(#[$ta])*
+        $vis enum $n {
+            $(
+                $(#[$a])*
+                $e($e)
+            ),*
         }
 
-        /// Create a new boxed located node.
-        pub fn boxed(t: T, loc: Span) -> LocatedBox<T> {
-            Box::new(Located(t, loc))
-        }
-
-        /// Similar to [`Option::as_ref`].
-        pub fn as_ref(&self) -> Located<&T> {
-            Located::new(&self.0, self.range())
-        }
-
-        /// Similar to [`Option::as_mut`].
-        pub fn as_mut(&mut self) -> Located<&mut T> {
-            let range = self.range();
-            Located::new(&mut self.0, range)
-        }
-        
-        /// Map a Located with a given type to a Located of another type.
-        pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Located<U> {
-            let Located(node, loc) = self;
-            Located(f(node), loc)
-        }
-
-        /// Gets this located node's range.
-        pub fn range(&self) -> Span {
-            self.1.clone()
-        }
-
-    }
-
-    impl<T: transposable::LTranspose> Located<T> {
-        /// Transposes various types wrapped in Located out.
-        /// 
-        /// - `Located<Option<T>> => Option<Located<T>>`
-        /// - `Located<Result<T, E>> => Result<Located<T>, E>`
-        /// - `Located<Box<T>> => LocatedBox<T>`
-        pub fn transpose(self) -> T::Transposed {
-            T::ltranspose(self)
-        }
-    }
-
-    /// Helper trait that converts a Located call for a method call
-    pub trait Locatable {
-        /// Add a range to this object
-        fn located_at(self, range: Span) -> Located<Self> 
-            where Self: Sized
-        {
-            Located::new(self, range)
-        }
-    }
-    impl<T> Locatable for T {}
-
-    mod transposable {
-        use super::Located;
-
-        pub trait LTranspose: Sized {
-            type Transposed;
-    
-            fn ltranspose(located: Located<Self>) -> Self::Transposed;
-        }
-
-        impl<T> LTranspose for Option<T> {
-            type Transposed = Option<Located<T>>;
-
-            fn ltranspose(located: Located<Self>) -> Self::Transposed {
-                located.0.map(|v| Located::new(v, located.1))
-            }
-        }
-        impl<T, E> LTranspose for Result<T, E> {
-            type Transposed = Result<Located<T>, E>;
-
-            fn ltranspose(located: Located<Self>) -> Self::Transposed {
-                located.0.map(|v| Located::new(v, located.1))
-            }
-        }
-        impl<T> LTranspose for Box<T> {
-            type Transposed = Box<Located<T>>;
-
-            fn ltranspose(located: Located<Self>) -> Self::Transposed {
-                let Located(val, range) = located;
-                Box::new(Located::new(*val, range))
+        impl $crate::span::Spanned for $n {
+            fn span(&self) -> &$crate::span::Span {
+                match self {
+                    $(Self::$e(t) => t.span()),*
+                }
             }
         }
     }
 }
+
+use crate::err::{FullGonErr, GonErr};
+use crate::span::{Span, Spanned};
+pub use types::*;
 pub use located::*;
+pub use stmt::*;
+pub use fun::*;
+
+pub mod op;
+mod types;
+mod located;
+mod stmt;
+mod fun;
 
 /// A complete program.
 /// 
@@ -200,124 +97,6 @@ impl Spanned for Block {
     }
 }
 
-/// A statement.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Stmt {
-    /// A variable declaration with a value initializer.
-    /// 
-    /// See [`Decl`] for examples.
-    Decl(Decl),
-    
-    /// A return statement that signals to exit the function body.
-    /// 
-    /// This return statement can return nothing (`void`), 
-    /// or return a value from a given expression.
-    /// 
-    /// # Examples
-    /// ```text
-    /// return; // no expr
-    /// return 2; // with expr
-    /// ```
-    Return {
-        expr: Option<Expr>,
-        span: Span
-    },
-    
-    /// `break`
-    Break {
-        span: Span
-    },
-
-    /// `continue`
-    Continue {
-        span: Span
-    },
-    
-    /// `throw` statements (a very primitive version)
-    Throw {
-        message: StrLiteral,
-        span: Span
-    },
-
-    /// A function declaration with a defined body.
-    /// 
-    /// See [`FunDecl`] for examples.
-    FunDecl(FunDecl),
-
-    /// A function declaration without a specified body
-    /// 
-    /// In the compiler, this is used to call functions from libc.
-    /// 
-    /// # Example
-    /// ```text
-    /// extern fun puts(s: string) -> int;
-    /// ```
-    ExternFunDecl {
-        sig: FunSignature,
-        span: Span
-    },
-
-    /// An expression.
-    Expr(Expr),
-
-    /// A struct declaration.
-    ClassDecl(Class),
-
-    /// An import declaration.
-    Import {
-        path: StaticPath,
-        span: Span
-    },
-
-    /// `import intrinsic`. Enables intrinsic functionality.
-    ImportIntrinsic {
-        span: Span
-    },
-
-    /// A global declaration. This is part of intrinsic functionality.
-    IGlobal(IGlobal),
-
-    /// An intrinsic `fit class` declaration. This is part of intrinsic functionality.
-    FitClassDecl(FitClassDecl),
-}
-
-impl Stmt {
-    /// Test if this statement ends with a block.
-    pub fn ends_with_block(&self) -> bool {
-        matches!(self, 
-            | Stmt::FunDecl(_)
-            | Stmt::ClassDecl(_)
-            | Stmt::FitClassDecl(_)
-            | Stmt::Expr(Expr::Block(_))
-            | Stmt::Expr(Expr::If { .. })
-            | Stmt::Expr(Expr::While { .. })
-            | Stmt::Expr(Expr::For { .. })
-        )
-    }
-}
-impl Spanned for Stmt {
-    fn span(&self) -> &Span {
-        match self {
-            Stmt::Decl(d) => d.span(),
-            
-            | Stmt::Return { span, .. }
-            | Stmt::Break { span }
-            | Stmt::Continue { span }
-            | Stmt::Throw { span, .. }
-            | Stmt::ExternFunDecl { span, .. }
-            | Stmt::Import { span, .. }
-            | Stmt::ImportIntrinsic { span }
-            => span,
-
-            Stmt::FunDecl(d) => d.span(),
-            Stmt::Expr(e) => e.span(),
-            Stmt::ClassDecl(d) => d.span(),
-            Stmt::IGlobal(d) => d.span(),
-            Stmt::FitClassDecl(d) => d.span(),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Ident {
     pub ident: String,
@@ -335,90 +114,6 @@ pub struct StrLiteral {
     pub span: Span
 }
 impl Spanned for StrLiteral {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// A variable declaration.
-/// 
-/// This struct also requires a value initializer.
-/// 
-/// # Syntax
-/// ```text
-/// decl = ("let" | "const") decl_pat (: ty)? = expr;
-/// ```
-/// 
-/// # Examples
-/// ```text
-/// // basic declarations:
-/// let a = 1;
-/// const b = 2;
-/// let mut c = 3;
-/// const mut d = 4;
-/// let e: int = 5;
-/// 
-/// // with patterns:
-/// let [mut x, y, z] = [1, 2, 3];
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Decl {
-    /// Whether the variable can be reassigned later
-    pub rt: ReasgType,
-
-    /// The pattern to declare to
-    pub pat: DeclPat,
-
-    /// The type of the declaration (inferred if not present)
-    pub ty: Option<Type>,
-
-    /// The value to declare the variable to
-    pub val: Expr,
-
-    pub span: Span
-}
-impl Spanned for Decl {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// A function parameter.
-/// 
-/// This struct is similar to [`Decl`], 
-/// but omits the value initializer and does not accept patterns.
-/// 
-/// # Syntax
-/// ```text
-/// param = ("let" | "const")? ident (: ty)?;
-/// ```
-/// 
-/// # Example
-/// ```text
-/// fun funny(
-///     a: int, 
-///     const b: float, 
-///     mut c: string, 
-///     const mut d: list<string>
-/// ) {}
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Param {
-    /// Whether the parameter variable can be reassigned later
-    pub rt: ReasgType,
-
-    /// Whether the parameter variable can be mutated
-    pub mt: MutType,
-
-    /// The parameter variable
-    pub ident: Ident,
-
-    /// The type of the parameter variable (inferred if not present)
-    pub ty: Option<Type>,
-
-    pub span: Span
-}
-impl Spanned for Param {
     fn span(&self) -> &Span {
         &self.span
     }
@@ -444,93 +139,6 @@ pub enum MutType {
     Immut
 }
 
-/// A function header / signature.
-/// 
-/// If a return type is not provided, it is assumed to be `void`.
-/// 
-/// # Syntax
-/// ```text
-/// sig = "fun" ident "(" (param,)* ")" (-> ty)?;
-/// ```
-/// 
-/// # Examples
-/// ```text
-/// fun abc(a: int);
-/// fun def(a: int) -> string;
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FunSignature {
-    /// The function's identifier
-    pub ident: Ident,
-    /// Generic parameters
-    pub generics: Vec<Ident>,
-    /// The function's parameters
-    pub params: Vec<Param>,
-    /// Whether the function is varargs
-    pub varargs: bool,
-    /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Type>,
-
-    pub span: Span
-}
-impl Spanned for FunSignature {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// A complete function declaration with a function body.
-/// 
-/// # Syntax
-/// ```text
-/// fun_decl = "fun" ident "(" (param,)* ")" (-> ty)? block;
-/// ```
-/// 
-/// # Example
-/// ```text
-/// fun double(n: int) -> int {
-///     n * 2;
-/// }
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FunDecl {
-    /// The function's signature
-    pub sig: FunSignature,
-    /// The function's body
-    pub block: Block,
-
-    pub span: Span
-}
-impl Spanned for FunDecl {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct IGlobal {
-    pub ident: Ident,
-    pub value: StrLiteral,
-    pub span: Span
-}
-impl Spanned for IGlobal {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FitClassDecl {
-    pub ty: Type,
-    pub methods: Vec<MethodDecl>,
-    pub span: Span
-}
-impl Spanned for FitClassDecl {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
 /// An expression.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
@@ -548,7 +156,7 @@ pub enum Expr {
     Literal(Literal),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
-    ListLiteral{
+    ListLiteral {
         values: Vec<Expr>,
         span: Span
     },

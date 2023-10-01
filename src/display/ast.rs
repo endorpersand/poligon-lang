@@ -19,24 +19,19 @@ impl Display for Program {
 impl Display for Stmt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Decl(d) => d.fmt(f),
-            Stmt::Return { expr, .. } => {
-                match expr {
-                    Some(e) => write!(f, "return {e}"),
-                    None => write!(f, "return"),
-                }
-            },
-            Stmt::Break { .. } => write!(f, "break"),
-            Stmt::Continue { .. } => write!(f, "continue"),
-            Stmt::Throw { message, .. } => write!(f, "throw {message:?}"),
-            Stmt::FunDecl(fd) => write!(f, "{fd}"),
-            Stmt::ExternFunDecl { sig, .. } => write!(f, "extern {sig}"),
-            Stmt::Expr(e) => write!(f, "{e}"),
-            Stmt::ClassDecl(s) => write!(f, "{s}"),
-            Stmt::Import { path, .. } => write!(f, "import {path}"),
-            Stmt::ImportIntrinsic { .. } => write!(f, "import intrinsic"),
-            Stmt::IGlobal(s) => write!(f, "{s}"),
-            Stmt::FitClassDecl(s) => write!(f, "{s}")
+            Stmt::Decl(e) => e.fmt(f),
+            Stmt::Return(e) => e.fmt(f),
+            Stmt::Break(e) => e.fmt(f),
+            Stmt::Continue(e) => e.fmt(f),
+            Stmt::Throw(e) => e.fmt(f),
+            Stmt::FunDecl(e) => e.fmt(f),
+            Stmt::ExternFunDecl(e) => e.fmt(f),
+            Stmt::Expr(e) => e.fmt(f),
+            Stmt::Class(e) => e.fmt(f),
+            Stmt::Import(e) => e.fmt(f),
+            Stmt::ImportIntrinsic(e) => e.fmt(f),
+            Stmt::IGlobal(e) => e.fmt(f),
+            Stmt::FitClassDecl(e) => e.fmt(f),
         }
     }
 }
@@ -44,6 +39,11 @@ impl Display for Stmt {
 impl Display for Ident {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.ident.fmt(f)
+    }
+}
+impl Display for StrLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.literal)
     }
 }
 
@@ -95,6 +95,31 @@ impl Display for DeclUnit {
         }
 
         write!(f, "{ident}")
+    }
+}
+
+impl Display for Return {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(e) = &self.expr {
+            write!(f, "return {e}")
+        } else {
+            write!(f, "return")
+        }
+    }
+}
+impl Display for Break {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "break")
+    }
+}
+impl Display for Continue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "continue")
+    }
+}
+impl Display for Throw {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "throw {}", self.message)
     }
 }
 
@@ -200,6 +225,12 @@ impl Display for Type {
     }
 }
 
+impl Display for ExternFunDecl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "extern {}", self.sig)
+    }
+}
+
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ident, generic_params, fields, methods, span: _ } = self;
@@ -240,6 +271,17 @@ impl Display for MethodDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let MethodDecl { sig, block, span: _ } = self;
         write!(f, "{sig} {block}")
+    }
+}
+
+impl Display for Import {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "import {}", self.path)
+    }
+}
+impl Display for ImportIntrinsic {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "import intrinsic")
     }
 }
 

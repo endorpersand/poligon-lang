@@ -1310,14 +1310,14 @@ impl PLIRCodegen {
                     let pi = partially_init_sig(sig);
                     self.peek_block().insert_unresolved(UnresolvedValue::Fun(pi, block));
                 },
-                ast::Stmt::ExternFunDecl { sig, span: _ } => {
+                ast::Stmt::ExternFunDecl(ast::ExternFunDecl { sig, span: _ }) => {
                     let pi = partially_init_sig(sig);
                     self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(pi));
                     }
-                ast::Stmt::ClassDecl(cls) => {
+                ast::Stmt::Class(cls) => {
                     self.peek_block().insert_unresolved(UnresolvedType::Class(cls));
                 },
-                ast::Stmt::Import { path, span: _ } => {
+                ast::Stmt::Import(ast::Import { path, span: _ }) => {
                     self.peek_block().insert_unresolved(UnresolvedValue::Import(path));
                 },
                 ast::Stmt::IGlobal(s) => {
@@ -1389,7 +1389,7 @@ impl PLIRCodegen {
 
         match stmt {
             ast::Stmt::Decl(d) => self.consume_decl(d),
-            ast::Stmt::Return { expr, span } => {
+            ast::Stmt::Return(ast::Return { expr, span }) => {
                 let maybe_expr = match expr {
                     Some(e) => Some(self.consume_expr(e, ctx_type.clone())?),
                     None => None,
@@ -1397,15 +1397,15 @@ impl PLIRCodegen {
                 self.peek_block().instrs.push(ProcStmt::Return(maybe_expr).located_at(span));
                 Ok(())
             },
-            ast::Stmt::Break { span } => {
+            ast::Stmt::Break(ast::Break { span }) => {
                 self.peek_block().instrs.push(ProcStmt::Break.located_at(span));
                 Ok(())
             },
-            ast::Stmt::Continue { span } => {
+            ast::Stmt::Continue(ast::Continue { span }) => {
                 self.peek_block().instrs.push(ProcStmt::Continue.located_at(span));
                 Ok(())
             },
-            ast::Stmt::Throw { message, span } => {
+            ast::Stmt::Throw(ast::Throw { message, span }) => {
                 self.peek_block().instrs.push(ProcStmt::Throw(message.literal).located_at(span));
                 Ok(())
             },
@@ -1419,7 +1419,7 @@ impl PLIRCodegen {
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
             ast::Stmt::ExternFunDecl { .. } => unimplemented!("extern fun decl should not be resolved eagerly"),
-            ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
+            ast::Stmt::Class(_) => unimplemented!("class decl should not be resolved eagerly"),
             ast::Stmt::Import { .. } => unimplemented!("import decl should not be resolved eagerly"),
             ast::Stmt::ImportIntrinsic { .. } => Ok(()), // no-op
             ast::Stmt::IGlobal(_) => unimplemented!("global decl should not be resolved eagerly"),
@@ -2232,7 +2232,7 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::For { ident, iterator, block, span } => {
-                let it_span = iterator.span();
+                let &it_span = iterator.span();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup

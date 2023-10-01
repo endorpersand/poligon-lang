@@ -300,6 +300,11 @@ impl<E: GonErr + PartialEq> PartialEq<E> for FullGonErr<E> {
         &self.err == other
     }
 }
+impl<E: GonErr> From<std::convert::Infallible> for FullGonErr<E> {
+    fn from(value: std::convert::Infallible) -> Self {
+        match value {}
+    }
+}
 
 macro_rules! full_gon_cast_impl {
     ($t:ty, $u:ty) => {
