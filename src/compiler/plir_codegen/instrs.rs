@@ -274,7 +274,7 @@ impl InstrBlock {
                 panic!("address {addr:?} has no statement");
             };
 
-            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc.clone()))?;
+            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc))?;
             if is_propagating {
                 propagated.push((addr, loc));
             } else {

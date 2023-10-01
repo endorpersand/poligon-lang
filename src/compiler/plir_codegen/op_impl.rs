@@ -114,12 +114,12 @@ impl<'a> Cast<'a> {
                 (_, TypeRef::Prim(s)) if s == Type::S_STR => {
                     let Located(src, src_range) = self.src;
                     
-                    let src_key = cg.get_class_key(Located::new(&src.ty, src_range.clone()))?;
-                    let (to_str, to_str_ty) = cg.get_method_or_err(&src_key, "to_string", src_range.clone())?;
+                    let src_key = cg.get_class_key(Located::new(&src.ty, src_range))?;
+                    let (to_str, to_str_ty) = cg.get_method_or_err(&src_key, "to_string", src_range)?;
                     let to_str_expr = to_str.into_expr(to_str_ty);
 
                     Located::new(Expr::call(
-                        Located::new(to_str_expr, src_range.clone()), 
+                        Located::new(to_str_expr, src_range), 
                         vec![src]
                     )?, src_range)
                 },
@@ -287,10 +287,10 @@ impl super::PLIRCodegen {
                 (op, _) => {
                     let fun = self.find_unary_method(op, Located::new(&ty, left_range))?
                         .ok_or_else(|| {
-                            OpErr::CannotUnary(op, ty).at_range(unary_range.clone())
+                            OpErr::CannotUnary(op, ty).at_range(unary_range)
                         })?;
                     
-                    return Expr::call(Located::new(fun, unary_range.clone()), vec![cast])
+                    return Expr::call(Located::new(fun, unary_range), vec![cast])
                         .map(|e| Located::new(e, unary_range));
                 }
             }
@@ -469,7 +469,7 @@ impl super::PLIRCodegen {
                     let fun = self.find_binary_method(op, Located::new(&left, lcast.1), right)?
                         .ok_or_else(|| {
                             OpErr::CannotBinary(op, left, right.clone())
-                                .at_range(expr_range.clone())
+                                .at_range(expr_range)
                         })?;
 
                     return Expr::call(Located::new(fun, expr_range), vec![lcast.0, rcast.0]);

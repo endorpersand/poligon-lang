@@ -2190,7 +2190,7 @@ struct RangeBlock(&'static str, Option<Span>);
 //         if let Some(Located(k, _)) = self.match_ident()? {
 //             let v = match self.match_(token![:]) {
 //                 Some(_) => self.expect_expr()?,
-//                 None    => Located::new(ast::Expr::Ident(k.clone()), krange.clone()),
+//                 None    => Located::new(ast::Expr::Ident(k.clone()), krange),
 //             };
             
 //             Ok(Some((Located::new(k, krange), v)))

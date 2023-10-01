@@ -333,7 +333,7 @@ impl DParser {
         assert_eq!(pushed, name, "requested {name}, popped {pushed}");
 
         let r2 = mr2?;
-        self.append_span(r2.clone());
+        self.append_span(r2);
 
         Some(r2)
     }

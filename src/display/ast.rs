@@ -152,7 +152,7 @@ impl Display for FunSignature {
 }
 impl Display for MethodSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let MethodSignature { referent, is_static, name, generic_params, params, ret, span } = self;
+        let MethodSignature { referent, is_static, name, generic_params, params, ret, span: _ } = self;
 
         write!(f, "fun ")?;
         if let Some(ref_ident) = referent {
@@ -293,7 +293,7 @@ impl Display for IGlobal {
 
 impl Display for FitClassDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FitClassDecl { ty, methods, span } = self;
+        let FitClassDecl { ty, methods, span: _ } = self;
 
         write!(f, "fit class {ty} {{")?;
         for method in methods {

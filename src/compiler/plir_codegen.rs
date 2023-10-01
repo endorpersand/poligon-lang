@@ -409,7 +409,7 @@ impl InsertBlock {
             match m_param_ty {
                 None => Ok(fallback),
                 Some(pty) => {
-                    let ast::Type { ident: pty_id, params: pty_params, span } = &pty;
+                    let ast::Type { ident: pty_id, params: pty_params, span: _ } = &pty;
                     
                     if pty_params.is_empty() {
                         // pty is a single String
@@ -961,7 +961,7 @@ impl PLIRCodegen {
         walkers::TypeApplier(&mut resolver).walk_program(&mut program)
             .map_err(|e @ CannotResolve(n)| {
                 PLIRErr::from(e)
-                    .at_range(resolver.unk_positions[n].clone())
+                    .at_range(resolver.unk_positions[n])
             })?;
         
         Ok(program)
@@ -1145,7 +1145,7 @@ impl PLIRCodegen {
             match ty {
                 TypeRef::Unk(_) => {
                     self.resolver.normalize_or_err(ty.upgrade())
-                        .map_err(|e| PLIRErr::from(e).at_range(range.clone()))
+                        .map_err(|e| PLIRErr::from(e).at_range(range))
                 },
                 TypeRef::TypeVar(tv_type, tv_param) => {
                     self.resolve_type_key(tv_type)?;
@@ -1155,7 +1155,7 @@ impl PLIRCodegen {
                         .find(|ctx| &ctx.0 == tv_type)
                         .ok_or_else(|| {
                             PLIRErr::ParamCannotBind(tv_type.to_string(), tv_param.to_string())
-                                .at_range(range.clone())
+                                .at_range(range)
                         })?;
                     
                     let ty = ctx.1.get(&**tv_param).ok_or_else(|| {
@@ -1166,7 +1166,7 @@ impl PLIRCodegen {
                         PLIRErr::UndefinedTypeParam(
                             td.type_shape().upgrade(),
                             tv_param.to_string()
-                        ).at_range(range.clone())
+                        ).at_range(range)
                     })?;
 
                     Ok(ty.upgrade())
@@ -1186,8 +1186,7 @@ impl PLIRCodegen {
                 let (scope, block) = self.block_iter().enumerate()
                     .find(|(_, ib)| ib.types.contains_key(&*ty.get_type_key()))
                     .ok_or_else(|| {
-                        PLIRErr::UndefinedType(ty.clone())
-                            .at_range(range.clone())
+                        PLIRErr::UndefinedType(ty.clone()).at_range(range)
                     })?;
 
                 Ok(ClassKey { block, scope, referent: ty })
@@ -1259,7 +1258,7 @@ impl PLIRCodegen {
             val: e,
         };
 
-        self.peek_block().instrs.push(Located::new(decl, decl_range.clone()));
+        self.peek_block().instrs.push(Located::new(decl, decl_range));
 
         Var {
             ident,
@@ -1562,7 +1561,7 @@ impl PLIRCodegen {
                     => panic!("not terminal at {addr:?}"),
                 };
 
-                (ty, range.clone())
+                (ty, *range)
             })
             .unzip();
 
@@ -1620,19 +1619,19 @@ impl PLIRCodegen {
 
         match pat {
             ast::Pat::Unit(t) => map(self, t, expr, extra.0),
-            ast::Pat::Spread { inner, span } => match inner {
+            ast::Pat::Spread { inner, span: _ } => match inner {
                 Some(pat) => self.unpack_pat_inner(*pat, expr, extra, map, consume_var, stmt_range),
                 None => Ok(()),
             },
-            ast::Pat::List { values, span } => {
-                let var = expr.map(|e| self.push_tmp_decl("decl", e, stmt_range.clone()));
+            ast::Pat::List { values, span: _ } => {
+                let var = expr.map(|e| self.push_tmp_decl("decl", e, stmt_range));
                 let (extra, split_extra) = extra;
 
                 for (idx, pat) in std::iter::zip(create_splits(&values), values) {
                     let rhs = var.clone().map(|v| v.split(idx)).transpose()?;
 
                     let extr = split_extra(&extra, idx)?;
-                    self.unpack_pat_inner(pat, rhs, (extr, split_extra), map, false, stmt_range.clone())?;
+                    self.unpack_pat_inner(pat, rhs, (extr, split_extra), map, false, stmt_range)?;
                 }
 
                 // On final statement, consume the var, and return its original value.
@@ -1660,7 +1659,7 @@ impl PLIRCodegen {
             ((rt, ty), |(rt, ty), idx| {
                 // TODO: add special rules for plir::Type::Unk
                 let spl_ty = ty.split(idx).map_err(|e| {
-                    e.at_range(decl_span.clone())
+                    e.at_range(decl_span)
                 })?;
 
                 Ok((*rt, spl_ty))
@@ -1674,12 +1673,12 @@ impl PLIRCodegen {
 
                 this.peek_block().declare(&ident.ident, ty.clone());
                 let decl = plir::Decl { rt, mt, ident: ident.ident, ty, val: e };
-                this.peek_block().instrs.push(Located::new(decl, decl_span.clone()));
+                this.peek_block().instrs.push(Located::new(decl, decl_span));
 
                 Ok(())
             },
             false,
-            decl_span.clone()
+            decl_span
         )?;
 
         Ok(())
@@ -1842,7 +1841,7 @@ impl PLIRCodegen {
                     }
                 }).ok_or_else(|| {
                     PLIRErr::UndefinedType(ty.clone())
-                        .at_range(range.clone())
+                        .at_range(range)
                 })?;
 
                 let arg_len = ty.generic_args().len();
@@ -1854,7 +1853,7 @@ impl PLIRCodegen {
                     Ordering::Equal => {},
                     Ordering::Greater => {
                         let mut params = ty.generic_args().to_vec();
-                        params.resize_with(param_len, || self.resolver.new_unknown(range.clone()));
+                        params.resize_with(param_len, || self.resolver.new_unknown(range));
                         *ty = TypeRef::new_generic(id, params);
                     },
                 }
@@ -1972,7 +1971,7 @@ impl PLIRCodegen {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
-                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span))?
                 };
 
                 let new_inner: Vec<_> = values.into_iter()
@@ -1981,7 +1980,7 @@ impl PLIRCodegen {
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span))?;
 
                 let mut coll_ty = plir::ty!(plir::Type::S_LIST, [el_ty]);
                 self.verify_type(Located::new(&mut coll_ty, span))?;
@@ -1995,7 +1994,7 @@ impl PLIRCodegen {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_SET), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
-                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span))?
                 };
 
                 let new_inner: Vec<_> = values.into_iter()
@@ -2004,7 +2003,7 @@ impl PLIRCodegen {
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span))?;
 
                 let mut coll_ty = plir::ty!(plir::Type::S_SET, [el_ty]);
                 self.verify_type(Located::new(&mut coll_ty, span))?;
@@ -2020,7 +2019,7 @@ impl PLIRCodegen {
                         (Some(k.clone()), Some(v.clone()))
                     },
                     None => (None, None),
-                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span))?
                 };
 
                 let new_inner: Vec<_> = entries.into_iter()
@@ -2032,10 +2031,10 @@ impl PLIRCodegen {
                     .unzip();
                 let key_ty = plir::Type::resolve_collection_ty(key_tys)
                     .or(kty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span))?;
                 let val_ty = plir::Type::resolve_collection_ty(val_tys)
                     .or(vty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span))?;
                 
                 let mut coll_ty = plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]);
                 self.verify_type(Located::new(&mut coll_ty, span))?;
@@ -2045,7 +2044,7 @@ impl PLIRCodegen {
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
-            ast::Expr::ClassLiteral { ty, entries, span } => {
+            ast::Expr::ClassLiteral { ty, entries, span: _ } => {
                 let lty = self.consume_located_type(ty)?;
                 
                 let cls_key = self.get_class_key(lty.as_ref())?;
@@ -2087,14 +2086,14 @@ impl PLIRCodegen {
             ast::Expr::Assign { target, value, span } => {
                 let expr = self.consume_located_expr(*value, ctx_type.clone())?;
 
-                self.push_block(span.clone(), ctx_type);
+                self.push_block(span, ctx_type);
                 self.unpack_pat(target, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
                         let &span = unit.span();
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident.ident),
                             ast::AsgUnit::Path(p) => {
-                                let pspan = p.span().clone();
+                                let &pspan = p.span();
                                 let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
                                     Err(PLIRErr::CannotAssignToMethod.at_range(pspan))?
@@ -2150,7 +2149,7 @@ impl PLIRCodegen {
                 let le = self.consume_located_expr(*expr, None)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(le, |expr, op| self.apply_unary(expr, op, span.clone()))
+                    .try_fold(le, |expr, op| self.apply_unary(expr, op, span))
                     .map(|le| le.0)
             },
             ast::Expr::BinaryOp { op, left, right, span } => {
@@ -2158,7 +2157,7 @@ impl PLIRCodegen {
                 let right = self.consume_located_expr(*right, None)?;
                 self.apply_binary(op, left, right, span)
             },
-            ast::Expr::Comparison { left, rights, span } => {
+            ast::Expr::Comparison { left, rights, span: _ } => {
                 let left = self.consume_expr_and_box(*left, None)?;
                 let rights = rights.into_iter()
                     .map(|(op, right)| Ok((op, self.consume_expr(right, None)?)))
@@ -2221,7 +2220,7 @@ impl PLIRCodegen {
                     plir::ExprType::If { conditionals, last }
                 ))
             },
-            ast::Expr::While { condition, block, span } => {
+            ast::Expr::While { condition, block, span: _ } => {
                 let condition = self.consume_expr_truth(*condition)?;
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
                 self.peek_block().instrs.add_fragment(frag);
@@ -2231,13 +2230,13 @@ impl PLIRCodegen {
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
-            ast::Expr::For { ident, iterator, block, span } => {
+            ast::Expr::For { ident, iterator, block, span: _ } => {
                 let &it_span = iterator.span();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup
-                let cls_key = self.get_class_key(Located::new(&iterator.ty, it_span.clone()))?;
-                let (_, it_next_ty) = self.get_method_or_err(&cls_key, "next", it_span.clone())?;
+                let cls_key = self.get_class_key(Located::new(&iterator.ty, it_span))?;
+                let (_, it_next_ty) = self.get_method_or_err(&cls_key, "next", it_span)?;
 
                 let element_type = match it_next_ty.downgrade() {
                     plir::TypeRef::Fun(plir::FunTypeRef {
@@ -2246,7 +2245,7 @@ impl PLIRCodegen {
                         varargs: false
                     }) if a == &iterator.ty => {
                         let plir::TypeRef::Generic(Cow::Borrowed("option"), Cow::Borrowed([rp]), ()) = &**ret else {
-                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span.clone()))?
+                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?
                         };
                         let idty = rp.clone();
 
@@ -2255,7 +2254,7 @@ impl PLIRCodegen {
 
                         idty
                     }
-                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span.clone()))?,
+                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?,
                 };
 
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
@@ -2357,7 +2356,7 @@ impl PLIRCodegen {
             ast::Expr::Spread { expr: _, span } => Err(PLIRErr::CannotSpread.at_range(span)),
             ast::Expr::Deref(d) => {
                 let dty = ctx_type
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(d.span().clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(*d.span()))?;
 
                 self.consume_deref(d, dty)
                     .map(|deref| plir::Expr::new(deref.ty.clone(), plir::ExprType::Deref(deref)))
@@ -2388,14 +2387,14 @@ impl PLIRCodegen {
             let top_ty = path.ty();
             let attr = attr.ident;
 
-            let cls_key = self.get_class_key(Located::new(&top_ty, path_span.clone()))?;
+            let cls_key = self.get_class_key(Located::new(&top_ty, path_span))?;
             let cls = self.get_class(&cls_key);
 
             if cls.has_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
-                    Err(PLIRErr::CannotAccessOnMethod.at_range(path_span.clone()))?;
+                    Err(PLIRErr::CannotAccessOnMethod.at_range(path_span))?;
                 } else {
-                    let (_, fun_ty) = self.get_method_or_err(&cls_key, &attr, path_span.clone())?;
+                    let (_, fun_ty) = self.get_method_or_err(&cls_key, &attr, path_span)?;
                     let mut fun_ty: plir::FunType = fun_ty.try_into()?;
                     fun_ty.pop_front();
 
@@ -2410,11 +2409,11 @@ impl PLIRCodegen {
                     .map(|(i, t)| (i, t.clone()))
                     .ok_or_else(|| {
                         let id = plir::FunIdent::new_static(&top_ty, &attr);
-                        PLIRErr::UndefinedVarAttr(id).at_range(path_span.clone())
+                        PLIRErr::UndefinedVarAttr(id).at_range(path_span)
                     })?;
     
                 path.add_struct_seg(field)
-                    .map_err(|_| PLIRErr::CannotAccessOnMethod.at_range(path_span.clone()))?;
+                    .map_err(|_| PLIRErr::CannotAccessOnMethod.at_range(path_span))?;
             }
         }
 

@@ -605,7 +605,7 @@ impl TryFrom<Expr> for AsgUnit {
             Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
             Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
             Expr::Deref(deref) => Ok(AsgUnit::Deref(deref)),
-            e => Err(PatErr::InvalidAssignTarget.at_range(e.span().clone()))
+            e => Err(PatErr::InvalidAssignTarget.at_range(*e.span()))
         }
     }
 }

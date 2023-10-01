@@ -63,7 +63,7 @@ impl<T> Located<T> {
 
     /// Gets this located node's range.
     pub fn range(&self) -> Span {
-        self.1.clone()
+        self.1
     }
 
 }
