@@ -11,8 +11,6 @@
 //! An AST *can* be built manually by using these structs, but that is very painful.
 //! Instead, [`crate::lexer`] and [`crate::parser`] should be used to create one from a string.
 
-use std::rc::Rc;
-
 use crate::err::{FullGonErr, GonErr};
 use crate::span::{Span, Spanned};
 pub use self::types::*;
@@ -20,7 +18,7 @@ pub use self::types::*;
 pub mod op;
 mod types;
 
-#[deprecated]
+// #[deprecated]
 mod located {
     use crate::span::CursorRange;
 
@@ -499,7 +497,7 @@ pub struct FunDecl {
     /// The function's signature
     pub sig: FunSignature,
     /// The function's body
-    pub block: Rc<Block>,
+    pub block: Block,
 
     pub span: Span
 }

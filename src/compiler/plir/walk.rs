@@ -1,4 +1,4 @@
-use crate::ast::Literal;
+use crate::ast::LitKind;
 
 use super::own_cow;
 
@@ -17,7 +17,7 @@ pub(crate) trait Walker {
     fn visit_ident(&mut self, el: &str) -> Result<(), Self::Err>;
     fn visit_fun_ident(&mut self, el: &super::FunIdent) -> Result<(), Self::Err>;
     fn visit_block(&mut self, el: &super::Block) -> Result<(), Self::Err>;
-    fn visit_literal(&mut self, el: &Literal) -> Result<(), Self::Err>;
+    fn visit_literal(&mut self, el: &LitKind) -> Result<(), Self::Err>;
     fn visit_asg_unit(&mut self, _el: &super::AsgUnit) -> Result<(), Self::Err> {
         // Assignment unit is typically just glue for the variants.
         Ok(())
@@ -315,7 +315,7 @@ pub(crate) trait WalkerMut {
     fn visit_ident(&mut self, el: &mut str) -> Result<(), Self::Err>;
     fn visit_fun_ident(&mut self, el: &mut super::FunIdent) -> Result<(), Self::Err>;
     fn visit_block(&mut self, el: &mut super::Block) -> Result<(), Self::Err>;
-    fn visit_literal(&mut self, el: &mut Literal) -> Result<(), Self::Err>;
+    fn visit_literal(&mut self, el: &mut LitKind) -> Result<(), Self::Err>;
     fn visit_asg_unit(&mut self, _el: &mut super::AsgUnit) -> Result<(), Self::Err> {
         // Assignment unit is typically just glue for the variants.
         Ok(())

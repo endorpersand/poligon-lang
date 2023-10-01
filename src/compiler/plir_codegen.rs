@@ -21,7 +21,6 @@ mod walkers;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
-use std::rc::Rc;
 
 use indexmap::IndexMap;
 
@@ -30,7 +29,7 @@ use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl};
-use crate::span::CursorRange;
+use crate::span::{CursorRange, Spanned};
 
 use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
@@ -216,8 +215,8 @@ fn primitives(prims: impl IntoIterator<Item=plir::Type>) -> HashMap<String, Type
 #[derive(Debug)]
 enum UnresolvedValue {
     ExternFun(PiFunSig),
-    Fun(PiFunSig, Located<Rc<ast::Block>>),
-    FunBlock(plir::FunSignature, Located<Rc<ast::Block>>),
+    Fun(PiFunSig, ast::Block),
+    FunBlock(plir::FunSignature, ast::Block),
     Import(ast::StaticPath)
 }
 #[derive(Debug)]
@@ -244,7 +243,7 @@ impl Unresolved for UnresolvedValue {
             UnresolvedValue::ExternFun(pi)   => Cow::Borrowed(&pi.ident),
             UnresolvedValue::Fun(pi, _)      => Cow::Borrowed(&pi.ident),
             UnresolvedValue::FunBlock(fs, _) => Cow::Borrowed(&fs.ident),
-            UnresolvedValue::Import(mp)      => Cow::Owned(plir::FunIdent::new_simple(&mp.attr)),
+            UnresolvedValue::Import(mp)      => Cow::Owned(plir::FunIdent::new_simple(&mp.attr.ident)),
         }
     }
 
@@ -257,8 +256,8 @@ impl Unresolved for UnresolvedType {
 
     fn rez_key(&self) -> Cow<str> {
         match self {
-            UnresolvedType::Class(cls) => Cow::from(&cls.ident),
-            UnresolvedType::Import(mp) => Cow::from(&mp.attr),
+            UnresolvedType::Class(cls) => Cow::from(&cls.ident.ident),
+            UnresolvedType::Import(mp) => Cow::from(&mp.attr.ident),
         }
     }
 
@@ -273,7 +272,7 @@ enum MaybeInit<U, I> {
     Init(I)
 }
 type MaybeInitParam = MaybeInit<ast::Param, plir::Param>;
-type MaybeInitType = MaybeInit<Located<ast::Type>, plir::Type>;
+type MaybeInitType = MaybeInit<ast::Type, plir::Type>;
 
 /// Partially initialized function signature.
 #[derive(Debug)]
@@ -1279,14 +1278,14 @@ impl PLIRCodegen {
     /// 
     /// This function stops parsing statements early if an unconditional exit has been found.
     /// At this point, the insert block cannot accept any more statements.
-    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=Located<ast::Stmt>>) -> PLIRResult<()> {
+    fn consume_stmts(&mut self, stmts: impl IntoIterator<Item=ast::Stmt>) -> PLIRResult<()> {
         fn partially_init_sig(sig: ast::FunSignature) -> PiFunSig {
             use MaybeInit::*;
-            let ast::FunSignature { ident, generics, params, varargs, ret } = sig;
+            let ast::FunSignature { ident, generics, params, varargs, ret, span: _ } = sig;
 
             PiFunSig { 
-                ident: plir::FunIdent::Simple(ident), 
-                generics, 
+                ident: plir::FunIdent::Simple(ident.ident), 
+                generics: generics.into_iter().map(|s| s.ident).collect(), 
                 params: params.into_iter()
                     .map(Uninit)
                     .collect(), 
@@ -1299,27 +1298,30 @@ impl PLIRCodegen {
         }
         let mut eager_stmts = vec![];
         for stmt in stmts {
-            match stmt.0 {
+            match stmt {
                 ast::Stmt::FunDecl(fd) => {
-                    let ast::FunDecl { sig, block } = fd;
+                    let ast::FunDecl { sig, block, span: _ } = fd;
                     let pi = partially_init_sig(sig);
                     self.peek_block().insert_unresolved(UnresolvedValue::Fun(pi, block));
                 },
-                ast::Stmt::ExternFunDecl(fs) => {
-                    let pi = partially_init_sig(fs);
+                ast::Stmt::ExternFunDecl { sig, span: _ } => {
+                    let pi = partially_init_sig(sig);
                     self.peek_block().insert_unresolved(UnresolvedValue::ExternFun(pi));
                     }
                 ast::Stmt::ClassDecl(cls) => {
                     self.peek_block().insert_unresolved(UnresolvedType::Class(cls));
                 },
-                ast::Stmt::Import(mp) => {
-                    self.peek_block().insert_unresolved(UnresolvedValue::Import(mp));
+                ast::Stmt::Import { path, span: _ } => {
+                    self.peek_block().insert_unresolved(UnresolvedValue::Import(path));
                 },
-                ast::Stmt::IGlobal(id, s) => {
-                    self.program.declare(&id, plir::ty!("#ptr"));
-                    self.push_global(plir::HoistedStmt::IGlobal(id, s))?;
+                ast::Stmt::IGlobal(s) => {
+                    let ast::IGlobal { ident, value, span: _ } = s;
+                    self.program.declare(&ident.ident, plir::ty!("#ptr"));
+                    self.push_global(plir::HoistedStmt::IGlobal(ident.ident, value.literal))?;
                 },
-                ast::Stmt::FitClassDecl(ty, methods) => {
+                ast::Stmt::FitClassDecl(d) => {
+                    let ast::FitClassDecl { ty, methods, span: _ } = d;
+
                     let ty = self.consume_type(ty)?;
                     let block = self.peek_block();
                     for m in methods {
@@ -1376,31 +1378,29 @@ impl PLIRCodegen {
     /// Consume a statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_proc_stmt(&mut self, stmt: Located<ast::Stmt>, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<()> {
+    fn consume_proc_stmt(&mut self, stmt: ast::Stmt, ctx_type: &Option<plir::Type>, index_til_end: usize) -> PLIRResult<()> {
         use plir::ProcStmt;
 
-        let Located(stmt, range) = stmt;
-
         match stmt {
-            ast::Stmt::Decl(d) => self.consume_decl(Located::new(d, range)),
-            ast::Stmt::Return(me) => {
-                let maybe_expr = match me {
+            ast::Stmt::Decl(d) => self.consume_decl(d),
+            ast::Stmt::Return { expr, span } => {
+                let maybe_expr = match expr {
                     Some(e) => Some(self.consume_expr(e, ctx_type.clone())?),
                     None => None,
                 };
-                self.peek_block().instrs.push(ProcStmt::Return(maybe_expr).located_at(range));
+                self.peek_block().instrs.push(ProcStmt::Return(maybe_expr).located_at(span));
                 Ok(())
             },
-            ast::Stmt::Break => {
-                self.peek_block().instrs.push(ProcStmt::Break.located_at(range));
+            ast::Stmt::Break { span } => {
+                self.peek_block().instrs.push(ProcStmt::Break.located_at(span));
                 Ok(())
             },
-            ast::Stmt::Continue => {
-                self.peek_block().instrs.push(ProcStmt::Continue.located_at(range));
+            ast::Stmt::Continue { span } => {
+                self.peek_block().instrs.push(ProcStmt::Continue.located_at(span));
                 Ok(())
             },
-            ast::Stmt::Throw(msg) => {
-                self.peek_block().instrs.push(ProcStmt::Throw(msg).located_at(range));
+            ast::Stmt::Throw { message, span } => {
+                self.peek_block().instrs.push(ProcStmt::Throw(message).located_at(span));
                 Ok(())
             },
             ast::Stmt::Expr(e) => {
@@ -1412,12 +1412,12 @@ impl PLIRCodegen {
                 Ok(())
             },
             ast::Stmt::FunDecl(_) => unimplemented!("fun decl should not be resolved eagerly"),
-            ast::Stmt::ExternFunDecl(_) => unimplemented!("extern fun decl should not be resolved eagerly"),
+            ast::Stmt::ExternFunDecl { .. } => unimplemented!("extern fun decl should not be resolved eagerly"),
             ast::Stmt::ClassDecl(_) => unimplemented!("class decl should not be resolved eagerly"),
-            ast::Stmt::Import(_) => unimplemented!("import decl should not be resolved eagerly"),
-            ast::Stmt::ImportIntrinsic => Ok(()), // no-op
-            ast::Stmt::IGlobal(_, _) => unimplemented!("global decl should not be resolved eagerly"),
-            ast::Stmt::FitClassDecl(_, _) => unimplemented!("fit class decl should not be resolved eagerly"),
+            ast::Stmt::Import { .. } => unimplemented!("import decl should not be resolved eagerly"),
+            ast::Stmt::ImportIntrinsic { .. } => Ok(()), // no-op
+            ast::Stmt::IGlobal(_) => unimplemented!("global decl should not be resolved eagerly"),
+            ast::Stmt::FitClassDecl(_) => unimplemented!("fit class decl should not be resolved eagerly"),
         }
     }
 
@@ -1474,13 +1474,13 @@ impl PLIRCodegen {
     }
     fn consume_tree_block(
         &mut self, 
-        block: Located<ast::Block>, 
+        block: ast::Block, 
         btype: BlockBehavior, 
         expected_ty: Option<plir::Type>
     ) -> PLIRResult<(plir::Block, TerminalFrag)> {
-        let Located(ast::Block(stmts), block_range) = block;
+        let ast::Block { stmts, span: block_span } = block;
 
-        self.push_block(block_range, expected_ty);
+        self.push_block(block_span, expected_ty);
         // collect all the statements from this block
         self.consume_stmts(stmts)?;
         let insert_block = self.pop_block().unwrap();
@@ -1768,10 +1768,8 @@ impl PLIRCodegen {
     /// Consume a function declaration statement into the current insert block.
     /// 
     /// This function returns whether or not the insert block accepts any more statements.
-    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: Located<Rc<ast::Block>>) -> PLIRResult<()> {
-        let Located(block, block_range) = block;
-        let old_block = Rc::try_unwrap(block)
-            .unwrap_or_else(|ob| (*ob).clone());
+    fn consume_fun_block(&mut self, sig: plir::FunSignature, block: ast::Block) -> PLIRResult<()> {
+        let ast::Block { stmts, span: block_span } = block;
     
         let block = {
             let gctx = if let plir::FunIdent::Static(ty @ plir::Type::Generic(_, _, ()), _) = &sig.ident {
@@ -1779,7 +1777,7 @@ impl PLIRCodegen {
             } else {
                 None
             };
-            let ib = self.push_block(block_range, Some(sig.ret.clone()));
+            let ib = self.push_block(block_span, Some(sig.ret.clone()));
             ib.generic_ctx = gctx;
 
             for plir::Param { ident, ty, .. } in sig.params.iter() {
@@ -1787,7 +1785,7 @@ impl PLIRCodegen {
             }
     
             // collect all the statements from this block
-            self.consume_stmts(old_block.0)?;
+            self.consume_stmts(stmts)?;
     
             let insert_block = self.pop_block().unwrap();
             let (block, frag) = self.consume_insert_block(insert_block, BlockBehavior::Function)?;
@@ -1867,8 +1865,8 @@ impl PLIRCodegen {
     }
 
     /// Consumes a located [`ast::Class`] into a located concrete [`plir::Type`].
-    fn consume_located_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<Located<plir::Type>> {
-        let Located(ast::Type(ty_ident, ty_params), range) = ty;
+    fn consume_located_type(&mut self, ty: ast::Type) -> PLIRResult<Located<plir::Type>> {
+        let ast::Type { ident: ty_ident, params: ty_params, span } = ty;
         
         let ty = {
             if ty_params.is_empty() {
@@ -1888,23 +1886,23 @@ impl PLIRCodegen {
             }
         };
 
-        let mut lty = Located::new(ty, range);
+        let mut lty = Located::new(ty, span);
         self.verify_type(lty.as_mut())?;
         Ok(lty)
     }
 
     /// Consumes a located [`ast::Class`] into a concrete [`plir::Type`].
-    fn consume_type(&mut self, ty: Located<ast::Type>) -> PLIRResult<plir::Type> {
+    fn consume_type(&mut self, ty: ast::Type) -> PLIRResult<plir::Type> {
         self.consume_located_type(ty)
             .map(|lty| lty.0)
     }
 
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
-        let ast::Class { ident: cls_id, generics, fields, methods } = cls;
+        let ast::Class { ident: cls_id, generic_params, fields, methods, span: _ } = cls;
 
         let ib = self.push_block((0, 0) ..= (0, 0), None);
         ib.generic_ctx = Some(GenericContext(cls_id.to_string(), {
-            generics.iter()
+            generic_params.iter()
                 .map(|p| {
                     (p.to_string(), plir::Type::new_type_var(cls_id.to_string(), p.to_string()))
                 })
@@ -1912,14 +1910,14 @@ impl PLIRCodegen {
         }));
 
         let fields = fields.into_iter()
-            .map(|ast::FieldDecl { rt, mt, ident: field_id, ty }| -> PLIRResult<_> {
+            .map(|ast::FieldDecl { rt, mt, ident: field_id, ty, span: _ }| -> PLIRResult<_> {
                 let ty = self.consume_type(ty)?;
-                Ok((field_id, plir::Field { rt, mt, ty }))
+                Ok((field_id.ident, plir::Field { rt, mt, ty }))
             })
             .collect::<Result<_, _>>()?;
         
         self.pop_block();
-        let params = generics.into_iter()
+        let params = generic_params.into_iter()
             .map(|p| plir::Type::new_type_var(cls_id.clone(), p));
         
         let cls = plir::Class { ty: plir::Type::new_generic(cls_id.clone(), params), fields };
@@ -1930,12 +1928,11 @@ impl PLIRCodegen {
 
         Ok(())
     }
-    fn consume_expr(&mut self, value: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
-        let Located(expr, range) = value;
-        
-        match expr {
+    fn consume_expr(&mut self, value: ast::Expr, ctx_type: Option<plir::Type>) -> PLIRResult<plir::Expr> {
+        match value {
             ast::Expr::Ident(ident) => {
-                let ty = self.get_var_type_or_err(&ident, range)?;
+                let ast::Ident { ident, span } = ident;
+                let ty = self.get_var_type_or_err(&ident, span)?;
 
                 Ok(plir::Expr::new(
                     ty,
@@ -1948,76 +1945,78 @@ impl PLIRCodegen {
 
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
-            ast::Expr::Literal(literal) => {
-                let mut ty = match literal {
-                    ast::Literal::Int(_)   => plir::ty!(plir::Type::S_INT),
-                    ast::Literal::Float(_) => plir::ty!(plir::Type::S_FLOAT),
-                    ast::Literal::Char(_)  => plir::ty!(plir::Type::S_CHAR),
-                    ast::Literal::Str(_)   => plir::ty!(plir::Type::S_STR),
-                    ast::Literal::Bool(_)  => plir::ty!(plir::Type::S_BOOL)
+            ast::Expr::Literal(lit) => {
+                let ast::Literal { kind, span } = lit;
+
+                let mut ty = match kind {
+                    ast::LitKind::Int(_)   => plir::ty!(plir::Type::S_INT),
+                    ast::LitKind::Float(_) => plir::ty!(plir::Type::S_FLOAT),
+                    ast::LitKind::Char(_)  => plir::ty!(plir::Type::S_CHAR),
+                    ast::LitKind::Str(_)   => plir::ty!(plir::Type::S_STR),
+                    ast::LitKind::Bool(_)  => plir::ty!(plir::Type::S_BOOL)
                 };
 
                 // check type exists (for string, this may not happen if std isn't loaded)
-                self.verify_type(Located::new(&mut ty, range))?;
+                self.verify_type(Located::new(&mut ty, span))?;
                 //
 
                 Ok(plir::Expr::new(
-                    ty, plir::ExprType::Literal(literal)
+                    ty, plir::ExprType::Literal(kind)
                 ))
             },
-            ast::Expr::ListLiteral(lst) => {
+            ast::Expr::ListLiteral { values, span } => {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
-                    _ => Err(PLIRErr::CannotResolveType.at_range(range.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
                 };
 
-                let new_inner: Vec<_> = lst.into_iter()
+                let new_inner: Vec<_> = values.into_iter()
                     .map(|e| self.consume_expr(e, el_ty.clone()))
                     .collect::<Result<_, _>>()?;
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
 
                 let mut coll_ty = plir::ty!(plir::Type::S_LIST, [el_ty]);
-                self.verify_type(Located::new(&mut coll_ty, range))?;
+                self.verify_type(Located::new(&mut coll_ty, span))?;
 
                 Ok(plir::Expr::new(
                     coll_ty,
                     plir::ExprType::ListLiteral(new_inner)
                 ))
             },
-            ast::Expr::SetLiteral(set) => {
+            ast::Expr::SetLiteral { values, span } => {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_SET), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
-                    _ => Err(PLIRErr::CannotResolveType.at_range(range.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
                 };
 
-                let new_inner: Vec<_> = set.into_iter()
+                let new_inner: Vec<_> = values.into_iter()
                     .map(|e| self.consume_expr(e, el_ty.clone()))
                     .collect::<Result<_, _>>()?;
 
                 let el_ty = plir::Type::resolve_collection_ty(new_inner.iter().map(|e| &e.ty))
                     .or(el_ty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
 
                 let mut coll_ty = plir::ty!(plir::Type::S_SET, [el_ty]);
-                self.verify_type(Located::new(&mut coll_ty, range))?;
+                self.verify_type(Located::new(&mut coll_ty, span))?;
     
                 Ok(plir::Expr::new(
                     coll_ty,
                     plir::ExprType::SetLiteral(new_inner)
                 ))
             },
-            ast::Expr::DictLiteral(entries) => {
+            ast::Expr::DictLiteral { entries, span } => {
                 let (kty, vty) = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_DICT), Cow::Borrowed([k, v]), ())) => {
                         (Some(k.clone()), Some(v.clone()))
                     },
                     None => (None, None),
-                    _ => Err(PLIRErr::CannotResolveType.at_range(range.clone()))?
+                    _ => Err(PLIRErr::CannotResolveType.at_range(span.clone()))?
                 };
 
                 let new_inner: Vec<_> = entries.into_iter()
@@ -2029,20 +2028,20 @@ impl PLIRCodegen {
                     .unzip();
                 let key_ty = plir::Type::resolve_collection_ty(key_tys)
                     .or(kty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
                 let val_ty = plir::Type::resolve_collection_ty(val_tys)
                     .or(vty)
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span.clone()))?;
                 
                 let mut coll_ty = plir::ty!(plir::Type::S_DICT, [key_ty, val_ty]);
-                self.verify_type(Located::new(&mut coll_ty, range))?;
+                self.verify_type(Located::new(&mut coll_ty, span))?;
 
                 Ok(plir::Expr::new(
                     coll_ty,
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
-            ast::Expr::ClassLiteral(ty, entries) => {
+            ast::Expr::ClassLiteral { ty, entries, span } => {
                 let lty = self.consume_located_type(ty)?;
                 
                 let cls_key = self.get_class_key(lty.as_ref())?;
@@ -2055,7 +2054,7 @@ impl PLIRCodegen {
                     .collect();
                 
                 let mut entries: HashMap<_, _> = entries.into_iter()
-                    .map(|(Located(k, krange), v)| (k, (krange, v)))
+                    .map(|(ast::Ident { ident, span }, v)| (ident, (span, v)))
                     .collect();
                 
                 let new_entries = cls_fields.into_iter()
@@ -2081,17 +2080,17 @@ impl PLIRCodegen {
                     ))
                 }
             },
-            ast::Expr::Assign(pat, expr) => {
-                let expr = self.consume_located_expr(*expr, ctx_type.clone())?;
+            ast::Expr::Assign { target, value, span } => {
+                let expr = self.consume_located_expr(*value, ctx_type.clone())?;
 
-                self.push_block(range.clone(), ctx_type);
-                self.unpack_pat(pat, expr, ((), |_, _| Ok(())),
+                self.push_block(span.clone(), ctx_type);
+                self.unpack_pat(target, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
                         let Located(unit, range) = unit;
                         let unit = match unit {
-                            ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident),
+                            ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident.ident),
                             ast::AsgUnit::Path(p) => {
-                                let p = this.consume_path(Located::new(p, range.clone()))?;
+                                let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
                                     Err(PLIRErr::CannotAssignToMethod.at_range(range.clone()))?
                                 } else {
@@ -2099,11 +2098,11 @@ impl PLIRCodegen {
                                 }
                             },
                             ast::AsgUnit::Index(idx) => {
-                                let (_, idx) = this.consume_index(Located::new(idx, range.clone()))?;
+                                let (_, idx) = this.consume_index(idx)?;
                                 plir::AsgUnit::Index(idx)
                             },
                             ast::AsgUnit::Deref(d) => {
-                                let deref = this.consume_deref(Located::new(d, range.clone()), e.ty.clone())?;
+                                let deref = this.consume_deref(d, e.ty.clone())?;
                                 plir::AsgUnit::Deref(deref)
                             },
                         };
@@ -2117,7 +2116,7 @@ impl PLIRCodegen {
                         Ok(())
                     },
                     true,
-                    range
+                    span
                 )?;
                 
                 let insert_block = self.pop_block().unwrap();
@@ -2127,33 +2126,34 @@ impl PLIRCodegen {
                 Ok(plir::Expr::new(block.0.clone(), plir::ExprType::Block(block)))
             },
             ast::Expr::Path(p) => {
-                self.consume_path(Located::new(p, range)).map(Into::into)
+                self.consume_path(p)
+                    .map(Into::into)
             },
             ast::Expr::StaticPath(sp) => {
-                let ast::StaticPath { ty, attr } = sp;
+                let ast::StaticPath { ty, attr, span } = sp;
 
                 let lty = self.consume_located_type(ty)?;
 
                 let cls_key = self.get_class_key(lty.as_ref())?;
                 let (_, met_type) = self.get_method_or_err(
-                    &cls_key, &attr, range
+                    &cls_key, &attr.ident, span
                 )?;
                 
                 Ok(plir::Path::Static(lty.0, attr, met_type).into())
             },
-            ast::Expr::UnaryOps { ops, expr } => {
+            ast::Expr::UnaryOps { ops, expr, span } => {
                 let le = self.consume_located_expr(*expr, None)?;
                 
                 ops.into_iter().rev()
-                    .try_fold(le, |expr, op| self.apply_unary(expr, op, range.clone()))
+                    .try_fold(le, |expr, op| self.apply_unary(expr, op, span.clone()))
                     .map(|le| le.0)
             },
-            ast::Expr::BinaryOp { op, left, right } => {
+            ast::Expr::BinaryOp { op, left, right, span } => {
                 let left = self.consume_located_expr(*left, None)?;
                 let right = self.consume_located_expr(*right, None)?;
-                self.apply_binary(op, left, right, range)
+                self.apply_binary(op, left, right, span)
             },
-            ast::Expr::Comparison { left, rights } => {
+            ast::Expr::Comparison { left, rights, span } => {
                 let left = self.consume_expr_and_box(*left, None)?;
                 let rights = rights.into_iter()
                     .map(|(op, right)| Ok((op, self.consume_expr(right, None)?)))
@@ -2164,7 +2164,7 @@ impl PLIRCodegen {
                     plir::ExprType::Comparison { left, rights }
                 ))
             },
-            ast::Expr::Range { left, right, step } => {
+            ast::Expr::Range { left, right, step, span } => {
                 let left = self.consume_expr_and_box(*left, None)?;
                 let right = self.consume_expr_and_box(*right, None)?;
                 let step = match step {
@@ -2173,14 +2173,14 @@ impl PLIRCodegen {
                 };
 
                 let ty = plir::Type::resolve_collection_ty([&left.ty, &right.ty])
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(span))?;
 
                 Ok(plir::Expr::new(
                     plir::ty!(plir::Type::S_RANGE, [ty]),
                     plir::ExprType::Range { left, right, step }
                 ))
             },
-            ast::Expr::If { conditionals, last } => {
+            ast::Expr::If { conditionals, last, span } => {
                 let (conditionals, mut frags): (Vec<_>, Vec<_>) = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr_truth(cond)?;
@@ -2216,7 +2216,7 @@ impl PLIRCodegen {
                     plir::ExprType::If { conditionals, last }
                 ))
             },
-            ast::Expr::While { condition, block } => {
+            ast::Expr::While { condition, block, span } => {
                 let condition = self.consume_expr_truth(*condition)?;
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
                 self.peek_block().instrs.add_fragment(frag);
@@ -2226,13 +2226,13 @@ impl PLIRCodegen {
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
-            ast::Expr::For { ident, iterator, block } => {
-                let itrange = iterator.range();
+            ast::Expr::For { ident, iterator, block, span } => {
+                let it_span = iterator.span();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup
-                let cls_key = self.get_class_key(Located::new(&iterator.ty, itrange.clone()))?;
-                let (_, it_next_ty) = self.get_method_or_err(&cls_key, "next", itrange.clone())?;
+                let cls_key = self.get_class_key(Located::new(&iterator.ty, it_span.clone()))?;
+                let (_, it_next_ty) = self.get_method_or_err(&cls_key, "next", it_span.clone())?;
 
                 let element_type = match it_next_ty.downgrade() {
                     plir::TypeRef::Fun(plir::FunTypeRef {
@@ -2241,7 +2241,7 @@ impl PLIRCodegen {
                         varargs: false
                     }) if a == &iterator.ty => {
                         let plir::TypeRef::Generic(Cow::Borrowed("option"), Cow::Borrowed([rp]), ()) = &**ret else {
-                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?
+                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?
                         };
                         let idty = rp.clone();
 
@@ -2250,7 +2250,7 @@ impl PLIRCodegen {
 
                         idty
                     }
-                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(itrange))?,
+                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?,
                 };
 
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
@@ -2261,18 +2261,18 @@ impl PLIRCodegen {
                     plir::ExprType::For { ident, element_type, iterator, block }
                 ))
             },
-            ast::Expr::Call { funct, params } => {
+            ast::Expr::Call { funct, args, span } => {
                 let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
-                    Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#gep" => {
+                    ast::Expr::StaticPath(sp) if sp.attr.ident == "#gep" => {
                         let ty = self.consume_type(sp.ty)?;
 
                         let ptr_ = plir::ty!("#ptr");
                         let int_ = plir::ty!(plir::Type::S_INT);
 
-                        let mut piter = params.into_iter();
+                        let mut piter = args.into_iter();
                         let ptr = piter.next()
-                            .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(range))
+                            .ok_or_else(|| PLIRErr::WrongArity(1, 0).at_range(span))
                             .and_then(|e| self.consume_located_expr(e, Some(ptr_.clone())))
                             .and_then(|le| self.expect_type(le, ptr_, CastFlags::Decl))
                             .map(Box::new)?;
@@ -2291,20 +2291,20 @@ impl PLIRCodegen {
                             plir::ExprType::GEP(ty, ptr, params)
                         ))
                     },
-                    Located(ast::Expr::StaticPath(sp), _) if sp.attr == "#alloca" => {
+                    ast::Expr::StaticPath(sp) if sp.attr.ident == "#alloca" => {
                         return Ok(plir::Expr::new(
                             plir::ty!("#ptr"),
                             plir::ExprType::Alloca(self.consume_type(sp.ty)?)
                         ))
                     },
-                    Located(ast::Expr::StaticPath(sp), _) if sp.attr == "size_of" => {
+                    ast::Expr::StaticPath(sp) if sp.attr.ident == "size_of" => {
                         return Ok(plir::Expr::new(
                             plir::ty!(plir::Type::S_INT),
                             plir::ExprType::SizeOf(self.consume_type(sp.ty)?)
                         ))
                     }
                     e => {
-                        let largs: Vec<_> = params.into_iter()
+                        let largs: Vec<_> = args.into_iter()
                             .map(|le| self.consume_located_expr(le, None))
                             .collect::<Result<_, _>>()?;
 
@@ -2346,50 +2346,51 @@ impl PLIRCodegen {
                 }
             },
             ast::Expr::Index(idx) => {
-                self.consume_index(Located::new(idx, range))
+                self.consume_index(idx)
                     .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
-            ast::Expr::Spread(_) => Err(PLIRErr::CannotSpread.at_range(range)),
+            ast::Expr::Spread { expr: _, span } => Err(PLIRErr::CannotSpread.at_range(span)),
             ast::Expr::Deref(d) => {
                 let dty = ctx_type
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(range.clone()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(d.span().clone()))?;
 
-                self.consume_deref(Located::new(d, range), dty)
+                self.consume_deref(d, dty)
                     .map(|deref| plir::Expr::new(deref.ty.clone(), plir::ExprType::Deref(deref)))
             },
         }
     }
 
-    fn consume_located_expr(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<Located<plir::Expr>> {
-        let range = expr.range();
+    fn consume_located_expr(&mut self, expr: ast::Expr, ctx_type: Option<plir::Type>) -> PLIRResult<Located<plir::Expr>> {
+        let span = expr.span();
         self.consume_expr(expr, ctx_type)
-            .map(|e| Located::new(e, range))
+            .map(|e| Located::new(e, span))
     }
-    fn consume_expr_and_box(&mut self, expr: Located<ast::Expr>, ctx_type: Option<plir::Type>) -> PLIRResult<Box<plir::Expr>> {
+    fn consume_expr_and_box(&mut self, expr: ast::Expr, ctx_type: Option<plir::Type>) -> PLIRResult<Box<plir::Expr>> {
         self.consume_expr(expr, ctx_type).map(Box::new)
     }
-    fn consume_expr_truth(&mut self, expr: Located<ast::Expr>) -> PLIRResult<plir::Expr> {
+    fn consume_expr_truth(&mut self, expr: ast::Expr) -> PLIRResult<plir::Expr> {
         self.consume_located_expr(expr, None)
             .and_then(|le| self.expect_type(le, plir::ty!(plir::Type::S_BOOL), CastFlags::Truth))
     }
 
-    fn consume_path(&mut self, p: Located<ast::Path>) -> PLIRResult<plir::Path> {
-        let Located(ast::Path { obj, attrs }, expr_range) = p;
+    fn consume_path(&mut self, p: ast::Path) -> PLIRResult<plir::Path> {
+        let ast::Path { obj, attrs, span: path_span } = p;
 
         let obj = self.consume_expr_and_box(*obj, None)?;
         let mut path = plir::Path::Struct(obj, vec![]);
 
         for attr in attrs {
             let top_ty = path.ty();
+            let attr = attr.ident;
 
-            let cls_key = self.get_class_key(Located::new(&top_ty, expr_range.clone()))?;
+            let cls_key = self.get_class_key(Located::new(&top_ty, path_span.clone()))?;
             let cls = self.get_class(&cls_key);
 
             if cls.has_method(&attr) {
                 if matches!(path, plir::Path::Method(..)) {
-                    Err(PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
+                    Err(PLIRErr::CannotAccessOnMethod.at_range(path_span.clone()))?;
                 } else {
-                    let (_, fun_ty) = self.get_method_or_err(&cls_key, &attr, expr_range.clone())?;
+                    let (_, fun_ty) = self.get_method_or_err(&cls_key, &attr, path_span.clone())?;
                     let mut fun_ty: plir::FunType = fun_ty.try_into()?;
                     fun_ty.pop_front();
 
@@ -2404,30 +2405,30 @@ impl PLIRCodegen {
                     .map(|(i, t)| (i, t.clone()))
                     .ok_or_else(|| {
                         let id = plir::FunIdent::new_static(&top_ty, &attr);
-                        PLIRErr::UndefinedVarAttr(id).at_range(expr_range.clone())
+                        PLIRErr::UndefinedVarAttr(id).at_range(path_span.clone())
                     })?;
     
                 path.add_struct_seg(field)
-                    .map_err(|_| PLIRErr::CannotAccessOnMethod.at_range(expr_range.clone()))?;
+                    .map_err(|_| PLIRErr::CannotAccessOnMethod.at_range(path_span.clone()))?;
             }
         }
 
         Ok(path)
     }
 
-    fn consume_index(&mut self, idx: Located<ast::Index>) -> PLIRResult<(plir::Type, plir::Index)> {
+    fn consume_index(&mut self, idx: ast::Index) -> PLIRResult<(plir::Type, plir::Index)> {
         // Type signature is needed for assignment.
 
-        let Located(ast::Index { expr, index }, expr_range) = idx;
+        let ast::Index { expr, index, span: expr_span }  = idx;
 
         let expr = self.consume_located_expr(*expr, None)?;
         let index = self.consume_located_expr(*index, None)?;
         
-        self.apply_index(expr, index, expr_range)
+        self.apply_index(expr, index, expr_span)
     }
 
-    fn consume_deref(&mut self, d: Located<ast::IDeref>, ty: plir::Type) -> PLIRResult<plir::IDeref> {
-        let Located(ast::IDeref(e), _) = d;
+    fn consume_deref(&mut self, d: ast::IDeref, ty: plir::Type) -> PLIRResult<plir::IDeref> {
+        let ast::IDeref { reference: e, span: _ } = d;
         let Located(expr, expr_range) = self.consume_located_expr(*e, None)?;
 
         if let plir::TypeRef::Prim(Cow::Borrowed("#ptr")) = expr.ty.downgrade() {

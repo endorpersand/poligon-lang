@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::ast::{op, Literal};
+use crate::ast::{op, LitKind};
 use crate::compiler::plir::*;
 use crate::err::GonErr;
 use crate::span::CursorRange;
@@ -510,7 +510,7 @@ impl super::PLIRCodegen {
                 (Generic(Borrowed(Type::S_LIST), Borrowed([t]), ()), Prim(Borrowed(Type::S_INT))) => t.clone(),
                 (Generic(Borrowed(Type::S_DICT), Borrowed([k, v]), ()), idx) if &idx == k => v.clone(),
                 (Tuple(tys, ()), Prim(Borrowed(Type::S_INT))) => {
-                    let Expr { expr: ExprType::Literal(Literal::Int(lit)), ..} = icast else {
+                    let Expr { expr: ExprType::Literal(LitKind::Int(lit)), ..} = icast else {
                         let err = OpErr::TupleIndexNonLiteral(left).at_range(expr_range);
                         return Err(err.into());
                     };

@@ -1,8 +1,6 @@
 //! These components are the components of the AST involved with types 
 //! (type expressions, classes, shapes).
 
-use std::rc::Rc;
-
 use crate::span::{Span, Spanned};
 
 use super::{MutType, ReasgType, Block, Param, Ident};
@@ -145,7 +143,7 @@ pub struct MethodDecl {
     /// The method's signature
     pub sig: MethodSignature,
     /// The method's body
-    pub block: Rc<Block>,
+    pub block: Block,
 
     pub span: Span
 }
