@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr};
-use crate::span::{Cursor, CursorRange, Span};
+use crate::span::{Cursor, Span};
 
 use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
 pub mod token;
@@ -354,7 +354,7 @@ impl<'lx> LiteralBuffer<'lx> {
         self.lexer.cursor
     }
 
-    fn cursor_range(&self) -> CursorRange {
+    fn cursor_range(&self) -> Span {
         Span::new(self.lexer.token_start ..= self.lexer.cursor)
     }
 }
@@ -670,7 +670,7 @@ impl Lexer {
     }
 
     /// Get the range of the current token being generated.
-    fn token_range(&self) -> CursorRange {
+    fn token_range(&self) -> Span {
         Span::new(self.token_start ..= self.cursor)
     }
 
@@ -680,7 +680,7 @@ impl Lexer {
     }
 
     /// Add token to the token buffer, with a custom defined range
-    fn push_token_with_range(&mut self, t: Token, r: CursorRange) {
+    fn push_token_with_range(&mut self, t: Token, r: Span) {
         let ft = FullToken::new(t, r);
         self.tokens.push(ft);
     }

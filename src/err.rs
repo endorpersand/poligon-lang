@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ops::{RangeFrom, RangeBounds, Bound};
-use crate::span::{Cursor, CursorRange, Span};
+use crate::span::{Cursor, Span};
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -77,7 +77,7 @@ enum ErrPos {
     Point(Cursor),
 
     /// Error occurred at an inclusive range of points
-    Range(CursorRange),
+    Range(Span),
 
     /// Error occurred at an range of points, going to the end
     RangeFrom(RangeFrom<Cursor>)

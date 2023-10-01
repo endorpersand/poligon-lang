@@ -5,7 +5,7 @@
 use std::fmt::{Debug, Display};
 use std::collections::{BTreeMap, HashMap};
 use once_cell::sync::Lazy;
-use crate::span::CursorRange;
+use crate::span::Span;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 /// A specific unit that carries some graphemic value in Poligon.
@@ -52,13 +52,13 @@ impl Token {
 /// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
-    pub(crate) loc: CursorRange,
+    pub(crate) loc: Span,
     pub(crate) tt: Token
 }
 
 impl FullToken {
     /// Create a FullToken using a token and its given position.
-    pub fn new(tt: Token, loc: CursorRange) -> Self {
+    pub fn new(tt: Token, loc: Span) -> Self {
         Self { loc, tt }
     }
 

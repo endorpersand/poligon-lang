@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::ast::{op, LitKind};
 use crate::compiler::plir::*;
 use crate::err::GonErr;
-use crate::span::CursorRange;
+use crate::span::Span;
 
 use super::PLIRResult;
 
@@ -257,7 +257,7 @@ impl super::PLIRCodegen {
         Ok(e)
     }
     
-    pub(super) fn apply_unary(&mut self, e: Located<Expr>, op: op::Unary, unary_range: CursorRange) -> PLIRResult<Located<Expr>> {
+    pub(super) fn apply_unary(&mut self, e: Located<Expr>, op: op::Unary, unary_range: Span) -> PLIRResult<Located<Expr>> {
         // Check for any valid casts that can be applied here:
         let Located(cast, left_range) = match op {
             op::Unary::Plus => {
@@ -339,7 +339,7 @@ impl super::PLIRCodegen {
         op: op::Binary, 
         left: Located<Expr>, 
         right: Located<Expr>, 
-        expr_range: CursorRange
+        expr_range: Span
     ) -> PLIRResult<Expr> {
         use TypeRef::*;
         use Cow::Borrowed;
@@ -481,7 +481,7 @@ impl super::PLIRCodegen {
         Ok(Expr { ty, expr: ExprType::BinaryOp { op, left: Box::new(lcast.0), right: Box::new(rcast.0) }})
     }
 
-    pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: CursorRange) -> PLIRResult<(Type, Index)> {
+    pub(super) fn apply_index(&mut self, left: Located<Expr>, index: Located<Expr>, expr_range: Span) -> PLIRResult<(Type, Index)> {
         use TypeRef::*;
         use Cow::Borrowed;
 

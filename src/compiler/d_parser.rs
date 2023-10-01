@@ -15,7 +15,7 @@ use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{Located, ReasgType, MutType};
-use crate::span::{CursorRange, Span};
+use crate::span::Span;
 
 use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;
@@ -56,7 +56,7 @@ pub struct DParser {
 }
 
 #[derive(Clone, Debug)]
-struct RangeBlock(&'static str, Option<CursorRange>);
+struct RangeBlock(&'static str, Option<Span>);
 
 /// An error that occurs in the parsing process.
 #[derive(Debug)]
@@ -303,7 +303,7 @@ impl DParser {
     }
 
     /// Look at the range of the next token in the input (or return EOF).
-    pub fn peek_loc(&self) -> CursorRange {
+    pub fn peek_loc(&self) -> Span {
         self.tokens.get(0)
             .map_or(
                 Span::one(self.eof),
@@ -327,7 +327,7 @@ impl DParser {
     /// otherwise it will return None.
     /// When this function is called, the top block's range is added to the range of 
     /// the block under it.
-    pub fn pop_loc_block(&mut self, name: &'static str) -> Option<CursorRange> {
+    pub fn pop_loc_block(&mut self, name: &'static str) -> Option<Span> {
         let RangeBlock(pushed, mr2) = self.tree_locs.pop()
             .expect("pop_loc_block called without a push");
         assert_eq!(pushed, name, "requested {name}, popped {pushed}");
@@ -393,7 +393,7 @@ impl DParser {
     }
 
     /// Extends the range of the top cursor-tracking block to reach the bounds of new_range.
-    fn append_span(&mut self, new_span: CursorRange) {
+    fn append_span(&mut self, new_span: Span) {
         if let Some(rb) = self.tree_locs.last_mut() {
             rb.1.replace(if let Some(span) = rb.1 {
                 span.append(new_span)

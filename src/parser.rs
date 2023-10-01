@@ -19,7 +19,7 @@ use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, TokenPattern};
 use crate::ast::{self, PatErr};
-use crate::span::CursorRange;
+use crate::span::Span;
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
@@ -81,7 +81,7 @@ pub struct Parser {
 }
 
 #[derive(Clone, Debug)]
-struct RangeBlock(&'static str, Option<CursorRange>);
+struct RangeBlock(&'static str, Option<Span>);
 
 /// An error that occurs in the parsing process.
 #[derive(Debug, PartialEq, Eq)]
@@ -475,7 +475,7 @@ impl Parser {
     }
 
     /// Look at the range of the next token in the input (or return EOF).
-    pub fn peek_loc(&self) -> CursorRange {
+    pub fn peek_loc(&self) -> Span {
         self.tokens.get(0)
             .map_or(
                 self.eof..=self.eof,
@@ -496,7 +496,7 @@ impl Parser {
     /**
      * Looks at the top cursor-tracking block without removing it.
      */
-    pub fn peek_loc_block(&mut self) -> Option<CursorRange> {
+    pub fn peek_loc_block(&mut self) -> Option<Span> {
         self.tree_locs.last()
             .and_then(|RangeBlock(_, r)| r.clone())
     }
@@ -507,7 +507,7 @@ impl Parser {
     /// otherwise it will return None.
     /// When this function is called, the top block's range is added to the range of 
     /// the block under it.
-    pub fn pop_loc_block(&mut self, name: &'static str) -> Option<CursorRange> {
+    pub fn pop_loc_block(&mut self, name: &'static str) -> Option<Span> {
         let RangeBlock(pushed, mr2) = self.tree_locs.pop()
             .expect("pop_loc_block called without a push");
         assert_eq!(pushed, name, "requested {name}, popped {pushed}");
@@ -640,7 +640,7 @@ impl Parser {
     }
 
     /// Extends the range of the top cursor-tracking block to reach the bounds of new_range.
-    fn append_range(&mut self, new_range: CursorRange) {
+    fn append_range(&mut self, new_range: Span) {
         if let Some(rb) = self.tree_locs.last_mut() {
             merge_ranges_in_place(&mut rb.1, new_range);
         }
@@ -1379,7 +1379,7 @@ impl Parser {
     fn wrap_unary_op(
         mut ops: Vec<ast::op::Unary>, 
         inner: Located<ast::Expr>, 
-        range: CursorRange
+        range: Span
     ) -> Located<ast::Expr> {
         // flatten if unary ops inside
         if let Located(ast::Expr::UnaryOps { ops: ops2, expr }, _) = inner {
@@ -1739,7 +1739,7 @@ mod tests {
             Located::new(Stmt::Expr(Located::new($e, $loc)), $loc)
         }
     }
-    fn add_one(cr: CursorRange) -> CursorRange {
+    fn add_one(cr: Span) -> Span {
         let &(el, ec) = cr.end();
         *cr.start() ..= (el, ec + 1)
     }

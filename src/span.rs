@@ -3,9 +3,6 @@ use std::ops::RangeInclusive;
 /// Indicates a specific character in given code.
 pub type Cursor = (usize /* line */, usize /* character */);
 
-/// Indicates a contiguous range of characters in given code.
-pub type CursorRange = Span;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
     start: Cursor,

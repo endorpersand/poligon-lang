@@ -29,7 +29,7 @@ use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, full_gon_cast_impl};
-use crate::span::{CursorRange, Spanned, Span};
+use crate::span::{Span, Spanned};
 
 use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
@@ -311,7 +311,7 @@ struct InsertBlock {
     instrs: InstrBlock,
     /// The range of the whole block, 
     /// only used to append a location to custom exits
-    block_range: CursorRange,
+    block_range: Span,
 
     vars: HashMap<plir::FunIdent, plir::Type>,
     types: HashMap<String, TypeData>,
@@ -328,7 +328,7 @@ struct InsertBlock {
 }
 
 impl InsertBlock {
-    fn new(block_range: CursorRange, expected_ty: Option<plir::Type>) -> Self {
+    fn new(block_range: Span, expected_ty: Option<plir::Type>) -> Self {
         Self {
             instrs: InstrBlock::new(),
             block_range,
@@ -483,7 +483,7 @@ impl InsertBlock {
 struct Var {
     ident: String,
     ty: plir::Type,
-    decl_range: CursorRange
+    decl_range: Span
 }
 impl Var {
     fn into_expr(self) -> plir::Expr {
@@ -622,7 +622,7 @@ struct TypeResolver {
     /// A Vec of the declared unknowns.
     /// 
     /// This indicates which range of characters represent the unknown type.
-    unk_positions: Vec<CursorRange>
+    unk_positions: Vec<Span>
 }
 #[derive(Debug)]
 enum ConstraintFail<T> {
@@ -682,7 +682,7 @@ impl TypeResolver {
         }
     }
 
-    fn new_unknown(&mut self, range: CursorRange) -> plir::Type {
+    fn new_unknown(&mut self, range: Span) -> plir::Type {
         let unk = plir::Type::Unk(self.unk_positions.len());
         self.unk_positions.push(range);
         unk
@@ -972,7 +972,7 @@ impl PLIRCodegen {
         self.globals.declared.clone()
     }
 
-    fn push_block(&mut self, block_range: CursorRange, expected_ty: Option<plir::Type>) -> &mut InsertBlock {
+    fn push_block(&mut self, block_range: Span, expected_ty: Option<plir::Type>) -> &mut InsertBlock {
         self.blocks.push(InsertBlock::new(block_range, expected_ty));
         self.blocks.last_mut().unwrap()
     }
@@ -1082,7 +1082,7 @@ impl PLIRCodegen {
     /// 
     /// This function also tries to resolve the variable using [`PLIRCodegen::resolve_ident`].
     /// Any errors during function/class resolution will be propagated.
-    fn get_var_type_or_err<I>(&mut self, ident: &I, range: CursorRange) -> PLIRResult<plir::Type> 
+    fn get_var_type_or_err<I>(&mut self, ident: &I, range: Span) -> PLIRResult<plir::Type> 
         where I: plir::AsFunIdent + std::hash::Hash + ?Sized
     {
         self.get_var_type(ident)?
@@ -1101,7 +1101,7 @@ impl PLIRCodegen {
 
         Ok(var)
     }
-    fn get_method_or_err(&mut self, key: &ClassKey, attr: &str, range: CursorRange) -> PLIRResult<(plir::FunIdent, plir::Type)> {
+    fn get_method_or_err(&mut self, key: &ClassKey, attr: &str, range: Span) -> PLIRResult<(plir::FunIdent, plir::Type)> {
         self.get_method(key, attr)?
             .ok_or_else(|| {
                 let cls = self.get_class(key);
@@ -1247,7 +1247,7 @@ impl PLIRCodegen {
         string
     }
 
-    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr, decl_range: CursorRange) -> Var {
+    fn push_tmp_decl(&mut self, ident: &str, e: plir::Expr, decl_range: Span) -> Var {
         let ident = self.tmp_var_name(ident);
         let ety = e.ty.clone();
 
@@ -1588,7 +1588,7 @@ impl PLIRCodegen {
         (extra, mut split_extra): (E, impl FnMut(&E, plir::Split) -> PLIRResult<E>),
         mut map: impl FnMut(&mut Self, T, Located<plir::Expr>, E) -> PLIRResult<()>,
         consume_var: bool,
-        stmt_range: CursorRange
+        stmt_range: Span
     ) -> PLIRResult<()> {
         self.unpack_pat_inner(pat, expr, (extra, &mut split_extra), &mut map, consume_var, stmt_range)
     }
@@ -1600,7 +1600,7 @@ impl PLIRCodegen {
         extra: (E, &mut impl FnMut(&E, plir::Split) -> PLIRResult<E>),
         map: &mut impl FnMut(&mut Self, T, Located<plir::Expr>, E) -> PLIRResult<()>,
         consume_var: bool,
-        stmt_range: CursorRange
+        stmt_range: Span
     ) -> PLIRResult<()> {
         fn create_splits<T>(pats: &[ast::Pat<T>]) -> Vec<plir::Split> {
             let len = pats.len();

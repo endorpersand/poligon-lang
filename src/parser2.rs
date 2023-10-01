@@ -19,7 +19,7 @@ use crate::GonErr;
 use crate::err::FullGonErr;
 use crate::lexer::token::{Token, token, FullToken, SPLITTABLES2};
 use crate::ast::{self, PatErr};
-use crate::span::{Span, CursorRange, Cursor};
+use crate::span::{Span, Cursor};
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
@@ -94,7 +94,7 @@ impl<'s> ParCursor<'s> {
     pub fn is_empty(&self) -> bool {
         self.stream.is_empty()
     }
-    pub fn pointing_at(&self) -> CursorRange {
+    pub fn pointing_at(&self) -> Span {
         match self.peek() {
             Some(tok) => tok.loc.clone(),
             None => Span::one(self.eof),
@@ -606,7 +606,7 @@ pub struct Parser {
 }
 
 #[derive(Clone, Debug)]
-struct RangeBlock(&'static str, Option<CursorRange>);
+struct RangeBlock(&'static str, Option<Span>);
 
 // macro_rules! left_assoc_op {
 //     ($n:ident = $ds:ident (($($op:tt),+) $_:ident)*;) => {

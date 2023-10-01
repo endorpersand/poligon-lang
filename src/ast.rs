@@ -20,11 +20,11 @@ mod types;
 
 // #[deprecated]
 mod located {
-    use crate::span::CursorRange;
+    use crate::span::Span;
 
     /// AST node with a known location.
     #[derive(PartialEq, Eq, Clone)]
-    pub struct Located<T>(pub T, pub CursorRange);
+    pub struct Located<T>(pub T, pub Span);
 
     impl<T: std::fmt::Debug> std::fmt::Debug for Located<T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,12 +57,12 @@ mod located {
 
     impl<T> Located<T> {
         /// Create a new located node.
-        pub fn new(t: T, loc: CursorRange) -> Self {
+        pub fn new(t: T, loc: Span) -> Self {
             Self(t, loc)
         }
 
         /// Create a new boxed located node.
-        pub fn boxed(t: T, loc: CursorRange) -> LocatedBox<T> {
+        pub fn boxed(t: T, loc: Span) -> LocatedBox<T> {
             Box::new(Located(t, loc))
         }
 
@@ -84,7 +84,7 @@ mod located {
         }
 
         /// Gets this located node's range.
-        pub fn range(&self) -> CursorRange {
+        pub fn range(&self) -> Span {
             self.1.clone()
         }
 
@@ -104,7 +104,7 @@ mod located {
     /// Helper trait that converts a Located call for a method call
     pub trait Locatable {
         /// Add a range to this object
-        fn located_at(self, range: CursorRange) -> Located<Self> 
+        fn located_at(self, range: Span) -> Located<Self> 
             where Self: Sized
         {
             Located::new(self, range)
