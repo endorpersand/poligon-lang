@@ -9,50 +9,47 @@ impl StmtLike for Stmt {
         self.ends_with_block()
     }
 }
-impl StmtLike for Located<Stmt> {
-    fn ends_with_block(&self) -> bool {
-        (**self).ends_with_block()
-    }
-}
 
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        fmt_stmt_list(f, &self.0)
+        fmt_stmt_list(f, &self.stmts)
     }
 }
 
 impl Display for Stmt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Decl(d) => write!(f, "{d}"),
-            Stmt::Return(me) => match me {
-                Some(e) => write!(f, "return {e}"),
-                None => write!(f, "return"),
+            Stmt::Decl(d) => d.fmt(f),
+            Stmt::Return { expr, .. } => {
+                match expr {
+                    Some(e) => write!(f, "return {e}"),
+                    None => write!(f, "return"),
+                }
             },
-            Stmt::Break => write!(f, "break"),
-            Stmt::Continue => write!(f, "continue"),
-            Stmt::Throw(s) => write!(f, "throw {s:?}"),
+            Stmt::Break { .. } => write!(f, "break"),
+            Stmt::Continue { .. } => write!(f, "continue"),
+            Stmt::Throw { message, .. } => write!(f, "throw {message:?}"),
             Stmt::FunDecl(fd) => write!(f, "{fd}"),
-            Stmt::ExternFunDecl(fs) => write!(f, "extern {fs}"),
+            Stmt::ExternFunDecl { sig, .. } => write!(f, "extern {sig}"),
             Stmt::Expr(e) => write!(f, "{e}"),
             Stmt::ClassDecl(s) => write!(f, "{s}"),
-            Stmt::Import(sp) => write!(f, "import {sp}"),
-            Stmt::ImportIntrinsic => write!(f, "import intrinsic"),
-            Stmt::IGlobal(id, val) => write!(f, "global {id} = {val:?}"),
-            Stmt::FitClassDecl(ty, methods) => {
-                write!(f, "fit class {ty} {{")?;
-                for method in methods {
-                    writeln!(f,"{method}")?;
-                }
-                write!(f, "}}")
-            },
+            Stmt::Import { path, .. } => write!(f, "import {path}"),
+            Stmt::ImportIntrinsic { .. } => write!(f, "import intrinsic"),
+            Stmt::IGlobal(s) => write!(f, "{s}"),
+            Stmt::FitClassDecl(s) => write!(f, "{s}")
         }
+    }
+}
+
+impl Display for Ident {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.ident.fmt(f)
     }
 }
 
 impl Display for Decl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Decl { rt, pat, ty, val } = self;
+        let Decl { rt, pat, ty, val, span: _ } = self;
         
         match rt {
             ReasgType::Let => write!(f, "let "),
@@ -72,16 +69,16 @@ impl<T: Display> Display for Pat<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Pat::Unit(t) => write!(f, "{t}"),
-            Pat::Spread(mp) => {
+            Pat::Spread { inner, span: _ } => {
                 write!(f, "..")?;
-                match mp {
+                match inner {
                     Some(pat) => write!(f, "{pat}"),
                     None => Ok(()),
                 }
             },
-            Pat::List(vec) => {
+            Pat::List { values, span: _ } => {
                 write!(f, "[")?;
-                fmt_list(f, vec)?;
+                fmt_list(f, values)?;
                 write!(f, "]")
             },
         }
@@ -90,7 +87,7 @@ impl<T: Display> Display for Pat<T> {
 
 impl Display for DeclUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let DeclUnit(ident, mt) = self;
+        let DeclUnit { ident, mt, span: _ } = self;
         
         match mt {
             MutType::Mut => write!(f, "mut ")?,
@@ -103,7 +100,7 @@ impl Display for DeclUnit {
 
 impl Display for FunSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunSignature { ident, generics, params, varargs, ret } = self;
+        let FunSignature { ident, generics, params, varargs, ret, span: _ } = self;
 
         write!(f, "fun {ident}")?;
         if !generics.is_empty() {
@@ -130,7 +127,7 @@ impl Display for FunSignature {
 }
 impl Display for MethodSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let MethodSignature { referent, is_static, name, generics, params, ret } = self;
+        let MethodSignature { referent, is_static, name, generic_params, params, ret, span } = self;
 
         write!(f, "fun ")?;
         if let Some(ref_ident) = referent {
@@ -142,9 +139,9 @@ impl Display for MethodSignature {
         }?;
         write!(f, "{name}")?;
         
-        if !generics.is_empty() {
+        if !generic_params.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, generics)?;
+            fmt_list(f, generic_params)?;
             write!(f, ">")?;
         }
         write!(f, "(")?;
@@ -160,14 +157,14 @@ impl Display for MethodSignature {
 }
 impl Display for FunDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FunDecl { sig, block } = self;
+        let FunDecl { sig, block, span: _ } = self;
         write!(f, "{sig} {block}")
     }
 }
 
 impl Display for Param {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Param { rt, mt, ident, ty } = self;
+        let Param { rt, mt, ident, ty, span: _ } = self;
 
         match rt {
             ReasgType::Let => {},
@@ -190,7 +187,7 @@ impl Display for Param {
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Type(ident, params) = self;
+        let Type { ident, params, span: _ } = self;
         
         write!(f, "{ident}")?;
         if !params.is_empty() {
@@ -205,11 +202,11 @@ impl Display for Type {
 
 impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Class { ident, generics, fields, methods } = self;
+        let Class { ident, generic_params, fields, methods, span: _ } = self;
         write!(f, "class {ident}")?;
-        if !generics.is_empty() {
+        if !generic_params.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, generics)?;
+            fmt_list(f, generic_params)?;
             write!(f, ">")?;
         }
         write!(f, " {{")?;
@@ -226,7 +223,7 @@ impl Display for Class {
 
 impl Display for FieldDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let FieldDecl { rt, mt, ident, ty } = self;
+        let FieldDecl { rt, mt, ident, ty, span: _ } = self;
         
         match rt {
             ReasgType::Let => write!(f, "let "),
@@ -241,50 +238,69 @@ impl Display for FieldDecl {
 }
 impl Display for MethodDecl {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let MethodDecl { sig, block } = self;
+        let MethodDecl { sig, block, span: _ } = self;
         write!(f, "{sig} {block}")
     }
 }
+
+impl Display for IGlobal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "global {} = {:?}", self.ident, self.value)
+    }
+}
+
+impl Display for FitClassDecl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let FitClassDecl { ty, methods, span } = self;
+
+        write!(f, "fit class {ty} {{")?;
+        for method in methods {
+            writeln!(f,"{method}")?;
+        }
+        write!(f, "}}")
+    }
+}
+
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Ident(id) => write!(f, "{id}"),
             Expr::Block(b) => write!(f, "{b}"),
             Expr::Literal(lt) => write!(f, "{lt}"),
-            Expr::ListLiteral(lt) => {
+            Expr::ListLiteral { values, span: _ } => {
                 write!(f, "[")?;
-                fmt_list(f, lt)?;
+                fmt_list(f, values)?;
                 write!(f, "]")
             },
-            Expr::SetLiteral(lt)  => {
+            Expr::SetLiteral { values, span: _ } => {
                 write!(f, "set {{")?;
-                fmt_list(f, lt)?;
+                fmt_list(f, values)?;
                 write!(f, "}}")
             },
-            Expr::DictLiteral(lt) => {
+            Expr::DictLiteral { entries, span: _ } => {
                 write!(f, "dict {{")?;
-                fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
+                fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
                 write!(f, "}}")
             },
-            Expr::ClassLiteral(name, lt) => {
-                write!(f, "{name} #{{")?;
-                fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
+            Expr::ClassLiteral { ty, entries, span: _ } => {
+                write!(f, "{ty} #{{")?;
+                fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
                 write!(f, "}}")
             },
-            Expr::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
+            Expr::Assign { target, value, span: _ } => write!(f, "{target} = {value}"),
             Expr::Path(p) => write!(f, "{p}"),
             Expr::StaticPath(sp) => write!(f, "{sp}"),
-            Expr::UnaryOps { ops, expr } => {
+            Expr::UnaryOps { ops, expr, span: _ } => {
                 for op in ops {
                     write!(f, "{op}")?;
                 }
         
                 write!(f, "{expr}")
             },
-            Expr::BinaryOp { op, left, right } => {
+            Expr::BinaryOp { op, left, right, span: _ } => {
                 write!(f, "{left} {op} {right}")
             },
-            Expr::Comparison { left, rights } => {
+            Expr::Comparison { left, rights, span: _ } => {
                 write!(f, "{left}")?;
 
                 for (cmp, right) in rights {
@@ -293,14 +309,14 @@ impl Display for Expr {
 
                 Ok(())
             },
-            Expr::Range { left, right, step } => {
+            Expr::Range { left, right, step, span: _ } => {
                 write!(f, "{left}..{right}")?;
                 match step {
                     Some(s) => write!(f, " step {s}"),
                     None => Ok(()),
                 }
             },
-            Expr::If { conditionals, last } => {
+            Expr::If { conditionals, last, span: _ } => {
                 if let Some(((penult_cond, penult_block), rest)) = conditionals.split_last() {
                     for (cond, block) in rest {
                         write!(f, "if {cond} {block} else")?;
@@ -319,17 +335,17 @@ impl Display for Expr {
                     }
                 }
             },
-            Expr::While { condition, block } => write!(f, "while {condition} {block}"),
-            Expr::For { ident, iterator, block } => write!(f, "for {ident} in {iterator} {block}"),
-            Expr::Call { funct, params } => {
+            Expr::While { condition, block, span: _ } => write!(f, "while {condition} {block}"),
+            Expr::For { ident, iterator, block, span: _ } => write!(f, "for {ident} in {iterator} {block}"),
+            Expr::Call { funct, args, span: _ } => {
                 write!(f, "{funct}(")?;
-                fmt_list(f, params)?;
+                fmt_list(f, args)?;
                 write!(f, ")")
             },
             Expr::Index(idx) => write!(f, "{idx}"),
-            Expr::Spread(me) => {
+            Expr::Spread { expr, span: _ } => {
                 write!(f, "..")?;
-                match me {
+                match expr {
                     Some(e) => write!(f, "{e}"),
                     None => Ok(()),
                 }
@@ -341,19 +357,24 @@ impl Display for Expr {
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", BlockDisplay(&self.0))
+        write!(f, "{}", BlockDisplay(&self.stmts))
     }
 }
 
-impl Display for Literal {
+impl Display for LitKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Literal::Int(v) => write!(f, "{v}"),
-            Literal::Float(v) => write!(f, "{v}"),
-            Literal::Char(v) => write!(f, "{v:?}"),
-            Literal::Str(v) => write!(f, "{v:?}"),
-            Literal::Bool(v) => write!(f, "{v}"),
+            LitKind::Int(v) => write!(f, "{v}"),
+            LitKind::Float(v) => write!(f, "{v}"),
+            LitKind::Char(v) => write!(f, "{v:?}"),
+            LitKind::Str(v) => write!(f, "{v:?}"),
+            LitKind::Bool(v) => write!(f, "{v}"),
         }
+    }
+}
+impl Display for Literal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
     }
 }
 
@@ -370,7 +391,7 @@ impl Display for AsgUnit {
 
 impl Display for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Path { obj, attrs } = self;
+        let Path { obj, attrs, span: _ } = self;
         write!(f, "{obj}")?;
 
         for attr in attrs {
@@ -389,7 +410,7 @@ impl Display for StaticPath {
 
 impl Display for Index {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Index { expr, index } = self;
+        let Index { expr, index, span: _ } = self;
 
         write!(f, "{expr}[{index}]")
     }
@@ -397,12 +418,6 @@ impl Display for Index {
 
 impl Display for IDeref {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "*{}", self.0)
-    }
-}
-
-impl<T: Display> Display for Located<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "*{}", self.reference)
     }
 }

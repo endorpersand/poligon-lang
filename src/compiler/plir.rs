@@ -476,7 +476,7 @@ pub enum ExprType {
     /// An int, float, char, or string literal.
     /// 
     /// See [`ast::Literal`] for examples.
-    Literal(ast::Literal),
+    Literal(ast::LitKind),
 
     /// A list literal (e.g. `[1, 2, 3, 4]`).
     ListLiteral(Vec<Expr>),

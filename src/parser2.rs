@@ -81,6 +81,13 @@ impl<'s> ParCursor<'s> {
     pub fn peek_n(&self, n: usize) -> Option<&FullToken> {
         self.stream.get(n)
     }
+    
+    pub fn peek_span(&self) -> Span {
+        match self.peek() {
+            Some(t) => Span::from(t.loc.clone()),
+            None => Span::from(self.eof.clone()),
+        }
+    }
 
     /// The number of tokens remaining in the stream
     pub fn len(&self) -> usize {
@@ -309,9 +316,33 @@ macro_rules! expected_tokens {
     }
 }
 
+mod tspan {
+    use crate::span::Span;
+
+    pub trait TransposeSpan<T>: Sized {
+        type Transposed;
+        fn transpose(el: (Self, Span)) -> Self::Transposed;
+    }
+
+    impl<T> TransposeSpan<T> for Option<T> {
+        type Transposed = Option<(T, Span)>;
+    
+        fn transpose(el: (Self, Span)) -> Self::Transposed {
+            el.0.map(|t| (t, el.1))
+        }
+    }
+    impl<T, E> TransposeSpan<T> for Result<T, E> {
+        type Transposed = Result<(T, Span), E>;
+    
+        fn transpose(el: (Self, Span)) -> Self::Transposed {
+            el.0.map(|t| (t, el.1))
+        }
+    }
+}
+
 pub struct Parser2<'s> {
     cursor: ParCursor<'s>,
-    span_collectors: Vec<Option<Span>>
+    span_collectors: Vec<Span>
 }
 
 impl<'s> Parser2<'s> {
@@ -421,12 +452,8 @@ impl<'s> Parser2<'s> {
         // Attach to span collector:
         if let Some((collector, m)) = Option::zip(self.span_collectors.last_mut(), mat.as_ref()) {
             let loc = Span::from(m.loc.clone());
-            
-            let ns = match collector {
-                Some(s) => s.append(&loc),
-                None => loc,
-            };
-            collector.replace(ns);
+            let new_span = collector.append(&loc);
+            *collector = new_span;
         }
 
         mat
@@ -436,21 +463,26 @@ impl<'s> Parser2<'s> {
         self.cursor.peek()
     }
 
-    pub fn spanned<T>(&mut self, f: impl FnOnce(&mut Parser2<'s>) -> T) -> Located<T> {
-        self.span_collectors.push(None);
+    pub fn spanned<T>(&mut self, f: impl FnOnce(&mut Parser2<'s>) -> T) -> (T, Span) {
+        use std::convert::Infallible;
+
+        self.try_spanned(|p| Ok::<_, Infallible>(f(p)))
+            .unwrap()
+    }
+
+    pub fn try_spanned<T, S>(&mut self, f: impl FnOnce(&mut Parser2<'s>) -> S) -> S::Transposed 
+        where S: tspan::TransposeSpan<T>
+    {
+        self.span_collectors.push(self.cursor.peek_span());
         let out = f(self);
         let span = self.span_collectors.pop()
             .expect("span block should have existed");
         
-        if let Some(Span::Closed(c)) = span {
-            Located::new(out, c)
-        } else {
-            todo!("extended span")
-        }
+        S::transpose((out, span))
     }
 }
 
-fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<Located<ast::Stmt>>> {
+fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<ast::Stmt>> {
     use std::ops::ControlFlow::{self, Break, Continue};
 
     let mut stmts = vec![];
@@ -478,7 +510,7 @@ fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<Located<ast::
         // - semicolon may be omitted at the end of a block
         // - therefore, an omitted semicolon indicates the end of the block
 
-        let Located((mstmt, flow), stmt_range) = parser.spanned(|parser| -> ParseResult<_> {
+        let (mstmt, flow) = {
             let out = {
                 let stmt = parser.try_parse::<ast::Stmt>()?;
                 let semi = parser.match_(token![;]);
@@ -504,11 +536,12 @@ fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<Located<ast::
                 
                 (stmt, if stop_reading { Break(()) } else { Continue(()) })
             };
-            Ok(out)
-        }).transpose()?;
+
+            ParseResult::Ok(out)
+        }?;
         
         if let Some(stmt) = mstmt {
-            stmts.push(Located::new(stmt, stmt_range));
+            stmts.push(stmt);
         }
         cf = flow;
     }
@@ -520,10 +553,10 @@ impl Parseable for ast::Program {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        let program = parse_stmts_closed(parser)?;
+        let (stmts, span) = parser.try_spanned(parse_stmts_closed)?;
 
         if parser.cursor.is_empty() {
-            Ok(ast::Program(program))
+            Ok(ast::Program { stmts, span })
         } else {
             // there are more tokens left that couldn't be parsed as a program.
             // we have an issue.

@@ -193,7 +193,7 @@ impl Spanned for Program {
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
-    pub stmts: Vec<Located<Stmt>>,
+    pub stmts: Vec<Stmt>,
     pub span: Span
 }
 impl Spanned for Block {
@@ -322,8 +322,8 @@ impl Spanned for Stmt {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Ident {
-    ident: String,
-    span: Span
+    pub ident: String,
+    pub span: Span
 }
 impl Spanned for Ident {
     fn span(&self) -> &Span {
@@ -333,8 +333,8 @@ impl Spanned for Ident {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct StrLiteral {
-    literal: String,
-    span: Span
+    pub literal: String,
+    pub span: Span
 }
 impl Spanned for StrLiteral {
     fn span(&self) -> &Span {
@@ -524,7 +524,7 @@ impl Spanned for IGlobal {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FitClassDecl {
     pub ty: Type,
-    pub methods: MethodDecl,
+    pub methods: Vec<MethodDecl>,
     pub span: Span
 }
 impl Spanned for FitClassDecl {
@@ -990,17 +990,16 @@ impl std::fmt::Display for PatErr {
 }
 impl std::error::Error for PatErr {}
 
-impl TryFrom<Located<Expr>> for Located<AsgUnit> {
+impl TryFrom<Expr> for AsgUnit {
     type Error = FullPatErr;
     
-    fn try_from(value: Located<Expr>) -> Result<Self, Self::Error> {
-        let Located(expr, range) = value;
-        match expr {
-            Expr::Ident(ident) => Ok(Located(AsgUnit::Ident(ident), range)),
-            Expr::Path(attrs)  => Ok(Located(AsgUnit::Path(attrs), range)),
-            Expr::Index(idx)   => Ok(Located(AsgUnit::Index(idx), range)),
-            Expr::Deref(deref) => Ok(Located(AsgUnit::Deref(deref), range)),
-            _ => Err(PatErr::InvalidAssignTarget.at_range(range))
+    fn try_from(value: Expr) -> Result<Self, Self::Error> {
+        match value {
+            Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
+            Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
+            Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
+            Expr::Deref(deref) => Ok(AsgUnit::Deref(deref)),
+            e => Err(PatErr::InvalidAssignTarget.at_range(e.span().clone()))
         }
     }
 }
