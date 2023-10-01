@@ -2094,9 +2094,10 @@ impl PLIRCodegen {
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident.ident),
                             ast::AsgUnit::Path(p) => {
+                                let pspan = p.span().clone();
                                 let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
-                                    Err(PLIRErr::CannotAssignToMethod.at_range(p.span().clone()))?
+                                    Err(PLIRErr::CannotAssignToMethod.at_range(pspan))?
                                 } else {
                                     plir::AsgUnit::Path(p)
                                 }
@@ -2245,7 +2246,7 @@ impl PLIRCodegen {
                         varargs: false
                     }) if a == &iterator.ty => {
                         let plir::TypeRef::Generic(Cow::Borrowed("option"), Cow::Borrowed([rp]), ()) = &**ret else {
-                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?
+                            return Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span.clone()))?
                         };
                         let idty = rp.clone();
 
@@ -2254,7 +2255,7 @@ impl PLIRCodegen {
 
                         idty
                     }
-                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span))?,
+                    _ => Err(PLIRErr::CannotIterateType(iterator.ty.clone()).at_range(it_span.clone()))?,
                 };
 
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
