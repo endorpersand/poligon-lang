@@ -481,6 +481,29 @@ impl<'s> Parser2<'s> {
         
         S::transpose((out, span))
     }
+
+    pub fn parse_tuple<T>(&mut self, tok: Token) -> ParseResult<Tuple<T>> 
+        where Option<T>: Parseable<Err = FullParseErr>
+    {
+        
+        let ((pairs, end), span) = self.try_spanned(|parser| {
+            let mut pairs = vec![];
+            let mut end = None;
+
+            while let Some(value) = parser.try_parse::<T>()? {
+                if let Some(punct) = parser.match_(&tok) {
+                    pairs.push((value, punct));
+                } else {
+                    end.replace(value);
+                    break;
+                }
+            }
+
+            ParseResult::Ok((pairs, end))
+        })?;
+
+        Ok(Tuple { pairs, end, span })
+    }
 }
 
 fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<ast::Stmt>> {
@@ -548,6 +571,35 @@ fn parse_stmts_closed(parser: &mut Parser2<'_>) -> ParseResult<Vec<ast::Stmt>> {
     }
 
     Ok(stmts)
+}
+
+pub struct Tuple<T> {
+    pairs: Vec<(T, FullToken)>,
+    end: Option<T>,
+    span: Span
+}
+impl<T> Tuple<T> {
+    pub fn values(self) -> impl Iterator<Item=T> {
+        self.pairs.into_iter()
+            .map(|(t, _)| t)
+            .chain(self.end)
+    }
+
+    pub fn ended_on_terminator(&self) -> bool {
+        !self.end.is_some()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty() && self.end.is_none()
+    }
+    pub fn len(&self) -> usize {
+        self.pairs.len() + if self.end.is_some() { 1 } else { 0 }
+    }
+}
+impl<T> crate::span::Spanned for Tuple<T> {
+    fn span(&self) -> &Span {
+        &self.span
+    }
 }
 
 impl Parseable for ast::Program {
@@ -665,6 +717,44 @@ impl Parseable for Option<ast::Stmt> {
         };
 
         Ok(st)
+    }
+}
+
+impl Parseable for Option<ast::Type> {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let (result, span) = parser.try_spanned(|parser| {
+            let Some(ident) = parser.try_parse()? else { return Ok(None) };
+
+            parser.expect(token!["["])?;
+            let args = parser.parse_tuple(token![,])?;
+
+            // do not allow empty parameters
+            if args.is_empty() {
+                return Err(parser.cursor.error(ParseErr::ExpectedType));
+            }
+            // if end is not ], we're missing something
+            parser.match_(token!["]"])
+                .ok_or_else(|| parser.cursor.error({
+                    match args.ended_on_terminator() {
+                        true  => ParseErr::ExpectedType,
+                        false => ParseErr::ExpectedTokens(token![,].expected_tokens()),
+                    }
+                }))?;
+    
+            Ok(Some((ident, args.values().collect())))
+        })?;
+
+        Ok(result.map(|(ident, params)| ast::Type { ident, params, span }))
+    }
+}
+impl Parseable for ast::Type {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        parser.try_parse()?
+            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedType))
     }
 }
 
