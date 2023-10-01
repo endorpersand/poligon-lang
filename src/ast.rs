@@ -28,6 +28,14 @@ macro_rules! define_enum {
                 }
             }
         }
+
+        $(
+            impl From<$e> for $n {
+                fn from(value: $e) -> $n {
+                    Self::$e(value)
+                }
+            }
+        )*
     }
 }
 
