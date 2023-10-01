@@ -4,6 +4,7 @@ use std::ops::{RangeInclusive, RangeFrom};
 pub type Cursor = (usize /* line */, usize /* character */);
 
 /// Indicates a contiguous range of characters in given code.
+#[deprecated(note="use Span")]
 pub type CursorRange = RangeInclusive<Cursor>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
