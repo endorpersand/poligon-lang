@@ -740,21 +740,39 @@ impl Parseable for ast::Import {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let (path, span) = parser.try_spanned(|parser| {
+            parser.expect(token![import])?;
+            parser.parse()
+        })?;
+
+        Ok(Self { path, span })
     }
 }
 impl Parseable for ast::ImportIntrinsic {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let (_, span) = parser.try_spanned(|parser| {
+            parser.expect(token![import])?;
+            parser.expect( Token::Ident(String::from("intrinsic")) )
+        })?;
+
+        Ok(Self { span })
     }
 }
 impl Parseable for ast::IGlobal {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let ((ident, value), span) = parser.try_spanned(|parser| {
+            parser.expect(token![global])?;
+            let ident = parser.parse()?;
+            let value = parser.parse()?;
+
+            ParseResult::Ok((ident, value))
+        })?;
+
+        Ok(ast::IGlobal { ident, value, span })
     }
 }
 impl Parseable for ast::FitClassDecl {
@@ -780,6 +798,29 @@ impl Parseable for Option<ast::Expr> {
         todo!()
     }
 }
+impl Parseable for ast::Block {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let (stmts, span) = parser.try_spanned(|parser| {
+            parser.expect(token!["{"])?;
+            let stmts = parse_stmts_closed(parser)?;
+            parser.expect(token!["}"])?;
+            
+            ParseResult::Ok(stmts)
+        })?;
+
+        Ok(ast::Block { stmts, span })
+    }
+}
+impl Parseable for ast::StaticPath {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        todo!()
+    }
+}
+
 /// A struct that does the conversion of tokens to a parseable program tree.
 /// 
 /// This struct uses some terminology in its function declarations:
