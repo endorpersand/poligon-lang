@@ -12,8 +12,8 @@
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::ops::{RangeBounds, Bound};
-use crate::span::{Cursor, Span};
+use std::ops::{RangeFrom, RangeBounds, Bound};
+use crate::span::{Cursor, CursorRange};
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -76,8 +76,11 @@ enum ErrPos {
     /// Error occurred at a specific point
     Point(Cursor),
 
-    /// Error occurred at a span
-    Span(Span),
+    /// Error occurred at an inclusive range of points
+    Range(CursorRange),
+
+    /// Error occurred at an range of points, going to the end
+    RangeFrom(RangeFrom<Cursor>)
 }
 
 impl ErrPos {
@@ -96,10 +99,10 @@ impl ErrPos {
                 if p == &start {
                     ErrPos::Point(start)
                 } else {
-                    ErrPos::Span(Span::from(start..=(*p)))
+                    ErrPos::Range(start..=(*p))
                 }
             },
-            Bound::Unbounded => ErrPos::Span(Span::from(start..)),
+            Bound::Unbounded => ErrPos::RangeFrom(start..),
         }
     }
 
@@ -107,21 +110,24 @@ impl ErrPos {
         match self {
             ErrPos::Point((lno, cno)) => format!("{}:{}", lno + 1, cno + 1),
 
-            ErrPos::Span(span) => {
-                let (start_lno, start_cno) = span.start();
-                if let Some((end_lno, end_cno)) = span.end() {
-                    format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
-                } else {
-                    format!("{}:{}-EOF", start_lno + 1, start_cno + 1)
-                }
+            ErrPos::Range(ri) => {
+                let (start_lno, start_cno) = ri.start();
+                let (end_lno, end_cno) = ri.end();
+                format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
+            },
+            
+            ErrPos::RangeFrom(RangeFrom { start }) => {
+                let (start_lno, start_cno) = start;
+                format!("{}:{}-..", start_lno + 1, start_cno + 1)
             },
         }
     }
 
     fn display_pointer(&self, src: &str) -> Vec<String> {
         match self {
-            ErrPos::Point(p) => ptr_point(src, *p).into(),
-            ErrPos::Span(r)  => ptrs_range(src, r),
+            ErrPos::Point(p)     => ptr_point(src, *p).into(),
+            ErrPos::Range(r)     => ptrs_range(src, r),
+            ErrPos::RangeFrom(r) => ptrs_range(src, r),
         }
     }
 }
@@ -137,8 +143,9 @@ impl Ord for ErrPos {
 
         fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
             match pos {
-                ErrPos::Point(p) => (*p,        Some(*p)),
-                ErrPos::Span(r)  => (r.start(), r.end()),
+                ErrPos::Point(p)     => (*p,         Some(*p)),
+                ErrPos::Range(r)     => (*r.start(), Some(*r.end())),
+                ErrPos::RangeFrom(r) => (r.start,    None),
             }
         }
 
