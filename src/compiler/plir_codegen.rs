@@ -1967,7 +1967,7 @@ impl PLIRCodegen {
                     ty, plir::ExprType::Literal(kind)
                 ))
             },
-            ast::Expr::ListLiteral { values, span } => {
+            ast::Expr::ListLiteral(ast::ListLiteral { values, span }) => {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
@@ -1990,7 +1990,7 @@ impl PLIRCodegen {
                     plir::ExprType::ListLiteral(new_inner)
                 ))
             },
-            ast::Expr::SetLiteral { values, span } => {
+            ast::Expr::SetLiteral(ast::SetLiteral { values, span }) => {
                 let el_ty = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_SET), Cow::Borrowed([t]), ())) => Some(t.clone()),
                     None => None,
@@ -2013,7 +2013,7 @@ impl PLIRCodegen {
                     plir::ExprType::SetLiteral(new_inner)
                 ))
             },
-            ast::Expr::DictLiteral { entries, span } => {
+            ast::Expr::DictLiteral(ast::DictLiteral { entries, span }) => {
                 let (kty, vty) = match ctx_type.as_ref().map(plir::Type::downgrade) {
                     Some(plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_DICT), Cow::Borrowed([k, v]), ())) => {
                         (Some(k.clone()), Some(v.clone()))
@@ -2044,7 +2044,7 @@ impl PLIRCodegen {
                     plir::ExprType::DictLiteral(new_inner)
                 ))
             },
-            ast::Expr::ClassLiteral { ty, entries, span: _ } => {
+            ast::Expr::ClassLiteral(ast::ClassLiteral { ty, entries, span: _ }) => {
                 let lty = self.consume_located_type(ty)?;
                 
                 let cls_key = self.get_class_key(lty.as_ref())?;
@@ -2083,7 +2083,7 @@ impl PLIRCodegen {
                     ))
                 }
             },
-            ast::Expr::Assign { target, value, span } => {
+            ast::Expr::Assign(ast::Assign { target, value, span }) => {
                 let expr = self.consume_located_expr(*value, ctx_type.clone())?;
 
                 self.push_block(span, ctx_type);
@@ -2145,19 +2145,19 @@ impl PLIRCodegen {
                 
                 Ok(plir::Path::Static(lty.0, attr.ident, met_type).into())
             },
-            ast::Expr::UnaryOps { ops, expr, span } => {
+            ast::Expr::UnaryOps(ast::UnaryOps { ops, expr, span }) => {
                 let le = self.consume_located_expr(*expr, None)?;
                 
                 ops.into_iter().rev()
                     .try_fold(le, |expr, op| self.apply_unary(expr, op, span))
                     .map(|le| le.0)
             },
-            ast::Expr::BinaryOp { op, left, right, span } => {
+            ast::Expr::BinaryOp(ast::BinaryOp { op, left, right, span }) => {
                 let left = self.consume_located_expr(*left, None)?;
                 let right = self.consume_located_expr(*right, None)?;
                 self.apply_binary(op, left, right, span)
             },
-            ast::Expr::Comparison { left, rights, span: _ } => {
+            ast::Expr::Comparison(ast::Comparison { left, rights, span: _ }) => {
                 let left = self.consume_expr_and_box(*left, None)?;
                 let rights = rights.into_iter()
                     .map(|(op, right)| Ok((op, self.consume_expr(right, None)?)))
@@ -2168,7 +2168,7 @@ impl PLIRCodegen {
                     plir::ExprType::Comparison { left, rights }
                 ))
             },
-            ast::Expr::Range { left, right, step, span } => {
+            ast::Expr::Range(ast::Range { left, right, step, span }) => {
                 let left = self.consume_expr_and_box(*left, None)?;
                 let right = self.consume_expr_and_box(*right, None)?;
                 let step = match step {
@@ -2184,7 +2184,7 @@ impl PLIRCodegen {
                     plir::ExprType::Range { left, right, step }
                 ))
             },
-            ast::Expr::If { conditionals, last, span } => {
+            ast::Expr::If(ast::If { conditionals, last, span }) => {
                 let (conditionals, mut frags): (Vec<_>, Vec<_>) = conditionals.into_iter()
                     .map(|(cond, block)| {
                         let c = self.consume_expr_truth(cond)?;
@@ -2220,7 +2220,7 @@ impl PLIRCodegen {
                     plir::ExprType::If { conditionals, last }
                 ))
             },
-            ast::Expr::While { condition, block, span: _ } => {
+            ast::Expr::While(ast::While { condition, block, span: _ }) => {
                 let condition = self.consume_expr_truth(*condition)?;
                 let (block, frag) = self.consume_tree_block(block, BlockBehavior::Loop, None)?;
                 self.peek_block().instrs.add_fragment(frag);
@@ -2230,7 +2230,7 @@ impl PLIRCodegen {
                     plir::ExprType::While { condition: Box::new(condition), block }
                 ))
             },
-            ast::Expr::For { ident, iterator, block, span: _ } => {
+            ast::Expr::For(ast::For { ident, iterator, block, span: _ }) => {
                 let &it_span = iterator.span();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
@@ -2265,7 +2265,7 @@ impl PLIRCodegen {
                     plir::ExprType::For { ident: ident.ident, element_type, iterator, block }
                 ))
             },
-            ast::Expr::Call { funct, args, span } => {
+            ast::Expr::Call(ast::Call { funct, args, span }) => {
                 let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     ast::Expr::StaticPath(sp) if sp.attr.ident == "#gep" => {
@@ -2353,8 +2353,8 @@ impl PLIRCodegen {
                 self.consume_index(idx)
                     .map(|(ty, index)| plir::Expr::new(ty, plir::ExprType::Index(index)))
             },
-            ast::Expr::Spread { expr: _, span } => Err(PLIRErr::CannotSpread.at_range(span)),
-            ast::Expr::Deref(d) => {
+            ast::Expr::Spread(ast::Spread { expr: _, span }) => Err(PLIRErr::CannotSpread.at_range(span)),
+            ast::Expr::IDeref(d) => {
                 let dty = ctx_type
                     .ok_or_else(|| PLIRErr::CannotResolveType.at_range(*d.span()))?;
 

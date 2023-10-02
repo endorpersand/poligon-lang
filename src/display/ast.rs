@@ -306,93 +306,27 @@ impl Display for FitClassDecl {
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Ident(id) => write!(f, "{id}"),
-            Expr::Block(b) => write!(f, "{b}"),
-            Expr::Literal(lt) => write!(f, "{lt}"),
-            Expr::ListLiteral { values, span: _ } => {
-                write!(f, "[")?;
-                fmt_list(f, values)?;
-                write!(f, "]")
-            },
-            Expr::SetLiteral { values, span: _ } => {
-                write!(f, "set {{")?;
-                fmt_list(f, values)?;
-                write!(f, "}}")
-            },
-            Expr::DictLiteral { entries, span: _ } => {
-                write!(f, "dict {{")?;
-                fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
-                write!(f, "}}")
-            },
-            Expr::ClassLiteral { ty, entries, span: _ } => {
-                write!(f, "{ty} #{{")?;
-                fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
-                write!(f, "}}")
-            },
-            Expr::Assign { target, value, span: _ } => write!(f, "{target} = {value}"),
-            Expr::Path(p) => write!(f, "{p}"),
-            Expr::StaticPath(sp) => write!(f, "{sp}"),
-            Expr::UnaryOps { ops, expr, span: _ } => {
-                for op in ops {
-                    write!(f, "{op}")?;
-                }
-        
-                write!(f, "{expr}")
-            },
-            Expr::BinaryOp { op, left, right, span: _ } => {
-                write!(f, "{left} {op} {right}")
-            },
-            Expr::Comparison { left, rights, span: _ } => {
-                write!(f, "{left}")?;
-
-                for (cmp, right) in rights {
-                    write!(f, " {cmp} {right}")?;
-                }
-
-                Ok(())
-            },
-            Expr::Range { left, right, step, span: _ } => {
-                write!(f, "{left}..{right}")?;
-                match step {
-                    Some(s) => write!(f, " step {s}"),
-                    None => Ok(()),
-                }
-            },
-            Expr::If { conditionals, last, span: _ } => {
-                if let Some(((penult_cond, penult_block), rest)) = conditionals.split_last() {
-                    for (cond, block) in rest {
-                        write!(f, "if {cond} {block} else")?;
-                    }
-                    
-                    write!(f, "if {penult_cond} {penult_block}")?;
-                    match last {
-                        Some(b) => write!(f, " else {b}"),
-                        None => Ok(()),
-                    }
-                } else {
-                    // fallback which should not occur
-                    match last {
-                        Some(b) => write!(f, "{b}"),
-                        None => Ok(()),
-                    }
-                }
-            },
-            Expr::While { condition, block, span: _ } => write!(f, "while {condition} {block}"),
-            Expr::For { ident, iterator, block, span: _ } => write!(f, "for {ident} in {iterator} {block}"),
-            Expr::Call { funct, args, span: _ } => {
-                write!(f, "{funct}(")?;
-                fmt_list(f, args)?;
-                write!(f, ")")
-            },
-            Expr::Index(idx) => write!(f, "{idx}"),
-            Expr::Spread { expr, span: _ } => {
-                write!(f, "..")?;
-                match expr {
-                    Some(e) => write!(f, "{e}"),
-                    None => Ok(()),
-                }
-            },
-            Expr::Deref(d) => write!(f, "{d}"),
+            Expr::Ident(e) => e.fmt(f),
+            Expr::Block(e) => e.fmt(f),
+            Expr::Literal(e) => e.fmt(f),
+            Expr::ListLiteral(e) => e.fmt(f),
+            Expr::SetLiteral(e) => e.fmt(f),
+            Expr::DictLiteral(e) => e.fmt(f),
+            Expr::ClassLiteral(e) => e.fmt(f),
+            Expr::Assign(e) => e.fmt(f),
+            Expr::Path(e) => e.fmt(f),
+            Expr::StaticPath(e) => e.fmt(f),
+            Expr::UnaryOps(e) => e.fmt(f),
+            Expr::BinaryOp(e) => e.fmt(f),
+            Expr::Comparison(e) => e.fmt(f),
+            Expr::Range(e) => e.fmt(f),
+            Expr::If(e) => e.fmt(f),
+            Expr::While(e) => e.fmt(f),
+            Expr::For(e) => e.fmt(f),
+            Expr::Call(e) => e.fmt(f),
+            Expr::Index(e) => e.fmt(f),
+            Expr::Spread(e) => e.fmt(f),
+            Expr::IDeref(e) => e.fmt(f),
         }
     }
 }
@@ -419,7 +353,44 @@ impl Display for Literal {
         self.kind.fmt(f)
     }
 }
-
+impl Display for ListLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { values, span: _ } = self;
+        write!(f, "[")?;
+        fmt_list(f, values)?;
+        write!(f, "]")
+    }
+}
+impl Display for SetLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { values, span: _ } = self;
+        write!(f, "set {{")?;
+        fmt_list(f, values)?;
+        write!(f, "}}")
+    }
+}
+impl Display for DictLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { entries, span: _ } = self;
+        write!(f, "dict {{")?;
+        fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
+        write!(f, "}}")
+    }
+}
+impl Display for ClassLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { ty, entries, span: _ } = self;
+        write!(f, "{ty} #{{")?;
+        fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
+        write!(f, "}}")
+    }
+}
+impl Display for Assign {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { target, value, span: _ } = self;
+        write!(f, "{target} = {value}")
+    }
+}
 impl Display for AsgUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -430,7 +401,6 @@ impl Display for AsgUnit {
         }
     }
 }
-
 impl Display for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Path { obj, attrs, span: _ } = self;
@@ -450,14 +420,102 @@ impl Display for StaticPath {
     }
 }
 
+impl Display for UnaryOps {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { ops, expr, span: _ } = self;
+        for op in ops {
+            write!(f, "{op}")?;
+        }
+
+        write!(f, "{expr}")
+    }
+}
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { op, left, right, span: _ } = self;
+        write!(f, "{left} {op} {right}")
+    }
+}
+impl Display for Comparison {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { left, rights, span: _ } = self;
+        write!(f, "{left}")?;
+    
+        for (cmp, right) in rights {
+            write!(f, " {cmp} {right}")?;
+        }
+    
+        Ok(())
+    }
+}
+impl Display for Range {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { left, right, step, span: _ } = self;
+        write!(f, "{left}..{right}")?;
+        match step {
+            Some(s) => write!(f, " step {s}"),
+            None => Ok(()),
+        }
+    }
+}
+impl Display for If {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { conditionals, last, span: _ } = self;
+        if let Some(((penult_cond, penult_block), rest)) = conditionals.split_last() {
+            for (cond, block) in rest {
+                write!(f, "if {cond} {block} else")?;
+            }
+            
+            write!(f, "if {penult_cond} {penult_block}")?;
+            match last {
+                Some(b) => write!(f, " else {b}"),
+                None => Ok(()),
+            }
+        } else {
+            // fallback which should not occur
+            match last {
+                Some(b) => write!(f, "{b}"),
+                None => Ok(()),
+            }
+        }
+    }
+} 
+impl Display for While {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { condition, block, span: _ } = self;
+        write!(f, "while {condition} {block}")
+    }
+}
+impl Display for For {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { ident, iterator, block, span: _ } = self;
+        write!(f, "for {ident} in {iterator} {block}")
+    }
+}
+impl Display for Call {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { funct, args, span: _ } = self;
+        write!(f, "{funct}(")?;
+        fmt_list(f, args)?;
+        write!(f, ")")
+    }
+}
 impl Display for Index {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Index { expr, index, span: _ } = self;
-
         write!(f, "{expr}[{index}]")
     }
 }
-
+impl Display for Spread {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self { expr, span: _ } = self;
+        write!(f, "..")?;
+        match expr {
+            Some(e) => write!(f, "{e}"),
+            None => Ok(()),
+        }
+    }
+}
 impl Display for IDeref {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "*{}", self.reference)

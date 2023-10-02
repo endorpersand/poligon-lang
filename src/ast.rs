@@ -45,12 +45,14 @@ pub use types::*;
 pub use located::*;
 pub use stmt::*;
 pub use fun::*;
+pub use expr::*;
 
 pub mod op;
 mod types;
 mod located;
 mod stmt;
 mod fun;
+mod expr;
 
 /// A complete program.
 /// 
@@ -147,254 +149,6 @@ pub enum MutType {
     Immut
 }
 
-/// An expression.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Expr {
-    /// Variable access.
-    Ident(Ident),
-
-    /// A block of statements.
-    /// 
-    /// See [`Block`] for examples.
-    Block(Block),
-
-    /// An int, float, char, or string literal.
-    /// 
-    /// See [`Literal`] for examples.
-    Literal(Literal),
-
-    /// A list literal (e.g. `[1, 2, 3, 4]`).
-    ListLiteral {
-        values: Vec<Expr>,
-        span: Span
-    },
-
-    /// A set literal (e.g. `set {1, 2, 3, 4}`).
-    SetLiteral {
-        values: Vec<Expr>,
-        span: Span
-    },
-    
-    /// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
-    DictLiteral {
-        entries: Vec<(Expr, Expr)>,
-        span: Span
-    },
-
-    /// A class initializer (e.g. `Animal {age: 1, size: 2}`).
-    ClassLiteral {
-        ty: Type,
-        entries: Vec<(Ident, Expr)>,
-        span: Span
-    },
-    
-    /// An assignment operation.
-    /// 
-    /// # Examples
-    /// ```text
-    /// a = 1;
-    /// b[0] = 3;
-    /// [a, b, c] = [1, 2, 3];
-    /// ```
-    Assign {
-        target: AsgPat,
-        value: Box<Expr>,
-        span: Span
-    },
-
-    /// A path.
-    /// 
-    /// See [`Path`] for examples.
-    Path(Path),
-
-    /// A static path.
-    /// 
-    /// This does a static access on a type (e.g. `Type::attr`).
-    StaticPath(StaticPath),
-    
-    /// A chain of unary operations (e.g. `+-+-~!+e`).
-    UnaryOps {
-        /// The operators applied. These are in display order 
-        /// (i.e. they are applied to the expression from right to left).
-        ops: Vec<op::Unary>,
-        /// Expression to apply the unary operations to.
-        expr: Box<Expr>,
-        span: Span
-    },
-
-    /// A binary operation (e.g. `a + b`).
-    BinaryOp {
-        /// Operator to apply.
-        op: op::Binary,
-        /// The left expression.
-        left: Box<Expr>,
-        /// The right expression.
-        right: Box<Expr>,
-        span: Span
-    },
-
-    /// A comparison operation (e.g. `a < b < c < d`).
-    /// 
-    /// Compound comparison operations are broken down by `&&`.
-    /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
-    Comparison {
-        /// The left expression
-        left: Box<Expr>,
-        /// A list of comparison operators and a right expressions to apply.
-        rights: Vec<(op::Cmp, Expr)>,
-        
-        span: Span
-    },
-
-    /// A range (e.g. `1..10` or `1..10 step 1`).
-    Range {
-        /// The left expression
-        left: Box<Expr>,
-        /// The right expression
-        right: Box<Expr>,
-        /// The expression for the step if it exists
-        step: Option<Box<Expr>>,
-
-        span: Span
-    },
-
-    /// An if expression or if-else expression. (e.g. `if cond {}`, `if cond {} else {}`, `if cond1 {} else if cond2 {} else {}`).
-    If {
-        /// The condition and block connected to each `if` of the chain
-        conditionals: Vec<(Expr, Block)>,
-        /// The final bare `else` block (if it exists)
-        last: Option<Block>,
-        span: Span
-    },
-
-    /// A `while` loop.
-    While {
-        /// The condition to check before each iteration.
-        condition: Box<Expr>,
-        /// The block to run in each iteration.
-        block: Block,
-        span: Span
-    },
-
-    /// A `for` loop.
-    For {
-        /// Variable to bind elements of the iterator to.
-        ident: Ident,
-        /// The iterator.
-        iterator: Box<Expr>,
-        /// The block to run in each iteration.
-        block: Block,
-        span: Span
-    },
-
-    /// A function call.
-    Call {
-        /// The function to call.
-        funct: Box<Expr>,
-        /// The parameters to the function call.
-        args: Vec<Expr>,
-
-        span: Span
-    },
-    /// An index operation.
-    /// 
-    /// See [`Index`] for examples.
-    Index(Index),
-    /// A spread operation (e.g. `..`, `..lst`).
-    Spread {
-        expr: Option<Box<Expr>>,
-        span: Span
-    },
-
-    /// Dereferencing intrinsic pointers.
-    /// 
-    /// See [`IDeref`] for examples.
-    Deref(IDeref)
-}
-impl Spanned for Expr {
-    fn span(&self) -> &Span {
-        match self {
-            | Expr::ListLiteral { span, .. }
-            | Expr::SetLiteral { span, .. }
-            | Expr::DictLiteral { span, .. }
-            | Expr::ClassLiteral { span, .. }
-            | Expr::Assign { span, .. }
-            | Expr::UnaryOps { span, .. }
-            | Expr::BinaryOp { span, .. }
-            | Expr::Comparison { span, .. }
-            | Expr::Range { span, .. }
-            | Expr::If { span, .. }
-            | Expr::While { span, .. }
-            | Expr::For { span, .. }
-            | Expr::Call { span, .. }
-            | Expr::Spread { span, .. }
-            => span,
-            
-            Expr::Ident(e) => e.span(),
-            Expr::Block(e) => e.span(),
-            Expr::Literal(e) => e.span(),
-            Expr::Path(e) => e.span(),
-            Expr::StaticPath(e) => e.span(),
-            Expr::Index(e) => e.span(),
-            Expr::Deref(e) => e.span(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Literal {
-    pub kind: LitKind,
-    pub span: Span
-}
-impl Spanned for Literal {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// A primitive literal.
-/// 
-/// # Examples
-/// ```text
-/// 14    // int
-/// 14.4  // float
-/// 'x'   // char
-/// "abc" // string
-/// true  // bool
-/// ```
-#[derive(Debug, Clone)]
-pub enum LitKind {
-    #[allow(missing_docs)] Int(isize),
-    #[allow(missing_docs)] Float(f64),
-    #[allow(missing_docs)] Char(char),
-    #[allow(missing_docs)] Str(String),
-    #[allow(missing_docs)] Bool(bool)
-}
-
-impl LitKind {
-    /// Create a literal from a string representing a numeric value.
-    pub fn from_numeric(s: &str) -> Option<Self> {
-        s.parse::<isize>().ok().map(LitKind::Int)
-            .or_else(|| s.parse::<f64>().ok().map(LitKind::Float))
-    }
-}
-
-impl PartialEq for LitKind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(l0), Self::Int(r0))     => l0 == r0,
-            // since this is an AST, we want the EXACT values of floats to be the same
-            // hence, we can compare the bits
-            (Self::Float(l0), Self::Float(r0)) => l0.to_bits() == r0.to_bits(),
-            (Self::Char(l0),  Self::Char(r0))  => l0 == r0,
-            (Self::Str(l0),   Self::Str(r0))   => l0 == r0,
-            (Self::Bool(l0),  Self::Bool(r0))  => l0 == r0,
-            _ => false,
-        }
-    }
-}
-impl Eq for LitKind {}
-
 /// A path, which accesses attributes from an expression.
 /// 
 /// # Syntax
@@ -446,49 +200,6 @@ pub struct StaticPath {
     pub span: Span
 }
 impl Spanned for StaticPath {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// Value indexing.
-/// 
-/// # Syntax
-/// ```text
-/// index = expr "[" expr "]";
-/// ```
-/// 
-/// # Examples
-/// ```text
-/// lst[0]
-/// dct["hello"]
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Index {
-    /// The expression to index
-    pub expr: Box<Expr>,
-    /// The index
-    pub index: Box<Expr>,
-    pub span: Span
-}
-impl Spanned for Index {
-    fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
-/// Dereferencing of an intrinsic pointer.
-/// 
-/// # Example
-/// ```text
-/// *ptr
-/// ```
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct IDeref {
-    pub reference: Box<Expr>,
-    pub span: Span
-}
-impl Spanned for IDeref {
     fn span(&self) -> &Span {
         &self.span
     }
@@ -609,10 +320,10 @@ impl TryFrom<Expr> for AsgUnit {
     
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
-            Expr::Ident(ident) => Ok(AsgUnit::Ident(ident)),
-            Expr::Path(attrs)  => Ok(AsgUnit::Path(attrs)),
-            Expr::Index(idx)   => Ok(AsgUnit::Index(idx)),
-            Expr::Deref(deref) => Ok(AsgUnit::Deref(deref)),
+            Expr::Ident(ident)  => Ok(AsgUnit::Ident(ident)),
+            Expr::Path(attrs)   => Ok(AsgUnit::Path(attrs)),
+            Expr::Index(idx)    => Ok(AsgUnit::Index(idx)),
+            Expr::IDeref(deref) => Ok(AsgUnit::Deref(deref)),
             e => Err(PatErr::InvalidAssignTarget.at_range(*e.span()))
         }
     }
@@ -627,7 +338,7 @@ impl<T> TryFrom<Expr> for Pat<T>
     /// fallibly be parsed from an expression.
     fn try_from(value: Expr) -> Result<Self, Self::Error> {
         match value {
-            Expr::Spread { expr, span } => {
+            Expr::Spread(Spread { expr, span }) => {
                 let inner = match expr {
                     Some(e) => {
                         let pat = Self::try_from(*e)?;
@@ -638,7 +349,7 @@ impl<T> TryFrom<Expr> for Pat<T>
 
                 Ok(Pat::Spread { inner, span })
             },
-            Expr::ListLiteral { values, span } => {
+            Expr::ListLiteral(ListLiteral { values, span }) => {
                 let pats: Vec<Self> = values.into_iter()
                     .map(TryFrom::try_from)
                     .collect::<Result<_, _>>()?;
