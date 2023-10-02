@@ -936,7 +936,38 @@ impl Parseable for Option<ast::Param> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let (result, span) = parser.try_spanned(|parser| {
+            let maybe_rt = parser.try_parse()?;
+
+            let mut empty = maybe_rt.is_none();
+            let rt = maybe_rt.unwrap_or_default();
+
+            let mt = match parser.match_(token![mut]) {
+                Some(_) => {
+                    empty = false;
+                    ast::MutType::Mut
+                }
+                None => ast::MutType::Immut,
+            };
+
+            let maybe_ident = parser.try_parse()?;
+
+            // the param checked so far is fully empty and probably not an actual param:
+            if empty && maybe_ident.is_none() { return ParseResult::Ok(None); }
+
+            let ident = maybe_ident.ok_or_else(|| {
+                parser.cursor.error(ParseErr::ExpectedIdent)
+            })?;
+
+            let ty = match parser.match_(token![:]) {
+                Some(_) => Some(parser.parse()?),
+                None    => None,
+            };
+
+            Ok(Some((rt, mt, ident, ty)))
+        })?;
+        
+        Ok(result.map(|(rt, mt, ident, ty)| ast::Param { rt, mt, ident, ty, span }))
     }
 }
 impl Parseable for ast::Param {
