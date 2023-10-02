@@ -997,26 +997,17 @@ impl Parseable for Option<ast::Param> {
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
             let maybe_rt = parser.try_parse()?;
-
-            let mut empty = maybe_rt.is_none();
-            let rt = maybe_rt.unwrap_or_default();
-
-            let mt = match parser.match_(token![mut]) {
-                Some(_) => {
-                    empty = false;
-                    ast::MutType::Mut
-                }
-                None => ast::MutType::Immut,
-            };
-
+            let maybe_mt = parser.match_(token![mut]).map(|_| ast::MutType::Mut);
             let maybe_ident = parser.try_parse()?;
 
             // the param checked so far is fully empty and probably not an actual param:
-            if empty && maybe_ident.is_none() { return ParseResult::Ok(None); }
+            if maybe_rt.is_none() && maybe_mt.is_none() && maybe_ident.is_none() {
+                return ParseResult::Ok(None);
+            }
 
-            let ident = maybe_ident.ok_or_else(|| {
-                parser.cursor.error(ParseErr::ExpectedIdent)
-            })?;
+            let rt = maybe_rt.unwrap_or_default();
+            let mt = maybe_mt.unwrap_or_default();
+            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))?;
 
             let ty = match parser.match_(token![:]) {
                 Some(_) => Some(parser.parse()?),
@@ -1161,9 +1152,38 @@ impl Parseable for Option<ast::FieldDecl> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let (result, span) = parser.try_spanned(|parser| {
+            let maybe_rt = parser.try_parse()?;
+            let maybe_mt = parser.match_(token![mut]).map(|_| ast::MutType::Mut);
+            let maybe_ident = parser.try_parse()?;
+
+            // the param checked so far is fully empty and probably not an actual param:
+            if maybe_rt.is_none() && maybe_mt.is_none() && maybe_ident.is_none() {
+                return ParseResult::Ok(None);
+            }
+
+            let rt = maybe_rt.unwrap_or_default();
+            let mt = maybe_mt.unwrap_or_default();
+            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))?;
+
+            parser.expect(token![:])?;
+            let ty = parser.parse()?;
+
+            Ok(Some((rt, mt, ident, ty)))
+        })?;
+        
+        Ok(result.map(|(rt, mt, ident, ty)| ast::FieldDecl { rt, mt, ident, ty, span }))
     }
 }
+impl Parseable for ast::FieldDecl {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        parser.try_parse()?
+            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))
+    }
+}
+
 impl Parseable for ast::Class {
     type Err = FullParseErr;
 
