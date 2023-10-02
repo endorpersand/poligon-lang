@@ -9,11 +9,8 @@
 //! - [`parse`]: A function to parse [a list of lexed tokens][`crate::lexer`] into an AST.
 //! - [`Parser`]: The struct that does all the parsing.
 
-use ast::Located;
-
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::ops::{RangeInclusive, RangeFrom, RangeBounds};
 
 use crate::GonErr;
 use crate::err::FullGonErr;
@@ -394,6 +391,12 @@ impl<'s> Parser2<'s> {
             })
     }
 
+    fn attach_to_collector(&mut self, span: Span) {
+        if let Some(collector) = self.span_collectors.last_mut() {
+            *collector = (*collector).append(span);
+        }
+    }
+
     /// Expect that the next token in the input is in the specified list of tokens.
     /// If it is, the token is returned, otherwise an error occurs.
     /// 
@@ -449,11 +452,8 @@ impl<'s> Parser2<'s> {
     pub fn match_<P: TokenPattern2>(&mut self, pat: P) -> Option<FullToken> {
         let mat = pat.strip_prefix_of(&mut self.cursor);
 
-        // Attach to span collector:
-        if let Some((collector, m)) = Option::zip(self.span_collectors.last_mut(), mat.as_ref()) {
-            let span = m.span;
-            let new_span = collector.append(span);
-            *collector = new_span;
+        if let Some(m) = &mat {
+            self.attach_to_collector(m.span);
         }
 
         mat
@@ -478,7 +478,8 @@ impl<'s> Parser2<'s> {
         let out = f(self);
         let span = self.span_collectors.pop()
             .expect("span block should have existed");
-        
+        self.attach_to_collector(span);
+
         S::transpose((out, span))
     }
 
@@ -504,6 +505,19 @@ impl<'s> Parser2<'s> {
         })?;
 
         Ok(Tuple { pairs, end, span })
+    }
+}
+impl Iterator for Parser2<'_> {
+    type Item = FullToken;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tok = self.cursor.next();
+        
+        if let Some(t) = tok {
+            self.attach_to_collector(t.span);
+        }
+
+        tok.cloned()
     }
 }
 
@@ -623,11 +637,28 @@ impl Parseable for Option<ast::Ident> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        let ident = parser.cursor.next_if(|t| matches!(&**t, Token::Ident(_)))
-            .map(|tok| {
-                let FullToken { kind: Token::Ident(ident), span } = tok.clone() else { unreachable!() };
-                ast::Ident { ident, span }
-            });
+        let ident = match (parser.peek().map(|t| &t.kind), parser.peek_n(1).map(|t| &t.kind)) {
+            (Some(token![#]), Some(Token::Ident(_))) => {
+                let (ident, span) = parser.spanned(|parser| {
+                    parser.expect(token![#]).unwrap(); // should be unreachable
+                    let Some(FullToken { kind: Token::Ident(ident), span: _ }) = parser.next() else {
+                        unreachable!()
+                    };
+
+                    String::from("#") + &ident
+                });
+
+                Some(ast::Ident { ident, span })
+            },
+            (Some(Token::Ident(_)), _) => {
+                let Some(FullToken { kind: Token::Ident(ident), span }) = parser.next() else {
+                    unreachable!()
+                };
+
+                Some(ast::Ident { ident, span })
+            },
+            _ => None
+        };
 
         Ok(ident)
     }
