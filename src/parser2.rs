@@ -1319,7 +1319,15 @@ impl Parseable for ast::StaticPath {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let ((ty, attr), span) = parser.try_spanned(|parser| {
+            let ty = parser.parse()?;
+            parser.expect(token![::])?;
+            let attr = parser.parse()?;
+            
+            ParseResult::Ok((ty, attr))
+        })?;
+
+        Ok(Self { ty, attr, span })
     }
 }
 
