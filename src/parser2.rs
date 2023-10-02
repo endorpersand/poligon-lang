@@ -610,6 +610,22 @@ impl<T> Tuple<T> {
     pub fn len(&self) -> usize {
         self.pairs.len() + if self.end.is_some() { 1 } else { 0 }
     }
+
+    pub fn assert_non_empty<E>(self, e: impl FnOnce() -> E) -> Result<Self, E> {
+        match self.is_empty() {
+            false => Ok(self),
+            true  => Err(e()),
+        }
+    }
+    pub fn assert_closed<P: TokenPattern2, E>(self, parser: &mut Parser2<'_>, p: P, needs_comma: impl FnOnce(&mut Parser2<'_>) -> E, needs_t: impl FnOnce(&mut Parser2<'_>) -> E) -> Result<Self, E> {
+        match parser.match_(p) {
+            Some(_) => Ok(self),
+            None => match self.ended_on_terminator() {
+                true  => Err(needs_t(parser)),
+                false => Err(needs_comma(parser)),
+            },
+        }
+    }
 }
 impl<T> crate::span::Spanned for Tuple<T> {
     fn span(&self) -> &Span {
@@ -828,25 +844,18 @@ impl Parseable for Option<ast::Type> {
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
-            let Some(ident) = parser.try_parse()? else { return Ok(None) };
+            let Some(ident) = parser.try_parse()? else { return ParseResult::Ok(None) };
 
             parser.expect(token!["["])?;
-            let args = parser.parse_tuple(token![,])?;
+            let args = parser.parse_tuple(token![,])?
+                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?
+                .assert_closed(parser, token!["]"], 
+                    |parser| parser.cursor.error(expected_tokens![,]),
+                    |parser| parser.cursor.error(ParseErr::ExpectedType)
+                )?
+                .values().collect();
 
-            // do not allow empty parameters
-            if args.is_empty() {
-                return Err(parser.cursor.error(ParseErr::ExpectedType));
-            }
-            // if end is not ], we're missing something
-            parser.match_(token!["]"])
-                .ok_or_else(|| parser.cursor.error({
-                    match args.ended_on_terminator() {
-                        true  => ParseErr::ExpectedType,
-                        false => ParseErr::ExpectedTokens(token![,].expected_tokens()),
-                    }
-                }))?;
-    
-            Ok(Some((ident, args.values().collect())))
+            Ok(Some((ident, args)))
         })?;
 
         Ok(result.map(|(ident, params)| ast::Type { ident, params, span }))
@@ -895,16 +904,14 @@ impl Parseable for Option<ast::DeclPat> {
             token!["["] => {
                 let (values, span) = parser.try_spanned(|parser| {
                     parser.expect(token!["["])?;
-                    let pats = parser.parse_tuple(token![,])?;
-                    parser.match_(token!["]"])
-                        .ok_or_else(|| parser.cursor.error({
-                            match pats.ended_on_terminator() {
-                                true  => ParseErr::ExpectedPattern,
-                                false => expected_tokens![,],
-                            }
-                        }))?;
+                    let pats = parser.parse_tuple(token![,])?
+                        .assert_closed(parser, token!["]"],
+                            |parser| parser.cursor.error(expected_tokens![,]),
+                            |parser| parser.cursor.error(ParseErr::ExpectedPattern)
+                        )?
+                        .values().collect();
                     
-                    ParseResult::Ok(pats.values().collect())
+                    ParseResult::Ok(pats)
                 })?;
 
                 ast::DeclPat::List { values, span }
@@ -1039,40 +1046,29 @@ impl Parseable for ast::FunSignature {
             let ident = parser.parse()?;
 
             let generics = if parser.match_(token!["["]).is_some() {
-                let params = parser.parse_tuple(token![,])?;
-
-                if params.is_empty() {
-                    return Err(parser.cursor.error(ParseErr::ExpectedIdent));
-                }
-                parser.match_(token!["]"])
-                    .ok_or_else(|| parser.cursor.error({
-                        match params.ended_on_terminator() {
-                            true  => ParseErr::ExpectedParam,
-                            false => expected_tokens![,],
-                        }
-                    }))?;
-
-                params.values().collect()
+                parser.parse_tuple(token![,])?
+                    .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_closed(parser, token!["]"], 
+                        |parser| parser.cursor.error(expected_tokens![,]),
+                        |parser| parser.cursor.error(ParseErr::ExpectedParam),
+                    )?.values().collect()
             } else {
                 vec![]
             };
 
             parser.expect(token!["("])?;
-            let params = parser.parse_tuple(token![,])?;
-            parser.match_(token![")"])
-                .ok_or_else(|| parser.cursor.error({
-                    match params.ended_on_terminator() {
-                        true  => ParseErr::ExpectedParam,
-                        false => expected_tokens![,],
-                    }
-                }))?;
-            
+            let params = parser.parse_tuple(token![,])?
+                .assert_closed(parser, token![")"],
+                    |parser| parser.cursor.error(expected_tokens![,]),
+                    |parser| parser.cursor.error(ParseErr::ExpectedParam),
+            )?.values().collect();
+
             let ret = match parser.match_(token![->]) {
                 Some(_) => Some(parser.parse()?),
                 None    => None,
             };
 
-            Ok((ident, generics, params.values().collect(), ret))
+            ParseResult::Ok((ident, generics, params, ret))
         })?;
 
         Ok(Self { ident, generics, params, varargs: false, ret, span })
@@ -1108,40 +1104,29 @@ impl Parseable for ast::MethodSignature {
             let name = parser.parse()?;
 
             let generics = if parser.match_(token!["["]).is_some() {
-                let params = parser.parse_tuple(token![,])?;
-
-                if params.is_empty() {
-                    return Err(parser.cursor.error(ParseErr::ExpectedIdent));
-                }
-                parser.match_(token!["]"])
-                    .ok_or_else(|| parser.cursor.error({
-                        match params.ended_on_terminator() {
-                            true  => ParseErr::ExpectedParam,
-                            false => expected_tokens![,],
-                        }
-                    }))?;
-
-                params.values().collect()
+                parser.parse_tuple(token![,])?
+                    .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_closed(parser, token!["]"], 
+                        |parser| parser.cursor.error(expected_tokens![,]),
+                        |parser| parser.cursor.error(ParseErr::ExpectedParam),
+                    )?.values().collect()
             } else {
                 vec![]
             };
 
             parser.expect(token!["("])?;
-            let params = parser.parse_tuple(token![,])?;
-            parser.match_(token![")"])
-                .ok_or_else(|| parser.cursor.error({
-                    match params.ended_on_terminator() {
-                        true  => ParseErr::ExpectedParam,
-                        false => expected_tokens![,],
-                    }
-                }))?;
+            let params = parser.parse_tuple(token![,])?
+                .assert_closed(parser, token![")"],
+                    |parser| parser.cursor.error(expected_tokens![,]),
+                    |parser| parser.cursor.error(ParseErr::ExpectedParam),
+            )?.values().collect();
             
             let ret = match parser.match_(token![->]) {
                 Some(_) => Some(parser.parse()?),
                 None    => None,
             };
 
-            Ok((referent, is_static, name, generics, params.values().collect(), ret))
+            ParseResult::Ok((referent, is_static, name, generics, params, ret))
         })?;
 
         Ok(Self { referent, is_static, name, generic_params, params, ret, span  })
@@ -1188,19 +1173,13 @@ impl Parseable for ast::Class {
             let ident = parser.parse()?;
             let generic_params = match parser.match_(token!["["]) {
                 Some(_) => {
-                    let tpl = parser.parse_tuple(token![,])?;
-                    if tpl.is_empty() {
-                        return ParseResult::Err(parser.cursor.error(ParseErr::ExpectedIdent));
-                    }
-                    parser.match_(token!["]"])
-                        .ok_or_else(|| parser.cursor.error({
-                            match tpl.ended_on_terminator() {
-                                true  => ParseErr::ExpectedIdent,
-                                false => expected_tokens![,],
-                            }
-                        }))?;
-                    
-                    tpl.values().collect()
+                    parser.parse_tuple(token![,])?
+                        .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                        .assert_closed(parser, token!["]"],
+                            |parser| parser.cursor.error(expected_tokens![,]),
+                            |parser| parser.cursor.error(ParseErr::ExpectedIdent),
+                        )?
+                        .values().collect()
                 },
                 None => vec![]
             };
@@ -1217,7 +1196,7 @@ impl Parseable for ast::Class {
 
             parser.expect(token!["}"])?;
             
-            Ok((ident, generic_params, fields, methods))
+            ParseResult::Ok((ident, generic_params, fields, methods))
         })?;
 
         Ok(Self { ident, generic_params, fields, methods, span })
@@ -1254,6 +1233,7 @@ impl Parseable for ast::IGlobal {
         let ((ident, value), span) = parser.try_spanned(|parser| {
             parser.expect(token![global])?;
             let ident = parser.parse()?;
+            parser.expect(token![=])?;
             let value = parser.parse()?;
 
             ParseResult::Ok((ident, value))
