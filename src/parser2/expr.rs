@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::lexer::token::Token;
+use crate::lexer::token::{Token, FullToken};
 use crate::span::Spanned;
 use crate::token;
 
@@ -69,7 +69,7 @@ macro_rules! parse_expr_enums {
 // 16. Assignment
 
 parse_expr_enums! {
-    Expr0:  { Ident, Block, Literal, ListLiteral, SetLiteral, DictLiteral, ClassLiteral, If, While, For },
+    Expr0:  { Ident, Block, Literal, ListLiteral, SetLiteral, DictLiteral, ClassLiteral, If, While, For, Expr },
     Expr1:  { Expr0, Path, StaticPath, Call, Index },
     Expr2:  { Expr1, IDeref },
     Expr3:  { Expr2, UnaryOps },
@@ -176,7 +176,36 @@ impl Parseable for Option<Expr12> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        const CMP_OPS: &[Token] = &[
+            token![<=], token![<],
+            token![==], token![!=],
+            token![>=], token![>],
+        ];
+
+        let Some(lhs) = parser.try_parse::<Expr11>()? else { return Ok(None) };
+        let mut rights = vec![];
+        let mut span = None;
+
+        while let Some(op) = parser.match_(CMP_OPS) {
+            let rhs: Expr   = parser.parse::<Expr11>()?.into();
+
+            let spanref = span.get_or_insert(op.span());
+            *spanref += op.span();
+            *spanref += rhs.span();
+
+            let op: op::Cmp = op.kind.try_into().unwrap();
+
+            rights.push((op, rhs));
+        }
+
+        if !rights.is_empty() {
+            let left = Box::new(Expr::from(lhs));
+            let span = left.span() + span.unwrap();
+            
+            Ok(Some(Expr12::Comparison(Comparison { left, rights, span })))
+        } else {
+            Ok(Some(Expr12::Expr11(lhs)))
+        }
     }
 }
 impl Parseable for Option<Expr11> {
@@ -326,6 +355,140 @@ impl Parseable for Option<Expr0> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let Some(FullToken { kind, span: _ }) = parser.peek() else { return Ok(None) };
+
+        let expr = match kind {
+            token![#] | Token::Ident(_) => Expr0::Ident(parser.parse()?), // TODO
+            token!["{"]   => Expr0::Block(parser.parse()?),
+            Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => Expr0::Literal(parser.parse()?),
+            token!["["]   => Expr0::ListLiteral(parser.parse()?),
+            token![if]    => Expr0::If(parser.parse()?),
+            token![while] => Expr0::While(parser.parse()?),
+            token![for]   => Expr0::For(parser.parse()?),
+            token!["("]   => {
+                parser.expect(token!["("])?;
+                let e = parser.parse()?;
+                parser.expect(token![")"])?;
+                
+                Expr0::Expr(e)
+            },
+            _ => { return Ok(None) }
+        };
+            // Ident, Block, Literal, ListLiteral, *SetLiteral, *DictLiteral, *ClassLiteral, If, While, For
+        // };
+
+        Ok(Some(expr))
+    }
+}
+
+impl Parseable for Literal {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let Some(FullToken { kind: tok_kind, span }) = parser.next() else {
+            return Err(parser.cursor.error(ParseErr::ExpectedLiteral));
+        };
+        
+        let lit_kind = match tok_kind {
+            Token::Numeric(n) => {
+                LitKind::from_numeric(&n)
+                    .ok_or_else(|| parser.cursor.error(ParseErr::CannotParseNumeric))?
+            }
+            Token::Str(s)  => LitKind::Str(s),
+            Token::Char(c) => LitKind::Char(c),
+            token![true]   => LitKind::Bool(true),
+            token![false]  => LitKind::Bool(false),
+            _ => { return Err(parser.cursor.error(ParseErr::ExpectedLiteral)) }
+        };
+        Ok(Self { kind: lit_kind, span })
+    }
+}
+impl Parseable for ListLiteral {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let (values, span) = parser.try_spanned(|parser| {
+            parser.expect(token!["["])?;
+            
+            let values = parser.parse_tuple(token![,])?
+                .assert_closed(parser, token!["]"],
+                    |parser| parser.cursor.error(ParseErr::ExpectedTokens(vec![token![,]])),
+                    |parser| parser.cursor.error(ParseErr::ExpectedExpr)
+                )?
+                .values()
+                .collect();
+            
+            ParseResult::Ok(values)
+        })?;
+
+        Ok(Self { values, span })
+    }
+}
+impl Parseable for If {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let span = parser.expect(token![if])?.span;
+        let mut conditionals = vec![];
+        let mut last: Option<Block> = None;
+
+        conditionals.push((parser.parse()?, parser.parse()?));
+        while parser.match_(token![else]).is_some() {
+            if parser.match_(token![if]).is_some() {
+                conditionals.push((parser.parse()?, parser.parse()?));
+            } else {
+                last.replace(parser.parse()?);
+                break;
+            }
+        }
+
+        let span = conditionals.iter()
+            .map(|(_, b)| b)
+            .chain(last.as_ref())
+            .map(Spanned::span)
+            .rfold(span, |acc, cv| acc + cv);
+
+        Ok(If { conditionals, last, span })
+    }
+}
+impl Parseable for While {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let ((condition, block), span) = parser.try_spanned(|parser| {
+            parser.expect(token![while])?;
+            let condition = parser.parse()?;
+            let block = parser.parse()?;
+
+            ParseResult::Ok((condition, block))
+        })?;
+
+        Ok(While {
+            condition: Box::new(condition), 
+            block, 
+            span
+        })
+    }
+}
+impl Parseable for For {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let ((ident, iterator, block), span) = parser.try_spanned(|parser| {
+            parser.expect(token![for])?;
+            let ident = parser.parse()?;
+            parser.expect(token![in])?;
+            let iterator = parser.parse()?;
+            let block = parser.parse()?;
+
+            ParseResult::Ok((ident, iterator, block))
+        })?;
+
+        Ok(For {
+            ident, 
+            iterator: Box::new(iterator), 
+            block,
+            span 
+        })
     }
 }

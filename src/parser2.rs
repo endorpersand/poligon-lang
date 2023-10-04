@@ -228,8 +228,8 @@ pub enum ParseErr {
     /// The parser expected an expression here, but failed to match an expression.
     ExpectedExpr,
 
-    /// The parser expected a str literal here, but got something else.
-    ExpectedStrLiteral,
+    /// The parser expected a literal here, but got something else.
+    ExpectedLiteral,
 
     /// The string provided could not be parsed into a numeric value.
     CannotParseNumeric,
@@ -283,7 +283,7 @@ impl std::fmt::Display for ParseErr {
             },
             ParseErr::ExpectedIdent      => write!(f, "expected identifier"),
             ParseErr::ExpectedExpr       => write!(f, "expected expression"),
-            ParseErr::ExpectedStrLiteral => write!(f, "expected string literal"),
+            ParseErr::ExpectedLiteral    => write!(f, "expected literal"),
             ParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
             ParseErr::ExpectedBlock      => write!(f, "expected block"),
             ParseErr::ExpectedType       => write!(f, "expected type expression"),
@@ -784,7 +784,7 @@ impl Parseable for ast::StrLiteral {
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or(parser.cursor.error(ParseErr::ExpectedStrLiteral))
+            .ok_or(parser.cursor.error(ParseErr::ExpectedLiteral))
     }
 }
 
