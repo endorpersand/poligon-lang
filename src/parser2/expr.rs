@@ -86,7 +86,7 @@ impl Parseable for Option<Expr15> {
 
         let expr = if let Some((far_pat, far_eq)) = lhs.pop() {
             let rhs = Expr::from(rhs);
-            let far_span = far_pat.span().append(*far_eq.span()).append(*rhs.span());
+            let far_span = far_pat.span() + far_eq.span() + rhs.span();
             let far_asg = Assign {
                 target: far_pat,
                 value: Box::new(rhs),
@@ -94,7 +94,7 @@ impl Parseable for Option<Expr15> {
             };
 
             let folded_asg = lhs.into_iter().rfold(far_asg, |acc, (pat, eq)| {
-                let span = pat.span().append(*eq.span()).append(*acc.span());
+                let span = pat.span() + eq.span() + acc.span();
                 Assign {
                     target: pat,
                     value: Box::new(Expr::Assign(acc)),

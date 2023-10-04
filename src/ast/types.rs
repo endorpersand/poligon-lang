@@ -20,8 +20,8 @@ pub struct Type {
     pub span: Span
 }
 impl Spanned for Type {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -52,8 +52,8 @@ pub struct Class {
     pub span: Span
 }
 impl Spanned for Class {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -90,8 +90,8 @@ pub struct FieldDecl {
     pub span: Span
 }
 impl Spanned for FieldDecl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -129,8 +129,8 @@ pub struct MethodSignature {
     pub span: Span
 }
 impl Spanned for MethodSignature {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -148,7 +148,7 @@ pub struct MethodDecl {
     pub span: Span
 }
 impl Spanned for MethodDecl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }

@@ -400,7 +400,7 @@ impl<'s> Parser2<'s> {
 
     fn attach_to_collector(&mut self, span: Span) {
         if let Some(collector) = self.span_collectors.last_mut() {
-            *collector = (*collector).append(span);
+            *collector += span;
         }
     }
 
@@ -635,8 +635,8 @@ impl<T> Tuple<T> {
     }
 }
 impl<T> crate::span::Spanned for Tuple<T> {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 pub struct Entry<K, V> {
@@ -645,8 +645,8 @@ pub struct Entry<K, V> {
     span: Span
 }
 impl<K, V> crate::span::Spanned for Entry<K, V> {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 // This cannot be generalized, as it causes recursion problems.

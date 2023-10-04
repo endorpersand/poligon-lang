@@ -87,8 +87,8 @@ pub struct Decl {
     pub span: Span
 }
 impl Spanned for Decl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -108,8 +108,8 @@ pub struct Return {
     pub span: Span
 }
 impl Spanned for Return {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 /// `break`
@@ -118,8 +118,8 @@ pub struct Break {
     pub span: Span
 }
 impl Spanned for Break {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -129,8 +129,8 @@ pub struct Continue {
     pub span: Span
 }
 impl Spanned for Continue {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -141,8 +141,8 @@ pub struct Throw {
     pub span: Span
 }
 impl Spanned for Throw {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -153,8 +153,8 @@ pub struct Import {
     pub span: Span
 }
 impl Spanned for Import {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -164,8 +164,8 @@ pub struct ImportIntrinsic {
     pub span: Span
 }
 impl Spanned for ImportIntrinsic {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -176,8 +176,8 @@ pub struct IGlobal {
     pub span: Span
 }
 impl Spanned for IGlobal {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -188,7 +188,7 @@ pub struct FitClassDecl {
     pub span: Span
 }
 impl Spanned for FitClassDecl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }

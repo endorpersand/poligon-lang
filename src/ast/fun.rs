@@ -39,8 +39,8 @@ pub struct Param {
     pub span: Span
 }
 impl Spanned for Param {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -74,8 +74,8 @@ pub struct FunSignature {
     pub span: Span
 }
 impl Spanned for FunSignature {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -102,8 +102,8 @@ pub struct FunDecl {
     pub span: Span
 }
 impl Spanned for FunDecl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -121,7 +121,7 @@ pub struct ExternFunDecl {
     pub span: Span
 }
 impl Spanned for ExternFunDecl {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }

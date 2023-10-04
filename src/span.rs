@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::ops::{RangeInclusive, Add, AddAssign};
 
 /// Indicates a specific character in given code.
 pub type Cursor = (usize /* line */, usize /* character */);
@@ -57,12 +57,24 @@ impl From<RangeInclusive<Cursor>> for Span {
         Span::new(value)
     }
 }
+impl Add for Span {
+    type Output = Span;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.append(rhs)
+    }
+}
+impl AddAssign for Span {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = (*self).append(rhs);
+    }
+}
 
 pub trait Spanned {
-    fn span(&self) -> &Span;
+    fn span(&self) -> Span;
 }
 impl Spanned for Span {
-    fn span(&self) -> &Span {
-        self
+    fn span(&self) -> Span {
+        *self
     }
 }

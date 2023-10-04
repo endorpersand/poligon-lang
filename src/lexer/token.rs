@@ -91,8 +91,8 @@ impl PartialEq<FullToken> for Token {
     }
 }
 impl Spanned for FullToken {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 

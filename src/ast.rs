@@ -22,7 +22,7 @@ macro_rules! define_enum {
         }
 
         impl $crate::span::Spanned for $n {
-            fn span(&self) -> &$crate::span::Span {
+            fn span(&self) -> $crate::span::Span {
                 match self {
                     $(Self::$e(t) => t.span()),*
                 }
@@ -76,8 +76,8 @@ pub struct Program {
     pub span: Span
 }
 impl Spanned for Program {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -102,8 +102,8 @@ pub struct Block {
     pub span: Span
 }
 impl Spanned for Block {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -113,8 +113,8 @@ pub struct Ident {
     pub span: Span
 }
 impl Spanned for Ident {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -124,8 +124,8 @@ pub struct StrLiteral {
     pub span: Span
 }
 impl Spanned for StrLiteral {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -172,8 +172,8 @@ pub struct Path {
     pub span: Span
 }
 impl Spanned for Path {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -200,8 +200,8 @@ pub struct StaticPath {
     pub span: Span
 }
 impl Spanned for StaticPath {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -216,7 +216,7 @@ pub enum AsgUnit {
     #[allow(missing_docs)] Deref(IDeref),
 }
 impl Spanned for AsgUnit {
-    fn span(&self) -> &Span {
+    fn span(&self) -> Span {
         match self {
             AsgUnit::Ident(e) => e.span(),
             AsgUnit::Path(e)  => e.span(),
@@ -237,8 +237,8 @@ pub struct DeclUnit {
     pub span: Span
 }
 impl Spanned for DeclUnit {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -273,12 +273,12 @@ pub enum Pat<T> {
     }
 }
 impl<T: Spanned> Spanned for Pat<T> {
-    fn span(&self) -> &Span {
+    fn span(&self) -> Span {
         match self {
             Pat::Unit(t) => t.span(),
             | Pat::Spread { span, .. }
             | Pat::List { span, .. }
-            => span,
+            => *span,
         }
     }
 }
@@ -324,7 +324,7 @@ impl TryFrom<Expr> for AsgUnit {
             Expr::Path(attrs)   => Ok(AsgUnit::Path(attrs)),
             Expr::Index(idx)    => Ok(AsgUnit::Index(idx)),
             Expr::IDeref(deref) => Ok(AsgUnit::Deref(deref)),
-            e => Err(PatErr::InvalidAssignTarget.at_range(*e.span()))
+            e => Err(PatErr::InvalidAssignTarget.at_range(e.span()))
         }
     }
 }

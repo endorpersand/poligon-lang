@@ -116,8 +116,8 @@ pub struct Literal {
     pub span: Span
 }
 impl Spanned for Literal {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -170,8 +170,8 @@ pub struct ListLiteral {
     pub span: Span
 }
 impl Spanned for ListLiteral {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -181,8 +181,8 @@ pub struct SetLiteral {
     pub span: Span
 }
 impl Spanned for SetLiteral {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -192,8 +192,8 @@ pub struct DictLiteral {
     pub span: Span
 }
 impl Spanned for DictLiteral {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -204,8 +204,8 @@ pub struct ClassLiteral {
     pub span: Span
 }
 impl Spanned for ClassLiteral {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -216,8 +216,8 @@ pub struct Assign {
     pub span: Span
 }
 impl Spanned for Assign {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -231,8 +231,8 @@ pub struct UnaryOps {
     pub span: Span
 }
 impl Spanned for UnaryOps {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -247,8 +247,8 @@ pub struct BinaryOp {
     pub span: Span
 }
 impl Spanned for BinaryOp {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -261,8 +261,8 @@ pub struct Comparison {
     pub span: Span
 }
 impl Spanned for Comparison {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -287,8 +287,8 @@ pub struct Index {
     pub span: Span
 }
 impl Spanned for Index {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -298,8 +298,8 @@ pub struct Spread {
     pub span: Span
 }
 impl Spanned for Spread {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -316,8 +316,8 @@ pub struct Range {
     pub span: Span
 }
 impl Spanned for Range {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -331,8 +331,8 @@ pub struct If {
     pub span: Span
 }
 impl Spanned for If {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -346,8 +346,8 @@ pub struct While {
     pub span: Span
 }
 impl Spanned for While {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -363,8 +363,8 @@ pub struct For {
     pub span: Span
 }
 impl Spanned for For {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -379,8 +379,8 @@ pub struct Call {
     pub span: Span
 }
 impl Spanned for Call {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }
 
@@ -396,7 +396,7 @@ pub struct IDeref {
     pub span: Span
 }
 impl Spanned for IDeref {
-    fn span(&self) -> &Span {
-        &self.span
+    fn span(&self) -> Span {
+        self.span
     }
 }

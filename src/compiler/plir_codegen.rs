@@ -1651,7 +1651,7 @@ impl PLIRCodegen {
         
         let ty = match ty {
             Some(t) => self.consume_type(t)?,
-            None => self.resolver.new_unknown(*pat.span()),
+            None => self.resolver.new_unknown(pat.span()),
         };
         let e = self.consume_located_expr(val, Some(ty.clone()))?;
 
@@ -2089,11 +2089,11 @@ impl PLIRCodegen {
                 self.push_block(span, ctx_type);
                 self.unpack_pat(target, expr, ((), |_, _| Ok(())),
                     |this, unit, e, _| {
-                        let &span = unit.span();
+                        let span = unit.span();
                         let unit = match unit {
                             ast::AsgUnit::Ident(ident) => plir::AsgUnit::Ident(ident.ident),
                             ast::AsgUnit::Path(p) => {
-                                let &pspan = p.span();
+                                let pspan = p.span();
                                 let p = this.consume_path(p)?;
                                 if matches!(p, plir::Path::Method(..)) {
                                     Err(PLIRErr::CannotAssignToMethod.at_range(pspan))?
@@ -2231,7 +2231,7 @@ impl PLIRCodegen {
                 ))
             },
             ast::Expr::For(ast::For { ident, iterator, block, span: _ }) => {
-                let &it_span = iterator.span();
+                let it_span = iterator.span();
                 let iterator = self.consume_expr_and_box(*iterator, None)?;
 
                 // FIXME: cleanup
@@ -2356,7 +2356,7 @@ impl PLIRCodegen {
             ast::Expr::Spread(ast::Spread { expr: _, span }) => Err(PLIRErr::CannotSpread.at_range(span)),
             ast::Expr::IDeref(d) => {
                 let dty = ctx_type
-                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(*d.span()))?;
+                    .ok_or_else(|| PLIRErr::CannotResolveType.at_range(d.span()))?;
 
                 self.consume_deref(d, dty)
                     .map(|deref| plir::Expr::new(deref.ty.clone(), plir::ExprType::Deref(deref)))
@@ -2365,7 +2365,7 @@ impl PLIRCodegen {
     }
 
     fn consume_located_expr(&mut self, expr: ast::Expr, ctx_type: Option<plir::Type>) -> PLIRResult<Located<plir::Expr>> {
-        let &span = expr.span();
+        let span = expr.span();
         self.consume_expr(expr, ctx_type)
             .map(|e| Located::new(e, span))
     }
