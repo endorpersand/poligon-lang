@@ -4,6 +4,24 @@ use super::{Ident, Block, Type, AsgPat, Path, StaticPath, op};
 
 define_enum! {
     /// An expression.
+    /// 
+    /// Precedence:
+    /// 1.  Unit expressions (ident, block, parenthesized expressions, literals, if statements, loops)
+    /// 2.  Calling, indexing, paths
+    /// 3.  Deref
+    /// 4.  Other unary operators (+, -, !, ~)
+    /// 5.  Mult., division, mod (*, /, %)
+    /// 6.  Add, sub (+, -)
+    /// 7.  Shifts (<<, >>)
+    /// 8.  Bitwise and (&)
+    /// 9.  Bitwise xor (^)
+    /// 10. Bitwise or (|)
+    /// 11. Range (a..b)
+    /// 12. Spread (..a)
+    /// 13. Comparisons (<, >, <=, >=, ==, !=)
+    /// 14. Logical and (&&)
+    /// 15. Logical or (||)
+    /// 16. Assignment
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Expr {
         /// Variable access.
