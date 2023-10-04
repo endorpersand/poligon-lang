@@ -1,8 +1,9 @@
 use crate::ast::*;
+use crate::lexer::token::Token;
 use crate::span::Spanned;
 use crate::token;
 
-use super::{Parseable, FullParseErr, Parser2, ParseErr, ParseResult};
+use super::{Parseable, FullParseErr, Parser2, ParseErr, ParseResult, TokenPattern2};
 
 impl Parseable for Option<Expr> {
     type Err = FullParseErr;
@@ -50,22 +51,23 @@ macro_rules! parse_expr_enums {
     }
 }
 
-/// 1.  Unit expressions (ident, block, parenthesized expressions, literals, if statements, loops)
-/// 2.  Calling, indexing, paths
-/// 3.  Deref
-/// 4.  Other unary operators (+, -, !, ~)
-/// 5.  Mult., division, mod (*, /, %)
-/// 6.  Add, sub (+, -)
-/// 7.  Shifts (<<, >>)
-/// 8.  Bitwise and (&)
-/// 9.  Bitwise xor (^)
-/// 10. Bitwise or (|)
-/// 11. Range (a..b)
-/// 12. Spread (..a)
-/// 13. Comparisons (<, >, <=, >=, ==, !=)
-/// 14. Logical and (&&)
-/// 15. Logical or (||)
-/// 16. Assignment
+// 1.  Unit expressions (ident, block, parenthesized expressions, literals, if statements, loops)
+// 2.  Calling, indexing, paths
+// 3.  Deref
+// 4.  Other unary operators (+, -, !, ~)
+// 5.  Mult., division, mod (*, /, %)
+// 6.  Add, sub (+, -)
+// 7.  Shifts (<<, >>)
+// 8.  Bitwise and (&)
+// 9.  Bitwise xor (^)
+// 10. Bitwise or (|)
+// 11. Range (a..b)
+// 12. Spread (..a)
+// 13. Comparisons (<, >, <=, >=, ==, !=)
+// 14. Logical and (&&)
+// 15. Logical or (||)
+// 16. Assignment
+
 parse_expr_enums! {
     Expr0:  { Ident, Block, Literal, ListLiteral, SetLiteral, DictLiteral, ClassLiteral, If, While, For },
     Expr1:  { Expr0, Path, StaticPath, Call, Index },
@@ -188,7 +190,7 @@ impl Parseable for Option<Expr11> {
                 .map(Expr11::Expr10)
         };
 
-        ParseResult::Ok(m_expr)
+        Ok(m_expr)
     }
 }
 impl Parseable for Spread {
@@ -208,24 +210,111 @@ impl Parseable for Option<Expr10> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let Some(lhs) = parser.try_parse::<Expr9>()? else { return Ok(None) };
+        if let Some(op) = parser.match_(token![..]) {
+            let lhs = Expr::from(lhs);
+            let rhs = Expr::from(parser.parse::<Expr9>()?);
+
+            let mut span = lhs.span() + op.span() + rhs.span();
+            let step = match parser.match_(token![step]) {
+                Some(t) => {
+                    span += t.span();
+                    Some(parser.parse::<Expr9>()?.into())
+                },
+                None => None,
+            };
+
+            Ok(Some(Expr10::Range(Range {
+                left:  Box::new(lhs),
+                right: Box::new(rhs),
+                step:  step.map(Box::new),
+                span,
+            })))
+        } else {
+            Ok(Some(Expr10::Expr9(lhs)))
+        }
     }
 }
 
+const UNARY_OPS: &[Token] = &[ token![+], token![-], token![~], token![!] ];
 impl Parseable for Option<Expr3> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let m_expr = if parser.peek().is_some_and(|t| UNARY_OPS.contains(&t.kind)) {
+            Some(Expr3::UnaryOps(parser.parse()?))
+        } else {
+            parser.try_parse()?
+                .map(Expr3::Expr2)
+        };
+
+        Ok(m_expr)
     }
 }
+impl Parseable for UnaryOps {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let ((ops, inner), span) = parser.try_spanned(|parser| {
+            let mut ops = vec![];
+            while let Some(op) = parser.match_(UNARY_OPS) {
+                ops.push(op.kind.try_into().unwrap());
+            }
+
+            if ops.is_empty() {
+                return Err(parser.cursor.error(ParseErr::ExpectedTokens(UNARY_OPS.to_vec())));
+            }
+            let inner = parser.parse::<Expr2>()?;
+
+            ParseResult::Ok((ops, inner))
+        })?;
+
+        Ok(Self { ops, expr: Box::new(inner.into()), span })
+    }
+}
+
 impl Parseable for Option<Expr2> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        let m_expr = if parser.peek().is_some_and(|t| matches!(&t.kind, token![*])) {
+            Some(Expr2::IDeref(parser.parse()?))
+        } else {
+            parser.try_parse()?
+                .map(Expr2::Expr1)
+        };
+
+        Ok(m_expr)
     }
 }
+impl Parseable for IDeref {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+        let mut deref_spans = vec![];
+        while let Some(op) = parser.match_(UNARY_OPS) {
+            deref_spans.push(op.span());
+        }
+
+        let Some(far_span) = deref_spans.pop() else {
+            return Err(parser.cursor.error(ParseErr::ExpectedTokens(token![*].expected_tokens())));
+        };
+
+        let far_deref = IDeref {
+            reference: Box::new(parser.parse::<Expr1>()?.into()),
+            span: far_span,
+        };
+        let deref = deref_spans.into_iter().rfold(far_deref, |d, op_span| {
+            let span = op_span + d.span();
+            IDeref {
+                reference: Box::new(d.into()), span
+            }
+        });
+
+        Ok(deref)
+    }
+}
+
 impl Parseable for Option<Expr1> {
     type Err = FullParseErr;
 

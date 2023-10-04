@@ -202,7 +202,7 @@ impl<const N: usize> TokenPattern2 for [Token; N] {
         self.as_slice().expected_tokens()
     }
 }
-impl<'a, P: TokenPattern2> TokenPattern2 for &'a P {
+impl<'a, P: TokenPattern2 + ?Sized> TokenPattern2 for &'a P {
     fn is_prefix_of(&self, cur: &ParCursor) -> bool {
         (*self).is_prefix_of(cur)
     }
