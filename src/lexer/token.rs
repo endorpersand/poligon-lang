@@ -42,13 +42,6 @@ pub enum Token {
     LineSep
 }
 
-impl Token {
-    /// Checks if one token contains another in it.
-    pub fn starts_with<P: TokenPattern>(&self, lhs: P) -> bool {
-        lhs.fully_accepts(self) || lhs.is_strict_prefix_of(self)
-    }
-}
-
 /// A token with position information.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct FullToken {
@@ -60,15 +53,6 @@ impl FullToken {
     /// Create a FullToken using a token and its given position.
     pub fn new(kind: Token, span: Span) -> Self {
         Self { kind, span }
-    }
-
-    /// Attempts to split the full token into two. 
-    /// 
-    /// If successful, the LHS token is returned (and removed from this token).
-    /// 
-    /// If unsuccessful, the token stays unchanged.
-    pub fn try_split<P: TokenPattern>(&mut self, lhs: P) -> Option<Self> {
-        lhs.strip_strict_prefix_of(self)
     }
 }
 
@@ -95,117 +79,6 @@ impl Spanned for FullToken {
         self.span
     }
 }
-
-mod pat {
-    use crate::span::Span;
-
-    use super::{Token, FullToken, SPLITTABLES};
-
-    /// A token pattern.
-    /// 
-    /// Similar to std [`std::str::pattern::Pattern`], this can be used to
-    /// search a pattern in a given Token.
-    /// 
-    /// [`Token`] == verify if that token is in the given output
-    /// [`[Token]`] == verify if any one of those tokens are in the given input
-    pub trait TokenPattern {
-        /// Tests if this pattern matches the token pattern exactly.
-        fn fully_accepts(&self, t: &Token) -> bool;
-        /// Tests if this pattern strictly prefixes the token.
-        /// 
-        /// To check for non-strict prefixes, 
-        /// one can perform `self.contains(t) || self.is_strict_prefix_of(t)`.
-        fn is_strict_prefix_of(&self, t: &Token) -> bool;
-        /// Removes the prefix from a given FullToken, returning it if present.
-        /// 
-        /// This will not work if the pattern encompasses the token fully.
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken>;
-        
-        /// Provides which tokens this pattern expects.
-        fn expected_tokens(&self) -> Vec<Token>;
-    }
-    
-    impl TokenPattern for Token {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self == t
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            SPLITTABLES.contains_key(&(t, self))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            let FullToken { kind: fkind, span: fspan } = t;
-            if let Some(rhs) = SPLITTABLES.get(&(fkind, self)) {
-                let ((slno, scno), (elno, ecno)) = (fspan.start(), fspan.end());
-    
-                let lspan = Span::new((slno, scno) ..= (slno, scno));
-                let rspan = Span::new((elno, ecno) ..= (elno, ecno));
-    
-                *t = FullToken { kind: rhs.clone(),     span: rspan };
-                Some(FullToken { kind: (*self).clone(), span: lspan })
-            } else {
-                None
-            }
-        }
-
-        fn expected_tokens(&self) -> Vec<Token> {
-            std::slice::from_ref(self).to_vec()
-        }
-    }
-    impl TokenPattern for [Token] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self.contains(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            self.iter().any(|pat| pat.is_strict_prefix_of(t))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
-        }
-
-        fn expected_tokens(&self) -> Vec<Token> {
-            self.to_vec()
-        }
-    }
-    impl<const N: usize> TokenPattern for [Token; N] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self.contains(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            self.iter().any(|pat| pat.is_strict_prefix_of(t))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
-        }
-
-        fn expected_tokens(&self) -> Vec<Token> {
-            self.to_vec()
-        }
-    }
-    impl<'a, P: TokenPattern> TokenPattern for &'a P {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            (*self).fully_accepts(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            (*self).is_strict_prefix_of(t)
-        }
-
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            (*self).strip_strict_prefix_of(t)
-        }
-
-        fn expected_tokens(&self) -> Vec<Token> {
-            (*self).expected_tokens()
-        }
-    }
-}
-pub use pat::TokenPattern;
 
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
@@ -391,22 +264,7 @@ define_operators_and_delimiters! {
 }
 
 /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
-static SPLITTABLES: Lazy<HashMap<(&'static Token, &'static Token), Token>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    // m.insert((&token![..], &token![.]), token![.]);
-    // m.insert((&token![&&], &token![&]), token![&]);
-    // m.insert((&token![||], &token![|]), token![|]);
-    // m.insert((&token![<=], &token![<]), token![=]);
-    // m.insert((&token![>=], &token![>]), token![=]);
-    // m.insert((&token![==], &token![=]), token![=]);
-    m.insert((&token![<<], &token![<]), token![<]);
-    m.insert((&token![>>], &token![>]), token![>]);
-    // m.insert((&token![::], &token![:]), token![:]);
-    // m.insert((&token![->], &token![-]), token![>]);
-    m
-});
-/// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
-pub(crate) static SPLITTABLES2: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(|| {
+pub(crate) static SPLITTABLES: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert(token![..], (token![.], token![.]));
     m.insert(token![&&], (token![&], token![&]));

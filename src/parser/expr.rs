@@ -3,12 +3,12 @@ use crate::lexer::token::{Token, FullToken};
 use crate::span::Spanned;
 use crate::token;
 
-use super::{Parseable, FullParseErr, Parser2, ParseErr, ParseResult, TokenPattern2, Entry};
+use super::{Parseable, FullParseErr, Parser, ParseErr, ParseResult, TokenPattern, Entry};
 
 impl Parseable for Option<Expr> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse::<Expr15>()
             .map(|m_expr| m_expr.map(Into::into))
     }
@@ -16,7 +16,7 @@ impl Parseable for Option<Expr> {
 impl Parseable for Expr {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
             .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedExpr))
     }
@@ -42,7 +42,7 @@ macro_rules! parse_expr_enums {
             impl Parseable for $i {
                 type Err = FullParseErr;
             
-                fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+                fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
                     parser.try_parse()?
                         .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedExpr))
                 }
@@ -91,7 +91,7 @@ parse_expr_enums! {
 impl Parseable for Option<Expr15> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let mut lhs = vec![];
         let Some(mut rhs) = parser.try_parse::<Expr14>()? else { return ParseResult::Ok(None) };
 
@@ -138,7 +138,7 @@ macro_rules! left_assoc_ops {
             impl Parseable for Option<$E> {
                 type Err = FullParseErr;
             
-                fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+                fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
                     let Some(mut lhs) = parser.try_parse::<$EM1>()?.map($E::$EM1) else {
                         return ParseResult::Ok(None)
                     };
@@ -176,7 +176,7 @@ left_assoc_ops! {
 impl Parseable for Option<Expr12> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         const CMP_OPS: &[Token] = &[
             token![<=], token![<],
             token![==], token![!=],
@@ -212,7 +212,7 @@ impl Parseable for Option<Expr12> {
 impl Parseable for Option<Expr11> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let m_expr = if parser.peek().is_some_and(|t| matches!(&t.kind, token![..])) {
             Some(Expr11::Spread(parser.parse()?))
         } else {
@@ -226,7 +226,7 @@ impl Parseable for Option<Expr11> {
 impl Parseable for Spread {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (e, span) = parser.try_spanned(|parser| {
             parser.expect(token![..])?;
             parser.try_parse()
@@ -239,7 +239,7 @@ impl Parseable for Spread {
 impl Parseable for Option<Expr10> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let Some(lhs) = parser.try_parse::<Expr9>()? else { return Ok(None) };
         if let Some(op) = parser.match_(token![..]) {
             let lhs = Expr::from(lhs);
@@ -270,7 +270,7 @@ const UNARY_OPS: &[Token] = &[ token![+], token![-], token![~], token![!] ];
 impl Parseable for Option<Expr3> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let m_expr = if parser.peek().is_some_and(|t| UNARY_OPS.contains(&t.kind)) {
             Some(Expr3::UnaryOps(parser.parse()?))
         } else {
@@ -284,7 +284,7 @@ impl Parseable for Option<Expr3> {
 impl Parseable for UnaryOps {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ops, inner), span) = parser.try_spanned(|parser| {
             let mut ops = vec![];
             while let Some(op) = parser.match_(UNARY_OPS) {
@@ -306,7 +306,7 @@ impl Parseable for UnaryOps {
 impl Parseable for Option<Expr2> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let m_expr = if parser.peek().is_some_and(|t| matches!(&t.kind, token![*])) {
             Some(Expr2::IDeref(parser.parse()?))
         } else {
@@ -320,7 +320,7 @@ impl Parseable for Option<Expr2> {
 impl Parseable for IDeref {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let mut deref_spans = vec![];
         while let Some(op) = parser.match_(UNARY_OPS) {
             deref_spans.push(op.span());
@@ -348,14 +348,14 @@ impl Parseable for IDeref {
 impl Parseable for Option<Expr1> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         todo!()
     }
 }
 impl Parseable for Option<Expr0> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let Some(FullToken { kind, span: _ }) = parser.peek() else { return Ok(None) };
 
         let expr = match kind {
@@ -384,7 +384,7 @@ impl Parseable for Option<Expr0> {
 impl Parseable for Option<Identoid> {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let identoid = {
             match (parser.peek().map(|t| &t.kind), parser.peek_n(1).map(|t| &t.kind), parser.peek_n(2).map(|t| &t.kind)) {
                 | (Some(token![#]), Some(Token::Ident(_)), Some(token!["["]))
@@ -445,7 +445,7 @@ impl Parseable for Option<Identoid> {
 impl Parseable for ClassLiteral {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ty, entries), span) = parser.try_spanned(|parser| {
             let ty = parser.parse()?;
             parser.expect(token![#])?;
@@ -469,7 +469,7 @@ impl Parseable for ClassLiteral {
 impl Parseable for Literal {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let Some(FullToken { kind: tok_kind, span }) = parser.next() else {
             return Err(parser.cursor.error(ParseErr::ExpectedLiteral));
         };
@@ -491,7 +491,7 @@ impl Parseable for Literal {
 impl Parseable for ListLiteral {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (values, span) = parser.try_spanned(|parser| {
             parser.expect(token!["["])?;
             
@@ -512,7 +512,7 @@ impl Parseable for ListLiteral {
 impl Parseable for If {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let if_span = parser.expect(token![if])?.span;
 
         let ((conditionals, last), rest_span) = parser.try_spanned(|parser| {
@@ -539,7 +539,7 @@ impl Parseable for If {
 impl Parseable for While {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((condition, block), span) = parser.try_spanned(|parser| {
             parser.expect(token![while])?;
             let condition = parser.parse()?;
@@ -558,7 +558,7 @@ impl Parseable for While {
 impl Parseable for For {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ident, iterator, block), span) = parser.try_spanned(|parser| {
             parser.expect(token![for])?;
             let ident = parser.parse()?;

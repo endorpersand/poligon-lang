@@ -13,12 +13,125 @@ use std::collections::VecDeque;
 
 use crate::GonErr;
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken, TokenPattern};
+use crate::lexer::token::{Token, token, FullToken};
 use crate::ast::{Located, ReasgType, MutType};
 use crate::span::Span;
 
 use super::{PLIRCodegen, plir, PLIRErr};
 use super::plir_codegen::DeclaredTypes;
+
+
+mod pat {
+    use crate::lexer::token::SPLITTABLES;
+
+    use super::{Token, FullToken, Span};
+
+    /// A token pattern.
+    /// 
+    /// Similar to std [`std::str::pattern::Pattern`], this can be used to
+    /// search a pattern in a given Token.
+    /// 
+    /// [`Token`] == verify if that token is in the given output
+    /// [`[Token]`] == verify if any one of those tokens are in the given input
+    pub trait TokenPattern {
+        /// Tests if this pattern matches the token pattern exactly.
+        fn fully_accepts(&self, t: &Token) -> bool;
+        /// Tests if this pattern strictly prefixes the token.
+        /// 
+        /// To check for non-strict prefixes, 
+        /// one can perform `self.contains(t) || self.is_strict_prefix_of(t)`.
+        fn is_strict_prefix_of(&self, t: &Token) -> bool;
+        /// Removes the prefix from a given FullToken, returning it if present.
+        /// 
+        /// This will not work if the pattern encompasses the token fully.
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken>;
+        
+        /// Provides which tokens this pattern expects.
+        fn expected_tokens(&self) -> Vec<Token>;
+    }
+    
+    impl TokenPattern for Token {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self == t
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            matches!(SPLITTABLES.get(t), Some((a, _)) if a == self)
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            let FullToken { kind: fkind, span: fspan } = t;
+            match SPLITTABLES.get(&fkind) {
+                Some((lhs, rhs)) if lhs == self => {
+                    let ((slno, scno), (elno, ecno)) = (fspan.start(), fspan.end());
+    
+                    let lspan = Span::new((slno, scno) ..= (slno, scno));
+                    let rspan = Span::new((elno, ecno) ..= (elno, ecno));
+    
+                    *t = FullToken { kind: rhs.clone(),     span: rspan };
+                    Some(FullToken { kind: (*self).clone(), span: lspan })
+                },
+                _ => None,
+            }
+        }
+
+        fn expected_tokens(&self) -> Vec<Token> {
+            std::slice::from_ref(self).to_vec()
+        }
+    }
+    impl TokenPattern for [Token] {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self.contains(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            self.iter().any(|pat| pat.is_strict_prefix_of(t))
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
+        }
+
+        fn expected_tokens(&self) -> Vec<Token> {
+            self.to_vec()
+        }
+    }
+    impl<const N: usize> TokenPattern for [Token; N] {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            self.contains(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            self.iter().any(|pat| pat.is_strict_prefix_of(t))
+        }
+    
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
+        }
+
+        fn expected_tokens(&self) -> Vec<Token> {
+            self.to_vec()
+        }
+    }
+    impl<'a, P: TokenPattern> TokenPattern for &'a P {
+        fn fully_accepts(&self, t: &Token) -> bool {
+            (*self).fully_accepts(t)
+        }
+
+        fn is_strict_prefix_of(&self, t: &Token) -> bool {
+            (*self).is_strict_prefix_of(t)
+        }
+
+        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
+            (*self).strip_strict_prefix_of(t)
+        }
+
+        fn expected_tokens(&self) -> Vec<Token> {
+            (*self).expected_tokens()
+        }
+    }
+}
+use pat::TokenPattern;
 
 /// A struct that does the conversion of tokens to a parseable program tree.
 /// 
@@ -206,14 +319,14 @@ impl DParser {
     /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
     /// ```
-    pub fn expect<P: TokenPattern>(&mut self, u: P) -> DParseResult<FullToken> {
+    pub fn expect<P: TokenPattern>(&mut self, pat: P) -> DParseResult<FullToken> {
         match self.tokens.get_mut(0) {
-            Some(t) if u.fully_accepts(t) => self.next().ok_or_else(|| unreachable!()),
-            Some(t) => match u.strip_strict_prefix_of(t) {
+            Some(t) if pat.fully_accepts(t) => self.next().ok_or_else(|| unreachable!()),
+            Some(t) => match pat.strip_strict_prefix_of(t) {
                 Some(prefix) => Ok(prefix),
-                None => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at_range(t.span))
+                None => Err(DParseErr::ExpectedTokens(pat.expected_tokens()).at_range(t.span))
             },
-            _ => Err(DParseErr::ExpectedTokens(u.expected_tokens()).at(self.eof))
+            _ => Err(DParseErr::ExpectedTokens(pat.expected_tokens()).at(self.eof))
         }
     }
 
