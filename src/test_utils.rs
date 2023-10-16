@@ -117,7 +117,7 @@ impl Test<'_> {
     }
 
     pub fn parse(&self) -> TestResult<ast::Program> {
-        parser::parse(self.tokens.clone())
+        parser::parse(&self.tokens)
             .map_err(|e| self.wrap_err(e))
     }
 

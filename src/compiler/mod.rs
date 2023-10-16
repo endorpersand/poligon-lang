@@ -268,8 +268,10 @@ impl<'ctx> Compiler<'ctx> {
     /// This function allows Poligon code to reference any declared classes and functions in the compiler.
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     pub fn generate_plir(&mut self, code: &str) -> CompileResult<(plir::Program, DeclaredTypes)> {
+        use crate::ast;
+
         let lexed = cast_e(lexer::tokenize(code), code)?;
-        let ast   = cast_e(parser::parse(lexed), code)?;
+        let ast: ast::Program = cast_e(parser::parse(&lexed), code)?;
 
         let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
         cast_e(cg.consume_program(ast), code)?;

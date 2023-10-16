@@ -22,11 +22,47 @@ use crate::span::{Span, Cursor};
 
 type Stream<'s> = &'s [FullToken];
 
-pub struct StreamNotFullyConsumed(pub usize);
+#[derive(Debug)]
+struct StreamNotFullyConsumed(());
+
+impl std::fmt::Display for StreamNotFullyConsumed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stream of tokens was not fully consumed")
+    }
+}
+impl std::error::Error for StreamNotFullyConsumed {}
+impl GonErr for StreamNotFullyConsumed {
+    fn err_name(&self) -> &'static str {
+        "parse err"
+    }
+}
+impl From<StreamNotFullyConsumed> for ParseErr {
+    fn from(_: StreamNotFullyConsumed) -> Self {
+        ParseErr::ExpectedTokens(vec![])
+    }
+}
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
 /// For more control, see [`Parser`].
+fn parse_generic<P: Parseable>(stream: Stream) -> Result<Result<P, FullGonErr<StreamNotFullyConsumed>>, P::Err> {
+    let mut parser = Parser2::new(stream);
+    
+    parser.parse().map(|p| {
+        if !parser.is_empty() {
+            Ok(p)
+        } else {
+            Err(parser.cursor.error(StreamNotFullyConsumed(())))
+        }
+    })
+}
+
+/// Parses a sequence of tokens to an isolated parseable program tree. 
+/// 
+/// This function will attempt to consume the entire stream as a value, 
+/// raising a [`ParseErr::StreamNotFullyConsumed`] if not fully consumed.
+/// 
+/// for more control, use [`Parser::parse`].
 /// 
 /// # Example
 /// ```
@@ -43,20 +79,10 @@ pub struct StreamNotFullyConsumed(pub usize);
 ///     )
 /// ]));
 /// ```
-// pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
-//     Parser::new(tokens, false).parse()
-// }
-pub fn parse<P: Parseable>(stream: Stream) -> Result<Result<P, StreamNotFullyConsumed>, P::Err> {
-    let mut parser = Parser2::new(stream);
-    let p = parser.parse()?;
-
-    if !parser.is_empty() {
-        Ok(Ok(p))
-    } else {
-        Ok(Err(StreamNotFullyConsumed(stream.len() - parser.cursor.len())))
-    }
+pub fn parse<P: Parseable<Err = FullParseErr>>(stream: Stream) -> Result<P, P::Err> {
+    parse_generic(stream)?
+        .map_err(FullGonErr::cast_err)
 }
-
 pub trait Parseable: Sized {
     type Err;
 
@@ -115,15 +141,10 @@ impl<'s> ParCursor<'s> {
     pub fn is_empty(&self) -> bool {
         self.stream.is_empty()
     }
-    pub fn pointing_at(&self) -> Span {
-        match self.peek() {
-            Some(tok) => tok.span,
-            None => Span::one(self.eof),
-        }
-    }
+
     /// Creates an error at the current position.
-    pub fn error(&self, p: ParseErr) -> FullParseErr {
-        p.at_range(self.pointing_at())
+    pub fn error<E: GonErr>(&self, err: E) -> FullGonErr<E> {
+        err.at_range(self.peek_span())
     }
 
     // pub fn partition(&self, mut f: impl FnMut(&FullToken) -> bool) -> Option<(ParCursor<'s>, FullToken, ParCursor<'s>)> {
@@ -270,7 +291,7 @@ pub enum ParseErr {
     NoIntrinsicIdents,
 
     /// Parser is not in intrinsic mode and therefore this statement cannot be defined
-    NoIntrinsicStmts
+    NoIntrinsicStmts,
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
