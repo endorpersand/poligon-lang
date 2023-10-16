@@ -32,7 +32,7 @@
 pub mod plir_codegen;
 pub mod plir;
 mod llvm;
-pub(self) mod internals;
+mod internals;
 pub mod llvm_codegen;
 mod d_parser;
 mod dsds;
@@ -62,7 +62,7 @@ use self::plir_codegen::DeclaredTypes;
 macro_rules! to_str {
     ($e:expr) => { $e.to_str().expect("Expected UTF-8 str") }
 }
-pub(self) use to_str;
+use to_str;
 
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
