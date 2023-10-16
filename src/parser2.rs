@@ -20,6 +20,10 @@ use crate::lexer::token::{Token, token, FullToken, SPLITTABLES2};
 use crate::ast::{self, PatErr};
 use crate::span::{Span, Cursor};
 
+type Stream<'s> = &'s [FullToken];
+
+pub struct StreamNotFullyConsumed(pub usize);
+
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
 /// For more control, see [`Parser`].
@@ -42,6 +46,16 @@ use crate::span::{Span, Cursor};
 // pub fn parse(tokens: impl IntoIterator<Item=FullToken>) -> ParseResult<ast::Program> {
 //     Parser::new(tokens, false).parse()
 // }
+pub fn parse<P: Parseable>(stream: Stream) -> Result<Result<P, StreamNotFullyConsumed>, P::Err> {
+    let mut parser = Parser2::new(stream);
+    let p = parser.parse()?;
+
+    if !parser.is_empty() {
+        Ok(Ok(p))
+    } else {
+        Ok(Err(StreamNotFullyConsumed(stream.len() - parser.cursor.len())))
+    }
+}
 
 pub trait Parseable: Sized {
     type Err;
@@ -51,14 +65,14 @@ pub trait Parseable: Sized {
 
 /// A cursor that allows simple scanning and traversing over a stream of tokens.
 pub struct ParCursor<'s> {
-    stream: &'s [FullToken],
+    stream: Stream<'s>,
     
     /// The end character's range
     eof: Cursor
 }
 impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
-    pub fn new(stream: &'s [FullToken]) -> Self {
+    pub fn new(stream: Stream<'s>) -> Self {
         let eof = if let Some(tok) = stream.last() {
             let (lno, cno) = tok.span.end();
             (lno, cno + 1)
@@ -350,6 +364,10 @@ pub struct Parser2<'s> {
 }
 
 impl<'s> Parser2<'s> {
+    pub fn new(stream: Stream<'s>) -> Self {
+        Parser2 { cursor: ParCursor::new(stream), span_collectors: vec![] }
+    }
+
     pub fn parse<P: Parseable>(&mut self) -> Result<P, P::Err> {
         P::read(self)
     }
@@ -471,6 +489,9 @@ impl<'s> Parser2<'s> {
     }
     pub fn peek_n(&self, n: usize) -> Option<&FullToken> {
         self.cursor.peek_n(n)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.cursor.is_empty()
     }
 
     pub fn spanned<T>(&mut self, f: impl FnOnce(&mut Parser2<'s>) -> T) -> (T, Span) {
@@ -717,7 +738,7 @@ impl Parseable for ast::Program {
     fn read(parser: &mut Parser2<'_>) -> Result<Self, Self::Err> {
         let (stmts, span) = parser.try_spanned(parse_stmts_closed)?;
 
-        if parser.cursor.is_empty() {
+        if parser.is_empty() {
             Ok(ast::Program { stmts, span })
         } else {
             // there are more tokens left that couldn't be parsed as a program.
