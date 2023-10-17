@@ -16,7 +16,7 @@ use regex::Regex;
 use crate::err::{GonErr, FullGonErr};
 use crate::span::{Cursor, Span};
 
-use self::token::{Token, Keyword, OPMAP, Delimiter, token, FullToken};
+use self::token::{Token, Keyword, Delimiter, token, FullToken};
 pub mod token;
 
 /// Convert a string and lex it into a sequence of tokens.
@@ -675,14 +675,13 @@ impl Lexer {
     }
 
     /// Add token to the token buffer, using the default range
-    fn push_token(&mut self, t: Token) {
-        self.push_token_with_range(t, self.token_range());
+    fn push_token(&mut self, kind: Token) {
+        self.push_spanned_token(FullToken { kind, span: self.token_range() });
     }
 
     /// Add token to the token buffer, with a custom defined range
-    fn push_token_with_range(&mut self, t: Token, r: Span) {
-        let ft = FullToken::new(t, r);
-        self.tokens.push(ft);
+    fn push_spanned_token(&mut self, st: FullToken) {
+        self.tokens.push(st);
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -860,6 +859,8 @@ impl Lexer {
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
+        use self::token::OP_MAP;
+
         let mut buf = String::new();
 
         while let Some(c) = self.match_cls(CharClass::Punct) {
@@ -871,7 +872,7 @@ impl Lexer {
             let right = &buf[..];
     
             // Find the largest length operator that matches the start of the operator buffer.
-            let (op, token) = OPMAP.range(left..=right)
+            let (op, token) = OP_MAP.range(left..=right)
                 .rev() // largest length
                 .find(|(&op, _)| buf.starts_with(op)) // that occurs in the text
                 .ok_or_else(|| {
@@ -906,7 +907,10 @@ impl Lexer {
             let len = op.len();
 
             let token_end = cur_shift(self.token_start, len - 1);
-            self.push_token_with_range(token.clone(), Span::new(self.token_start..=token_end));
+            self.push_spanned_token(FullToken {
+                kind: token.clone(),
+                span: Span::new(self.token_start..=token_end)
+            });
 
             self.token_start = cur_shift(self.token_start, len);
             buf.drain(..len);
