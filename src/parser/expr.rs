@@ -386,7 +386,7 @@ impl Parseable for Option<Identoid> {
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let identoid = {
-            match (parser.peek().map(|t| &t.kind), parser.peek_n(1).map(|t| &t.kind), parser.peek_n(2).map(|t| &t.kind)) {
+            match (parser.peek().map(|t| &t.kind), parser.peek_nth(1).map(|t| &t.kind), parser.peek_nth(2).map(|t| &t.kind)) {
                 | (Some(token![#]), Some(Token::Ident(_)), Some(token!["["]))
                 | (Some(token![#]), Some(Token::Ident(_)), Some(token![#]))
                 | (Some(Token::Ident(_)), Some(token!["["]), _)

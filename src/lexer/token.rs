@@ -113,11 +113,8 @@ macro_rules! define_keywords {
     };
 }
 
-macro_rules! define_operators_and_delimiters {
-    (
-        operators: {$($id:ident: $ex:literal),*},
-        delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
-    ) => {
+macro_rules! define_operators {
+    ($($id:ident: $ex:literal),*) => {
         /// The defined Poligon operators.
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Operator {
@@ -134,6 +131,18 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
+        pub(super) static OP_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
+            let mut m = BTreeMap::new();
+
+            $(m.insert($ex, Token::Operator(Operator::$id));)*
+
+            m
+        });
+    };
+}
+
+macro_rules! define_delimiters {
+    ($($idl:ident: $exl:literal, $idr:ident: $exr:literal),*) => {
         /// The defined Poligon delimiters (`()`, `[]`, etc.).
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Delimiter {
@@ -162,7 +171,6 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
-
         impl Display for Delimiter {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str(match self {
@@ -172,10 +180,9 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
-        pub(super) static OPMAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
+        pub(super) static DE_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
             let mut m = BTreeMap::new();
 
-            $(m.insert($ex, Token::Operator(Operator::$id));)*
             $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
             $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
 
@@ -216,52 +223,69 @@ define_keywords! {
     Throw:    "throw"
 }
 
-define_operators_and_delimiters! {
-    operators: {
-        Plus:    "+",
-        Minus:   "-",
-        Star:    "*",
-        Slash:   "/",
-        Percent: "%",
-        
-        Dot:   ".",
-        DDot:  "..",
-        Or:    "|",
-        And:   "&",
-        Tilde: "~",
-        Caret: "^",
+define_operators! {
+    Plus:    "+",
+    Minus:   "-",
+    Star:    "*",
+    Slash:   "/",
+    Percent: "%",
     
-        DAnd: "&&",
-        DOr:  "||",
-        Excl: "!",
-    
-        Lt:     "<",
-        Le:     "<=",
-        Gt:     ">",
-        Ge:     ">=",
-        Equal:  "=",
-        DEqual: "==",
-        Ne:     "!=",
-    
-        Shl: "<<",
-        Shr: ">>",
-    
-        Comma:  ",",
-        Comment: "//",
-        Colon: ":",
-        DColon: "::",
-    
-        Hash: "#",
-        Arrow: "->"
-    },
+    Dot:   ".",
+    DDot:  "..",
+    Or:    "|",
+    And:   "&",
+    Tilde: "~",
+    Caret: "^",
 
-    delimiters: {
-        LParen: "(",    RParen: ")",
-        LSquare: "[",   RSquare: "]",
-        LCurly: "{",    RCurly: "}",
-        LComment: "/*", RComment: "*/"
-    }
+    DAnd: "&&",
+    DOr:  "||",
+    Excl: "!",
+
+    Lt:     "<",
+    Le:     "<=",
+    Gt:     ">",
+    Ge:     ">=",
+    Equal:  "=",
+    DEqual: "==",
+    Ne:     "!=",
+
+    Shl: "<<",
+    Shr: ">>",
+
+    Comma:  ",",
+    Comment: "//",
+    Colon: ":",
+    DColon: "::",
+
+    Hash: "#",
+    Arrow: "->"
 }
+define_delimiters! {
+    LParen: "(",    RParen: ")",
+    LSquare: "[",   RSquare: "]",
+    LCurly: "{",    RCurly: "}",
+    LComment: "/*", RComment: "*/"
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Group {
+    pub delimiter: Delimiter,
+    pub content: Vec<TokenTree>
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub enum TokenTreeKind {
+    Token(Token),
+    Group(Group)
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub struct TokenTree {
+    pub kind: TokenTreeKind,
+    pub span: Span
+}
+
+type Stream<'s> = &'s [TokenTree];
 
 /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
 pub(crate) static SPLITTABLES: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(|| {

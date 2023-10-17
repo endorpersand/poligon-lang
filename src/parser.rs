@@ -113,7 +113,7 @@ impl<'s> ParCursor<'s> {
         self.stream.first()
     }
     /// Peeks the nth token, with 0 being the current token.
-    pub fn peek_n(&self, n: usize) -> Option<&FullToken> {
+    pub fn peek_nth(&self, n: usize) -> Option<&FullToken> {
         self.stream.get(n)
     }
 
@@ -507,8 +507,8 @@ impl<'s> Parser<'s> {
     pub fn peek(&self) -> Option<&FullToken> {
         self.cursor.peek()
     }
-    pub fn peek_n(&self, n: usize) -> Option<&FullToken> {
-        self.cursor.peek_n(n)
+    pub fn peek_nth(&self, n: usize) -> Option<&FullToken> {
+        self.cursor.peek_nth(n)
     }
     pub fn is_empty(&self) -> bool {
         self.cursor.is_empty()
@@ -772,7 +772,7 @@ impl Parseable for Option<ast::Ident> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let ident = match (parser.peek().map(|t| &t.kind), parser.peek_n(1).map(|t| &t.kind)) {
+        let ident = match (parser.peek().map(|t| &t.kind), parser.peek_nth(1).map(|t| &t.kind)) {
             (Some(token![#]), Some(Token::Ident(_))) => {
                 let (ident, span) = parser.spanned(|parser| {
                     parser.expect(token![#]).unwrap(); // should be unreachable
@@ -870,7 +870,7 @@ impl Parseable for Option<ast::Stmt> {
                 token![extern]   => Some(ast::Stmt::ExternFunDecl(parser.parse()?)),
                 token![class]    => Some(ast::Stmt::Class(parser.parse()?)),
                 token![fit]      => Some(ast::Stmt::FitClassDecl(parser.parse()?)),
-                token![import]   => match parser.peek_n(1) {
+                token![import]   => match parser.peek_nth(1) {
                     Some(t) => match &**t {
                         Token::Ident(id) if id == "intrinsic" => Some(ast::Stmt::ImportIntrinsic(parser.parse()?)),
                         _ => Some(ast::Stmt::Import(parser.parse()?))
