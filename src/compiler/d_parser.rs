@@ -61,7 +61,7 @@ mod pat {
     
         fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
             let FullToken { kind: fkind, span: fspan } = t;
-            match SPLITTABLES.get(&fkind) {
+            match SPLITTABLES.get(fkind) {
                 Some((lhs, rhs)) if lhs == self => {
                     let ((slno, scno), (elno, ecno)) = (fspan.start(), fspan.end());
     
