@@ -9,6 +9,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashMap};
+use std::sync::OnceLock;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -656,6 +657,8 @@ impl Lexer {
 
     /// Consume the next `n` characters in the input and return them.
     fn next_n(&mut self, n: usize) -> VecDeque<char> {
+        if n == 0 { return VecDeque::new() };
+
         let mut front = self.remaining.split_off(n);
         std::mem::swap(&mut self.remaining, &mut front);
 
@@ -859,62 +862,116 @@ impl Lexer {
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
-        use self::token::OP_MAP;
+        use self::token::{OP_MAP, DE_MAP};
+
+        struct Trie<V> {
+            entry: Option<V>, // if no entry, this is a root
+            children: HashMap<u8, Trie<V>>
+        }
+        impl<V> Trie<V> {
+            // Not checked, but iterator should only have unique keys
+            fn new<'a>(it: impl IntoIterator<Item=(&'a str, V)>) -> Self {
+                let mut trie = Trie {
+                    entry: None,
+                    children: HashMap::new()
+                };
+
+                for (k, v) in it {
+                    let leaf = k.bytes().fold(&mut trie, |trie, byte| {
+                        trie.children.entry(byte).or_insert_with(|| {
+                            Trie { entry: None, children: HashMap::new() }
+                        })
+                    });
+
+                    leaf.entry = Some(v);
+                }
+
+                trie
+            }
+
+            fn get_child(&self, k: &str) -> Option<&Trie<V>> {
+                k.bytes().try_fold(self, |trie, byte| {
+                    trie.children.get(&byte)
+                })
+            }
+
+            fn get_child_by_char(&self, c: char) -> Option<&Trie<V>> {
+                let mut chr = [0; 4];
+                self.get_child(c.encode_utf8(&mut chr))
+            }
+        }
+        static TRIE: OnceLock<Trie<Token>> = OnceLock::new();
 
         let mut buf = String::new();
+        let mut trie = TRIE.get_or_init(|| Trie::new(
+            OP_MAP.iter().chain(DE_MAP.iter())
+                .map(|(&k, v)| (k, v.clone()))
+        ));
+        
+        // Find the first trie ref that points to a token.
+        while trie.entry.is_none() {
+            let found_next_trie = 'token: {
+                let Some(c) = self.match_cls(CharClass::Punct) else { break 'token false };
+                buf.push(c);
 
-        while let Some(c) = self.match_cls(CharClass::Punct) {
-            buf.push(c);
-        }
-
-        while !buf.is_empty() {
-            let left = &buf[..1];
-            let right = &buf[..];
-    
-            // Find the largest length operator that matches the start of the operator buffer.
-            let (op, token) = OP_MAP.range(left..=right)
-                .rev() // largest length
-                .find(|(&op, _)| buf.starts_with(op)) // that occurs in the text
-                .ok_or_else(|| {
-                    LexErr::UnknownOp(buf.clone())
-                        .at_range(self.token_start..=self.cursor)
-                })?;
-            
-            // Keep track of the delimiters.
-            // If left delimiter, add to delimiter stack.
-            // If right delimiter, verify the top of the stack is the matching left delimiter 
-            //      (or error if mismatch).
-            if let Token::Delimiter(d) = token {
-                let pos = self.token_start;
-                
-                if !d.is_right() {
-                    self.delimiters.push((pos, *d));
-                } else {
-                    self.match_delimiter(pos, *d)?;
+                match trie.get_child_by_char(c) {
+                    Some(child) => {
+                        trie = child;
+                        true
+                    },
+                    None => break 'token false,
                 }
+            };
+
+            if !found_next_trie {
+                return Err(LexErr::UnknownOp(buf.clone())
+                    .at_range(self.token_range())
+                );
             }
-
-            // Stop tokenizing when we're dealing with comments:
-            if token == &token!["//"] {
-                buf.drain(..2);
-                return self.push_line_comment(buf);
-            } else if token == &token!["/*"] {
-                buf.drain(..2);
-                return self.push_multi_comment(buf);
-            }
-            
-            
-            let len = op.len();
-
-            let token_end = cur_shift(self.token_start, len - 1);
-            self.push_spanned_token(FullToken {
-                kind: token.clone(),
-                span: Span::new(self.token_start..=token_end)
-            });
-
-            self.token_start = cur_shift(self.token_start, len);
-            buf.drain(..len);
         }
+
+        // We have a match, but keep checking for tries in case there are longer chains:
+        let mut peek_trie = trie;
+        let mut consumed: usize = 0;
+
+        let it = self.remaining.iter()
+            .copied()
+            .take_while(|&c| matches!(CharClass::of(c), Some(CharClass::Punct)))
+            .enumerate();
+        for (i, c) in it {
+            if let Some(ctrie) = peek_trie.get_child_by_char(c) {
+                peek_trie = ctrie;
+                if peek_trie.entry.is_some() {
+                    trie = peek_trie;
+                    consumed = i + 1;
+                }
+            } else {
+                break;
+            }
+        }
+
+        self.next_n(consumed);
+
+        let token = trie.entry.clone()
+            .unwrap_or_else(|| unreachable!("trie should have had token"));
+
+        match token {
+            token!["//"] => self.push_line_comment(String::new())?,
+            token!["/*"] => {
+                self.delimiters.push((self.token_start, Delimiter::LComment));
+                self.push_multi_comment(String::new())?;
+            },
+            Token::Delimiter(ref delim) => {
+                if !delim.is_right() {
+                    self.delimiters.push((self.token_start, *delim));
+                } else {
+                    self.match_delimiter(self.token_start, *delim)?;
+                }
+                self.push_token(token)
+            },
+            t => self.push_token(t)
+        }
+
         Ok(())
     }
 
@@ -923,6 +980,8 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a line comment 
     /// (`// a comment that goes to the end of a line`) to the output.
+    /// 
+    /// This function assumes a `//` token was already consumed.
     fn push_line_comment(&mut self, mut buf: String) -> LexResult<()> {
         while let Some(chr) = self.next() {
             if chr == '\n' { break; }
@@ -939,6 +998,8 @@ impl Lexer {
     /// 
     /// This function consumes characters from the input and adds a multi-line comment 
     /// (`/* this kind of comment */`) to the output.
+    /// 
+    /// This function assumes a `/*` token was already consumed.
     fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/\*|\*/").unwrap());
 
@@ -1068,24 +1129,27 @@ mod tests {
     #[test]
     fn op_lex() {
         assert_lex("!~==!~&&.=+-*<><<3", &[
-            token![!],
-            token![~],
-            token![==],
-            token![!],
-            token![~],
-            token![&&],
-            token![.],
-            token![=],
-            token![+],
-            token![-],
-            token![*],
-            token![<],
-            token![>],
-            token![<<],
-            Token::Numeric("3".to_string())
+            FullToken { kind: token![!],  span: Span::new((0, 0)  ..= (0, 0)) },
+            FullToken { kind: token![~],  span: Span::new((0, 1)  ..= (0, 1)) },
+            FullToken { kind: token![==], span: Span::new((0, 2)  ..= (0, 3)) },
+            FullToken { kind: token![!],  span: Span::new((0, 4)  ..= (0, 4)) },
+            FullToken { kind: token![~],  span: Span::new((0, 5)  ..= (0, 5)) },
+            FullToken { kind: token![&&], span: Span::new((0, 6)  ..= (0, 7)) },
+            FullToken { kind: token![.],  span: Span::new((0, 8)  ..= (0, 8)) },
+            FullToken { kind: token![=],  span: Span::new((0, 9)  ..= (0, 9)) },
+            FullToken { kind: token![+],  span: Span::new((0, 10) ..= (0, 10)) },
+            FullToken { kind: token![-],  span: Span::new((0, 11) ..= (0, 11)) },
+            FullToken { kind: token![*],  span: Span::new((0, 12) ..= (0, 12)) },
+            FullToken { kind: token![<],  span: Span::new((0, 13) ..= (0, 13)) },
+            FullToken { kind: token![>],  span: Span::new((0, 14) ..= (0, 14)) },
+            FullToken { kind: token![<<], span: Span::new((0, 15) ..= (0, 16)) },
+            FullToken { kind: Token::Numeric("3".to_string()), span: Span::new((0, 17) ..= (0, 17)) },
         ]);
 
-        assert_lex("<<<", &[token![<<], token![<]]);
+        assert_lex("<<<", &[
+            FullToken { kind: token![<<], span: Span::new((0, 0) ..= (0, 1))},
+            FullToken { kind: token![<],  span: Span::new((0, 2) ..= (0, 2))},
+        ]);
     }
 
     /// Tests keywords, multiple lines, semicolon detection.
