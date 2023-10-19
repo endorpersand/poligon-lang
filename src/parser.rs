@@ -153,6 +153,12 @@ impl<'s> ParCursor<'s> {
     }
     /// Advances the cursor only if the predicate is Some for the next TokenTree.
     pub fn next_if_map<T>(&mut self, f: impl FnOnce(&TokenTree) -> Option<&T>) -> Option<&T> {
+        self.next_if_generic(f)
+    }
+    /// Advances the cursor only if the predicate is Some for the next TokenTree.
+    pub fn next_if_generic<'a, T: 'a>(&mut self, f: impl FnOnce(&'a TokenTree) -> Option<T>) -> Option<T> 
+        where 's: 'a
+    {
         let (first, rest) = self.stream.split_first()?;
         
         let out = f(first);
@@ -370,42 +376,6 @@ impl<'s> Parser<'s> {
         Option::<P>::read(self)
     }
     
-    /// Expect that the next token in the input is in the specified token, 
-    /// erroring if the next token does not match.
-    /// 
-    /// # Example
-    /// 
-    /// Checking that the next token is the specified token.
-    /// 
-    /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
-    /// # use poligon_lang::parser::Parser;
-    /// 
-    /// let mut tokens = tokenize("return true && false").unwrap();
-    /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect(token![return]).is_ok());
-    /// assert!(parser.expect(token![true]).is_ok());
-    /// assert!(parser.expect(token![||]).is_err());
-    /// ```
-    /// 
-    /// Checking that the next token is one of a few given tokens.
-    /// 
-    /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
-    /// # use poligon_lang::parser::Parser;
-    /// 
-    /// let mut tokens = tokenize("return true + false").unwrap();
-    /// let mut parser = Parser::new(tokens, false);
-    /// assert!(parser.expect(token![return]).is_ok());
-    /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
-    /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
-    /// ```
-    pub fn expect<P: TokenPattern>(&mut self, pat: P) -> ParseResult<FullToken> {
-        self.match_(&pat)
-            .ok_or_else(|| self.cursor.error(pat.fail_err()))
-    }
 
     /// Expect that the next token in the input is in the specified list of tokens.
     /// If it is, the token is returned, otherwise an error occurs.
@@ -459,25 +429,58 @@ impl<'s> Parser<'s> {
     /// assert_eq!(parser.match_(&[token![&&], token![||]]), None);
     /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
-    pub fn match_<P: TokenPattern>(&mut self, pat: P) -> Option<FullToken> {
-        let hit = self.cursor.next_if_map(|tt| match tt {
-            TokenTree::Token(t) => pat.is_match(t).then_some(t),
-            TokenTree::Group(_) => None,
-        })?.clone();
+    pub fn match_<'tt, P: TokenPattern<'tt>>(&mut self, pat: P) -> Option<P::Munched> 
+        where 's: 'tt
+    {
+        let hit = self.cursor.next_if_generic(|tt| P::try_munch(&pat, tt))?;
 
-        self.span_collectors.attach(hit.span);
+        self.span_collectors.attach(hit.span());
         Some(hit)
     }
 
-    pub fn match_group(&mut self, delim: Delimiter) -> Option<ParCursor> {
-        let hit = self.cursor.next_if_map(|tt| match tt {
-            TokenTree::Token(_) => None,
-            TokenTree::Group(g) => (g.delimiter == delim).then_some(g),
-        })?;
+
+    /// Expect that the next token in the input is in the specified token, 
+    /// erroring if the next token does not match.
+    /// 
+    /// # Example
+    /// 
+    /// Checking that the next token is the specified token.
+    /// 
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true && false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert!(parser.expect(token![true]).is_ok());
+    /// assert!(parser.expect(token![||]).is_err());
+    /// ```
+    /// 
+    /// Checking that the next token is one of a few given tokens.
+    /// 
+    /// ```
+    /// use poligon_lang::lexer::tokenize;
+    /// use poligon_lang::lexer::token::token;
+    /// # use poligon_lang::parser::Parser;
+    /// 
+    /// let mut tokens = tokenize("return true + false").unwrap();
+    /// let mut parser = Parser::new(tokens, false);
+    /// assert!(parser.expect(token![return]).is_ok());
+    /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
+    /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
+    /// ```
+    pub fn expect<'tt, P: TokenPattern<'tt>>(&mut self, pat: P) -> ParseResult<P::Munched> 
+        where 's: 'tt
+    {
+        let hit = self.cursor.next_if_generic(|tt| pat.try_munch(tt))
+            .ok_or_else(|| self.cursor.error(pat.fail_err()))?;
 
         self.span_collectors.attach(hit.span());
-        Some(ParCursor::new(&hit.content))
+        Ok(hit)
     }
+
     pub fn peek(&self) -> Option<&FullToken> {
         self.cursor.peek().map(|t| match t {
             TokenTree::Token(t) => t,
@@ -646,7 +649,9 @@ impl<T> Tuple<T> {
             true  => Err(e()),
         }
     }
-    pub fn assert_closed<P: TokenPattern, E>(self, parser: &mut Parser<'_>, p: P, needs_comma: impl FnOnce(&mut Parser<'_>) -> E, needs_t: impl FnOnce(&mut Parser<'_>) -> E) -> Result<Self, E> {
+    pub fn assert_closed<'s, 'tt, P: TokenPattern<'tt>, E>(self, parser: &mut Parser<'s>, p: P, needs_comma: impl FnOnce(&mut Parser<'_>) -> E, needs_t: impl FnOnce(&mut Parser<'_>) -> E) -> Result<Self, E> 
+        where 's: 'tt
+    {
         match parser.match_(p) {
             Some(_) => Ok(self),
             None => match self.ended_on_terminator() {
@@ -792,11 +797,16 @@ impl Parseable for Option<ast::StrLiteral> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let lit = parser.match_(MatchFn::new(|token| matches!(token.kind, Token::Str(_))))
-            .map(|tok| {
-                let FullToken { kind: Token::Str(literal), span } = tok.clone() else { unreachable!() };
-                ast::StrLiteral { literal, span }
-            });
+        let lit = parser.match_(MatchFn::new(|tt| {
+            if let TokenTree::Token(FullToken { kind: Token::Str(literal), span }) = tt {
+                let literal = literal.clone();
+                let span = *span;
+
+                Some(ast::StrLiteral { literal, span })
+            } else {
+                None
+            }
+        }));
 
         Ok(lit)
     }

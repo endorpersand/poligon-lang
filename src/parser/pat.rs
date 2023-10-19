@@ -1,4 +1,5 @@
-use crate::lexer::token::{FullToken, Token, TokenTree};
+use crate::lexer::token::{FullToken, Token, TokenTree, Group, Delimiter};
+use crate::span::Spanned;
 
 use super::ParseErr;
 
@@ -9,54 +10,89 @@ use super::ParseErr;
 /// Here are the currently implemented pattern:
 /// - [`Token`] == verify if that the stream token is equal to the pattern token
 /// - [`[Token]`] == verify if that the stream token is one of the tokens of the pattern
-pub trait TokenPattern {
-    /// Checks if the pattern matches this token.
-    fn is_match(&self, token: &FullToken) -> bool;
+pub trait TokenPattern<'tt> {
+    /// The type that this pattern munches the tree into.
+    type Munched: Spanned + 'tt;
+
+    /// Attempts to match the token tree and convert it into the munched type.
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched>;
 
     /// Provides the error if this pattern does not match.
     fn fail_err(&self) -> ParseErr;
 }
 
-impl TokenPattern for Token {
-    fn is_match(&self, token: &FullToken) -> bool {
-        self == token
-    }
+impl<'tt, P: TokenPattern<'tt> + ?Sized> TokenPattern<'tt> for &'tt P {
+    type Munched = P::Munched;
 
-    fn fail_err(&self) -> ParseErr {
-        ParseErr::ExpectedTokens(vec![self.clone()])
-    }
-}
-impl TokenPattern for [Token] {
-    fn is_match(&self, token: &FullToken) -> bool {
-        self.contains(&token.kind)
-    }
-
-    fn fail_err(&self) -> ParseErr {
-        ParseErr::ExpectedTokens(self.to_vec())
-    }
-}
-impl<const N: usize> TokenPattern for [Token; N] {
-    fn is_match(&self, token: &FullToken) -> bool {
-        self.as_slice().is_match(token)
-    }
-
-    fn fail_err(&self) -> ParseErr {
-        self.as_slice().fail_err()
-    }
-}
-impl<'p, P: TokenPattern + ?Sized> TokenPattern for &'p P {
-    fn is_match(&self, token: &FullToken) -> bool {
-        (*self).is_match(token)
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        (*self).try_munch(tt)
     }
 
     fn fail_err(&self) -> ParseErr {
         (*self).fail_err()
     }
 }
+impl<'tt> TokenPattern<'tt> for Token {
+    type Munched = FullToken;
 
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        match tt {
+            TokenTree::Token(token) => (self == token).then_some(token).cloned(),
+            TokenTree::Group(_) => None,
+        }
+    }
+
+    fn fail_err(&self) -> ParseErr {
+        ParseErr::ExpectedTokens(vec![self.clone()])
+    }
+}
+impl<'tt> TokenPattern<'tt> for [Token] {
+    type Munched = FullToken;
+
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        match tt {
+            TokenTree::Token(token) => self.contains(&token.kind).then_some(token).cloned(),
+            TokenTree::Group(_) => None,
+        }
+    }
+
+    fn fail_err(&self) -> ParseErr {
+        ParseErr::ExpectedTokens(self.to_vec())
+    }
+}
+impl<'tt, const N: usize> TokenPattern<'tt> for [Token; N] {
+    type Munched = FullToken;
+
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        self.as_slice().try_munch(tt)
+    }
+
+    fn fail_err(&self) -> ParseErr {
+        self.as_slice().fail_err()
+    }
+}
+
+/// Matches a group enclosed by the provided delimiter.
+pub struct MatchGroup(pub Delimiter);
+impl<'tt> TokenPattern<'tt> for MatchGroup {
+    type Munched = &'tt Group;
+
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        match tt {
+            TokenTree::Token(_) => None,
+            TokenTree::Group(g) => (g.delimiter == self.0).then_some(g),
+        }
+    }
+
+    fn fail_err(&self) -> ParseErr {
+        ParseErr::ExpectedTokens(vec![Token::Delimiter(self.0, false)])
+    }
+}
+
+/// Matches an arbitrary function.
 pub struct MatchFn<F>(F, fn() -> ParseErr);
-impl<F> MatchFn<F> 
-    where F: Fn(&FullToken) -> bool,
+impl<F, T: Spanned> MatchFn<F> 
+    where F: Fn(&TokenTree) -> Option<T>,
 {
     pub fn new(f: F) -> Self {
         fn match_fn_default() -> ParseErr {
@@ -70,11 +106,13 @@ impl<F> MatchFn<F>
         Self(f, e)
     }
 }
-impl<F> TokenPattern for MatchFn<F> 
-    where F: Fn(&FullToken) -> bool
+impl<'tt, F, T: Spanned + 'tt> TokenPattern<'tt> for MatchFn<F> 
+    where F: Fn(&TokenTree) -> Option<T>
 {    
-    fn is_match(&self, token: &FullToken) -> bool {
-        (self.0)(token)
+    type Munched = T;
+
+    fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
+        (self.0)(tt)
     }
 
     fn fail_err(&self) -> ParseErr {

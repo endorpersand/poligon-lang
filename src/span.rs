@@ -78,3 +78,8 @@ impl Spanned for Span {
         *self
     }
 }
+impl<S: Spanned> Spanned for &S {
+    fn span(&self) -> Span {
+        (*self).span()
+    }
+}
