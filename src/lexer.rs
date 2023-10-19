@@ -679,12 +679,7 @@ impl Lexer {
 
     /// Add token to the token buffer, using the default range
     fn push_token(&mut self, kind: Token) {
-        self.push_spanned_token(FullToken { kind, span: self.token_range() });
-    }
-
-    /// Add token to the token buffer, with a custom defined range
-    fn push_spanned_token(&mut self, st: FullToken) {
-        self.tokens.push(st);
+        self.tokens.push(FullToken { kind, span: self.token_range() });
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -806,7 +801,7 @@ impl Lexer {
         
         // Assert next char matches quote:
         if self.next().unwrap() == qt {
-            self.tokens.push(FullToken::new(Token::Str(buf), self.token_range()));
+            self.push_token(Token::Str(buf));
             Ok(())
         } else {
             // Loop can only be exited when terminal character is found.
@@ -865,7 +860,7 @@ impl Lexer {
         use self::token::{OP_MAP, DE_MAP};
 
         struct Trie<V> {
-            entry: Option<V>, // if no entry, this is a root
+            entry: Option<V>,
             children: HashMap<u8, Trie<V>>
         }
         impl<V> Trie<V> {
