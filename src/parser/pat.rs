@@ -73,19 +73,18 @@ impl<'tt, const N: usize> TokenPattern<'tt> for [Token; N] {
 }
 
 /// Matches a group enclosed by the provided delimiter.
-pub struct MatchGroup(pub Delimiter);
-impl<'tt> TokenPattern<'tt> for MatchGroup {
+impl<'tt> TokenPattern<'tt> for Delimiter {
     type Munched = &'tt Group;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         match tt {
             TokenTree::Token(_) => None,
-            TokenTree::Group(g) => (g.delimiter == self.0).then_some(g),
+            TokenTree::Group(g) => (&g.delimiter == self).then_some(g),
         }
     }
 
     fn fail_err(&self) -> ParseErr {
-        ParseErr::ExpectedTokens(vec![Token::Delimiter(self.0, false)])
+        ParseErr::ExpectedTokens(vec![Token::Delimiter(*self, false)])
     }
 }
 

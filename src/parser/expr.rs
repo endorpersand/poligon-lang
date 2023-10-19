@@ -1,5 +1,5 @@
-use crate::ast::*;
-use crate::lexer::token::{Token, FullToken};
+use crate::{ast::*, delim};
+use crate::lexer::token::{Token, FullToken, TokenTree, TTKind};
 use crate::span::Spanned;
 use crate::token;
 
@@ -356,24 +356,29 @@ impl Parseable for Option<Expr0> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let Some(FullToken { kind, span: _ }) = parser.peek() else { return Ok(None) };
+        let Some(tt) = parser.peek_kind() else { return Ok(None) };
 
-        let expr = match kind {
-            token![#] | Token::Ident(_) => Expr0::Identoid(parser.parse()?),
-            token!["{"]   => Expr0::Block(parser.parse()?),
-            Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => Expr0::Literal(parser.parse()?),
-            token!["["]   => Expr0::ListLiteral(parser.parse()?),
-            token![if]    => Expr0::If(parser.parse()?),
-            token![while] => Expr0::While(parser.parse()?),
-            token![for]   => Expr0::For(parser.parse()?),
-            token!["("]   => {
-                parser.expect(token!["("])?;
-                let e = parser.parse()?;
-                parser.expect(token![")"])?;
-                
-                Expr0::Expr(e)
+        let expr = match tt {
+            TTKind::Group(delimiter) => match delimiter {
+                delim!["{}"] => Expr0::Block(parser.parse()?),
+                delim!["[]"] => Expr0::ListLiteral(parser.parse()?),
+                delim!["()"] => {
+                    let group = parser.expect(delim!["()"])?;
+                    let mut content = Parser::new(group);
+                    let e = content.parse()?;
+                    content.close()?;
+
+                    Expr0::Expr(e)
+                }
             },
-            _ => { return Ok(None) }
+            TTKind::Token(token) => match token {
+                token![#] | Token::Ident(_) => Expr0::Identoid(parser.parse()?),
+                Token::Numeric(_) | Token::Str(_) | Token::Char(_) | token![true] | token![false] => Expr0::Literal(parser.parse()?),
+                token![if]    => Expr0::If(parser.parse()?),
+                token![while] => Expr0::While(parser.parse()?),
+                token![for]   => Expr0::For(parser.parse()?),
+                _ => { return Ok(None) }
+            }
         };
             // Ident, Block, Literal, ListLiteral, *SetLiteral, *DictLiteral, *ClassLiteral, If, While, For
         // };
@@ -385,56 +390,56 @@ impl Parseable for Option<Identoid> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let identoid = {
-            match (parser.peek().map(|t| &t.kind), parser.peek_nth(1).map(|t| &t.kind), parser.peek_nth(2).map(|t| &t.kind)) {
-                | (Some(token![#]), Some(Token::Ident(_)), Some(token!["["]))
-                | (Some(token![#]), Some(Token::Ident(_)), Some(token![#]))
-                | (Some(Token::Ident(_)), Some(token!["["]), _)
-                | (Some(Token::Ident(_)), Some(token![#]), _)
-                => {
-                    Identoid::ClassLiteral(parser.parse()?)
-                }
-                _ => {
-                    let Some(ident) = parser.try_parse::<Ident>()? else { return Ok(None) };
+        use super::TTKind::{Token as Tk, Group as Gr};
 
-                    match (&*ident.ident, parser.peek().map(|t| &t.kind)) {
-                        ("set",  Some(token!["{"])) => {
-                            let (values, rest_span) = parser.try_spanned(|parser| {
-                                parser.expect(token!["{"])?;
-                                let values = parser.parse_tuple(token![,])?
-                                    .assert_closed(parser, token!["}"], 
-                                        |parser| parser.cursor.error(ParseErr::ExpectedTokens(vec![token![,]])), 
-                                        |parser| parser.cursor.error(ParseErr::ExpectedExpr)
-                                    )?
-                                    .values()
-                                    .collect();
+        let identoid = match parser.peek_kinds(4).as_slice() {
+            | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#])]
+            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![#]), _]
+            | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#]), _]
+            | [Tk(Token::Ident(_)), Tk(token![#]), _, _]
+            => {
+                Identoid::ClassLiteral(parser.parse()?)
+            },
+            _ => {
+                let Some(ident) = parser.try_parse::<Ident>()? else { return Ok(None) };
 
-                                ParseResult::Ok(values)
-                            })?;
+                match (&*ident.ident, parser.peek_tree().map(|t| t.kind())) {
+                    ("set",  Some(Gr(delim!["{}"]))) => {
+                        let group = parser.expect(delim!["{}"])?;
+                        let mut content = Parser::new(group);
 
-                            let span = ident.span + rest_span;
-                            Identoid::SetLiteral(SetLiteral { values, span })
-                        }
-                        ("dict", Some(token!["{"])) => {
-                            let (entries, rest_span) = parser.try_spanned(|parser| {
-                                parser.expect(token!["{"])?;
-                                let entries = parser.parse_tuple(token![,])?
-                                    .assert_closed(parser, token!["}"], 
-                                        |parser| parser.cursor.error(ParseErr::ExpectedTokens(vec![token![,]])), 
-                                        |parser| parser.cursor.error(ParseErr::ExpectedExpr)
-                                    )?
-                                    .values()
-                                    .map(|Entry { key, val, span: _ } | (key, val))
-                                    .collect();
+                        let values = content.parse_tuple(token![,])?
+                            .assert_closed(content, 
+                                || ParseErr::ExpectedTokens(vec![token![,]]), 
+                                || ParseErr::ExpectedExpr,
+                            )?
+                            .values()
+                            .collect();
 
-                                ParseResult::Ok(entries)
-                            })?;
-
-                            let span = ident.span + rest_span;
-                            Identoid::DictLiteral(DictLiteral { entries, span })
-                        }
-                        _ => Identoid::Ident(ident)
+                        let span = ident.span + group.span();
+                        Identoid::SetLiteral(SetLiteral { values, span })
                     }
+                    ("dict", Some(Gr(delim!["{}"]))) => {
+                        let (entries, rest_span) = parser.try_spanned(|parser| {
+                            let group = parser.expect(delim!["{}"])?;
+                            let mut content = Parser::new(group);
+
+                            let entries = content.parse_tuple(token![,])?
+                                .assert_closed(content,
+                                    || ParseErr::ExpectedTokens(vec![token![,]]),
+                                    || ParseErr::ExpectedExpr
+                                )?
+                                .values()
+                                .map(|Entry { key, val, span: _ } | (key, val))
+                                .collect();
+
+                            ParseResult::Ok(entries)
+                        })?;
+
+                        let span = ident.span + rest_span;
+                        Identoid::DictLiteral(DictLiteral { entries, span })
+                    }
+                    _ => Identoid::Ident(ident)
                 }
             }
         };
@@ -449,11 +454,14 @@ impl Parseable for ClassLiteral {
         let ((ty, entries), span) = parser.try_spanned(|parser| {
             let ty = parser.parse()?;
             parser.expect(token![#])?;
-            parser.expect(token!["{"])?;
-            let entries = parser.parse_tuple(token![,])?
-                .assert_closed(parser, token!["}"], 
-                    |parser| parser.cursor.error(ParseErr::ExpectedTokens(vec![token![,]])), 
-                    |parser| parser.cursor.error(ParseErr::ExpectedExpr)
+
+            let group = parser.expect(delim!["{}"])?;
+            let mut content = Parser::new(group);
+
+            let entries = content.parse_tuple(token![,])?
+                .assert_closed(content,
+                    || ParseErr::ExpectedTokens(vec![token![,]]),
+                    || ParseErr::ExpectedExpr
                 )?
                 .values()
                 .map(|Entry { key, val, span: _ }| (key, val))
@@ -492,21 +500,18 @@ impl Parseable for ListLiteral {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let (values, span) = parser.try_spanned(|parser| {
-            parser.expect(token!["["])?;
-            
-            let values = parser.parse_tuple(token![,])?
-                .assert_closed(parser, token!["]"],
-                    |parser| parser.cursor.error(ParseErr::ExpectedTokens(vec![token![,]])),
-                    |parser| parser.cursor.error(ParseErr::ExpectedExpr)
-                )?
-                .values()
-                .collect();
-            
-            ParseResult::Ok(values)
-        })?;
+        let group = parser.expect(delim!["[]"])?;
+        let mut content = Parser::new(group);
 
-        Ok(Self { values, span })
+        let values = content.parse_tuple(token![,])?
+            .assert_closed(content, 
+                || ParseErr::ExpectedTokens(vec![token![,]]),
+                || ParseErr::ExpectedExpr
+            )?
+            .values()
+            .collect();
+
+        Ok(Self { values, span: group.span() })
     }
 }
 impl Parseable for If {

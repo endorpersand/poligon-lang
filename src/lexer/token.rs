@@ -285,6 +285,14 @@ pub enum TokenTree {
     #[allow(missing_docs)]
     Group(Group)
 }
+impl TokenTree {
+    pub fn kind(&self) -> TTKind {
+        match self {
+            TokenTree::Token(t) => TTKind::Token(&t.kind),
+            TokenTree::Group(g) => TTKind::Group(&g.delimiter),
+        }
+    }
+}
 impl Spanned for TokenTree {
     fn span(&self) -> Span {
         match self {
@@ -335,6 +343,12 @@ impl TryFrom<TokenTree> for FullToken {
         }
     }
 }
+
+pub enum TTKind<'t> {
+    Token(&'t Token),
+    Group(&'t Delimiter)
+}
+
 pub type Stream<'s> = &'s [TokenTree];
 pub type OwnedStream = Vec<TokenTree>;
 
@@ -432,15 +446,18 @@ pub use token;
 
 #[macro_export]
 macro_rules! delim {
-    ("(")  => { $crate::lexer::token::Delimiter::Paren  };
-    (")")  => { $crate::lexer::token::Delimiter::Paren  };
-    ("[")  => { $crate::lexer::token::Delimiter::Square };
-    ("]")  => { $crate::lexer::token::Delimiter::Square };
-    ("{")  => { $crate::lexer::token::Delimiter::Curly  };
-    ("}")  => { $crate::lexer::token::Delimiter::Curly  };
+    ("(")   => { $crate::lexer::token::Delimiter::Paren  };
+    (")")   => { $crate::lexer::token::Delimiter::Paren  };
+    ("()")  => { $crate::lexer::token::Delimiter::Paren  };
+
+    ("[")   => { $crate::lexer::token::Delimiter::Square };
+    ("]")   => { $crate::lexer::token::Delimiter::Square };
+    ("[]")  => { $crate::lexer::token::Delimiter::Square };
+
+    ("{")   => { $crate::lexer::token::Delimiter::Curly  };
+    ("}")   => { $crate::lexer::token::Delimiter::Curly  };
+    ("{}")  => { $crate::lexer::token::Delimiter::Curly  };
 }
-#[doc(inline)]
-pub(crate) use delim;
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

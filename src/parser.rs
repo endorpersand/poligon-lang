@@ -14,49 +14,49 @@ pub mod pat;
 
 use std::convert::Infallible;
 
-use crate::GonErr;
+use crate::{GonErr, delim};
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, Delimiter};
+use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, Delimiter, TTKind};
 use crate::ast::{self, PatErr};
 use crate::span::{Span, Cursor, Spanned};
 pub use pat::TokenPattern;
 
 use self::pat::MatchFn;
 
-#[derive(Debug)]
-struct StreamNotFullyConsumed(());
+// #[derive(Debug)]
+// struct StreamNotFullyConsumed(());
 
-impl std::fmt::Display for StreamNotFullyConsumed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream of tokens was not fully consumed")
-    }
-}
-impl std::error::Error for StreamNotFullyConsumed {}
-impl GonErr for StreamNotFullyConsumed {
-    fn err_name(&self) -> &'static str {
-        "parse err"
-    }
-}
-impl From<StreamNotFullyConsumed> for ParseErr {
-    fn from(_: StreamNotFullyConsumed) -> Self {
-        ParseErr::ExpectedTokens(vec![])
-    }
-}
+// impl std::fmt::Display for StreamNotFullyConsumed {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "stream of tokens was not fully consumed")
+//     }
+// }
+// impl std::error::Error for StreamNotFullyConsumed {}
+// impl GonErr for StreamNotFullyConsumed {
+//     fn err_name(&self) -> &'static str {
+//         "parse err"
+//     }
+// }
+// impl From<StreamNotFullyConsumed> for ParseErr {
+//     fn from(_: StreamNotFullyConsumed) -> Self {
+//         ParseErr::ExpectedTokens(vec![])
+//     }
+// }
 
-/// Parses a sequence of tokens to an isolated parseable program tree. 
-/// 
-/// For more control, see [`Parser`].
-fn parse_generic<P: Parseable>(stream: Stream) -> Result<Result<P, FullGonErr<StreamNotFullyConsumed>>, P::Err> {
-    let mut parser = Parser::new(stream);
+// /// Parses a sequence of tokens to an isolated parseable program tree. 
+// /// 
+// /// For more control, see [`Parser`].
+// fn parse_generic<P: Parseable>(stream: Stream) -> Result<Result<P, FullGonErr<StreamNotFullyConsumed>>, P::Err> {
+//     let mut parser = Parser::new(stream);
     
-    parser.parse().map(|p| {
-        if !parser.is_empty() {
-            Ok(p)
-        } else {
-            Err(parser.cursor.error(StreamNotFullyConsumed(())))
-        }
-    })
-}
+//     parser.parse().map(|p| {
+//         if !parser.is_empty() {
+//             Ok(p)
+//         } else {
+//             Err(parser.cursor.error(StreamNotFullyConsumed(())))
+//         }
+//     })
+// }
 
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
@@ -80,9 +80,12 @@ fn parse_generic<P: Parseable>(stream: Stream) -> Result<Result<P, FullGonErr<St
 ///     )
 /// ]));
 /// ```
-pub fn parse<P: Parseable<Err = FullParseErr>>(stream: Stream) -> Result<P, P::Err> {
-    parse_generic(stream)?
-        .map_err(FullGonErr::cast_err)
+pub fn parse<P: Parseable<Err = FullParseErr>>(stream: Stream) -> ParseResult<P> {
+    let mut parser = Parser::new(stream);
+
+    let result = parser.parse()?;
+    parser.close()?;
+    Ok(result)
 }
 pub trait Parseable: Sized {
     type Err;
@@ -108,16 +111,6 @@ impl<'s> ParCursor<'s> {
         };
 
         ParCursor { stream, eof }
-    }
-
-    /// Creates a new cursor from a token tree.
-    pub fn new_from_tree(tt: &'s TokenTree) -> Self {
-        let stream = match tt {
-            TokenTree::Token(_) => std::slice::from_ref(tt),
-            TokenTree::Group(Group { content, .. }) => content,
-        };
-
-        Self::new(stream)
     }
 
     /// Peeks the current token.
@@ -341,6 +334,12 @@ mod tspan {
     }
 }
 
+impl AsRef<[TokenTree]> for Group {
+    fn as_ref(&self) -> &[TokenTree] {
+        &self.content
+    }
+}
+
 #[derive(Default)]
 struct SpanCollectors(Vec<Span>);
 impl SpanCollectors {
@@ -363,8 +362,8 @@ pub struct Parser<'s> {
 }
 
 impl<'s> Parser<'s> {
-    pub fn new(stream: Stream<'s>) -> Self {
-        Parser { cursor: ParCursor::new(stream), span_collectors: Default::default() }
+    pub fn new<S: AsRef<[TokenTree]> + ?Sized>(stream: &'s S) -> Self {
+        Parser { cursor: ParCursor::new(stream.as_ref()), span_collectors: Default::default() }
     }
 
     pub fn parse<P: Parseable>(&mut self) -> Result<P, P::Err> {
@@ -493,6 +492,21 @@ impl<'s> Parser<'s> {
             TokenTree::Group(_) => todo!(),
         })
     }
+    pub fn peek_kind(&self) -> Option<TTKind> {
+        self.cursor.peek().map(TokenTree::kind)
+    }
+    pub fn peek_kinds(&self, n: usize) -> Vec<TTKind> {
+        let stream = self.cursor.stream;
+        let end = usize::max(n, stream.len());
+
+        stream[0..end].iter()
+            .map(TokenTree::kind)
+            .collect()
+    }
+
+    pub fn peek_tree(&self) -> Option<&TokenTree> {
+        self.cursor.peek()
+    }
     pub fn is_empty(&self) -> bool {
         self.cursor.is_empty()
     }
@@ -537,6 +551,19 @@ impl<'s> Parser<'s> {
         })?;
 
         Ok(Tuple { pairs, end, span })
+    }
+
+    /// Attempts to close the parser, failing if the stream is not empty.
+    pub fn close(self) -> ParseResult<()> {
+        self.close_or_else(|| ParseErr::UnexpectedToken)
+    }
+
+    /// Attempts to close the parser, failing (and calling the error function) if the stream is not empty.
+    pub fn close_or_else<E: GonErr>(self, e: impl FnOnce() -> E) -> Result<(), FullGonErr<E>> {
+        match self.is_empty() {
+            true  => Ok(()),
+            false => Err(self.cursor.error(e()))
+        } 
     }
 }
 impl Iterator for Parser<'_> {
@@ -649,15 +676,31 @@ impl<T> Tuple<T> {
             true  => Err(e()),
         }
     }
-    pub fn assert_closed<'s, 'tt, P: TokenPattern<'tt>, E>(self, parser: &mut Parser<'s>, p: P, needs_comma: impl FnOnce(&mut Parser<'_>) -> E, needs_t: impl FnOnce(&mut Parser<'_>) -> E) -> Result<Self, E> 
+    pub fn assert_closed<'s, 'tt, E: GonErr>(
+        self, 
+        parser: Parser<'s>, 
+        needs_comma: impl FnOnce() -> E, 
+        needs_t: impl FnOnce() -> E
+    ) -> Result<Self, FullGonErr<E>> 
         where 's: 'tt
     {
-        match parser.match_(p) {
-            Some(_) => Ok(self),
-            None => match self.ended_on_terminator() {
-                true  => Err(needs_t(parser)),
-                false => Err(needs_comma(parser)),
-            },
+        parser.close_or_else(|| match self.ended_on_terminator() {
+            true  => needs_t(),
+            false => needs_comma()
+        })?;
+
+        Ok(self)
+    }
+
+    pub fn handle_close<E: GonErr>(
+        &self,
+        needs_comma: impl FnOnce() -> E,
+        needs_t: impl FnOnce() -> E
+    ) -> E
+    {
+        match self.ended_on_terminator() {
+            true  => needs_t(),
+            false => needs_comma()
         }
     }
 }
@@ -885,16 +928,15 @@ impl Parseable for Option<ast::Type> {
         let (result, span) = parser.try_spanned(|parser| {
             let Some(ident) = parser.try_parse()? else { return ParseResult::Ok(None) };
 
-            parser.expect(token!["["])?;
-            let args = parser.parse_tuple(token![,])?
-                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?
-                .assert_closed(parser, token!["]"], 
-                    |parser| parser.cursor.error(expected_tokens![,]),
-                    |parser| parser.cursor.error(ParseErr::ExpectedType)
-                )?
-                .values().collect();
+            let mut group = Parser::new(parser.expect(delim!["[]"])?);
+            let args = group.parse_tuple(token![,])?
+                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?;
+            group.close_or_else(|| args.handle_close(
+                || expected_tokens![,],
+                || ParseErr::ExpectedType
+            ))?;
 
-            Ok(Some((ident, args)))
+            Ok(Some((ident, args.values().collect())))
         })?;
 
         Ok(result.map(|(ident, params)| ast::Type { ident, params, span }))
@@ -935,46 +977,48 @@ impl Parseable for Option<ast::DeclPat> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let Some(peek) = parser.peek().map(|t| &t.kind) else {
+        let Some(peek) = parser.peek_tree() else {
             return Ok(None)
         };
 
         let pat = match peek {
-            token!["["] => {
-                let (values, span) = parser.try_spanned(|parser| {
-                    parser.expect(token!["["])?;
-                    let pats = parser.parse_tuple(token![,])?
-                        .assert_closed(parser, token!["]"],
-                            |parser| parser.cursor.error(expected_tokens![,]),
-                            |parser| parser.cursor.error(ParseErr::ExpectedPattern)
-                        )?
-                        .values().collect();
-                    
-                    ParseResult::Ok(pats)
-                })?;
+            TokenTree::Group(group) if group.delimiter == delim!["[]"] => {
+                let span = group.span();
 
+                let mut content = Parser::new(parser.expect(delim!["[]"])?);
+                let values = content.parse_tuple(token![,])?
+                    .assert_closed(content,
+                        || expected_tokens![,],
+                        || ParseErr::ExpectedPattern,
+                    )?
+                    .values()
+                    .collect();
+                
                 ast::DeclPat::List { values, span }
             },
-            token![..] => {
-                let (item, span) = parser.try_spanned(|parser| {
-                    parser.expect(token![..])?;
-                    parser.try_parse()
-                })?;
-
-                ast::DeclPat::Spread { inner: item.map(Box::new), span }
-            },
-            token![mut] | token![#] | Token::Ident(_) => {
-                let ((mt, ident), span) = parser.try_spanned(|parser| {
-                    let mt = match parser.match_(token![mut]).is_some() {
-                        true  => ast::MutType::Mut,
-                        false => ast::MutType::Immut
-                    };
-
-                    ParseResult::Ok((mt, parser.parse()?))
-                })?;
-
-                ast::DeclPat::Unit(ast::DeclUnit { ident, mt, span })
-            },
+            TokenTree::Token(token) => match &token.kind {
+                token![..] => {
+                    let (item, span) = parser.try_spanned(|parser| {
+                        parser.expect(token![..])?;
+                        parser.try_parse()
+                    })?;
+    
+                    ast::DeclPat::Spread { inner: item.map(Box::new), span }
+                },
+                token![mut] | token![#] | Token::Ident(_) => {
+                    let ((mt, ident), span) = parser.try_spanned(|parser| {
+                        let mt = match parser.match_(token![mut]).is_some() {
+                            true  => ast::MutType::Mut,
+                            false => ast::MutType::Immut
+                        };
+    
+                        ParseResult::Ok((mt, parser.parse()?))
+                    })?;
+    
+                    ast::DeclPat::Unit(ast::DeclUnit { ident, mt, span })
+                },
+                _ => return Ok(None)
+            }
             _ => return Ok(None)
         };
 
@@ -1075,23 +1119,29 @@ impl Parseable for ast::FunSignature {
             parser.expect(token![fun])?;
             let ident = parser.parse()?;
 
-            let generics = if parser.match_(token!["["]).is_some() {
-                parser.parse_tuple(token![,])?
+            let generics = if let Some(group) = parser.match_(delim!["[]"]) {
+                let mut content = Parser::new(group);
+                
+                content.parse_tuple(token![,])?
                     .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
-                    .assert_closed(parser, token!["]"], 
-                        |parser| parser.cursor.error(expected_tokens![,]),
-                        |parser| parser.cursor.error(ParseErr::ExpectedParam),
-                    )?.values().collect()
+                    .assert_closed(content, 
+                        || expected_tokens![,],
+                        || ParseErr::ExpectedParam,
+                    )?
+                    .values()
+                    .collect()
             } else {
                 vec![]
             };
 
-            parser.expect(token!["("])?;
-            let params = parser.parse_tuple(token![,])?
-                .assert_closed(parser, token![")"],
-                    |parser| parser.cursor.error(expected_tokens![,]),
-                    |parser| parser.cursor.error(ParseErr::ExpectedParam),
-            )?.values().collect();
+            let mut content = Parser::new(parser.expect(delim!["()"])?);
+            let params = content.parse_tuple(token![,])?
+                .assert_closed(content,
+                    || expected_tokens![,],
+                    || ParseErr::ExpectedParam,
+                )?
+                .values()
+                .collect();
 
             let ret = match parser.match_(token![->]) {
                 Some(_) => Some(parser.parse()?),
@@ -1133,23 +1183,29 @@ impl Parseable for ast::MethodSignature {
             };
             let name = parser.parse()?;
 
-            let generics = if parser.match_(token!["["]).is_some() {
-                parser.parse_tuple(token![,])?
+            let generics = if let Some(group) = parser.match_(delim!["[]"]) {
+                let mut content = Parser::new(group);
+                
+                content.parse_tuple(token![,])?
                     .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
-                    .assert_closed(parser, token!["]"], 
-                        |parser| parser.cursor.error(expected_tokens![,]),
-                        |parser| parser.cursor.error(ParseErr::ExpectedParam),
-                    )?.values().collect()
+                    .assert_closed(content, 
+                        || expected_tokens![,],
+                        || ParseErr::ExpectedParam,
+                    )?
+                    .values()
+                    .collect()
             } else {
                 vec![]
             };
 
-            parser.expect(token!["("])?;
-            let params = parser.parse_tuple(token![,])?
-                .assert_closed(parser, token![")"],
-                    |parser| parser.cursor.error(expected_tokens![,]),
-                    |parser| parser.cursor.error(ParseErr::ExpectedParam),
-            )?.values().collect();
+            let mut content = Parser::new(parser.expect(delim!["()"])?);
+            let params = content.parse_tuple(token![,])?
+                .assert_closed(content,
+                    || expected_tokens![,],
+                    || ParseErr::ExpectedParam,
+                )?
+                .values()
+                .collect();
             
             let ret = match parser.match_(token![->]) {
                 Some(_) => Some(parser.parse()?),
@@ -1230,30 +1286,33 @@ impl Parseable for ast::Class {
         let ((ident, generic_params, fields, methods), span) = parser.try_spanned(|parser| {
             parser.expect(token![class])?;
             let ident = parser.parse()?;
-            let generic_params = match parser.match_(token!["["]) {
-                Some(_) => {
-                    parser.parse_tuple(token![,])?
+            let generic_params = match parser.match_(delim!["[]"]) {
+                Some(group) => {
+                    let mut content = Parser::new(group);
+                    content.parse_tuple(token![,])?
                         .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
-                        .assert_closed(parser, token!["]"],
-                            |parser| parser.cursor.error(expected_tokens![,]),
-                            |parser| parser.cursor.error(ParseErr::ExpectedIdent),
+                        .assert_closed(content,
+                            || expected_tokens![,],
+                            || ParseErr::ExpectedIdent,
                         )?
-                        .values().collect()
+                        .values()
+                        .collect()
                 },
                 None => vec![]
             };
 
-            parser.expect(token!["{"])?;
-            let fields = parser.parse_tuple(token![,])?
+            let mut block_parser = Parser::new(parser.expect(delim!["{}"])?);
+
+            let fields = block_parser.parse_tuple(token![,])?
                 .values()
                 .collect();
             
             let mut methods = vec![];
-            while let Some(FullToken { kind: token![fun], span: _ }) = parser.peek() {
-                methods.push(parser.parse()?);
+            while let Some(FullToken { kind: token![fun], span: _ }) = block_parser.peek() {
+                methods.push(block_parser.parse()?);
             }
 
-            parser.expect(token!["}"])?;
+            block_parser.close()?;
             
             ParseResult::Ok((ident, generic_params, fields, methods))
         })?;
@@ -1310,12 +1369,14 @@ impl Parseable for ast::FitClassDecl {
             parser.expect(token![class])?;
             let ty = parser.parse()?;
             
-            parser.expect(token!["{"])?;
+            let group = parser.expect(delim!["{}"])?;
+            let mut content = Parser::new(group);
+
             let mut methods = vec![];
-            while let Some(FullToken { kind: token![fun], span: _ }) = parser.peek() {
-                methods.push(parser.parse()?);
+            while let Some(FullToken { kind: token![fun], span: _ }) = content.peek() {
+                methods.push(content.parse()?);
             }
-            parser.expect(token!["}"])?;
+            content.close()?;
             
             ParseResult::Ok((ty, methods))
         })?;
@@ -1327,15 +1388,13 @@ impl Parseable for ast::Block {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let (stmts, span) = parser.try_spanned(|parser| {
-            parser.expect(token!["{"])?;
-            let stmts = parse_stmts_closed(parser)?;
-            parser.expect(token!["}"])?;
-            
-            ParseResult::Ok(stmts)
-        })?;
+        let group = parser.expect(delim!["{}"])?;
 
-        Ok(ast::Block { stmts, span })
+        let mut content = Parser::new(group);
+        let stmts = parse_stmts_closed(&mut content)?;
+        content.close()?;
+
+        Ok(ast::Block { stmts, span: group.span() })
     }
 }
 impl Parseable for ast::StaticPath {

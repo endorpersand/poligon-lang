@@ -1064,6 +1064,8 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
+    use crate::delim;
+
     use super::*;
 
     /// Assert that the string provided lexes into the vector of tokens.
@@ -1161,9 +1163,15 @@ mod tests {
     #[test]
     fn delimiter_lex() {
         assert_lex("(1)", &[
-            token!["("],
-            Token::Numeric("1".to_string()),
-            token![")"]
+            TokenTree::Group(Group {
+                delimiter: delim!["()"], 
+                content: vec![TokenTree::Token(FullToken {
+                    kind: Token::Numeric("1".to_string()),
+                    span: Span::new((0, 1) ..= (0, 1))
+                })], 
+                left_span: Span::new((0, 0) ..= (0, 0)), 
+                right_span: Span::new((0, 2) ..= (0, 2))
+            })
         ]);
 
         assert_lex_fail("(1", LexErr::UnclosedDelimiter.at((0, 0)));
