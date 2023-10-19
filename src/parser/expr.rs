@@ -327,7 +327,7 @@ impl Parseable for IDeref {
         }
 
         let Some(far_span) = deref_spans.pop() else {
-            return Err(parser.cursor.error(ParseErr::ExpectedTokens(token![*].expected_tokens())));
+            return Err(parser.cursor.error(token![*].fail_err()));
         };
 
         let far_deref = IDeref {

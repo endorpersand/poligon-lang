@@ -10,14 +10,18 @@
 //! - [`Parser`]: The struct that does all the parsing.
 
 mod expr;
+pub mod pat;
 
 use std::convert::Infallible;
 
 use crate::GonErr;
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group};
+use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, Delimiter};
 use crate::ast::{self, PatErr};
 use crate::span::{Span, Cursor, Spanned};
+pub use pat::TokenPattern;
+
+use self::pat::MatchFn;
 
 #[derive(Debug)]
 struct StreamNotFullyConsumed(());
@@ -120,6 +124,7 @@ impl<'s> ParCursor<'s> {
     pub fn peek(&self) -> Option<&TokenTree> {
         self.stream.first()
     }
+
     /// Peeks the nth token, with 0 being the current token.
     pub fn peek_nth(&self, n: usize) -> Option<&TokenTree> {
         self.stream.get(n)
@@ -131,13 +136,30 @@ impl<'s> ParCursor<'s> {
             None => Span::one(self.eof),
         }
     }
-
-    pub fn next_if(&mut self, f: impl FnOnce(&TokenTree) -> bool) -> Option<&TokenTree> {
-        if f(self.peek()?) {
-            self.next()
-        } else {
-            None
+    fn peek_token_span(&self) -> Span {
+        match self.peek() {
+            Some(TokenTree::Token(token)) => token.span(),
+            Some(TokenTree::Group(group)) => group.left_span,
+            None => Span::one(self.eof),
         }
+    }
+
+    /// Advances the cursor only if the current token tree matches the predicate.
+    pub fn next_if(&mut self, f: impl FnOnce(&TokenTree) -> bool) -> Option<&TokenTree> {
+        match f(self.peek()?) {
+            true  => self.next(),
+            false => None,
+        }
+    }
+    /// Advances the cursor only if the predicate is Some for the next TokenTree.
+    pub fn next_if_map<T>(&mut self, f: impl FnOnce(&TokenTree) -> Option<&T>) -> Option<&T> {
+        let (first, rest) = self.stream.split_first()?;
+        
+        let out = f(first);
+        if out.is_some() {
+            self.stream = rest;
+        }
+        out
     }
 
     /// The number of tokens remaining in the stream
@@ -151,7 +173,7 @@ impl<'s> ParCursor<'s> {
 
     /// Creates an error at the current position.
     pub fn error<E: GonErr>(&self, err: E) -> FullGonErr<E> {
-        err.at_range(self.peek_span())
+        err.at_range(self.peek_token_span())
     }
 
     // pub fn partition(&self, mut f: impl FnMut(&FullToken) -> bool) -> Option<(ParCursor<'s>, FullToken, ParCursor<'s>)> {
@@ -174,73 +196,10 @@ impl<'s> Iterator for ParCursor<'s> {
     type Item = &'s TokenTree;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stream.split_first().map(|(first, rest)| {
-            self.stream = rest;
-            first
-        })
-    }
-}
-
-mod pat {
-    use crate::lexer::token::{FullToken, Group, TokenTree};
-
-    pub trait Sealed {}
-
-    impl Sealed for FullToken {}
-    impl Sealed for Group {}
-    impl Sealed for TokenTree {}
-}
-
-/// A token tree pattern.
-/// 
-/// This reads a singular token tree and sees if it matches the given pattern.
-/// It also has the ability to "downcast" to a lower type ([`FullToken`] or [`Group`]).
-/// 
-/// Here are the currently implemented pattern:
-/// - [`Token`] == verify if that the stream token is equal to the pattern token
-/// - [`[Token]`] == verify if that the stream token is one of the tokens of the pattern
-pub trait TokenPattern {
-    /// Tests if the start of the cursor matches the pattern.
-    fn is_match(&self, tok: &FullToken) -> bool;
-
-    /// Provides which tokens this pattern expects.
-    fn expected_tokens(&self) -> Vec<Token>;
-}
-
-impl TokenPattern for Token {
-    fn is_match(&self, tok: &FullToken) -> bool {
-        self == tok
-    }
-
-    fn expected_tokens(&self) -> Vec<Token> {
-        std::slice::from_ref(self).to_vec()
-    }
-}
-impl TokenPattern for [Token] {
-    fn is_match(&self, tok: &FullToken) -> bool {
-        self.contains(&tok.kind)
-    }
-
-    fn expected_tokens(&self) -> Vec<Token> {
-        self.to_vec()
-    }
-}
-impl<const N: usize> TokenPattern for [Token; N] {
-    fn is_match(&self, tok: &FullToken) -> bool {
-        self.as_slice().is_match(tok)
-    }
-
-    fn expected_tokens(&self) -> Vec<Token> {
-        self.as_slice().expected_tokens()
-    }
-}
-impl<'a, P: TokenPattern + ?Sized> TokenPattern for &'a P {
-    fn is_match(&self, tok: &FullToken) -> bool {
-        (*self).is_match(tok)
-    }
-
-    fn expected_tokens(&self) -> Vec<Token> {
-        (*self).expected_tokens()
+        let (first, rest) = self.stream.split_first()?;
+        
+        self.stream = rest;
+        Some(first)
     }
 }
 
@@ -276,6 +235,9 @@ pub enum ParseErr {
 
     /// The parser expected a function parameter.
     ExpectedParam,
+
+    /// The parser tried to match a pattern and it did not work!
+    UnexpectedToken,
 
     /// An error occurred in creating an assignment pattern.
     AsgPatErr(PatErr),
@@ -318,6 +280,7 @@ impl std::fmt::Display for ParseErr {
             ParseErr::ExpectedPattern    => write!(f, "expected pattern"),
             ParseErr::ExpectedEntry      => write!(f, "expected entry"),
             ParseErr::ExpectedParam      => write!(f, "expected param"),
+            ParseErr::UnexpectedToken    => write!(f, "unexpected token"),
             ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
             ParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
             ParseErr::AsgPatErr(e)       => e.fmt(f),
@@ -344,7 +307,7 @@ type FullParseErr = FullGonErr<ParseErr>;
 
 macro_rules! expected_tokens {
     ($($t:tt),*) => {
-        ParseErr::ExpectedTokens(<[_]>::expected_tokens(&[$(token![$t]),*]))
+        <[_]>::fail_err(&[$(token![$t]),*])
     }
 }
 
@@ -372,14 +335,30 @@ mod tspan {
     }
 }
 
+#[derive(Default)]
+struct SpanCollectors(Vec<Span>);
+impl SpanCollectors {
+    fn push(&mut self, span: Span) {
+        self.0.push(span);
+    }
+    fn pop(&mut self) -> Option<Span> {
+        self.0.pop()
+    }
+    fn attach(&mut self, span: Span) {
+        if let Some(collector) = self.0.last_mut() {
+            *collector += span;
+        }
+    }
+}
+
 pub struct Parser<'s> {
     cursor: ParCursor<'s>,
-    span_collectors: Vec<Span>
+    span_collectors: SpanCollectors
 }
 
 impl<'s> Parser<'s> {
     pub fn new(stream: Stream<'s>) -> Self {
-        Parser { cursor: ParCursor::new(stream), span_collectors: vec![] }
+        Parser { cursor: ParCursor::new(stream), span_collectors: Default::default() }
     }
 
     pub fn parse<P: Parseable>(&mut self) -> Result<P, P::Err> {
@@ -425,15 +404,7 @@ impl<'s> Parser<'s> {
     /// ```
     pub fn expect<P: TokenPattern>(&mut self, pat: P) -> ParseResult<FullToken> {
         self.match_(&pat)
-            .ok_or_else(|| {
-                self.cursor.error(ParseErr::ExpectedTokens(pat.expected_tokens()))
-            })
-    }
-
-    fn attach_to_collector(&mut self, span: Span) {
-        if let Some(collector) = self.span_collectors.last_mut() {
-            *collector += span;
-        }
+            .ok_or_else(|| self.cursor.error(pat.fail_err()))
     }
 
     /// Expect that the next token in the input is in the specified list of tokens.
@@ -489,17 +460,24 @@ impl<'s> Parser<'s> {
     /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
     pub fn match_<P: TokenPattern>(&mut self, pat: P) -> Option<FullToken> {
-        let TokenTree::Token(hit) = self.cursor.next_if(|tt| match tt {
-            TokenTree::Token(token) => pat.is_match(token),
-            TokenTree::Group(_) => false,
-        })?.clone() else {
-            unreachable!("next_if call should have only matched token units")
-        };
+        let hit = self.cursor.next_if_map(|tt| match tt {
+            TokenTree::Token(t) => pat.is_match(t).then_some(t),
+            TokenTree::Group(_) => None,
+        })?.clone();
 
-        self.attach_to_collector(hit.span());
+        self.span_collectors.attach(hit.span);
         Some(hit)
     }
 
+    pub fn match_group(&mut self, delim: Delimiter) -> Option<ParCursor> {
+        let hit = self.cursor.next_if_map(|tt| match tt {
+            TokenTree::Token(_) => None,
+            TokenTree::Group(g) => (g.delimiter == delim).then_some(g),
+        })?;
+
+        self.span_collectors.attach(hit.span());
+        Some(ParCursor::new(&hit.content))
+    }
     pub fn peek(&self) -> Option<&FullToken> {
         self.cursor.peek().map(|t| match t {
             TokenTree::Token(t) => t,
@@ -528,7 +506,8 @@ impl<'s> Parser<'s> {
         let out = f(self);
         let span = self.span_collectors.pop()
             .expect("span block should have existed");
-        self.attach_to_collector(span);
+        
+        self.span_collectors.attach(span);
 
         S::transpose((out, span))
     }
@@ -564,7 +543,7 @@ impl Iterator for Parser<'_> {
         let tok = self.cursor.next();
         
         if let Some(t) = tok {
-            self.attach_to_collector(t.span());
+            self.span_collectors.attach(t.span());
         }
 
         tok.cloned().map(|t| t.try_into().unwrap()) // TODO
@@ -813,10 +792,9 @@ impl Parseable for Option<ast::StrLiteral> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        // TODO
-        let lit = parser.cursor.next_if(|t| matches!(t, TokenTree::Token(FullToken {kind: Token::Str(_), .. })))
+        let lit = parser.match_(MatchFn::new(|token| matches!(token.kind, Token::Str(_))))
             .map(|tok| {
-                let FullToken { kind: Token::Str(literal), span } = tok.clone().try_into().unwrap() else { unreachable!() };
+                let FullToken { kind: Token::Str(literal), span } = tok.clone() else { unreachable!() };
                 ast::StrLiteral { literal, span }
             });
 
@@ -853,7 +831,7 @@ impl Parseable for ast::ReasgType {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
             .ok_or_else(|| {
-                parser.cursor.error(ParseErr::ExpectedTokens(REASG_TOKENS.expected_tokens()))
+                parser.cursor.error(REASG_TOKENS.fail_err())
             })
     }
 }
