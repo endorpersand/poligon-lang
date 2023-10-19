@@ -36,14 +36,14 @@ pub enum Token {
     Operator(Operator),
 
     /// Delimiters (e.g. `()`, `[]`)
-    Delimiter(Delimiter),
+    Delimiter(Delimiter, bool /* direction: false = L, true = R */),
 
     /// End of line (`;`)
     LineSep
 }
 
 /// A token with position information.
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub struct FullToken {
     pub(crate) kind: Token,
     pub(crate) span: Span,
@@ -142,53 +142,43 @@ macro_rules! define_operators {
 }
 
 macro_rules! define_delimiters {
-    ($($idl:ident: $exl:literal, $idr:ident: $exr:literal),*) => {
+    ($($id:ident: $exl:literal, $exr:literal),*) => {
         /// The defined Poligon delimiters (`()`, `[]`, etc.).
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Delimiter {
             $(
-                #[allow(missing_docs)] $idl,
-                #[allow(missing_docs)] $idr
+                #[allow(missing_docs)] $id
             ),*
         }
-
+    
         impl Delimiter {
-            /// "Reverses" the bracket, providing the left variant if given the right and
-            /// the right variant if given the left.
-            pub fn reversed(&self) -> Self {
+            fn display_left(&self) -> &'static str {
                 match self {
-                    $(Self::$idl => Self::$idr),+,
-                    $(Self::$idr => Self::$idl),+
+                    $(Self::$id => $exl),*
                 }
             }
-
-            /// Test if this variant is a right bracket.
-            pub fn is_right(&self) -> bool {
+            fn display_right(&self) -> &'static str {
                 match self {
-                    $(Self::$idl => false),+,
-                    $(Self::$idr => true),+
+                    $(Self::$id => $exr),*
                 }
             }
         }
-
-        impl Display for Delimiter {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(match self {
-                    $(Self::$idl => $exl),*,
-                    $(Self::$idr => $exr),*
-                })
-            }
-        }
-
+    
         pub(super) static DE_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
             let mut m = BTreeMap::new();
-
-            $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
-            $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
-
+    
+            $(m.insert($exl, Token::Delimiter(Delimiter::$id, false));)*
+            $(m.insert($exr, Token::Delimiter(Delimiter::$id, true));)*
+    
             m
         });
     };
+}
+impl Display for Delimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.display_left())?;
+        f.write_str(self.display_right())
+    }
 }
 
 define_keywords! {
@@ -258,31 +248,50 @@ define_operators! {
     DColon: "::",
 
     Hash: "#",
-    Arrow: "->"
+    Arrow: "->",
+
+    LComment: "/*",
+    RComment: "*/"
 }
 define_delimiters! {
-    LParen: "(",    RParen: ")",
-    LSquare: "[",   RSquare: "]",
-    LCurly: "{",    RCurly: "}",
-    LComment: "/*", RComment: "*/"
+    Paren:  "(", ")",
+    Square: "[", "]",
+    Curly:  "{", "}"
 }
 
+/// A group of tokens, wrapped with a delimiter.
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Group {
+    /// The delimiter
     pub delimiter: Delimiter,
-    pub content: Vec<TokenTree>
+    /// The tokens encapsulated by this group
+    pub content: Vec<TokenTree>,
+    /// The span of the left delimiter
+    pub left_span: Span,
+    /// The span of the right delimiter
+    pub right_span: Span
+}
+impl Spanned for Group {
+    fn span(&self) -> Span {
+        self.left_span + self.right_span
+    }
 }
 
+/// A struct that either can hold a token unit or a group.
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
-pub enum TokenTreeKind {
-    Token(Token),
+pub enum TokenTree {
+    #[allow(missing_docs)]
+    Token(FullToken),
+    #[allow(missing_docs)]
     Group(Group)
 }
-
-#[derive(PartialEq, Eq, Debug, Clone, Hash)]
-pub struct TokenTree {
-    pub kind: TokenTreeKind,
-    pub span: Span
+impl Spanned for TokenTree {
+    fn span(&self) -> Span {
+        match self {
+            TokenTree::Token(e) => e.span(),
+            TokenTree::Group(e) => e.span(),
+        }
+    }
 }
 
 type Stream<'s> = &'s [TokenTree];
@@ -335,44 +344,44 @@ macro_rules! token {
     (import)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Import)   };
     (global)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Global)   };
     (throw)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Throw)    };
-    (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
-    (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
-    (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };
-    (/)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Slash)   };
-    (%)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Percent) };
-    (.)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Dot)     };
-    (..)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DDot)    };
-    (|)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Or)      };
-    (&)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::And)     };
-    (~)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Tilde)   };
-    (^)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Caret)   };
-    (&&)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DAnd)    };
-    (||)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DOr)     };
-    (!)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Excl)    };
-    (<)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Lt)      };
-    (<=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Le)      };
-    (>)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Gt)      };
-    (>=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ge)      };
-    (=)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Equal)   };
-    (==)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DEqual)  };
-    (!=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ne)      };
-    (<<)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shl)     };
-    (>>)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shr)     };
-    (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)   };
-    ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment) };
-    (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)   };
-    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)  };
-    (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)    };
-    (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)   };
+    (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)     };
+    (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)    };
+    (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)     };
+    (/)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Slash)    };
+    (%)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Percent)  };
+    (.)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Dot)      };
+    (..)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DDot)     };
+    (|)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Or)       };
+    (&)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::And)      };
+    (~)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Tilde)    };
+    (^)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Caret)    };
+    (&&)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DAnd)     };
+    (||)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DOr)      };
+    (!)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Excl)     };
+    (<)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Lt)       };
+    (<=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Le)       };
+    (>)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Gt)       };
+    (>=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ge)       };
+    (=)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Equal)    };
+    (==)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DEqual)   };
+    (!=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ne)       };
+    (<<)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shl)      };
+    (>>)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shr)      };
+    (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)    };
+    ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment)  };
+    (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)    };
+    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)   };
+    (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)     };
+    (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)    };
+    ("/*") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::LComment) };
+    ("*/") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::RComment) };
 
-    ("(")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LParen)   };
-    (")")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RParen)   };
-    ("[")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LSquare)  };
-    ("]")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RSquare)  };
-    ("{")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LCurly)   };
-    ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RCurly)   };
-    ("/*") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LComment) };
-    ("*/") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RComment) };
+    ("(")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Paren,  false) };
+    (")")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Paren,  true)  };
+    ("[")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Square, false) };
+    ("]")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Square, true)  };
+    ("{")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Curly,  false) };
+    ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Curly,  true)  };
 
     (;) => { $crate::lexer::token::Token::LineSep };
 }
@@ -393,7 +402,10 @@ impl Display for Token {
             },
             Token::Keyword(kw)  => Display::fmt(kw, f),
             Token::Operator(op) => Display::fmt(op, f),
-            Token::Delimiter(d) => Display::fmt(d, f),
+            Token::Delimiter(delim, dir) => match dir {
+                false => f.write_str(delim.display_left()),
+                true  => f.write_str(delim.display_right())
+            },
             Token::LineSep => f.write_str(";"),
         }
     }

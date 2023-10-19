@@ -12,7 +12,6 @@ use std::collections::{VecDeque, HashMap};
 use std::sync::OnceLock;
 
 use once_cell::sync::Lazy;
-use regex::Regex;
 
 use crate::err::{GonErr, FullGonErr};
 use crate::span::{Cursor, Span};
@@ -76,11 +75,11 @@ pub enum LexErr {
     /// A delimiter was never opened (e.g. ` ... )`)
     UnmatchedDelimiter,
 
-    /// A delimiter got closed with a semicolon (e.g. `( ...; `)
-    DelimiterClosedSemi,
-
     /// A comment was not closed (e.g. `/* ... `)
     UnclosedComment,
+
+    /// A comment was never opened (e.g. ` ... */`)
+    UnmatchedComment,
 
     /// There is still input to be lexed in the lexer
     NotFullyLexed,
@@ -115,12 +114,12 @@ impl std::fmt::Display for LexErr {
             LexErr::MismatchedDelimiter => write!(f, "mismatched delimiter"),
             LexErr::UnclosedDelimiter   => write!(f, "delimiter was never terminated"),
             LexErr::UnmatchedDelimiter  => write!(f, "delimiter was never opened"),
-            LexErr::DelimiterClosedSemi => write!(f, "unexpected ';'"),
             LexErr::UnclosedComment     => write!(f, "comment was never terminated"),
+            LexErr::UnmatchedComment    => write!(f, "comment was never opened"),
             LexErr::NotFullyLexed       => write!(f, "input not fully read"),
             LexErr::InvalidX            => write!(f, "invalid \\xXX escape"),
             LexErr::InvalidU            => write!(f, "invalid \\u{{XXXX}} escape"),
-            LexErr::InvalidChar(c)      => write!(f, "invalid char {:x}", c)
+            LexErr::InvalidChar(c)      => write!(f, "invalid char {:x}", c),
         }
     }
 }
@@ -370,7 +369,7 @@ enum ReplMode {
     /// Waiting for a string literal
     String(String, char),
     /// Waiting for a multiline comment
-    Comment(String)
+    Comment(String, usize /* num of indents into a comment. if non-zero, we are in a comment */)
 }
 impl ReplMode {
     fn take(&mut self) -> Self {
@@ -407,8 +406,9 @@ impl ReplMode {
 pub struct Lexer {
     /// The tokens generated from the string.
     tokens: Vec<FullToken>,
+
     /// A stack to keep track of delimiters (and their original position)
-    delimiters: Vec<(Cursor, Delimiter)>,
+    group_stack: Vec<(Span, Delimiter, Vec<FullToken>)>,
     
     /// The current position of the _current char.
     cursor: Cursor,
@@ -450,7 +450,7 @@ impl Lexer {
     pub fn new(input: &str, repl_mode: bool) -> Self {
         Self {
             tokens: vec![],
-            delimiters: vec![],
+            group_stack: vec![],
 
             cursor: (0, 0),
             token_start: (0, 0),
@@ -479,7 +479,7 @@ impl Lexer {
             ReplMode::NotRepl => {},
             ReplMode::NotPending => {},
             ReplMode::String(buf, qt) => self.push_str_with_buf(buf, qt)?,
-            ReplMode::Comment(buf) => self.push_multi_comment(buf)?,
+            ReplMode::Comment(buf, spans) => self.push_multi_comment(buf, spans)?,
         }
 
         // repeatedly check the next token type and consume
@@ -513,23 +513,6 @@ impl Lexer {
                 CharClass::Semi       => {
                     self.next();
                     self.push_token(token![;]);
-
-                    if let Some((_, de)) = self.delimiters.last() {
-                        match de {
-                            Delimiter::LParen
-                            | Delimiter::LSquare  => {
-                                Err(LexErr::DelimiterClosedSemi.at(self.cursor))?
-                            },
-
-                            Delimiter::LCurly
-                            | Delimiter::LComment => {},
-
-                            Delimiter::RParen
-                            | Delimiter::RSquare
-                            | Delimiter::RCurly
-                            | Delimiter::RComment => unreachable!(),
-                        }
-                    }
                 },
             }
         }
@@ -559,8 +542,8 @@ impl Lexer {
     /// assert_eq!(lx.try_close().unwrap_err(), LexErr::UnclosedDelimiter);
     /// ```
     pub fn try_close(&self) -> LexResult<()> {
-        if let Some((p, _)) = self.delimiters.last() {
-            return Err(LexErr::UnclosedDelimiter.at(*p));
+        if let Some(&(span, _, _)) = self.group_stack.last() {
+            return Err(LexErr::UnclosedDelimiter.at_range(span));
         } 
         
         if !self.remaining.is_empty() {
@@ -569,7 +552,7 @@ impl Lexer {
         
         match self.repl_mode {
             | ReplMode::String(..)
-            | ReplMode::Comment(_) 
+            | ReplMode::Comment(_, _) 
             => return Err(LexErr::NotFullyLexed.at(self.cursor)),
             _ => {}
         }
@@ -679,7 +662,12 @@ impl Lexer {
 
     /// Add token to the token buffer, using the default range
     fn push_token(&mut self, kind: Token) {
-        self.tokens.push(FullToken { kind, span: self.token_range() });
+        let token = FullToken { kind, span: self.token_range() };
+
+        match self.group_stack.last_mut() {
+            Some((_, _, tokens)) => tokens.push(token),
+            None => self.tokens.push(token),
+        }
     }
 
     /// Check if the next character in the input matches the given character class.
@@ -953,16 +941,31 @@ impl Lexer {
         match token {
             token!["//"] => self.push_line_comment(String::new())?,
             token!["/*"] => {
-                self.delimiters.push((self.token_start, Delimiter::LComment));
-                self.push_multi_comment(String::new())?;
+                self.push_multi_comment(String::new(), 1)?;
             },
-            Token::Delimiter(ref delim) => {
-                if !delim.is_right() {
-                    self.delimiters.push((self.token_start, *delim));
+            token!["*/"] => {
+                return Err(LexErr::UnmatchedComment.at_range(self.token_range()));
+            }
+            Token::Delimiter(delim, is_right) => {
+                if !is_right {
+                    // push group stack
+                    self.group_stack.push((self.token_range(), delim, vec![]));
                 } else {
-                    self.match_delimiter(self.token_start, *delim)?;
+                    // pop group stack
+                    match self.group_stack.last() {
+                        Some(&(_, ldelim, _)) if ldelim == delim => {
+                            self.group_stack.pop(); // TODO: readd to token stack as group
+                        },
+                        Some(&(lspan, _, _)) => Err({
+                            LexErr::MismatchedDelimiter
+                                .at_range(lspan)
+                                .and_at_range(self.token_range())
+                        })?,
+                        None => Err({
+                            LexErr::UnclosedDelimiter.at_range(self.token_range())
+                        })?
+                    }
                 }
-                self.push_token(token)
             },
             t => self.push_token(t)
         }
@@ -995,41 +998,26 @@ impl Lexer {
     /// (`/* this kind of comment */`) to the output.
     /// 
     /// This function assumes a `/*` token was already consumed.
-    fn push_multi_comment(&mut self, mut buf: String) -> LexResult<()> {
-        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/\*|\*/").unwrap());
-
+    fn push_multi_comment(&mut self, mut buf: String, mut indents: usize) -> LexResult<()> {
         // is used in this function only, because the uses here are ensured not to run into \n
         fn cur_shift_back((lno, cno): Cursor, chars: usize) -> Cursor {
             (lno, cno - chars)
         }
 
-        let comment_start = cur_shift(self.token_start, 2);
-
-        //read the current buffer to determine if any comments have been opened or closed
-        // note that there are recursive comments:
-        /* /* */ */
-        /*/ */
-        for m in RE.find_iter(&buf) {
-            let start = m.start();
-            match m.as_str() {
-                "/*" => self.delimiters.push(
-                    (cur_shift(comment_start, start), Delimiter::LComment)
-                ),
-                "*/" => self.match_delimiter(
-                    cur_shift(comment_start, start), Delimiter::RComment
-                )?,
-                _ => {}
-            }
-        }
-
-        'com: while let Some((_, Delimiter::LComment)) = self.delimiters.last() {
+        'com: while indents > 0 {
             while let Some(chr) = self.next() {
                 buf.push(chr);
 
                 if buf.ends_with("/*") {
-                    self.delimiters.push((cur_shift_back(self.cursor, 1), Delimiter::LComment));
+                    indents += 1;
                 } else if buf.ends_with("*/") {
-                    self.match_delimiter(cur_shift_back(self.cursor, 1), Delimiter::RComment)?;
+                    match indents.checked_sub(1) {
+                        Some(i) => indents = i,
+                        None => {
+                            let span = Span::new(cur_shift_back(self.cursor, 1) ..= self.cursor);
+                            Err(LexErr::UnmatchedComment.at_range(span))?
+                        }
+                    };
                     continue 'com;
                 }
             }
@@ -1037,13 +1025,7 @@ impl Lexer {
             // if we got here, the entire string got consumed...
             // and the comment is still open.
             if self.in_repl_mode() {
-                self.repl_mode = ReplMode::Comment(buf);
-
-                // get rid of all /* in delim stack except the first, to correct the buffer
-                if let Some(pos) = self.delimiters.iter().position(|&(_, dl)| dl == Delimiter::LComment) {
-                    self.delimiters.drain(pos + 1 ..);
-                }
-
+                self.repl_mode = ReplMode::Comment(buf, indents);
                 return Ok(());
             } else {
                 return Err(LexErr::UnclosedComment.at_range(self.token_start..=self.cursor));
@@ -1063,21 +1045,6 @@ impl Lexer {
         self.push_token(Token::Comment(String::from(com.trim()), false));
 
         Ok(())
-    }
-
-    /// Verify that the top delimiter in the delimiter stack is the same as the argument's 
-    /// delimiter type (Paren, Square, Curly, Comment) and pop it if they are the same.
-    fn match_delimiter(&mut self, pos: Cursor, d: Delimiter) -> LexResult<()> {
-        let left = if d.is_right() { d.reversed() } else { d };
-        
-        match self.delimiters.last() {
-            Some((_, l)) if l == &left => {
-                self.delimiters.pop();
-                Ok(())
-            },
-            Some((p, _)) => Err(LexErr::MismatchedDelimiter.at_points(&[*p, pos])),
-            None => Err(LexErr::UnmatchedDelimiter.at(pos)),
-        }
     }
 }
 
