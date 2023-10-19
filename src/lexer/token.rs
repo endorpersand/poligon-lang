@@ -293,8 +293,50 @@ impl Spanned for TokenTree {
         }
     }
 }
+impl PartialEq<Token> for TokenTree {
+    fn eq(&self, other: &Token) -> bool {
+        match self {
+            TokenTree::Token(t) => t == other,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<FullToken> for TokenTree {
+    fn eq(&self, other: &FullToken) -> bool {
+        match self {
+            TokenTree::Token(t) => t == other,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<TokenTree> for Token {
+    fn eq(&self, other: &TokenTree) -> bool {
+        match other {
+            TokenTree::Token(t) => t == self,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<TokenTree> for FullToken {
+    fn eq(&self, other: &TokenTree) -> bool {
+        match other {
+            TokenTree::Token(t) => t == self,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl TryFrom<TokenTree> for FullToken {
+    type Error = &'static str;
 
-type Stream<'s> = &'s [TokenTree];
+    fn try_from(value: TokenTree) -> Result<Self, Self::Error> {
+        match value {
+            TokenTree::Token(t) => Ok(t),
+            TokenTree::Group(_) => Err("poor support for TokenTree"),
+        }
+    }
+}
+pub type Stream<'s> = &'s [TokenTree];
+pub type OwnedStream = Vec<TokenTree>;
 
 /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
 pub(crate) static SPLITTABLES: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(|| {
@@ -387,6 +429,18 @@ macro_rules! token {
 }
 #[doc(inline)]
 pub use token;
+
+#[macro_export]
+macro_rules! delim {
+    ("(")  => { $crate::lexer::token::Delimiter::Paren  };
+    (")")  => { $crate::lexer::token::Delimiter::Paren  };
+    ("[")  => { $crate::lexer::token::Delimiter::Square };
+    ("]")  => { $crate::lexer::token::Delimiter::Square };
+    ("{")  => { $crate::lexer::token::Delimiter::Curly  };
+    ("}")  => { $crate::lexer::token::Delimiter::Curly  };
+}
+#[doc(inline)]
+pub(crate) use delim;
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

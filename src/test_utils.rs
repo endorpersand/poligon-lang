@@ -10,8 +10,9 @@ use std::path::Path;
 
 use crate::compiler::CompileErr;
 use crate::err::{FullGonErr, GonErr};
+use crate::span::Spanned;
 use crate::{lexer, ast, parser};
-use crate::lexer::token::{FullToken, Token};
+use crate::lexer::token::{FullToken, Token, OwnedStream, TokenTree};
 
 pub mod prelude {
     pub use super::{TestLoader, Test, TestResult, TestErr};
@@ -71,21 +72,20 @@ impl Debug for TestErr {
 }
 
 pub type TestResult<T> = Result<T, TestErr>;
-type Tokens = Vec<FullToken>;
 
 #[derive(Clone)]
 pub struct Test<'t> {
     pub header: &'t Header,
     code: &'t str,
-    tokens: Vec<FullToken>
+    tokens: OwnedStream
 }
 
 impl Test<'_> {
     pub fn source(&self) -> &str {
         match self.tokens.first().zip(self.tokens.last()) {
             Some((first, last)) => {
-                let (sl, sc) = first.span.start();
-                let (el, ec) = last.span.end();
+                let (sl, sc) = first.span().start();
+                let (el, ec) = last.span().end();
 
                 let schar = self.code.split('\n')
                     .take(sl)
@@ -129,7 +129,7 @@ impl Test<'_> {
 pub struct TestLoader {
     id: &'static str,
     code: String, 
-    tests: HashMap<Header, Tokens>
+    tests: HashMap<Header, OwnedStream>
 }
 impl TestLoader {
     pub fn new(id: &'static str, fp: impl AsRef<Path>) -> TestResult<Self> {
@@ -193,16 +193,16 @@ pub struct Header {
     ignore: Vec<String>
 }
 impl Header {
-    fn parse(t: &mut Peekable<impl Iterator<Item=FullToken>>) -> TestResult<Option<Header>> {
+    fn parse(t: &mut Peekable<impl Iterator<Item=TokenTree>>) -> TestResult<Option<Header>> {
         let mut name = None;
         let mut ignore = vec![];
 
-        while let Some(FullToken { kind: Token::Comment(c, _), ..}) = t.peek() {
+        while let Some(TokenTree::Token(FullToken { kind: Token::Comment(c, _), ..})) = t.peek() {
             if !c.trim().starts_with('!') {
                 break;
             }
 
-            let Some(FullToken { kind: Token::Comment(c, _), ..}) = t.next() else { unreachable!() };
+            let Some(TokenTree::Token(FullToken { kind: Token::Comment(c, _), ..})) = t.next() else { unreachable!() };
 
             let data = c.trim()
                 .strip_prefix('!')
@@ -247,7 +247,7 @@ impl Borrow<str> for Header {
     }
 }
 
-fn split_tests(t: impl IntoIterator<Item=FullToken>) -> TestResult<Vec<(Header, Tokens)>> {
+fn split_tests(t: impl IntoIterator<Item=TokenTree>) -> TestResult<Vec<(Header, OwnedStream)>> {
     let mut it = t.into_iter().peekable();
     let mut tests = vec![];
 

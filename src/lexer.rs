@@ -14,9 +14,10 @@ use std::sync::OnceLock;
 use once_cell::sync::Lazy;
 
 use crate::err::{GonErr, FullGonErr};
+use crate::lexer::token::Group;
 use crate::span::{Cursor, Span};
 
-use self::token::{Token, Keyword, Delimiter, token, FullToken};
+use self::token::{Token, Keyword, Delimiter, token, FullToken, TokenTree, OwnedStream};
 pub mod token;
 
 /// Convert a string and lex it into a sequence of tokens.
@@ -39,7 +40,7 @@ pub mod token;
 ///     Token::Ident(String::from("d"))
 /// ]);
 /// ```
-pub fn tokenize(input: &str) -> LexResult<Vec<FullToken>> {
+pub fn tokenize(input: &str) -> LexResult<OwnedStream> {
     let mut lx = Lexer::new(input, false);
     lx.lex()?;
     lx.close()
@@ -405,10 +406,10 @@ impl ReplMode {
 /// ```
 pub struct Lexer {
     /// The tokens generated from the string.
-    tokens: Vec<FullToken>,
+    tokens: Vec<TokenTree>,
 
     /// A stack to keep track of delimiters (and their original position)
-    group_stack: Vec<(Span, Delimiter, Vec<FullToken>)>,
+    group_stack: Vec<(Span, Delimiter, Vec<TokenTree>)>,
     
     /// The current position of the _current char.
     cursor: Cursor,
@@ -581,7 +582,7 @@ impl Lexer {
     /// assert_eq!(lx2.close().unwrap_err(), LexErr::UnclosedDelimiter);
     /// // -- error occurred, but lx2 still can't be used after this point --
     /// ```
-    pub fn close(self) -> LexResult<Vec<FullToken>> {
+    pub fn close(self) -> LexResult<OwnedStream> {
         self.try_close()?;
         Ok(self.tokens)
     }
@@ -663,10 +664,16 @@ impl Lexer {
     /// Add token to the token buffer, using the default range
     fn push_token(&mut self, kind: Token) {
         let token = FullToken { kind, span: self.token_range() };
+        let tt = TokenTree::Token(token);
 
+        self.push_token_tree(tt);
+    }
+
+    /// Add a token tree to the token buffer.
+    fn push_token_tree(&mut self, tt: TokenTree) {
         match self.group_stack.last_mut() {
-            Some((_, _, tokens)) => tokens.push(token),
-            None => self.tokens.push(token),
+            Some((_, _, tokens)) => tokens.push(tt),
+            None => self.tokens.push(tt),
         }
     }
 
@@ -952,11 +959,18 @@ impl Lexer {
                     self.group_stack.push((self.token_range(), delim, vec![]));
                 } else {
                     // pop group stack
-                    match self.group_stack.last() {
-                        Some(&(_, ldelim, _)) if ldelim == delim => {
-                            self.group_stack.pop(); // TODO: readd to token stack as group
+                    match self.group_stack.pop() {
+                        Some((lspan, ldelim, content)) if ldelim == delim => {
+                            let group = Group {
+                                delimiter: delim,
+                                content,
+                                left_span: lspan,
+                                right_span: self.token_range(),
+                            };
+
+                            self.push_token_tree(TokenTree::Group(group));
                         },
-                        Some(&(lspan, _, _)) => Err({
+                        Some((lspan, _, _)) => Err({
                             LexErr::MismatchedDelimiter
                                 .at_range(lspan)
                                 .and_at_range(self.token_range())
@@ -1056,7 +1070,7 @@ mod tests {
     #[allow(unused)]
     fn assert_lex<T>(input: &str, result: &[T]) 
         where T: std::fmt::Debug,
-            FullToken: PartialEq<T>
+            TokenTree: PartialEq<T>
     {
         match tokenize(input) {
             Ok(t) => assert_eq!(&t, result),

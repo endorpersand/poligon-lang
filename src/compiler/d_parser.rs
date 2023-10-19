@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 
 use crate::GonErr;
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken};
+use crate::lexer::token::{Token, token, FullToken, TokenTree};
 use crate::ast::{Located, ReasgType, MutType};
 use crate::span::Span;
 
@@ -250,8 +250,9 @@ impl Iterator for DParser {
 }
 
 impl DParser {
-    pub fn new(tokens: impl IntoIterator<Item=FullToken>, dtypes: DeclaredTypes) -> Self {
+    pub fn new(tokens: impl IntoIterator<Item=TokenTree>, dtypes: DeclaredTypes) -> Self {
         let mut tokens: VecDeque<_> = tokens.into_iter()
+            .map(|t| t.try_into().unwrap())
             .filter(|FullToken { kind, .. } | !matches!(kind, Token::Comment(_, _)))
             .collect();
         

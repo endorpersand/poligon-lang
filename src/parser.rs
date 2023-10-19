@@ -15,11 +15,9 @@ use std::convert::Infallible;
 
 use crate::GonErr;
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken, SPLITTABLES};
+use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group};
 use crate::ast::{self, PatErr};
-use crate::span::{Span, Cursor};
-
-type Stream<'s> = &'s [FullToken];
+use crate::span::{Span, Cursor, Spanned};
 
 #[derive(Debug)]
 struct StreamNotFullyConsumed(());
@@ -99,7 +97,7 @@ impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
     pub fn new(stream: Stream<'s>) -> Self {
         let eof = if let Some(tok) = stream.last() {
-            let (lno, cno) = tok.span.end();
+            let (lno, cno) = tok.span().end();
             (lno, cno + 1)
         } else {
             (0, 0)
@@ -108,23 +106,33 @@ impl<'s> ParCursor<'s> {
         ParCursor { stream, eof }
     }
 
+    /// Creates a new cursor from a token tree.
+    pub fn new_from_tree(tt: &'s TokenTree) -> Self {
+        let stream = match tt {
+            TokenTree::Token(_) => std::slice::from_ref(tt),
+            TokenTree::Group(Group { content, .. }) => content,
+        };
+
+        Self::new(stream)
+    }
+
     /// Peeks the current token.
-    pub fn peek(&self) -> Option<&FullToken> {
+    pub fn peek(&self) -> Option<&TokenTree> {
         self.stream.first()
     }
     /// Peeks the nth token, with 0 being the current token.
-    pub fn peek_nth(&self, n: usize) -> Option<&FullToken> {
+    pub fn peek_nth(&self, n: usize) -> Option<&TokenTree> {
         self.stream.get(n)
     }
 
     pub fn peek_span(&self) -> Span {
         match self.peek() {
-            Some(t) => t.span,
+            Some(t) => t.span(),
             None => Span::one(self.eof),
         }
     }
 
-    pub fn next_if(&mut self, f: impl FnOnce(&FullToken) -> bool) -> Option<&FullToken> {
+    pub fn next_if(&mut self, f: impl FnOnce(&TokenTree) -> bool) -> Option<&TokenTree> {
         if f(self.peek()?) {
             self.next()
         } else {
@@ -163,7 +171,7 @@ impl<'s> ParCursor<'s> {
 }
 
 impl<'s> Iterator for ParCursor<'s> {
-    type Item = &'s FullToken;
+    type Item = &'s TokenTree;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.stream.split_first().map(|(first, rest)| {
@@ -172,38 +180,36 @@ impl<'s> Iterator for ParCursor<'s> {
         })
     }
 }
-/// A token pattern.
+
+mod pat {
+    use crate::lexer::token::{FullToken, Group, TokenTree};
+
+    pub trait Sealed {}
+
+    impl Sealed for FullToken {}
+    impl Sealed for Group {}
+    impl Sealed for TokenTree {}
+}
+
+/// A token tree pattern.
 /// 
-/// Similar to std [`std::str::pattern::Pattern`], this can be used to
-/// search a pattern in a given Token.
+/// This reads a singular token tree and sees if it matches the given pattern.
+/// It also has the ability to "downcast" to a lower type ([`FullToken`] or [`Group`]).
 /// 
-/// [`Token`] == verify if that token is in the given output
-/// [`[Token]`] == verify if any one of those tokens are in the given input
+/// Here are the currently implemented pattern:
+/// - [`Token`] == verify if that the stream token is equal to the pattern token
+/// - [`[Token]`] == verify if that the stream token is one of the tokens of the pattern
 pub trait TokenPattern {
     /// Tests if the start of the cursor matches the pattern.
-    fn is_prefix_of(&self, cur: &ParCursor) -> bool;
-
-    /// Removes the token pattern from the cursor if it matches.
-    /// 
-    /// This function returns the prefix stripped.
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
-        if self.is_prefix_of(cur) {
-            cur.next().cloned()
-        } else {
-            None
-        }
-    }
+    fn is_match(&self, tok: &FullToken) -> bool;
 
     /// Provides which tokens this pattern expects.
     fn expected_tokens(&self) -> Vec<Token>;
 }
 
 impl TokenPattern for Token {
-    fn is_prefix_of(&self, cur: &ParCursor) -> bool {
-        cur.peek().is_some_and(|tok| {
-            // matches the first token, or matches the first half
-            (self == tok) || (SPLITTABLES.get(tok).is_some_and(|(l, _)| l == self))
-        })
+    fn is_match(&self, tok: &FullToken) -> bool {
+        self == tok
     }
 
     fn expected_tokens(&self) -> Vec<Token> {
@@ -211,12 +217,8 @@ impl TokenPattern for Token {
     }
 }
 impl TokenPattern for [Token] {
-    fn is_prefix_of(&self, cur: &ParCursor) -> bool {
-        self.iter().any(|t| t.is_prefix_of(cur))
-    }
-
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
-        self.iter().find_map(|t| t.strip_prefix_of(cur))
+    fn is_match(&self, tok: &FullToken) -> bool {
+        self.contains(&tok.kind)
     }
 
     fn expected_tokens(&self) -> Vec<Token> {
@@ -224,12 +226,8 @@ impl TokenPattern for [Token] {
     }
 }
 impl<const N: usize> TokenPattern for [Token; N] {
-    fn is_prefix_of(&self, cur: &ParCursor) -> bool {
-        self.as_slice().is_prefix_of(cur)
-    }
-
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
-        self.as_slice().strip_prefix_of(cur)
+    fn is_match(&self, tok: &FullToken) -> bool {
+        self.as_slice().is_match(tok)
     }
 
     fn expected_tokens(&self) -> Vec<Token> {
@@ -237,12 +235,8 @@ impl<const N: usize> TokenPattern for [Token; N] {
     }
 }
 impl<'a, P: TokenPattern + ?Sized> TokenPattern for &'a P {
-    fn is_prefix_of(&self, cur: &ParCursor) -> bool {
-        (*self).is_prefix_of(cur)
-    }
-
-    fn strip_prefix_of(&self, cur: &mut ParCursor) -> Option<FullToken> {
-        (*self).strip_prefix_of(cur)
+    fn is_match(&self, tok: &FullToken) -> bool {
+        (*self).is_match(tok)
     }
 
     fn expected_tokens(&self) -> Vec<Token> {
@@ -495,20 +489,28 @@ impl<'s> Parser<'s> {
     /// assert_eq!(parser.match_(&[token![+], token![-]]).unwrap(), token![+]);
     /// ```
     pub fn match_<P: TokenPattern>(&mut self, pat: P) -> Option<FullToken> {
-        let mat = pat.strip_prefix_of(&mut self.cursor);
+        let TokenTree::Token(hit) = self.cursor.next_if(|tt| match tt {
+            TokenTree::Token(token) => pat.is_match(token),
+            TokenTree::Group(_) => false,
+        })?.clone() else {
+            unreachable!("next_if call should have only matched token units")
+        };
 
-        if let Some(m) = &mat {
-            self.attach_to_collector(m.span);
-        }
-
-        mat
+        self.attach_to_collector(hit.span());
+        Some(hit)
     }
 
     pub fn peek(&self) -> Option<&FullToken> {
-        self.cursor.peek()
+        self.cursor.peek().map(|t| match t {
+            TokenTree::Token(t) => t,
+            TokenTree::Group(_) => todo!(),
+        })
     }
     pub fn peek_nth(&self, n: usize) -> Option<&FullToken> {
-        self.cursor.peek_nth(n)
+        self.cursor.peek_nth(n).map(|t| match t {
+            TokenTree::Token(t) => t,
+            TokenTree::Group(_) => todo!(),
+        })
     }
     pub fn is_empty(&self) -> bool {
         self.cursor.is_empty()
@@ -562,10 +564,10 @@ impl Iterator for Parser<'_> {
         let tok = self.cursor.next();
         
         if let Some(t) = tok {
-            self.attach_to_collector(t.span);
+            self.attach_to_collector(t.span());
         }
 
-        tok.cloned()
+        tok.cloned().map(|t| t.try_into().unwrap()) // TODO
     }
 }
 
@@ -811,9 +813,10 @@ impl Parseable for Option<ast::StrLiteral> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let lit = parser.cursor.next_if(|t| matches!(&**t, Token::Str(_)))
+        // TODO
+        let lit = parser.cursor.next_if(|t| matches!(t, TokenTree::Token(FullToken {kind: Token::Str(_), .. })))
             .map(|tok| {
-                let FullToken { kind: Token::Str(literal), span } = tok.clone() else { unreachable!() };
+                let FullToken { kind: Token::Str(literal), span } = tok.clone().try_into().unwrap() else { unreachable!() };
                 ast::StrLiteral { literal, span }
             });
 
