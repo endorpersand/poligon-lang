@@ -213,7 +213,7 @@ impl Parseable for Option<Expr11> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let m_expr = if let Some(TTKind::Token(token![..])) = parser.peek_kind() {
+        let m_expr = if let Some(TTKind::Token(token![..])) = parser.peek() {
             Some(Expr11::Spread(parser.parse()?))
         } else {
             parser.try_parse()?
@@ -271,7 +271,7 @@ impl Parseable for Option<Expr3> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let m_expr = match parser.peek_kind() {
+        let m_expr = match parser.peek() {
             Some(TTKind::Token(tok)) if UNARY_OPS.contains(tok) => {
                 Some(Expr3::UnaryOps(parser.parse()?))
             },
@@ -310,7 +310,7 @@ impl Parseable for Option<Expr2> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let m_expr = if let Some(TTKind::Token(token![*])) = parser.peek_kind() {
+        let m_expr = if let Some(TTKind::Token(token![*])) = parser.peek() {
             Some(Expr2::IDeref(parser.parse()?))
         } else {
             parser.try_parse()?
@@ -354,7 +354,7 @@ impl Parseable for Option<Expr1> {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use super::TTKind::{Token as Tk, Group as Gr};
 
-        let mut base = match parser.peek_kinds(4).as_ref() {
+        let mut base = match parser.peek_slice(4).as_ref() {
             // if a type-like structure appears before ::, try parsing a type
             | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::])]
             | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::]), ..]
@@ -379,7 +379,7 @@ impl Parseable for Option<Expr1> {
         };
 
         loop {
-            match parser.peek_kinds(3).as_ref() {
+            match parser.peek_slice(3).as_ref() {
                 // path access
                 | [Tk(token![.]), Tk(token![#]), Tk(Token::Ident(_))]
                 | [Tk(token![.]), Tk(Token::Ident(_)), ..]
@@ -470,7 +470,7 @@ impl Parseable for Option<Expr0> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let Some(tt) = parser.peek_kind() else { return Ok(None) };
+        let Some(tt) = parser.peek() else { return Ok(None) };
 
         let expr = match tt {
             TTKind::Group(delimiter) => match delimiter {
@@ -506,7 +506,7 @@ impl Parseable for Option<Identoid> {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use super::TTKind::{Token as Tk, Group as Gr};
 
-        let identoid = match parser.peek_kinds(4).as_ref() {
+        let identoid = match parser.peek_slice(4).as_ref() {
             | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#])]
             | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![#]), ..]
             | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#]), ..]

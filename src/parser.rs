@@ -479,20 +479,20 @@ impl<'s> Parser<'s> {
     }
 
     /// Peeks at the current token tree in the stream, returning its [`TTKind`].
-    pub fn peek_kind(&self) -> Option<TTKind> {
+    pub fn peek(&self) -> Option<TTKind> {
         self.cursor.peek().map(TokenTree::kind)
     }
     /// Peeks at the nth next token tree in the stream, returning its [`TTKind`].
     /// 
     /// `0` here represents the current token in the stream.
-    pub fn peek_nth_kind(&self, n: usize) -> Option<TTKind> {
+    pub fn peek_nth(&self, n: usize) -> Option<TTKind> {
         self.cursor.peek_nth(n).map(TokenTree::kind)
     }
     /// Peeks at the next few token trees in the stream, returning their [`TTKind`]s in a slice.
     /// 
     /// This will return at most `n` token trees, but it can return fewer 
     /// if there are fewer than `n` token trees remaining in the stream.
-    pub fn peek_kinds(&self, n: usize) -> Box<[TTKind]> {
+    pub fn peek_slice(&self, n: usize) -> Box<[TTKind]> {
         let stream = self.cursor.stream;
         let end = usize::max(n, stream.len());
 
@@ -818,7 +818,7 @@ impl Parseable for Option<ast::Ident> {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use TTKind::Token as Tk;
 
-        let ident = match parser.peek_kinds(2).as_ref() {
+        let ident = match parser.peek_slice(2).as_ref() {
             [Tk(token![#]), Tk(Token::Ident(_))] => {
                 let (ident, span) = parser.spanned(|parser| {
                     parser.expect(token![#]).unwrap(); // should be unreachable
@@ -910,7 +910,7 @@ impl Parseable for Option<ast::Stmt> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let st = match parser.peek_kind() {
+        let st = match parser.peek() {
             Some(TTKind::Token(tok)) => match tok {
                 token![let] | token![const] => Some(ast::Stmt::Decl(parser.parse()?)),
                 token![return]   => Some(ast::Stmt::Return(parser.parse()?)),
@@ -921,7 +921,7 @@ impl Parseable for Option<ast::Stmt> {
                 token![extern]   => Some(ast::Stmt::ExternFunDecl(parser.parse()?)),
                 token![class]    => Some(ast::Stmt::Class(parser.parse()?)),
                 token![fit]      => Some(ast::Stmt::FitClassDecl(parser.parse()?)),
-                token![import]   => match parser.peek_nth_kind(1) {
+                token![import]   => match parser.peek_nth(1) {
                     Some(TTKind::Token(t)) => match t {
                         Token::Ident(id) if id == "intrinsic" => Some(ast::Stmt::ImportIntrinsic(parser.parse()?)),
                         _ => Some(ast::Stmt::Import(parser.parse()?))
@@ -1325,7 +1325,7 @@ impl Parseable for ast::Class {
                 .collect();
             
             let mut methods = vec![];
-            while let Some(TTKind::Token(token![fun])) = block_parser.peek_kind() {
+            while let Some(TTKind::Token(token![fun])) = block_parser.peek() {
                 methods.push(block_parser.parse()?);
             }
 
@@ -1390,7 +1390,7 @@ impl Parseable for ast::FitClassDecl {
             let mut content = Parser::new(group);
 
             let mut methods = vec![];
-            while let Some(TTKind::Token(token![fun])) = content.peek_kind() {
+            while let Some(TTKind::Token(token![fun])) = content.peek() {
                 methods.push(content.parse()?);
             }
             content.close()?;
