@@ -16,7 +16,7 @@ use std::convert::Infallible;
 
 use crate::{GonErr, delim};
 use crate::err::FullGonErr;
-use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, Delimiter, TTKind};
+use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, TTKind};
 use crate::ast::{self, PatErr};
 use crate::span::{Span, Cursor, Spanned};
 pub use pat::TokenPattern;
