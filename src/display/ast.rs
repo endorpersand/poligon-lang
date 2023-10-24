@@ -78,7 +78,7 @@ impl<T: Display> Display for Pat<T> {
             },
             Pat::List { values, span: _ } => {
                 write!(f, "[")?;
-                fmt_list(f, values)?;
+                fmt_iter(f, values)?;
                 write!(f, "]")
             },
         }
@@ -130,16 +130,16 @@ impl Display for FunSignature {
         write!(f, "fun {ident}")?;
         if !generics.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, generics)?;
+            fmt_iter(f, generics)?;
             write!(f, ">")?;
         }
         write!(f, "(")?;
 
-        let mut pd: Vec<_> = params.iter()
-        .map(|t| t as _)
-        .collect();
-        if *varargs { pd.push(&".." as _); }
-        fmt_list::<&dyn Display>(f, &pd)?;
+        fmt_iter(f, {
+            params.iter()
+                .map::<&dyn Display, _>(|t| t)
+                .chain(varargs.then_some(&".." as _))
+        })?;
 
         write!(f, ") ")?;
 
@@ -166,11 +166,11 @@ impl Display for MethodSignature {
         
         if !generic_params.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, generic_params)?;
+            fmt_iter(f, generic_params)?;
             write!(f, ">")?;
         }
         write!(f, "(")?;
-        fmt_list(f, params)?;
+        fmt_iter(f, params)?;
         write!(f, ") ")?;
 
         if let Some(retty) = ret {
@@ -217,7 +217,7 @@ impl Display for Type {
         write!(f, "{ident}")?;
         if !params.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, params)?;
+            fmt_iter(f, params)?;
             write!(f, ">")?;
         }
 
@@ -237,7 +237,7 @@ impl Display for Class {
         write!(f, "class {ident}")?;
         if !generic_params.is_empty() {
             write!(f, "<")?;
-            fmt_list(f, generic_params)?;
+            fmt_iter(f, generic_params)?;
             write!(f, ">")?;
         }
         write!(f, " {{")?;
@@ -357,7 +357,7 @@ impl Display for ListLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Self { values, span: _ } = self;
         write!(f, "[")?;
-        fmt_list(f, values)?;
+        fmt_iter(f, values)?;
         write!(f, "]")
     }
 }
@@ -365,7 +365,7 @@ impl Display for SetLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Self { values, span: _ } = self;
         write!(f, "set {{")?;
-        fmt_list(f, values)?;
+        fmt_iter(f, values)?;
         write!(f, "}}")
     }
 }
@@ -498,11 +498,11 @@ impl Display for Call {
         write!(f, "{funct}")?;
         if !generic_args.is_empty() {
             write!(f, "[")?;
-            fmt_list(f, generic_args)?;
+            fmt_iter(f, generic_args)?;
             write!(f, "]")?;
         }
         write!(f, ")")?;
-        fmt_list(f, args)?;
+        fmt_iter(f, args)?;
         write!(f, ")")
     }
 }

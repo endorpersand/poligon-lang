@@ -159,11 +159,11 @@ fn fun_signature(f: &mut Formatter<'_>, fs: &FunSignature, external: bool) -> st
     }
     write!(f, "fun {ident}(")?;
     
-    let mut pd: Vec<_> = params.iter()
-        .map(|t| t as _)
-        .collect();
-    if *varargs { pd.push(&".." as _); }
-    fmt_list::<&dyn Display>(f, &pd)?;
+    fmt_iter(f, {
+        params.iter()
+            .map::<&dyn Display, _>(|t| t)
+            .chain(varargs.then_some(&".." as _))
+    })?;
     
     write!(f, ") -> {ret}")
 }
@@ -212,14 +212,14 @@ impl Display for TypeRef<'_> {
                 write!(f, "{ident}")?;
                 if !params.is_empty() {
                     write!(f, "<")?;
-                    fmt_list(f, params)?;
+                    fmt_iter(f, &**params)?;
                     write!(f, ">")?;
                 }
                 Ok(())
             },
             TypeRef::Tuple(types, ()) => {
                 write!(f, "[")?;
-                fmt_list(f, types)?;
+                fmt_iter(f, &**types)?;
                 write!(f, "]")
             },
             TypeRef::Fun(ft) => write!(f, "{ft}"),
@@ -233,11 +233,11 @@ impl Display for FunTypeRef<'_> {
         
         write!(f, "(")?;
 
-        let mut pd: Vec<_> = params.iter()
-            .map(|t| t as _)
-            .collect();
-        if *varargs { pd.push(&".." as _); }
-        fmt_list::<&dyn Display>(f, &pd)?;
+        fmt_iter(f, {
+            params.iter()
+                .map::<&dyn Display, _>(|t| t)
+                .chain(varargs.then_some(&".." as _))
+        })?;
 
         write!(f, ") -> {ret}")
     }
@@ -267,12 +267,12 @@ impl Display for ExprType {
             ExprType::Literal(lt) => write!(f, "{lt}"),
             ExprType::ListLiteral(lt) => {
                 write!(f, "[")?;
-                fmt_list(f, lt)?;
+                fmt_iter(f, lt)?;
                 write!(f, "]")
             },
             ExprType::SetLiteral(lt)  => {
                 write!(f, "set {{")?;
-                fmt_list(f, lt)?;
+                fmt_iter(f, lt)?;
                 write!(f, "}}")
             },
             ExprType::DictLiteral(lt) => {
@@ -282,7 +282,7 @@ impl Display for ExprType {
             },
             ExprType::ClassLiteral(ident, lt) => {
                 write!(f, "{ident} #{{")?;
-                fmt_list(f, lt)?;
+                fmt_iter(f, lt)?;
                 write!(f, "}}")
             },
             ExprType::Assign(asg, expr) => write!(f, "{asg} = {expr}"),
@@ -339,7 +339,7 @@ impl Display for ExprType {
             ExprType::For { ident, element_type, iterator, block } => write!(f, "for <{element_type}>({ident}) in {iterator} {block}"),
             ExprType::Call { funct, params } => {
                 write!(f, "{funct}(")?;
-                fmt_list(f, params)?;
+                fmt_iter(f, params)?;
                 write!(f, ")")
             },
             ExprType::Index(idx) => write!(f, "{idx}"),
@@ -367,7 +367,7 @@ impl Display for ExprType {
                 
                 if !rest.is_empty() {
                     write!(f, ", ")?;
-                    fmt_list(f, rest)?;
+                    fmt_iter(f, rest)?;
                 }
                 write!(f, ")")
             },
