@@ -139,7 +139,7 @@ impl Display for FunSignature {
         .map(|t| t as _)
         .collect();
         if *varargs { pd.push(&".." as _); }
-        fmt_dyn_list(f, &pd)?;
+        fmt_list::<&dyn Display>(f, &pd)?;
 
         write!(f, ") ")?;
 
@@ -373,7 +373,7 @@ impl Display for DictLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Self { entries, span: _ } = self;
         write!(f, "dict {{")?;
-        fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
+        fmt_mapped_list(f, entries, |f, (a, b)| write!(f, "{a}: {b}"))?;
         write!(f, "}}")
     }
 }
@@ -381,7 +381,7 @@ impl Display for ClassLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Self { ty, entries, span: _ } = self;
         write!(f, "{ty} #{{")?;
-        fmt_mapped_list(f, entries, |(a, b)| format!("{a}: {b}"))?;
+        fmt_mapped_list(f, entries, |f, (a, b)| write!(f, "{a}: {b}"))?;
         write!(f, "}}")
     }
 }

@@ -163,7 +163,7 @@ fn fun_signature(f: &mut Formatter<'_>, fs: &FunSignature, external: bool) -> st
         .map(|t| t as _)
         .collect();
     if *varargs { pd.push(&".." as _); }
-    fmt_dyn_list(f, &pd)?;
+    fmt_list::<&dyn Display>(f, &pd)?;
     
     write!(f, ") -> {ret}")
 }
@@ -237,7 +237,7 @@ impl Display for FunTypeRef<'_> {
             .map(|t| t as _)
             .collect();
         if *varargs { pd.push(&".." as _); }
-        fmt_dyn_list(f, &pd)?;
+        fmt_list::<&dyn Display>(f, &pd)?;
 
         write!(f, ") -> {ret}")
     }
@@ -277,7 +277,7 @@ impl Display for ExprType {
             },
             ExprType::DictLiteral(lt) => {
                 write!(f, "dict {{")?;
-                fmt_mapped_list(f, lt, |(a, b)| format!("{a}: {b}"))?;
+                fmt_mapped_list(f, lt, |f, (a, b)| write!(f, "{a}: {b}"))?;
                 write!(f, "}}")
             },
             ExprType::ClassLiteral(ident, lt) => {
