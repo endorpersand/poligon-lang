@@ -25,6 +25,8 @@ define_enum! {
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Expr {
         /// Variable access.
+        /// 
+        /// See [`Ident`] for examples.
         Ident,
     
         /// A block of statements.
@@ -51,12 +53,7 @@ define_enum! {
         
         /// An assignment operation.
         /// 
-        /// # Examples
-        /// ```text
-        /// a = 1;
-        /// b[0] = 3;
-        /// [a, b, c] = [1, 2, 3];
-        /// ```
+        /// See [`Assign`] for examples.
         Assign,
     
         /// A path.
@@ -77,8 +74,7 @@ define_enum! {
     
         /// A comparison operation (e.g. `a < b < c < d`).
         /// 
-        /// Compound comparison operations are broken down by `&&`.
-        /// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
+        /// For more details, see [`Comparison`].
         Comparison,
     
         /// A range (e.g. `1..10` or `1..10 step 1`).
@@ -100,6 +96,7 @@ define_enum! {
         /// 
         /// See [`Index`] for examples.
         Index,
+        
         /// A spread operation (e.g. `..`, `..lst`).
         Spread,
     
@@ -110,9 +107,21 @@ define_enum! {
     }
 }
 
+/// A primitive literal with a defined span.
+/// 
+/// # Examples
+/// ```text
+/// 14    // int
+/// 14.4  // float
+/// 'x'   // char
+/// "abc" // string
+/// true  // bool
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Literal {
+    /// The data held by this literal
     pub kind: LitKind,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Literal {
@@ -164,9 +173,12 @@ impl PartialEq for LitKind {
 }
 impl Eq for LitKind {}
 
+/// A list literal (e.g. `[1, 2, 3, 4]`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ListLiteral {
+    /// The values held in this list literal
     pub values: Vec<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for ListLiteral {
@@ -175,9 +187,12 @@ impl Spanned for ListLiteral {
     }
 }
 
+/// A set literal (e.g. `set {1, 2, 3, 4}`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SetLiteral {
+    /// The values held in this set literal
     pub values: Vec<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for SetLiteral {
@@ -186,9 +201,12 @@ impl Spanned for SetLiteral {
     }
 }
 
+/// A dict literal (e.g. `dict {1: "a", 2: "b", 3: "c", 4: "d"}`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DictLiteral {
+    /// The entries held in this dict literal
     pub entries: Vec<(Expr, Expr)>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for DictLiteral {
@@ -197,10 +215,14 @@ impl Spanned for DictLiteral {
     }
 }
 
+/// A class initializer (e.g. `Animal {age: 1, size: 2}`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ClassLiteral {
+    /// The type to instantiate by this class instantiation
     pub ty: Type,
+    /// The declaration of the fields in this class instantiation
     pub entries: Vec<(Ident, Expr)>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for ClassLiteral {
@@ -209,10 +231,21 @@ impl Spanned for ClassLiteral {
     }
 }
 
+/// An assignment operation.
+/// 
+/// # Examples
+/// ```text
+/// a = 1;
+/// b[0] = 3;
+/// [a, b, c] = [1, 2, 3];
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Assign {
+    /// The target pattern to assign
     pub target: AsgPat,
+    /// The expression to assign to the target
     pub value: Box<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Assign {
@@ -221,6 +254,7 @@ impl Spanned for Assign {
     }
 }
 
+/// A chain of unary operations (e.g. `+-+-~!+e`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnaryOps {
     /// The operators applied. These are in display order 
@@ -228,6 +262,7 @@ pub struct UnaryOps {
     pub ops: Vec<op::Unary>,
     /// Expression to apply the unary operations to.
     pub expr: Box<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for UnaryOps {
@@ -236,6 +271,7 @@ impl Spanned for UnaryOps {
     }
 }
 
+/// A binary operation (e.g. `a + b`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BinaryOp {
     /// Operator to apply.
@@ -244,6 +280,7 @@ pub struct BinaryOp {
     pub left: Box<Expr>,
     /// The right expression.
     pub right: Box<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for BinaryOp {
@@ -251,13 +288,18 @@ impl Spanned for BinaryOp {
         self.span
     }
 }
+
+/// A comparison operation (e.g. `a < b < c < d`).
+/// 
+/// Compound comparison operations are broken down by `&&`.
+/// For example, `a < b < c < d` breaks down into `a < b && b < c && c < d`.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Comparison {
     /// The left expression
     pub left: Box<Expr>,
     /// A list of comparison operators and a right expressions to apply.
     pub rights: Vec<(op::Cmp, Expr)>,
-    
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Comparison {
@@ -284,6 +326,7 @@ pub struct Index {
     pub expr: Box<Expr>,
     /// The index
     pub index: Box<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Index {
@@ -292,9 +335,12 @@ impl Spanned for Index {
     }
 }
 
+/// A spread operation (e.g. `..`, `..lst`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Spread {
+    /// The expression spread by this spread operation, if it exists.
     pub expr: Option<Box<Expr>>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Spread {
@@ -312,7 +358,7 @@ pub struct Range {
     pub right: Box<Expr>,
     /// The expression for the step if it exists
     pub step: Option<Box<Expr>>,
-
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Range {
@@ -328,6 +374,7 @@ pub struct If {
     pub conditionals: Vec<(Expr, Block)>,
     /// The final bare `else` block (if it exists)
     pub last: Option<Block>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for If {
@@ -343,6 +390,7 @@ pub struct While {
     pub condition: Box<Expr>,
     /// The block to run in each iteration.
     pub block: Block,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for While {
@@ -360,6 +408,7 @@ pub struct For {
     pub iterator: Box<Expr>,
     /// The block to run in each iteration.
     pub block: Block,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for For {
@@ -377,7 +426,7 @@ pub struct Call {
     pub generic_args: Vec<Type>,
     /// The argument to the function call.
     pub args: Vec<Expr>,
-
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for Call {
@@ -394,7 +443,9 @@ impl Spanned for Call {
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IDeref {
+    /// The expression being dereferenced
     pub reference: Box<Expr>,
+    /// The span of characters encompassed by this expression
     pub span: Span
 }
 impl Spanned for IDeref {

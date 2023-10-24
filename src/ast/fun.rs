@@ -36,6 +36,7 @@ pub struct Param {
     /// The type of the parameter variable (inferred if not present)
     pub ty: Option<Type>,
 
+    /// The span of characters this parameter ranges over.
     pub span: Span
 }
 impl Spanned for Param {
@@ -70,7 +71,7 @@ pub struct FunSignature {
     pub varargs: bool,
     /// The function's return type (or `void` if unspecified)
     pub ret: Option<Type>,
-
+    /// The span of characters this function signature ranges over.
     pub span: Span
 }
 impl Spanned for FunSignature {
@@ -98,7 +99,7 @@ pub struct FunDecl {
     pub sig: FunSignature,
     /// The function's body
     pub block: Block,
-
+/// The span of characters this function declaration ranges over.
     pub span: Span
 }
 impl Spanned for FunDecl {
@@ -109,7 +110,8 @@ impl Spanned for FunDecl {
 
 /// A function declaration without a specified body
 /// 
-/// In the compiler, this is used to call functions from libc.
+/// In the compiler, this is used to call functions that are
+/// declared internally or in a separate file or module.
 /// 
 /// # Example
 /// ```text
@@ -117,7 +119,9 @@ impl Spanned for FunDecl {
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExternFunDecl {
+    /// The signature of the external function declaration.
     pub sig: FunSignature,
+    /// The span of characters this external function declaration ranges over.
     pub span: Span
 }
 impl Spanned for ExternFunDecl {

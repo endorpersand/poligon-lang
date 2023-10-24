@@ -1,3 +1,11 @@
+//! A utility module for handling [`TokenPattern`]s,
+//! which can match a singular token tree into some useful value.
+//! 
+//! Token patterns are used in [`Parser::match_`] and [`Parser::expect`].
+//! 
+//! [`Parser::match_`]: [`super::Parser::match_`]
+//! [`Parser::expect`]: [`super::Parser::expect`]
+
 use crate::lexer::token::{FullToken, Token, TokenTree, Group, Delimiter};
 use crate::span::Spanned;
 
@@ -5,7 +13,7 @@ use super::ParseErr;
 
 /// A token pattern.
 /// 
-/// This reads a singular token (not a group) and sees if it matches the given pattern.
+/// This reads a singular token tree and sees if it matches the given pattern.
 /// 
 /// Here are the currently implemented pattern:
 /// - [`Token`] == verify if that the stream token is equal to the pattern token
@@ -93,6 +101,7 @@ pub struct MatchFn<F>(F, fn() -> ParseErr);
 impl<F, T: Spanned> MatchFn<F> 
     where F: Fn(&TokenTree) -> Option<T>,
 {
+    /// Creates a new match function with a default error.
     pub fn new(f: F) -> Self {
         fn match_fn_default() -> ParseErr {
             ParseErr::UnexpectedToken
@@ -101,6 +110,7 @@ impl<F, T: Spanned> MatchFn<F>
         MatchFn(f, match_fn_default)
     }
 
+    /// Creates a new match function with a defined error.
     pub fn new_with_err(f: F, e: fn() -> ParseErr) -> Self {
         Self(f, e)
     }

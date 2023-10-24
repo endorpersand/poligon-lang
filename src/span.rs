@@ -1,8 +1,14 @@
+//! This module holds utilities useful for handling spans.
+//! 
+//! The main items here are the [`Span`] struct, which holds the span of characters,
+//! and the [`Spanned`] trait, which indicates that a struct has a span.
+
 use std::ops::{RangeInclusive, Add, AddAssign};
 
 /// Indicates a specific character in given code.
 pub type Cursor = (usize /* line */, usize /* character */);
 
+/// A struct holding a span of characters (inclusive on both sides).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
     start: Cursor,
@@ -10,20 +16,24 @@ pub struct Span {
 }
 
 impl Span {
+    /// Creates a new span.
     pub fn new(r: RangeInclusive<Cursor>) -> Span {
         Span {
             start: *r.start(),
             end: *r.end()
         }
     }
+    /// Creates a new span of one character.
     pub fn one(c: Cursor) -> Span {
         Span::new(c ..= c)
     }
 
+    /// The start of the span.
     pub fn start(&self) -> Cursor {
         self.start
     }
 
+    /// The end of the span.
     pub fn end(&self) -> Cursor {
         self.end
     }
@@ -70,7 +80,9 @@ impl AddAssign for Span {
     }
 }
 
+/// Trait indicating that an item has a span.
 pub trait Spanned {
+    /// Gets the span of this item.
     fn span(&self) -> Span;
 }
 impl Spanned for Span {

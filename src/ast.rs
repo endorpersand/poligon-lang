@@ -72,7 +72,9 @@ mod expr;
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct Program {
+    /// The statements which this program holds
     pub stmts: Vec<Stmt>,
+    /// The span of characters which this program ranges
     pub span: Span
 }
 impl Spanned for Program {
@@ -98,7 +100,9 @@ impl Spanned for Program {
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
+    /// The statements which this block holds
     pub stmts: Vec<Stmt>,
+    /// The span of characters which this block ranges
     pub span: Span
 }
 impl Spanned for Block {
@@ -107,9 +111,14 @@ impl Spanned for Block {
     }
 }
 
+/// An identifier.
+/// 
+/// Examples include `foo`, `bar`,` abc123`,`_12abc`.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Ident {
+    /// The identifier
     pub ident: String,
+    /// The span of characters which this identiifier ranges
     pub span: Span
 }
 impl Spanned for Ident {
@@ -118,9 +127,14 @@ impl Spanned for Ident {
     }
 }
 
+/// A string literal.
+/// 
+/// Examples include `"Hello, World!"`.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct StrLiteral {
+    /// The string stored in this literal
     pub literal: String,
+    /// The span of characters which this literal ranges
     pub span: Span
 }
 impl Spanned for StrLiteral {
@@ -169,6 +183,7 @@ pub struct Path {
     /// The chain of attributes
     pub attrs: Vec<Ident>,
 
+    /// The span of characters this path ranges
     pub span: Span
 }
 impl Spanned for Path {
@@ -197,6 +212,7 @@ pub struct StaticPath {
     /// The attribute to access
     pub attr: Ident,
 
+    /// The span of characters this path ranges
     pub span: Span
 }
 impl Spanned for StaticPath {
@@ -232,8 +248,11 @@ impl Spanned for AsgUnit {
 /// See [`Decl`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DeclUnit {
-    pub ident: Ident, 
+    /// The identifier of the variable being declared
+    pub ident: Ident,
+    /// The mutability type of the variable being declared
     pub mt: MutType,
+    /// The span of characters this declaration unit ranges
     pub span: Span
 }
 impl Spanned for DeclUnit {
@@ -260,7 +279,9 @@ pub enum Pat<T> {
     /// This collects the remainder of the current pattern 
     /// and assigns it to its parameter (if present).
     Spread {
+        /// The pattern inside of the spread (if it exists)
         inner: Option<Box<Self>>,
+        /// The span of characters which this spread pattern contains
         span: Span
     },
 
@@ -268,7 +289,9 @@ pub enum Pat<T> {
     /// 
     /// The values of the RHS are aligned by index.
     List {
+        /// The list of patterns inside of this list
         values: Vec<Self>,
+        /// The span of characters which this list pattern contains
         span: Span
     }
 }

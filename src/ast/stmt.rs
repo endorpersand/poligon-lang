@@ -84,6 +84,7 @@ pub struct Decl {
     /// The value to declare the variable to
     pub val: Expr,
 
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Decl {
@@ -104,7 +105,9 @@ impl Spanned for Decl {
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Return {
+    /// The expression to return, if it exists
     pub expr: Option<Expr>,
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Return {
@@ -115,6 +118,7 @@ impl Spanned for Return {
 /// `break`
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Break {
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Break {
@@ -126,6 +130,7 @@ impl Spanned for Break {
 /// `continue`
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Continue {
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Continue {
@@ -137,7 +142,9 @@ impl Spanned for Continue {
 /// `throw` statements (a very primitive version)
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Throw {
+    /// The error message to display by this `throw` statement
     pub message: StrLiteral,
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Throw {
@@ -149,7 +156,9 @@ impl Spanned for Throw {
 /// An import declaration.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Import {
+    /// The path to import by this import declaration
     pub path: StaticPath,
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for Import {
@@ -161,6 +170,7 @@ impl Spanned for Import {
 /// `import intrinsic`. Enables intrinsic functionality.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportIntrinsic {
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for ImportIntrinsic {
@@ -168,11 +178,16 @@ impl Spanned for ImportIntrinsic {
         self.span
     }
 }
-
+/// A global declaration. This is part of intrinsic functionality.
+/// 
+/// This is used to create a global pointer that points to some string of characters.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IGlobal {
+    /// The identifier used to refer to the pointer
     pub ident: Ident,
+    /// The string held by the global
     pub value: StrLiteral,
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for IGlobal {
@@ -180,11 +195,14 @@ impl Spanned for IGlobal {
         self.span
     }
 }
-
+/// An intrinsic `fit class` declaration. This is part of intrinsic functionality.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FitClassDecl {
+    /// The type that methods are being added to in this `fit class` declaration.
     pub ty: Type,
+    /// The methods added to in this `fit class` declaration.
     pub methods: Vec<MethodDecl>,
+    /// The span of characters ranged by the entire statement
     pub span: Span
 }
 impl Spanned for FitClassDecl {

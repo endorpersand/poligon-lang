@@ -286,6 +286,9 @@ pub enum TokenTree {
     Group(Group)
 }
 impl TokenTree {
+    /// Converts this TokenTree into its kind.
+    /// 
+    /// See [`TTKind`] for more details.
     pub fn kind(&self) -> TTKind {
         match self {
             TokenTree::Token(t) => TTKind::Token(&t.kind),
@@ -344,12 +347,23 @@ impl TryFrom<TokenTree> for FullToken {
     }
 }
 
+/// Enum which holds the type of token/group that a [`TokenTree`] represents.
+/// 
+/// This is made to be simpler to pattern match against than [`TokenTree`] 
+/// (when combined with the [`token`] and [`delim`] macros).
+/// 
+/// A `TTKind` can be created with the [`TokenTree::kind`] method.
 pub enum TTKind<'t> {
+    /// This variant indicates the given token tree is some unit token.
     Token(&'t Token),
+    /// This variant indicates the given token tree is some group
+    /// and provides its delimiter for matching.
     Group(&'t Delimiter)
 }
 
+/// A stream of tokens that can be parsed over.
 pub type Stream<'s> = &'s [TokenTree];
+/// An owned version of [`Stream`], which holds a stream of tokens that can be parsed over.
 pub type OwnedStream = Vec<TokenTree>;
 
 /// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
@@ -368,7 +382,7 @@ pub(crate) static SPLITTABLES: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(
     m
 });
 
-/// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
+/// Utility macro that can be used as a shorthand for [`Keyword`] or [`Operator`] tokens.
 #[macro_export]
 macro_rules! token {
     (let)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Let)      };
@@ -444,6 +458,7 @@ macro_rules! token {
 #[doc(inline)]
 pub use token;
 
+/// Utility macro that can be used as a shorthand for [`Delimiter`]s.
 #[macro_export]
 macro_rules! delim {
     ("(")   => { $crate::lexer::token::Delimiter::Paren  };

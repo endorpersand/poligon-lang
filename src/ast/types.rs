@@ -10,13 +10,16 @@ use super::{MutType, ReasgType, Block, Param, Ident};
 /// # Examples
 /// ```text
 /// string
-/// list<string>
-/// map<string, list<int>>
+/// list[string]
+/// map[string, list[int]]
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type {
+    /// The identifier of this type
     pub ident: Ident,
+    /// The type parameters of this type
     pub params: Vec<Type>,
+    /// The span of characters this type ranges over.
     pub span: Span
 }
 impl Spanned for Type {
@@ -49,6 +52,7 @@ pub struct Class {
     pub fields: Vec<FieldDecl>,
     /// A vec of methods declared in this class
     pub methods: Vec<MethodDecl>,
+    /// THe span of characters this class declaration ranges over
     pub span: Span
 }
 impl Spanned for Class {
@@ -86,7 +90,8 @@ pub struct FieldDecl {
 
     /// The type of the declaration (inferred if not present)
     pub ty: Type,
-
+    
+    /// The span of characters this field declaration ranges over
     pub span: Span
 }
 impl Spanned for FieldDecl {
@@ -125,7 +130,7 @@ pub struct MethodSignature {
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
     pub ret: Option<Type>,
-
+    /// The span of characters this method signature ranges over
     pub span: Span
 }
 impl Spanned for MethodSignature {
@@ -144,7 +149,7 @@ pub struct MethodDecl {
     pub sig: MethodSignature,
     /// The method's body
     pub block: Block,
-
+    /// The span of characters this method declaration ranges over
     pub span: Span
 }
 impl Spanned for MethodDecl {

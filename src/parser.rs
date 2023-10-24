@@ -23,41 +23,6 @@ pub use pat::TokenPattern;
 
 use self::pat::MatchFn;
 
-// #[derive(Debug)]
-// struct StreamNotFullyConsumed(());
-
-// impl std::fmt::Display for StreamNotFullyConsumed {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "stream of tokens was not fully consumed")
-//     }
-// }
-// impl std::error::Error for StreamNotFullyConsumed {}
-// impl GonErr for StreamNotFullyConsumed {
-//     fn err_name(&self) -> &'static str {
-//         "parse err"
-//     }
-// }
-// impl From<StreamNotFullyConsumed> for ParseErr {
-//     fn from(_: StreamNotFullyConsumed) -> Self {
-//         ParseErr::ExpectedTokens(vec![])
-//     }
-// }
-
-// /// Parses a sequence of tokens to an isolated parseable program tree. 
-// /// 
-// /// For more control, see [`Parser`].
-// fn parse_generic<P: Parseable>(stream: Stream) -> Result<Result<P, FullGonErr<StreamNotFullyConsumed>>, P::Err> {
-//     let mut parser = Parser::new(stream);
-    
-//     parser.parse().map(|p| {
-//         if !parser.is_empty() {
-//             Ok(p)
-//         } else {
-//             Err(parser.cursor.error(StreamNotFullyConsumed(())))
-//         }
-//     })
-// }
-
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
 /// This function will attempt to consume the entire stream as a value, 
@@ -87,9 +52,13 @@ pub fn parse<P: Parseable<Err = FullParseErr>>(stream: Stream) -> ParseResult<P>
     parser.close()?;
     Ok(result)
 }
+
+/// Trait indicating that a type can be created out of a stream of tokens.
 pub trait Parseable: Sized {
+    /// Error to raise if a failure happens during the parsing of an item.
     type Err;
 
+    /// Try to parse the item out of the stream, raising the error if failing.
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err>;
 }
 
@@ -118,11 +87,12 @@ impl<'s> ParCursor<'s> {
         self.stream.first()
     }
 
-    /// Peeks the nth token, with 0 being the current token.
+    /// Peeks the nth next token in the stream, with 0 being the current token.
     pub fn peek_nth(&self, n: usize) -> Option<&TokenTree> {
         self.stream.get(n)
     }
 
+    /// Peeks at the span of the current token.
     pub fn peek_span(&self) -> Span {
         match self.peek() {
             Some(t) => t.span(),
@@ -356,19 +326,47 @@ impl SpanCollectors {
     }
 }
 
+/// A struct that can read a token stream into any [`Parseable`] items.
+/// 
+/// This parser is used to more ergonomically parse items and provides the following utilities:
+/// - [`Parser::parse`], [`Parser::try_parse`]: Parses items
+/// - [`Parser::match_`], [`Parser::expect`]: Parses individual tokens
+/// - [`Parser::parse_tuple`]: Parses a repeated set of items, divided by separators
+/// 
+/// # Example
+/// ```
+/// use poligon_lang::lexer::tokenize;
+/// # use poligon_lang::parser::Parser;
+/// use poligon_lang::ast::*;
+/// 
+/// let tokens = tokenize("hello;").unwrap();
+/// let program = Parser::new(tokens, false).parse().unwrap();
+/// assert_eq!(program, Program(vec![
+///     Located::new(Stmt::Expr(
+///         Located::new(Expr::Ident(String::from("hello")), (0, 0) ..= (0, 4))),
+///         (0, 0) ..= (0, 5)
+///     )
+/// ]));
+/// ```
 pub struct Parser<'s> {
     cursor: ParCursor<'s>,
     span_collectors: SpanCollectors
 }
 
 impl<'s> Parser<'s> {
+    /// Creates a new parser.
     pub fn new<S: AsRef<[TokenTree]> + ?Sized>(stream: &'s S) -> Self {
         Parser { cursor: ParCursor::new(stream.as_ref()), span_collectors: Default::default() }
     }
 
+    /// Parses a [`Parseable`] item.
     pub fn parse<P: Parseable>(&mut self) -> Result<P, P::Err> {
         P::read(self)
     }
+
+    /// Tries to parse an item, returning `None` if it fails.
+    /// 
+    /// This tries to parse any items P such that `Option<P>` can be parsed.
     pub fn try_parse<P>(&mut self) -> Result<Option<P>, <Option<P> as Parseable>::Err>
         where Option<P>: Parseable
     {
@@ -492,9 +490,14 @@ impl<'s> Parser<'s> {
             TokenTree::Group(_) => todo!(),
         })
     }
+    /// Peeks at the current token tree in the stream, returning its [`TTKind`].
     pub fn peek_kind(&self) -> Option<TTKind> {
         self.cursor.peek().map(TokenTree::kind)
     }
+    /// Peeks at the next few token trees in the stream, returning their [`TTKind`]s in a slice.
+    /// 
+    /// This will return at most `n` token trees, but it can return fewer 
+    /// if there are fewer than `n` token trees remaining in the stream.
     pub fn peek_kinds(&self, n: usize) -> Vec<TTKind> {
         let stream = self.cursor.stream;
         let end = usize::max(n, stream.len());
@@ -504,18 +507,26 @@ impl<'s> Parser<'s> {
             .collect()
     }
 
+    /// Peks at the current token tree in the stream
     pub fn peek_tree(&self) -> Option<&TokenTree> {
         self.cursor.peek()
     }
+
+    /// Tests if there are any more token trees in the parser's stream.
     pub fn is_empty(&self) -> bool {
         self.cursor.is_empty()
     }
 
+    /// Creates a span block over the function call, which keeps track of the tokens
+    /// that the parsed item spans and returns the joined span of all the tokens.
     pub fn spanned<T>(&mut self, f: impl FnOnce(&mut Parser<'s>) -> T) -> (T, Span) {
         self.try_spanned(|p| Ok::<_, Infallible>(f(p)))
             .unwrap()
     }
 
+    /// Similar to [`Parser::spanned`], but has the ability to be fallible.
+    /// - If the provided function returns `Option<T>`, this function returns `Option<(T, Span)>`.
+    /// - If the provided function returns `Result<T, E>`, this function returns `Result<(T, Span), E>`.
     pub fn try_spanned<T, S>(&mut self, f: impl FnOnce(&mut Parser<'s>) -> S) -> S::Transposed 
         where S: tspan::TransposeSpan<T>
     {
@@ -529,6 +540,10 @@ impl<'s> Parser<'s> {
         S::transpose((out, span))
     }
 
+    /// This parses a tuple (a repeated set of items divided by a separator).
+    /// 
+    /// This function requires a separator token and 
+    /// the tuple's items must be of a type which can be created by [`Parse::try_parse`].
     pub fn parse_tuple<T, E>(&mut self, tok: Token) -> ParseResult<Tuple<T>> 
         where Option<T>: Parseable<Err = E>,
               FullParseErr: From<E>
@@ -647,46 +662,59 @@ fn parse_stmts_closed(parser: &mut Parser<'_>) -> ParseResult<Vec<ast::Stmt>> {
     Ok(stmts)
 }
 
+/// A repeated set of items, separated by some separator.
 pub struct Tuple<T> {
     pairs: Vec<(T, FullToken)>,
     end: Option<T>,
     span: Span
 }
 impl<T> Tuple<T> {
+    /// The items held by this tuple.
+    /// 
+    /// This erases the information on what separators were used.
     pub fn values(self) -> impl Iterator<Item=T> {
         self.pairs.into_iter()
             .map(|(t, _)| t)
             .chain(self.end)
     }
 
+    /// Tests if the tuple ended with a terminator token 
+    /// or if it ended with a tuple item.
     pub fn ended_on_terminator(&self) -> bool {
         self.end.is_none()
     }
 
+    /// Tests if the tuple has no items.
     pub fn is_empty(&self) -> bool {
         self.pairs.is_empty() && self.end.is_none()
     }
+    /// Counts how many items the tuple has.
     pub fn len(&self) -> usize {
         self.pairs.len() + if self.end.is_some() { 1 } else { 0 }
     }
-
+    /// Asserts that the tuple is not empty, calling the provided error function if it is empty.
     pub fn assert_non_empty<E>(self, e: impl FnOnce() -> E) -> Result<Self, E> {
         match self.is_empty() {
             false => Ok(self),
             true  => Err(e()),
         }
     }
+    /// Asserts that the parser used for this tuple is not empty.
+    /// 
+    /// If the parser is not empty, 
+    /// this function will execute the provided `needs_sep` function if the tuple ended on an item,
+    /// and it will execute the provided `needs_t` function if the tuple ended on a separator.
     pub fn assert_closed<'s, 'tt, E: GonErr>(
         self, 
         parser: Parser<'s>, 
-        needs_comma: impl FnOnce() -> E, 
-        needs_t: impl FnOnce() -> E
+        needs_sep: impl FnOnce() -> E, 
+        needs_item: impl FnOnce() -> E
     ) -> Result<Self, FullGonErr<E>> 
         where 's: 'tt
     {
         parser.close_or_else(|| match self.ended_on_terminator() {
-            true  => needs_t(),
-            false => needs_comma()
+            true  => needs_item(),
+            false => needs_sep()
         })?;
 
         Ok(self)
@@ -709,10 +737,15 @@ impl<T> crate::span::Spanned for Tuple<T> {
         self.span
     }
 }
+
+/// An entry, consisting of a `K` item, followed by `:`, followed by a `V` item.
 pub struct Entry<K, V> {
-    key: K,
-    val: V,
-    span: Span
+    /// The key item
+    pub key: K,
+    /// The value item
+    pub val: V,
+    /// The span of characters ranged by the entire entry
+    pub span: Span
 }
 impl<K, V> crate::span::Spanned for Entry<K, V> {
     fn span(&self) -> Span {
