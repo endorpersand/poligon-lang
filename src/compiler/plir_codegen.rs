@@ -2265,7 +2265,7 @@ impl PLIRCodegen {
                     plir::ExprType::For { ident: ident.ident, element_type, iterator, block }
                 ))
             },
-            ast::Expr::Call(ast::Call { funct, args, span }) => {
+            ast::Expr::Call(ast::Call { funct, generic_args: _, args, span }) => {
                 let (largs, funct) = match *funct {
                     // HACK: GEP, alloca, size_of
                     ast::Expr::StaticPath(sp) if sp.attr.ident == "#gep" => {

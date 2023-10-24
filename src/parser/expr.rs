@@ -1,5 +1,5 @@
 use crate::{ast::*, delim};
-use crate::lexer::token::{Token, FullToken, TokenTree, TTKind};
+use crate::lexer::token::{Token, FullToken, TTKind};
 use crate::span::Spanned;
 use crate::token;
 
@@ -29,7 +29,7 @@ macro_rules! parse_expr_enums {
                 $($v($v)),*
             }
 
-            impl From<$i> for crate::ast::Expr {
+            impl From<$i> for $crate::ast::Expr {
                 fn from(value: $i) -> Self {
                     match value {
                         $(
@@ -349,7 +349,118 @@ impl Parseable for Option<Expr1> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        todo!()
+        use super::TTKind::{Token as Tk, Group as Gr};
+
+        let mut base = match parser.peek_kinds(4).as_slice() {
+            // if a type-like structure appears before ::, try parsing a type
+            | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::])]
+            | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::]), ..]
+            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![::])]
+            | [Tk(Token::Ident(_)), Tk(token![::]), ..]
+            => {
+                let ((ty, attr), span) = parser.try_spanned(|parser| {
+                    let ty = parser.parse()?;
+                    parser.expect(token![::])?;
+                    let attr = parser.parse()?;
+
+                    ParseResult::Ok((ty, attr))
+                })?;
+
+                Expr1::StaticPath(StaticPath { ty, attr, span })
+            },
+            // else, parse as an Expr0
+            _ => {
+                let Some(e0) = parser.try_parse()? else { return Ok(None) };
+                Expr1::Expr0(e0)
+            }
+        };
+
+        loop {
+            match parser.peek_kinds(3).as_slice() {
+                // path access
+                | [Tk(token![.]), Tk(token![#]), Tk(Token::Ident(_))]
+                | [Tk(token![.]), Tk(Token::Ident(_)), ..]
+                => {
+                    let (ident, attr_span) = parser.try_spanned(|parser| {
+                        parser.expect(token![.])?;
+                        parser.parse()
+                    })?;
+
+                    if let Expr1::Path(Path { attrs, span, .. }) = &mut base {
+                        attrs.push(ident);
+                        *span += attr_span;
+                    } else {
+                        let obj = Box::new(Expr::from(base));
+                        let span = obj.span() + attr_span;
+
+                        base = Expr1::Path(Path {
+                            obj,
+                            attrs: vec![ident],
+                            span,
+                        })
+                    }
+                },
+    
+                // function call
+                | [Tk(token![.]), Gr(delim!["()"]), ..]
+                | [Tk(token![.]), Gr(delim!["[]"]), Gr(delim!["()"])]
+                | [Gr(delim!["()"]), ..]
+                | [Gr(delim!["[]"]), Gr(delim!["()"]), ..]
+                => {
+                    let ((generic_args, args), call_span) = parser.try_spanned(|parser| {
+                        parser.match_(token![.]);
+                        
+                        let generics = if let Some(generics_group) = parser.match_(delim!["[]"]) {
+                            let mut generics_content = Parser::new(generics_group);
+                            
+                            generics_content.parse_tuple(token![,])?
+                                .assert_non_empty(|| ParseErr::ExpectedType)?
+                                .assert_closed(generics_content, 
+                                    || token![,].fail_err(),
+                                    || ParseErr::ExpectedType
+                                )?
+                                .values()
+                                .collect()
+                        } else {
+                            vec![]
+                        };
+
+                        let args_group = parser.expect(delim!["()"])?;
+                        let mut args_content = Parser::new(args_group);
+                        let tup = args_content.parse_tuple(token![,])?
+                            .assert_closed(args_content,
+                                || token![,].fail_err(),
+                                || ParseErr::ExpectedParam
+                            )?
+                            .values()
+                            .collect();
+
+                        ParseResult::Ok((generics, tup))
+                    })?;
+
+                    let funct = Box::new(Expr::from(base));
+                    let span = funct.span() + call_span;
+                    base = Expr1::Call(Call { funct, generic_args, args, span })
+                },
+    
+                // index
+                | [Gr(delim!["[]"]), ..]
+                => {
+                    let group = parser.expect(delim!["[]"])?;
+                    let mut content = Parser::new(group);
+                    let index = content.parse()?;
+                    content.close()?;
+
+                    let expr = Box::new(Expr::from(base));
+                    let index = Box::new(index);
+                    let span = expr.span() + group.span();
+                    base = Expr1::Index(Index { expr, index, span });
+                },
+                _ => break
+            };
+        }
+
+        Ok(Some(base))
     }
 }
 impl Parseable for Option<Expr0> {
@@ -394,9 +505,9 @@ impl Parseable for Option<Identoid> {
 
         let identoid = match parser.peek_kinds(4).as_slice() {
             | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#])]
-            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![#]), _]
-            | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#]), _]
-            | [Tk(Token::Ident(_)), Tk(token![#]), _, _]
+            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![#]), ..]
+            | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#]), ..]
+            | [Tk(Token::Ident(_)), Tk(token![#]), ..]
             => {
                 Identoid::ClassLiteral(parser.parse()?)
             },
@@ -420,23 +531,19 @@ impl Parseable for Option<Identoid> {
                         Identoid::SetLiteral(SetLiteral { values, span })
                     }
                     ("dict", Some(Gr(delim!["{}"]))) => {
-                        let (entries, rest_span) = parser.try_spanned(|parser| {
-                            let group = parser.expect(delim!["{}"])?;
-                            let mut content = Parser::new(group);
+                        let group = parser.expect(delim!["{}"])?;
+                        let mut content = Parser::new(group);
 
-                            let entries = content.parse_tuple(token![,])?
-                                .assert_closed(content,
-                                    || ParseErr::ExpectedTokens(vec![token![,]]),
-                                    || ParseErr::ExpectedExpr
-                                )?
-                                .values()
-                                .map(|Entry { key, val, span: _ } | (key, val))
-                                .collect();
+                        let entries = content.parse_tuple(token![,])?
+                            .assert_closed(content,
+                                || ParseErr::ExpectedTokens(vec![token![,]]),
+                                || ParseErr::ExpectedExpr
+                            )?
+                            .values()
+                            .map(|Entry { key, val, span: _ } | (key, val))
+                            .collect();
 
-                            ParseResult::Ok(entries)
-                        })?;
-
-                        let span = ident.span + rest_span;
+                        let span = ident.span + group.span();
                         Identoid::DictLiteral(DictLiteral { entries, span })
                     }
                     _ => Identoid::Ident(ident)

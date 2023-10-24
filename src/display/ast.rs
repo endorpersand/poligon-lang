@@ -494,8 +494,14 @@ impl Display for For {
 }
 impl Display for Call {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Self { funct, args, span: _ } = self;
-        write!(f, "{funct}(")?;
+        let Self { funct, generic_args, args, span: _ } = self;
+        write!(f, "{funct}")?;
+        if !generic_args.is_empty() {
+            write!(f, "[")?;
+            fmt_list(f, generic_args)?;
+            write!(f, "]")?;
+        }
+        write!(f, ")")?;
         fmt_list(f, args)?;
         write!(f, ")")
     }

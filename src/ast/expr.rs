@@ -373,7 +373,9 @@ impl Spanned for For {
 pub struct Call {
     /// The function to call.
     pub funct: Box<Expr>,
-    /// The parameters to the function call.
+    /// The generic (type) arguments to the function call.
+    pub generic_args: Vec<Type>,
+    /// The argument to the function call.
     pub args: Vec<Expr>,
 
     pub span: Span
