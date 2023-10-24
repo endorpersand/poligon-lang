@@ -478,27 +478,21 @@ impl<'s> Parser<'s> {
         Ok(hit)
     }
 
-    pub fn peek(&self) -> Option<&FullToken> {
-        self.cursor.peek().map(|t| match t {
-            TokenTree::Token(t) => t,
-            TokenTree::Group(_) => todo!(),
-        })
-    }
-    pub fn peek_nth(&self, n: usize) -> Option<&FullToken> {
-        self.cursor.peek_nth(n).map(|t| match t {
-            TokenTree::Token(t) => t,
-            TokenTree::Group(_) => todo!(),
-        })
-    }
     /// Peeks at the current token tree in the stream, returning its [`TTKind`].
     pub fn peek_kind(&self) -> Option<TTKind> {
         self.cursor.peek().map(TokenTree::kind)
+    }
+    /// Peeks at the nth next token tree in the stream, returning its [`TTKind`].
+    /// 
+    /// `0` here represents the current token in the stream.
+    pub fn peek_nth_kind(&self, n: usize) -> Option<TTKind> {
+        self.cursor.peek_nth(n).map(TokenTree::kind)
     }
     /// Peeks at the next few token trees in the stream, returning their [`TTKind`]s in a slice.
     /// 
     /// This will return at most `n` token trees, but it can return fewer 
     /// if there are fewer than `n` token trees remaining in the stream.
-    pub fn peek_kinds(&self, n: usize) -> Vec<TTKind> {
+    pub fn peek_kinds(&self, n: usize) -> Box<[TTKind]> {
         let stream = self.cursor.stream;
         let end = usize::max(n, stream.len());
 
@@ -719,18 +713,6 @@ impl<T> Tuple<T> {
 
         Ok(self)
     }
-
-    pub fn handle_close<E: GonErr>(
-        &self,
-        needs_comma: impl FnOnce() -> E,
-        needs_t: impl FnOnce() -> E
-    ) -> E
-    {
-        match self.ended_on_terminator() {
-            true  => needs_t(),
-            false => needs_comma()
-        }
-    }
 }
 impl<T> crate::span::Spanned for Tuple<T> {
     fn span(&self) -> Span {
@@ -834,8 +816,10 @@ impl Parseable for Option<ast::Ident> {
     type Err = Infallible;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let ident = match (parser.peek().map(|t| &t.kind), parser.peek_nth(1).map(|t| &t.kind)) {
-            (Some(token![#]), Some(Token::Ident(_))) => {
+        use TTKind::Token as Tk;
+
+        let ident = match parser.peek_kinds(2).as_ref() {
+            [Tk(token![#]), Tk(Token::Ident(_))] => {
                 let (ident, span) = parser.spanned(|parser| {
                     parser.expect(token![#]).unwrap(); // should be unreachable
                     let Some(FullToken { kind: Token::Ident(ident), span: _ }) = parser.next() else {
@@ -847,7 +831,7 @@ impl Parseable for Option<ast::Ident> {
 
                 Some(ast::Ident { ident, span })
             },
-            (Some(Token::Ident(_)), _) => {
+            [Tk(Token::Ident(_)), ..] => {
                 let Some(FullToken { kind: Token::Ident(ident), span }) = parser.next() else {
                     unreachable!()
                 };
@@ -926,8 +910,8 @@ impl Parseable for Option<ast::Stmt> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let st = match parser.peek() {
-            Some(tok) => match &**tok {
+        let st = match parser.peek_kind() {
+            Some(TTKind::Token(tok)) => match tok {
                 token![let] | token![const] => Some(ast::Stmt::Decl(parser.parse()?)),
                 token![return]   => Some(ast::Stmt::Return(parser.parse()?)),
                 token![break]    => Some(ast::Stmt::Break(parser.parse()?)),
@@ -937,17 +921,17 @@ impl Parseable for Option<ast::Stmt> {
                 token![extern]   => Some(ast::Stmt::ExternFunDecl(parser.parse()?)),
                 token![class]    => Some(ast::Stmt::Class(parser.parse()?)),
                 token![fit]      => Some(ast::Stmt::FitClassDecl(parser.parse()?)),
-                token![import]   => match parser.peek_nth(1) {
-                    Some(t) => match &**t {
+                token![import]   => match parser.peek_nth_kind(1) {
+                    Some(TTKind::Token(t)) => match t {
                         Token::Ident(id) if id == "intrinsic" => Some(ast::Stmt::ImportIntrinsic(parser.parse()?)),
                         _ => Some(ast::Stmt::Import(parser.parse()?))
                     }
-                    None => None
+                    _ => None
                 }
                 token![global]   => Some(ast::Stmt::IGlobal(parser.parse()?)),
                 _                => parser.try_parse()?.map(ast::Stmt::Expr),
             }
-            None => None
+            _ => None
         };
 
         Ok(st)
@@ -963,11 +947,11 @@ impl Parseable for Option<ast::Type> {
 
             let mut group = Parser::new(parser.expect(delim!["[]"])?);
             let args = group.parse_tuple(token![,])?
-                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?;
-            group.close_or_else(|| args.handle_close(
-                || expected_tokens![,],
-                || ParseErr::ExpectedType
-            ))?;
+                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?
+                .assert_closed(group, 
+                    || token![,].fail_err(),
+                    || ParseErr::ExpectedType
+                )?;
 
             Ok(Some((ident, args.values().collect())))
         })?;
@@ -1341,7 +1325,7 @@ impl Parseable for ast::Class {
                 .collect();
             
             let mut methods = vec![];
-            while let Some(FullToken { kind: token![fun], span: _ }) = block_parser.peek() {
+            while let Some(TTKind::Token(token![fun])) = block_parser.peek_kind() {
                 methods.push(block_parser.parse()?);
             }
 
@@ -1406,7 +1390,7 @@ impl Parseable for ast::FitClassDecl {
             let mut content = Parser::new(group);
 
             let mut methods = vec![];
-            while let Some(FullToken { kind: token![fun], span: _ }) = content.peek() {
+            while let Some(TTKind::Token(token![fun])) = content.peek_kind() {
                 methods.push(content.parse()?);
             }
             content.close()?;
