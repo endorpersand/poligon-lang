@@ -517,7 +517,7 @@ impl Parseable for Option<Identoid> {
             _ => {
                 let Some(ident) = parser.try_parse::<Ident>()? else { return Ok(None) };
 
-                match (&*ident.ident, parser.peek_tree().map(|t| t.kind())) {
+                match (ident.ident.as_str(), parser.peek()) {
                     ("set",  Some(Gr(delim!["{}"]))) => {
                         let group = parser.expect(delim!["{}"])?;
                         let mut content = Parser::new(group);
