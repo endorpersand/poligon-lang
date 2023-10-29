@@ -28,7 +28,7 @@ use crate::ast::{self, ReasgType, MutType, Locatable};
 use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
 use crate::compiler::plir::walk::WalkerMut;
-use crate::err::{GonErr, FullGonErr, full_gon_cast_impl};
+use crate::err::{GonErr, FullGonErr, impl_from_err};
 use crate::span::{Span, Spanned};
 
 use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
@@ -105,12 +105,7 @@ type FullPLIRErr = FullGonErr<PLIRErr>;
 /// A [`Result`] type for operations in the PLIR tree creation process.
 pub type PLIRResult<T> = Result<T, FullPLIRErr>;
 
-impl From<OpErr> for PLIRErr {
-    fn from(err: OpErr) -> Self {
-        Self::OpErr(err)
-    }
-}
-full_gon_cast_impl!(OpErr, PLIRErr);
+impl_from_err!(OpErr => PLIRErr: err => { Self::OpErr(err) });
 
 impl GonErr for PLIRErr {
     fn err_name(&self) -> &'static str {

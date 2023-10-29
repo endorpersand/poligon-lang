@@ -99,8 +99,7 @@ impl TryParseable for Expr15 {
             let new_rhs = parser.parse::<Expr14>()?;
             
             let new_lhs_expr: Expr = std::mem::replace(&mut rhs, new_rhs).into();
-            let new_lhs = AsgPat::try_from(new_lhs_expr)
-                .map_err(crate::err::FullGonErr::cast_err)?;
+            let new_lhs = AsgPat::try_from(new_lhs_expr)?;
             lhs.push((new_lhs, eq));
         }
 

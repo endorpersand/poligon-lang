@@ -277,11 +277,6 @@ impl<E: GonErr> FullGonErr<E> {
         }
     }
 
-    /// Cast the inner error to another error.
-    pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
-        self.map(F::from)
-    }
-
     /// Designate that this error also occurred at a specific position
     pub fn and_at(mut self, p: Cursor) -> Self {
         self.pos.insert(ErrPos::from_point(p));
@@ -306,13 +301,20 @@ impl<E: GonErr> From<std::convert::Infallible> for FullGonErr<E> {
     }
 }
 
-macro_rules! full_gon_cast_impl {
-    ($t:ty, $u:ty) => {
-        impl From<$crate::err::FullGonErr<$t>> for $crate::err::FullGonErr<$u> {
-            fn from(err: $crate::err::FullGonErr<$t>) -> Self {
-                err.cast_err()
+macro_rules! impl_from_err {
+    ($($t:ty => $u:ty$(: $id:ident => $e:block)?)*) => {
+        $(
+            $(
+                impl From<$t> for $u {
+                    fn from($id: $t) -> Self { $e }
+                }
+            )?
+            impl From<$crate::err::FullGonErr<$t>> for $crate::err::FullGonErr<$u> {
+                fn from(err: $crate::err::FullGonErr<$t>) -> Self {
+                    err.map(<$u>::from)
+                }
             }
-        }
-    }
+        )*
+    };
 }
-pub(crate) use full_gon_cast_impl;
+pub(crate) use impl_from_err;

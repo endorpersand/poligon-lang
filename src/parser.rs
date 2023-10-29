@@ -13,7 +13,7 @@ pub mod pat;
 
 use std::convert::Infallible;
 
-use crate::err::{GonErr, FullGonErr};
+use crate::err::{GonErr, FullGonErr, impl_from_err};
 use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, TTKind};
 use crate::ast::PatErr;
 use crate::span::{Span, Cursor, Spanned};
@@ -277,11 +277,7 @@ impl std::error::Error for ParseErr {
         }
     }
 }
-impl From<PatErr> for ParseErr {
-    fn from(value: PatErr) -> Self {
-        ParseErr::AsgPatErr(value)
-    }
-}
+impl_from_err! { PatErr => ParseErr: err => { Self::AsgPatErr(err) } }
 
 /// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullParseErr>;
