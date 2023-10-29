@@ -6,6 +6,7 @@
 //! [`Parser::match_`]: [`super::Parser::match_`]
 //! [`Parser::expect`]: [`super::Parser::expect`]
 
+use crate::err::GonErr;
 use crate::lexer::token::{FullToken, Token, TokenTree, Group, Delimiter};
 use crate::span::Spanned;
 
@@ -21,27 +22,31 @@ use super::ParseErr;
 pub trait TokenPattern<'tt> {
     /// The type that this pattern munches the tree into.
     type Munched: Spanned + 'tt;
+    /// The type of the error if this pattern does not match.
+    type Err: GonErr;
 
     /// Attempts to match the token tree and convert it into the munched type.
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched>;
 
     /// Provides the error if this pattern does not match.
-    fn fail_err(&self) -> ParseErr;
+    fn fail_err(&self) -> Self::Err;
 }
 
 impl<'tt, P: TokenPattern<'tt> + ?Sized> TokenPattern<'tt> for &'tt P {
     type Munched = P::Munched;
+    type Err = P::Err;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         (*self).try_munch(tt)
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         (*self).fail_err()
     }
 }
 impl<'tt> TokenPattern<'tt> for Token {
     type Munched = FullToken;
+    type Err = ParseErr;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         match tt {
@@ -50,12 +55,13 @@ impl<'tt> TokenPattern<'tt> for Token {
         }
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         ParseErr::ExpectedTokens(vec![self.clone()])
     }
 }
 impl<'tt> TokenPattern<'tt> for [Token] {
     type Munched = FullToken;
+    type Err = ParseErr;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         match tt {
@@ -64,18 +70,19 @@ impl<'tt> TokenPattern<'tt> for [Token] {
         }
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         ParseErr::ExpectedTokens(self.to_vec())
     }
 }
 impl<'tt, const N: usize> TokenPattern<'tt> for [Token; N] {
     type Munched = FullToken;
+    type Err = ParseErr;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         self.as_slice().try_munch(tt)
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         self.as_slice().fail_err()
     }
 }
@@ -83,6 +90,7 @@ impl<'tt, const N: usize> TokenPattern<'tt> for [Token; N] {
 /// Matches a group enclosed by the provided delimiter.
 impl<'tt> TokenPattern<'tt> for Delimiter {
     type Munched = &'tt Group;
+    type Err = ParseErr;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         match tt {
@@ -91,16 +99,16 @@ impl<'tt> TokenPattern<'tt> for Delimiter {
         }
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         ParseErr::ExpectedTokens(vec![Token::Delimiter(*self, false)])
     }
 }
 
 /// Matches an arbitrary function.
-#[derive(Clone, Copy)]
-pub struct MatchFn<F>(F, fn() -> ParseErr);
-impl<F, T: Spanned> MatchFn<F> 
+pub struct MatchFn<F, E>(F, fn() -> E);
+impl<F, T> MatchFn<F, ParseErr> 
     where F: Fn(&TokenTree) -> Option<T>,
+          T: Spanned
 {
     /// Creates a new match function with a default error.
     pub const fn new(f: F) -> Self {
@@ -110,22 +118,37 @@ impl<F, T: Spanned> MatchFn<F>
 
         MatchFn(f, match_fn_default)
     }
+}
 
+impl<F, T, E> MatchFn<F, E> 
+    where F: Fn(&TokenTree) -> Option<T>,
+          T: Spanned,
+          E: GonErr
+{
     /// Creates a new match function with a defined error.
-    pub const fn new_with_err(f: F, e: fn() -> ParseErr) -> Self {
+    pub const fn new_with_err(f: F, e: fn() -> E) -> Self {
         Self(f, e)
     }
 }
-impl<'tt, F, T: Spanned + 'tt> TokenPattern<'tt> for MatchFn<F> 
-    where F: Fn(&TokenTree) -> Option<T>
+impl<'tt, F, T, E> TokenPattern<'tt> for MatchFn<F, E> 
+    where F: Fn(&TokenTree) -> Option<T>,
+          T: Spanned + 'tt,
+          E: GonErr
 {    
     type Munched = T;
+    type Err = E;
 
     fn try_munch(&self, tt: &'tt TokenTree) -> Option<Self::Munched> {
         (self.0)(tt)
     }
 
-    fn fail_err(&self) -> ParseErr {
+    fn fail_err(&self) -> Self::Err {
         (self.1)()
     }
 }
+impl<F: Clone, E> Clone for MatchFn<F, E> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1)
+    }
+}
+impl<F: Copy, E> Copy for MatchFn<F, E> {}

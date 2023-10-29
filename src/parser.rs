@@ -468,7 +468,7 @@ impl<'s> Parser<'s> {
     /// assert_eq!(parser.expect(&[token![true], token![false]]).unwrap(), token![true]);
     /// assert!(parser.expect(&[token![||], token![&&]]).is_err());
     /// ```
-    pub fn expect<'tt, P: TokenPattern<'tt>>(&mut self, pat: P) -> ParseResult<P::Munched> 
+    pub fn expect<'tt, P: TokenPattern<'tt>>(&mut self, pat: P) -> Result<P::Munched, FullGonErr<P::Err>>
         where 's: 'tt
     {
         let hit = self.cursor.next_if_generic(|tt| pat.try_munch(tt))
@@ -538,11 +538,9 @@ impl<'s> Parser<'s> {
     /// 
     /// This function requires a separator token and 
     /// the tuple's items must be of a type which can be created by [`Parser::try_parse`].
-    pub fn parse_tuple<T, E>(&mut self, tok: Token) -> ParseResult<Tuple<T>> 
-        where Option<T>: Parseable<Err = E>,
-              FullParseErr: From<E>
+    pub fn parse_tuple<T, E>(&mut self, tok: Token) -> Result<Tuple<T>, E>
+        where Option<T>: Parseable<Err = E>
     {
-        
         let ((pairs, end), span) = self.try_spanned(|parser| {
             let mut pairs = vec![];
             let mut end = None;
@@ -556,7 +554,7 @@ impl<'s> Parser<'s> {
                 }
             }
 
-            ParseResult::Ok((pairs, end))
+            Ok((pairs, end))
         })?;
 
         Ok(Tuple { pairs, end, span })
@@ -818,7 +816,7 @@ impl Parseable for Option<ast::Ident> {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use TTKind::Token as Tk;
 
-        static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>> = MatchFn::new_with_err(
+        static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>, ParseErr> = MatchFn::new_with_err(
             |tt| match tt {
                 TokenTree::Token(ft) if matches!(ft.kind, Token::Ident(_)) => Some(ft.clone()),
                 _ => None,
