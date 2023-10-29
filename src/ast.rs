@@ -53,6 +53,7 @@ mod located;
 mod stmt;
 mod fun;
 mod expr;
+mod parsing;
 
 /// A complete program.
 /// 

@@ -3,7 +3,7 @@ use crate::lexer::token::{Token, TTKind};
 use crate::span::Spanned;
 use crate::token;
 
-use super::{Parseable, FullParseErr, Parser, ParseErr, ParseResult, TokenPattern, Entry, TryParseable};
+use crate::parser::{Parseable, FullParseErr, Parser, ParseErr, ParseResult, TokenPattern, Entry, TryParseable};
 
 impl TryParseable for Expr {
     type Err = FullParseErr;
@@ -360,7 +360,7 @@ impl TryParseable for Expr1 {
     type Err = FullParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
-        use super::TTKind::{Token as Tk, Group as Gr};
+        use TTKind::{Token as Tk, Group as Gr};
 
         let mut base = match parser.peek_slice(4).as_ref() {
             // if a type-like structure appears before ::, try parsing a type
@@ -512,7 +512,7 @@ impl TryParseable for Identoid {
     type Err = FullParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
-        use super::TTKind::{Token as Tk, Group as Gr};
+        use TTKind::{Token as Tk, Group as Gr};
 
         let identoid = match parser.peek_slice(4).as_ref() {
             | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![#])]
