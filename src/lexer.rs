@@ -582,8 +582,19 @@ impl Lexer {
     /// assert_eq!(lx2.close().unwrap_err(), LexErr::UnclosedDelimiter);
     /// // -- error occurred, but lx2 still can't be used after this point --
     /// ```
-    pub fn close(self) -> LexResult<OwnedStream> {
+    pub fn close(mut self) -> LexResult<OwnedStream> {
+        fn filter(t: &mut TokenTree) -> bool {
+            match t {
+                TokenTree::Token(FullToken { kind, .. }) => !matches!(kind, Token::Comment(_, _)),
+                TokenTree::Group(g) => {
+                    g.content.retain_mut(filter);
+                    true
+                },
+            }
+        }
+
         self.try_close()?;
+        self.tokens.retain_mut(filter);
         Ok(self.tokens)
     }
 

@@ -494,7 +494,7 @@ impl<'s> Parser<'s> {
     /// if there are fewer than `n` token trees remaining in the stream.
     pub fn peek_slice(&self, n: usize) -> Box<[TTKind]> {
         let stream = self.cursor.stream;
-        let end = usize::max(n, stream.len());
+        let end = usize::min(n, stream.len());
 
         stream[0..end].iter()
             .map(TokenTree::kind)
@@ -910,26 +910,27 @@ impl Parseable for Option<ast::Stmt> {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        use TTKind::Token as Tk;
+
         let st = match parser.peek() {
-            Some(TTKind::Token(tok)) => match tok {
-                token![let] | token![const] => Some(ast::Stmt::Decl(parser.parse()?)),
-                token![return]   => Some(ast::Stmt::Return(parser.parse()?)),
-                token![break]    => Some(ast::Stmt::Break(parser.parse()?)),
-                token![continue] => Some(ast::Stmt::Continue(parser.parse()?)),
-                token![throw]    => Some(ast::Stmt::Throw(parser.parse()?)),
-                token![fun]      => Some(ast::Stmt::FunDecl(parser.parse()?)),
-                token![extern]   => Some(ast::Stmt::ExternFunDecl(parser.parse()?)),
-                token![class]    => Some(ast::Stmt::Class(parser.parse()?)),
-                token![fit]      => Some(ast::Stmt::FitClassDecl(parser.parse()?)),
-                token![import]   => match parser.peek_nth(1) {
-                    Some(TTKind::Token(t)) => match t {
-                        Token::Ident(id) if id == "intrinsic" => Some(ast::Stmt::ImportIntrinsic(parser.parse()?)),
+            Some(tt) => match tt {
+                Tk(token![let] | token![const]) => Some(ast::Stmt::Decl(parser.parse()?)),
+                Tk(token![return])   => Some(ast::Stmt::Return(parser.parse()?)),
+                Tk(token![break])    => Some(ast::Stmt::Break(parser.parse()?)),
+                Tk(token![continue]) => Some(ast::Stmt::Continue(parser.parse()?)),
+                Tk(token![throw])    => Some(ast::Stmt::Throw(parser.parse()?)),
+                Tk(token![fun])      => Some(ast::Stmt::FunDecl(parser.parse()?)),
+                Tk(token![extern])   => Some(ast::Stmt::ExternFunDecl(parser.parse()?)),
+                Tk(token![class])    => Some(ast::Stmt::Class(parser.parse()?)),
+                Tk(token![fit])      => Some(ast::Stmt::FitClassDecl(parser.parse()?)),
+                Tk(token![import])   => {
+                    match parser.peek_nth(1) {
+                        Some(Tk(Token::Ident(id))) if id == "intrinsic" => Some(ast::Stmt::ImportIntrinsic(parser.parse()?)),
                         _ => Some(ast::Stmt::Import(parser.parse()?))
                     }
-                    _ => None
                 }
-                token![global]   => Some(ast::Stmt::IGlobal(parser.parse()?)),
-                _                => parser.try_parse()?.map(ast::Stmt::Expr),
+                Tk(token![global])   => Some(ast::Stmt::IGlobal(parser.parse()?)),
+                _                    => parser.try_parse()?.map(ast::Stmt::Expr),
             }
             _ => None
         };
@@ -945,15 +946,22 @@ impl Parseable for Option<ast::Type> {
         let (result, span) = parser.try_spanned(|parser| {
             let Some(ident) = parser.try_parse()? else { return ParseResult::Ok(None) };
 
-            let mut group = Parser::new(parser.expect(delim!["[]"])?);
-            let args = group.parse_tuple(token![,])?
-                .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedType))?
-                .assert_closed(group, 
-                    || token![,].fail_err(),
-                    || ParseErr::ExpectedType
-                )?;
+            let args = if let Some(group) = parser.match_(delim!["[]"]) {
+                let mut content = Parser::new(group);
+                
+                content.parse_tuple(token![,])?
+                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedType))?
+                    .assert_closed(content,
+                        || token![,].fail_err(),
+                        || ParseErr::ExpectedType
+                    )?
+                    .values()
+                    .collect()
+            } else {
+                vec![]
+            };
 
-            Ok(Some((ident, args.values().collect())))
+            Ok(Some((ident, args)))
         })?;
 
         Ok(result.map(|(ident, params)| ast::Type { ident, params, span }))
@@ -1140,7 +1148,7 @@ impl Parseable for ast::FunSignature {
                 let mut content = Parser::new(group);
                 
                 content.parse_tuple(token![,])?
-                    .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
                     .assert_closed(content, 
                         || expected_tokens![,],
                         || ParseErr::ExpectedParam,
@@ -1204,7 +1212,7 @@ impl Parseable for ast::MethodSignature {
                 let mut content = Parser::new(group);
                 
                 content.parse_tuple(token![,])?
-                    .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
                     .assert_closed(content, 
                         || expected_tokens![,],
                         || ParseErr::ExpectedParam,
@@ -1307,7 +1315,7 @@ impl Parseable for ast::Class {
                 Some(group) => {
                     let mut content = Parser::new(group);
                     content.parse_tuple(token![,])?
-                        .assert_non_empty(|| parser.cursor.error(ParseErr::ExpectedIdent))?
+                        .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
                         .assert_closed(content,
                             || expected_tokens![,],
                             || ParseErr::ExpectedIdent,
@@ -1432,80 +1440,65 @@ impl Parseable for ast::StaticPath {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::RangeInclusive;
+
     use crate::err::{FullGonErr, GonErr};
-    use crate::lexer::token::token;
     use crate::lexer::tokenize;
     use crate::ast::*;
 
     use super::*;
 
-    macro_rules! program {
+    macro_rules! stmts {
         ($($e:expr),*) => {
-            Program(vec![$($e),*])
-        }
-    }
-    macro_rules! block {
-        ($($e:expr),*; $loc:expr) => {
-            Located::new(Block(vec![$($e),*]), $loc)
-        }
-    }
-    macro_rules! block_expr {
-        ($($e:expr),*; $loc:expr) => {
-            Expr::Block(block![$($e),*; $loc])
+            vec![$(Stmt::from($e)),*]
         }
     }
     
-    macro_rules! expr_stmt {
-        ($e:expr, $loc:expr) => {
-            Located::new(Stmt::Expr(Located::new($e, $loc)), $loc)
-        }
-    }
-    fn add_one(cr: Span) -> Span {
-        let &(el, ec) = cr.end();
-        *cr.start() ..= (el, ec + 1)
-    }
-    macro_rules! expr_stmt_with_semi {
-        ($e:expr, $loc:expr) => {
-            Located::new(Stmt::Expr(Located::new($e, $loc)), add_one($loc))
-        }
-    }
     macro_rules! binop {
-        ($op:ident, $eloc:expr, $left:expr, $right:expr) => {
-            Located::new(Expr::BinaryOp {
+        ($op:ident, $span:expr, $left:expr, $right:expr) => {
+            Expr::from(BinaryOp {
                 op: op::Binary::$op,
-                left: Box::new($left),
-                right: Box::new($right)
-            }, $eloc)
+                left: Box::new(Expr::from($left)),
+                right: Box::new(Expr::from($right)),
+                span: Span::new($span)
+            })
         };
     }
 
-    macro_rules! ident {
-        ($ident:literal, $range:expr) => {
-            Located::new(Expr::Ident(String::from($ident)), $range)
+    fn ident(ident: &str, span: RangeInclusive<Cursor>) -> Ident {
+        Ident {
+            ident: ident.to_string(),
+            span: Span::new(span),
         }
     }
 
     macro_rules! literal {
-        ($ident:ident($e:expr), $range:expr) => {
-            Located::new(Expr::Literal(Literal::$ident($e)), $range)
+        ($ident:ident($e:expr), $span:expr) => {
+            Expr::Literal(Literal {
+                kind: LitKind::$ident($e),
+                span: Span::new($span)
+            })
         };
-        ($l:literal, $range:expr) => {
-            Located::new(Expr::Literal(Literal::Str(String::from($l))), $range)
+        ($l:literal, $span:expr) => {
+            Expr::Literal(Literal {
+                kind: LitKind::Str(String::from($l)),
+                span: Span::new($span)
+            })
         }
     }
 
-    macro_rules! asg_unit {
-        ($id:literal) => {
-            AsgUnit::Ident(String::from($id))
-        }
-
-    }
     macro_rules! decl_unit {
-        (mut $id:literal) => {
-            DeclUnit(String::from($id), MutType::Mut)
-        };
-        ($id:literal) => {
-            DeclUnit(String::from($id), MutType::Immut)
+        (mut $id:literal, $uspan:expr, $ispan:expr) => { decl_unit!(@ Mut   $id, $uspan, $ispan) };
+        (    $id:literal, $uspan:expr, $ispan:expr) => { decl_unit!(@ Immut $id, $uspan, $ispan) };
+        (mut $id:literal, $uspan:expr)              => { decl_unit!(@ Mut   $id, $uspan, $uspan) };
+        (    $id:literal, $uspan:expr)              => { decl_unit!(@ Immut $id, $uspan, $uspan) };
+        
+        (@ $mt:ident $id:literal, $uspan:expr, $ispan:expr) => {
+            DeclUnit {
+                ident: ident($id, $ispan),
+                mt: MutType::$mt,
+                span: Span::new($uspan)
+            }
         }
     }
     /// Unwrap the result (or print error if not possible).
@@ -1516,13 +1509,16 @@ mod tests {
         }
     }
     /// Lex and parse string.
-    fn parse_str(s: &str) -> ParseResult<Program> {
-        parse(unwrap_fe(tokenize(s), s))
+    fn parse_str<P: Parseable<Err = FullParseErr>>(s: &str) -> ParseResult<P> {
+        let stream = unwrap_fe(tokenize(s), s);
+        parse(&stream)
     }
     /// Assert that the string provided parses into the program.
     #[allow(unused)]
-    fn assert_parse(input: &str, r: Program) {
-        assert_eq!(unwrap_fe(parse_str(input), input), r)
+    fn assert_parse<P>(input: &str, r: P) 
+        where P: Parseable<Err = FullParseErr> + PartialEq<P> + std::fmt::Debug
+    {
+        assert_eq!(unwrap_fe(parse_str::<P>(input), input), r)
     }
     /// Assert that the string provided errors with the given error when parsed.
     #[allow(unused)]
@@ -1530,7 +1526,7 @@ mod tests {
         where E: std::fmt::Debug,
             FullParseErr: PartialEq<E>
     {
-        match parse_str(input) {
+        match parse_str::<Program>(input) {
             Ok(t)  => panic!("Lexing resulted in value: {t:?}"),
             Err(e) => assert_eq!(e, result)
         }
@@ -1538,38 +1534,39 @@ mod tests {
 
     #[test]
     fn bin_op_test() {
-        assert_parse("2 + 3;", program![
-            Located::new(Stmt::Expr(binop! {
-                Add, (0, 0) ..= (0, 4),
-                literal!(Int(2), (0, 0) ..= (0, 0)),
-                literal!(Int(3), (0, 4) ..= (0, 4))
-            }), (0, 0) ..= (0, 5))
-        ]);
+        assert_parse("2 + 3", binop! {
+            Add, (0, 0) ..= (0, 4),
+            literal!(Int(2), (0, 0) ..= (0, 0)),
+            literal!(Int(3), (0, 4) ..= (0, 4))
+        });
 
-        assert_parse("2 + 3 * 4;", program![
-            Located::new(Stmt::Expr(binop! {
-                Add, (0, 0) ..= (0, 8),
-                literal!(Int(2), (0, 0) ..= (0, 0)),
-                binop! {
-                    Mul, (0, 4) ..= (0, 8),
-                    literal!(Int(3), (0, 4) ..= (0, 4)),
-                    literal!(Int(4), (0, 8) ..= (0, 8))
-                }
-            }), (0, 0) ..= (0, 9))
-        ]);
+        assert_parse("2 + 3 * 4", binop! {
+            Add, (0, 0) ..= (0, 8),
+            literal!(Int(2), (0, 0) ..= (0, 0)),
+            binop! {
+                Mul, (0, 4) ..= (0, 8),
+                literal!(Int(3), (0, 4) ..= (0, 4)),
+                literal!(Int(4), (0, 8) ..= (0, 8))
+            }
+        });
     }
 
     #[test]
     fn block_test() {
-        assert_parse("{}", program![
-            expr_stmt!(block_expr![;(0, 0)..=(0, 1)], (0, 0)..=(0, 1))
-        ]);
+        assert_parse("{}", Block {
+            stmts: stmts![],
+            span: Span::new((0, 0)..=(0, 1))
+        });
 
-        assert_parse("{{}}", program![
-            expr_stmt!(block_expr![
-                expr_stmt!(block_expr![;(0, 1) ..= (0, 2)], (0, 1) ..= (0, 2));
-            (0, 0) ..= (0, 3)], (0, 0)..=(0, 3))
-        ])
+        assert_parse("{{}}", Block {
+            stmts: stmts![
+                Expr::from(Block {
+                    stmts: stmts![],
+                    span: Span::new((0, 1) ..= (0, 2))
+                })
+            ],
+            span: Span::new((0, 0)..=(0, 3))
+        });
     }
 
     /// Tests if statements.
@@ -1579,29 +1576,27 @@ mod tests {
             if true {
                 // :)
             }
-        ", program![
-            expr_stmt!(Expr::If {
-                conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
-                ],
-                last: None
-            }, (1, 12)..=(3, 12))
-        ]);
-
+        ", If {
+            conditionals: vec![
+                (literal!(Bool(true), (1, 15) ..= (1, 18)), Block { stmts: stmts![], span: Span::new((1, 20) ..= (3, 12))})
+            ],
+            last: None,
+            span: Span::new((1, 12)..=(3, 12))
+        });
+        
         assert_parse("
             if true {
                 // :)
             } else {
                 // :(
             }
-        ", program![
-            expr_stmt!(Expr::If { 
-                conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)])
-                ],
-                last: Some(block![; (3, 19) ..= (5, 12)])
-            }, (1, 12) ..= (5, 12))
-        ]);
+        ", If { 
+            conditionals: vec![
+                (literal!(Bool(true), (1, 15) ..= (1, 18)), Block { stmts: stmts![], span: Span::new((1, 20) ..= (3, 12))})
+            ],
+            last: Some(Block { stmts: stmts![], span: Span::new((3, 19) ..= (5, 12))}),
+            span: Span::new((1, 12) ..= (5, 12))
+        });
 
         assert_parse("
             if true {
@@ -1611,15 +1606,14 @@ mod tests {
             } else {
                 // :(
             }
-        ", program![
-            expr_stmt!(Expr::If { 
-                conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
-                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)])
-                ],
-                last: Some(block![; (5, 19) ..= (7, 12)])
-            }, (1, 12) ..= (7, 12))
-        ]);
+        ", If {
+            conditionals: vec![
+                (literal!(Bool(true), (1, 15) ..= (1, 18)),           Block { stmts: stmts![], span: Span::new((1, 20) ..= (3, 12))}),
+                (Expr::from(ident("condition", (3, 22) ..= (3, 30))), Block { stmts: stmts![], span: Span::new((3, 32) ..= (5, 12))})
+            ],
+            last: Some(Block { stmts: stmts![], span: Span::new((5, 19) ..= (7, 12)) }),
+            span: Span::new((1, 12) ..= (7, 12))
+        });
 
         assert_parse("
             if true {
@@ -1635,18 +1629,17 @@ mod tests {
             } else {
                 // :(
             }
-        ", program![
-            expr_stmt!(Expr::If { 
-                conditionals: vec![
-                    (literal!(Bool(true), (1, 15) ..= (1, 18)), block![; (1, 20) ..= (3, 12)]),
-                    (ident!("condition", (3, 22) ..= (3, 30)), block![; (3, 32) ..= (5, 12)]),
-                    (ident!("condition", (5, 22) ..= (5, 30)), block![; (5, 32) ..= (7, 12)]),
-                    (ident!("condition", (7, 22) ..= (7, 30)), block![; (7, 32) ..= (9, 12)]),
-                    (ident!("condition", (9, 22) ..= (9, 30)), block![; (9, 32) ..= (11, 12)]),
-                ],
-                last: Some(block![; (11, 19) ..= (13, 12)])
-            }, (1, 12) ..= (13, 12))
-        ]);
+        ", If {
+            conditionals: vec![
+                (literal!(Bool(true), (1, 15) ..= (1, 18)),           Block { stmts: stmts![], span: Span::new((1, 20) ..= (3, 12))}),
+                (Expr::from(ident("condition", (3, 22) ..= (3, 30))), Block { stmts: stmts![], span: Span::new((3, 32) ..= (5, 12))}),
+                (Expr::from(ident("condition", (5, 22) ..= (5, 30))), Block { stmts: stmts![], span: Span::new((5, 32) ..= (7, 12))}),
+                (Expr::from(ident("condition", (7, 22) ..= (7, 30))), Block { stmts: stmts![], span: Span::new((7, 32) ..= (9, 12))}),
+                (Expr::from(ident("condition", (9, 22) ..= (9, 30))), Block { stmts: stmts![], span: Span::new((9, 32) ..= (11, 12))}),
+            ],
+            last: Some(Block { stmts: stmts![], span: Span::new((11, 19) ..= (13, 12))}),
+            span: Span::new((1, 12) ..= (13, 12))
+        });
     }
 
     /// Tests while and for loop as well as 
@@ -1654,19 +1647,18 @@ mod tests {
     #[test]
     fn loop_test() {
         // barebones
-        assert_parse("while true {}", program![
-            expr_stmt!(Expr::While {
-                condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
-                block: block![; (0, 11) ..= (0, 12)]
-            }, (0, 0) ..= (0, 12))
-        ]);
-        assert_parse("for i in it {}", program![
-            expr_stmt!(Expr::For {
-                ident: String::from("i"),
-                iterator: Box::new(ident!("it", (0, 9) ..= (0, 10))),
-                block: block![; (0, 12) ..= (0, 13)]
-            }, (0, 0) ..= (0, 13))
-        ]);
+        assert_parse("while true {}", While {
+            condition: Box::new(literal!(Bool(true), (0, 6) ..= (0, 9))),
+            block: Block {stmts: stmts![], span: Span::new((0, 11) ..= (0, 12))},
+            span: Span::new((0, 0) ..= (0, 12))
+        });
+
+        assert_parse("for i in it {}", For {
+            ident: Ident { ident: String::from("i"), span: Span::new((0, 4) ..= (0, 4)) },
+            iterator: Box::new(Expr::from(ident("it", (0, 9) ..= (0, 10)))),
+            block: Block {stmts: stmts![], span: Span::new((0, 12) ..= (0, 13))},
+            span: Span::new((0, 0) ..= (0, 13))
+        });
 
         // full examples
         assert_parse("
@@ -1675,73 +1667,99 @@ mod tests {
                 print(i);
                 i = i + 1;
             }
-        ", program![
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!("i")), (1, 16) ..= (1, 16)), 
-                ty: None, 
-                val: literal!(Int(0), (1, 20) ..= (1, 20))
-            }), (1, 12) ..= (1, 21)),
-            expr_stmt!(Expr::While {
-                condition: Located::boxed(Expr::Comparison {
-                    left: Box::new(ident!("i", (2, 18) ..= (2, 18))), 
-                    rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))]
-                }, (2, 18) ..= (2, 23)), 
-                block: block![
-                    expr_stmt_with_semi!(Expr::Call {
-                        funct: Box::new(ident!("print", (3, 16) ..= (3, 20))),
-                        params: vec![ident!("i", (3, 22) ..= (3, 22))]
-                    }, (3, 16) ..= (3, 23)),
-                    expr_stmt_with_semi!(Expr::Assign(
-                        Located::new(Pat::Unit(asg_unit!("i")), (4, 16) ..= (4, 16)), 
-                        Box::new(binop! {
-                            Add, (4, 20) ..= (4, 24),
-                            ident!("i", (4, 20) ..= (4, 20)),
-                            literal!(Int(1), (4, 24) ..= (4, 24))
-                        })
-                    ), (4, 16) ..= (4, 24));
-                (2, 25) ..= (5, 12)]
-            }, (2, 12) ..= (5, 12))
-        ]);
+        ", 
+        Program {
+            stmts: stmts![
+                Decl {
+                    rt: ReasgType::Let, 
+                    pat: Pat::Unit(decl_unit!("i", (1, 16) ..= (1, 16))),
+                    ty: None, 
+                    val: literal!(Int(0), (1, 20) ..= (1, 20)),
+                    span: Span::new((1, 12) ..= (1, 20))
+                },
+                Expr::from(While {
+                    condition: Box::new(Expr::from(Comparison {
+                        left: Box::new(Expr::from(ident("i", (2, 18) ..= (2, 18)))), 
+                        rights: vec![(op::Cmp::Lt, literal!(Int(10), (2, 22) ..= (2, 23)))],
+                        span: Span::new((2, 18) ..= (2, 23))
+                    })),
+                    block: Block {
+                        stmts: stmts![
+                            Expr::from(Call {
+                                funct: Box::new(Expr::from(ident("print", (3, 16) ..= (3, 20)))),
+                                generic_args: vec![],
+                                args: vec![Expr::from(ident("i", (3, 22) ..= (3, 22)))],
+                                span: Span::new((3, 16) ..= (3, 23))
+                            }),
+                            Expr::from(Assign {
+                                target: AsgPat::Unit(AsgUnit::Ident(ident("i", (4, 16) ..= (4, 16)))),
+                                value: Box::new(binop! {
+                                    Add, (4, 20) ..= (4, 24),
+                                    ident("i", (4, 20) ..= (4, 20)),
+                                    literal!(Int(1), (4, 24) ..= (4, 24))
+                                }),
+                                span: Span::new((4, 16) ..= (4, 24))
+                            })
+                        ],
+                        span: Span::new((2, 25) ..= (5, 12))
+                    },
+                    span: Span::new((2, 12) ..= (5, 12))
+                })
+            ],
+            span: Span::new((1, 12) ..= (5, 12))
+        });
 
-        assert_parse("for i in 1..10 { print(i); }", program![
-            expr_stmt!(Expr::For {
-                ident: String::from("i"), 
-                iterator: Located::boxed(Expr::Range {
-                    left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
-                    right: Box::new(literal!(Int(10), (0, 12) ..= (0, 13))), 
-                    step: None 
-                }, (0, 9) ..= (0, 13)), 
-                block: block![
-                    expr_stmt_with_semi!(Expr::Call {
-                        funct: Box::new(ident!("print", (0, 17) ..= (0, 21))),
-                        params: vec![ident!("i", (0, 23) ..= (0, 23))]
-                    }, (0, 17) ..= (0, 24));
-                (0, 15) ..= (0, 27)]
-            }, (0, 0) ..= (0, 27))
-        ]);
+        assert_parse("for i in 1..10 { print(i); }", For {
+            ident: ident("i", (0, 4) ..= (0, 4)),
+            iterator: Box::new(Expr::from(Range {
+                left: Box::new(literal!(Int(1), (0, 9) ..= (0, 9))), 
+                right: Box::new(literal!(Int(10), (0, 12) ..= (0, 13))), 
+                step: None,
+                span: Span::new((0, 9) ..= (0, 13))
+            })),
+            block: Block {
+                stmts: stmts![
+                    Expr::from(Call {
+                        funct: Box::new(Expr::from(ident("print", (0, 17) ..= (0, 21)))),
+                        generic_args: vec![],
+                        args: vec![Expr::from(ident("i", (0, 23) ..= (0, 23)))],
+                        span: Span::new((0, 17) ..= (0, 24))
+                    })
+                ],
+                span: Span::new((0, 15) ..= (0, 27))
+            },
+            span: Span::new((0, 0) ..= (0, 27))
+        });
     }
 
     #[test]
     fn semicolon_test() {
         assert_parse_fail("2 2", expected_tokens![;]);
 
-        assert_parse("if cond {}", program![
-            expr_stmt!(Expr::If {
-                conditionals: vec![
-                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
-                ],
-                last: None
-            }, (0, 0) ..= (0, 9))
-        ]);
-        assert_parse("if cond {};", program![
-            expr_stmt_with_semi!(Expr::If {
-                conditionals: vec![
-                    (ident!("cond", (0, 3) ..= (0, 6)), block![; (0, 8) ..= (0, 9)])
-                ],
-                last: None
-            }, (0, 0) ..= (0, 9))
-        ]);
+        assert_parse("if cond {}", Program {
+            stmts: stmts![
+                Expr::from(If {
+                    conditionals: vec![
+                        (Expr::from(ident("cond", (0, 3) ..= (0, 6))), Block { stmts: stmts![], span: Span::new((0, 8) ..= (0, 9))})
+                    ],
+                    last: None,
+                    span: Span::new((0, 0) ..= (0, 9))
+                })
+            ],
+            span: Span::new((0, 0) ..= (0, 9))
+        });
+        assert_parse("if cond {};", Program {
+            stmts: stmts![
+                Expr::from(If {
+                    conditionals: vec![
+                        (Expr::from(ident("cond", (0, 3) ..= (0, 6))), Block { stmts: stmts![], span: Span::new((0, 8) ..= (0, 9))})
+                    ],
+                    last: None,
+                    span: Span::new((0, 0) ..= (0, 9))
+                })
+            ],
+            span: Span::new((0, 0) ..= (0, 10))
+        });
 
         assert_parse("
             let a = 1;
@@ -1750,105 +1768,139 @@ mod tests {
             if cond {
                 let d = 5;
             }
-        ", program![
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
-                ty: None, 
-                val: literal!(Int(1), (1, 20) ..= (1, 20))
-            }), (1, 12) ..= (1, 21)),
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!("b")), (2, 16) ..= (2, 16)), 
-                ty: None, 
-                val: literal!(Int(2), (2, 20) ..= (2, 20))
-            }), (2, 12) ..= (2, 21)),
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 16) ..= (3, 16)), 
-                ty: None, 
-                val: literal!(Int(3), (3, 20) ..= (3, 20))
-            }), (3, 12) ..= (3, 21)),
-            expr_stmt!(Expr::If {
-                conditionals: vec![(
-                    ident!("cond", (4, 15) ..= (4, 18)),
-                    block![
-                        Located::new(Stmt::Decl(Decl { 
-                            rt: ReasgType::Let, 
-                            pat: Located::new(Pat::Unit(decl_unit!("d")), (5, 20) ..= (5, 20)), 
-                            ty: None, 
-                            val: literal!(Int(5), (5, 24) ..= (5, 24))
-                        }), (5, 16) ..= (5, 25));
-                    (4, 20) ..= (6, 12)]
-                )],
-                last: None
-            }, (4, 12) ..= (6, 12))
-        ])
+        ", Program {
+            stmts: stmts![
+                Decl { 
+                    rt: ReasgType::Let, 
+                    pat: Pat::Unit(decl_unit!("a", (1, 16) ..= (1, 16))), 
+                    ty: None, 
+                    val: literal!(Int(1), (1, 20) ..= (1, 20)),
+                    span: Span::new((1, 12) ..= (1, 20))
+                },
+                Decl { 
+                    rt: ReasgType::Let, 
+                    pat: Pat::Unit(decl_unit!("b", (2, 16) ..= (2, 16))), 
+                    ty: None, 
+                    val: literal!(Int(2), (2, 20) ..= (2, 20)),
+                    span: Span::new((2, 12) ..= (2, 20))
+                },
+                Decl { 
+                    rt: ReasgType::Let, 
+                    pat: Pat::Unit(decl_unit!("c", (3, 16) ..= (3, 16))), 
+                    ty: None, 
+                    val: literal!(Int(3), (3, 20) ..= (3, 20)),
+                    span: Span::new((3, 12) ..= (3, 20))
+                },
+                Expr::from(If {
+                    conditionals: vec![(
+                        Expr::from(ident("cond", (4, 15) ..= (4, 18))),
+                        Block {
+                            stmts: stmts![
+                                Decl { 
+                                    rt: ReasgType::Let, 
+                                    pat: Pat::Unit(decl_unit!("d", (5, 20) ..= (5, 20))),
+                                    ty: None, 
+                                    val: literal!(Int(5), (5, 24) ..= (5, 24)),
+                                    span: Span::new((5, 16) ..= (5, 24))
+                                }
+                            ],
+                            span: Span::new((4, 20) ..= (6, 12))
+                        }
+                    )],
+                    last: None,
+                    span: Span::new((4, 12) ..= (6, 12))
+                })
+            ],
+            span: Span::new((1, 12) ..= (6, 12))
+        });
     }
 
     #[test]
     fn type_test() {
-        fn assert_parse_type(input: &str, ty: Type) {
-            let tokens = unwrap_fe(tokenize(input), input);
-            assert_eq!(
-                unwrap_fe(Parser::new(tokens, false).expect_type(), input),
-                ty
-            )
-        }
-
-        assert_parse_type(
+        assert_parse(
             "int",
-            Type("int".to_string(), vec![])
+            Type {
+                ident:  ident("int", (0, 0) ..= (0, 2)),
+                params: vec![],
+                span:   Span::new((0, 0) ..= (0, 2)),
+            }
         );
 
-        assert_parse_type(
-            "dict<a, b>",
-            Type("dict".to_string(), vec![
-                Located::new(Type("a".to_string(), vec![]), (0, 5) ..= (0, 5)),
-                Located::new(Type("b".to_string(), vec![]), (0, 8) ..= (0, 8))
-            ])
-
+        assert_parse(
+            "dict[K, V]",
+            Type {
+                ident: ident("dict", (0, 0) ..= (0, 3)),
+                params: vec![
+                    Type {
+                        ident: ident("K", (0, 5) ..= (0, 5)), 
+                        params: vec![],
+                        span: Span::new((0, 5) ..= (0, 5))
+                    },
+                    Type {
+                        ident: ident("V", (0, 8) ..= (0, 8)), 
+                        params: vec![],
+                        span: Span::new((0, 8) ..= (0, 8))
+                    },
+                ],
+                span: Span::new((0, 0) ..= (0, 9)),
+            }
         );
 
-        assert_parse_type(
-            "dict<list<list<int>>, str>",
-            Type("dict".to_string(), vec![
-                Located::new(Type("list".to_string(), vec![
-                    Located::new(Type("list".to_string(), vec![
-                        Located::new(Type("int".to_string(), vec![]), (0, 15) ..= (0,17))
-                    ]), (0, 10) ..= (0, 18))
-                ]), (0, 5) ..= (0, 19)),
-                Located::new(Type("str".to_string(), vec![]), (0, 22) ..= (0, 24))
-            ])
+        assert_parse(
+            "dict[list[list[int]], str]",
+            Type {
+                ident: ident("dict", (0, 0) ..= (0, 3)),
+                params: vec![
+                    Type {
+                        ident: ident("list", (0, 5) ..= (0, 8)),
+                        params: vec![
+                            Type {
+                                ident: ident("list", (0, 10) ..= (0, 13)),
+                                params: vec![
+                                    Type {
+                                        ident: ident("int", (0, 15) ..= (0,17)),
+                                        params: vec![],
+                                        span: Span::new((0, 15) ..= (0,17))
+                                    }
+                                ],
+                                span: Span::new((0, 10) ..= (0, 18))
+                            }
+                        ],
+                        span: Span::new((0, 5) ..= (0, 19))
+                    },
+                    Type {
+                        ident: ident("str", (0, 22) ..= (0, 24)),
+                        params: vec![],
+                        span: Span::new((0, 22) ..= (0, 24))
+                    }
+                ],
+                span: Span::new((0, 0) ..= (0, 25))
+            }
         );
     }
 
     #[test]
     fn unary_ops_test() {
-        assert_parse("+3;", program![
-            expr_stmt_with_semi!(Expr::UnaryOps {
-                ops: vec![token![+].try_into().unwrap()],
-                expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1)))
-            }, (0, 0) ..= (0, 1))
-        ]);
+        assert_parse("+3", Expr::from(UnaryOps {
+            ops: vec![token![+].try_into().unwrap()],
+            expr: Box::new(literal!(Int(3), (0, 1) ..= (0, 1))),
+            span: Span::new((0, 0) ..= (0, 1)),
+        }));
+        
+        assert_parse("+++++++3", Expr::from(UnaryOps {
+            ops: [token![+].try_into().unwrap()].repeat(7),
+            expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7))),
+            span: Span::new((0, 0) ..= (0, 7)),
+        }));
 
-        assert_parse("+++++++3;", program![
-            expr_stmt_with_semi!(Expr::UnaryOps {
-                ops: vec![token![+].try_into().unwrap()].repeat(7),
-                expr: Box::new(literal!(Int(3), (0, 7) ..= (0, 7)))
-            }, (0, 0) ..= (0, 7))
-        ]);
+        assert_parse("+-+-+-+-3", Expr::from(UnaryOps {
+            ops: [token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
+            expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8))),
+            span: Span::new((0, 0) ..= (0, 8)),
+        }));
 
-        assert_parse("+-+-+-+-3;", program![
-            expr_stmt_with_semi!(Expr::UnaryOps {
-                ops: vec![token![+].try_into().unwrap(), token![-].try_into().unwrap()].repeat(4),
-                expr: Box::new(literal!(Int(3), (0, 8) ..= (0, 8)))
-            }, (0, 0) ..= (0, 8))
-        ]);
-
-        assert_parse("!+-+-+-+-3;", program![
-            expr_stmt_with_semi!(Expr::UnaryOps {
-                ops: vec![
+        assert_parse("!+-+-+-+-3", Expr::from(UnaryOps {
+            ops: vec![
                     token![!].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap(), 
@@ -1857,17 +1909,17 @@ mod tests {
                     token![+].try_into().unwrap(), 
                     token![-].try_into().unwrap(), 
                     token![+].try_into().unwrap(), 
-                    token![-].try_into().unwrap()],
-                expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9)))
-            }, (0, 0) ..= (0, 9))
-        ]);
+                    token![-].try_into().unwrap()
+                ],
+            expr: Box::new(literal!(Int(3), (0, 9) ..= (0, 9))),
+            span: Span::new((0, 0) ..= (0, 9)),
+        }));
 
-        assert_parse("+(+2);", program![
-            expr_stmt_with_semi!(Expr::UnaryOps {
-                ops: vec![token![+].try_into().unwrap()].repeat(2),
-                expr: Box::new(literal!(Int(2), (0, 3) ..= (0, 3)))
-            }, (0, 0) ..= (0, 4))
-        ])
+        assert_parse("+(+2)", Expr::from(UnaryOps {
+            ops: [token![+].try_into().unwrap()].repeat(2),
+            expr: Box::new(literal!(Int(2), (0, 3) ..= (0, 3))),
+            span: Span::new((0, 0) ..= (0, 4)),
+        }));
     }
 
     #[test]
@@ -1877,31 +1929,38 @@ mod tests {
             let mut b   = 1;
             const c     = 2;
             const mut d = 3;
-        ", program![
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!("a")), (1, 16) ..= (1, 16)), 
-                ty: None, 
-                val: literal!(Int(0), (1, 26) ..= (1, 26))
-            }), (1, 12) ..= (1, 27)),
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Let, 
-                pat: Located::new(Pat::Unit(decl_unit!(mut "b")), (2, 16) ..= (2, 20)), 
-                ty: None, 
-                val: literal!(Int(1), (2, 26) ..= (2, 26))
-            }), (2, 12) ..= (2, 27)),
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Const, 
-                pat: Located::new(Pat::Unit(decl_unit!("c")), (3, 18) ..= (3, 18)), 
-                ty: None, 
-                val: literal!(Int(2), (3, 26) ..= (3, 26))
-            }), (3, 12) ..= (3, 27)),
-            Located::new(Stmt::Decl(Decl { 
-                rt: ReasgType::Const, 
-                pat: Located::new(Pat::Unit(decl_unit!(mut "d")), (4, 18) ..= (4, 22)), 
-                ty: None, 
-                val: literal!(Int(3), (4, 26) ..= (4, 26))
-            }), (4, 12) ..= (4, 27))
-        ])
+        ", Program {
+            stmts: stmts![
+                Decl {
+                    rt: ReasgType::Let,
+                    pat: Pat::Unit(decl_unit!("a", (1, 16) ..= (1, 16))),
+                    ty: None,
+                    val: literal!(Int(0), (1, 26) ..= (1, 26)),
+                    span: Span::new((1, 12) ..= (1, 26))
+                },
+                Decl { 
+                    rt: ReasgType::Let, 
+                    pat: Pat::Unit(decl_unit!(mut "b", (2, 16) ..= (2, 20), (2, 20) ..= (2, 20))),
+                    ty: None,
+                    val: literal!(Int(1), (2, 26) ..= (2, 26)),
+                    span: Span::new((2, 12) ..= (2, 26))
+                },
+                Decl { 
+                    rt: ReasgType::Const, 
+                    pat: Pat::Unit(decl_unit!("c", (3, 18) ..= (3, 18))),
+                    ty: None,
+                    val: literal!(Int(2), (3, 26) ..= (3, 26)),
+                    span: Span::new((3, 12) ..= (3, 26))
+                },
+                Decl { 
+                    rt: ReasgType::Const, 
+                    pat: Pat::Unit(decl_unit!(mut "d", (4, 18) ..= (4, 22), (4, 22) ..= (4, 22))),
+                    ty: None,
+                    val: literal!(Int(3), (4, 26) ..= (4, 26)),
+                    span: Span::new((4, 12) ..= (4, 26))
+                }
+            ],
+            span: Span::new((1, 12) ..= (4, 27)),
+        });
     }
 }

@@ -288,7 +288,7 @@ impl Parseable for UnaryOps {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let ((ops, inner), span) = parser.try_spanned(|parser| {
+        let ((mut ops, inner), span) = parser.try_spanned(|parser| {
             let mut ops = vec![];
             while let Some(op) = parser.match_(UNARY_OPS) {
                 ops.push(op.kind.try_into().unwrap());
@@ -302,7 +302,15 @@ impl Parseable for UnaryOps {
             ParseResult::Ok((ops, inner))
         })?;
 
-        Ok(Self { ops, expr: Box::new(inner.into()), span })
+        let expr = Expr::from(inner);
+        if let Expr::UnaryOps(uops) = expr {
+            let Self { ops: inner_ops, expr, span: _ } = uops;
+            ops.extend(inner_ops);
+
+            Ok(Self { ops, expr, span })
+        } else {
+            Ok(Self { ops, expr: Box::new(expr), span })
+        }
     }
 }
 
