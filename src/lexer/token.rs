@@ -473,6 +473,8 @@ macro_rules! delim {
     ("}")   => { $crate::lexer::token::Delimiter::Curly  };
     ("{}")  => { $crate::lexer::token::Delimiter::Curly  };
 }
+#[doc(inline)]
+pub use delim;
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

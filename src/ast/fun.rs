@@ -22,6 +22,8 @@ use super::{Block, Ident, Type, ReasgType, MutType};
 ///     const mut d: list<string>
 /// ) {}
 /// ```
+/// 
+/// [`Decl`]: super::Decl
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Param {
     /// Whether the parameter variable can be reassigned later

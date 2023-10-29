@@ -26,7 +26,7 @@ use self::pat::MatchFn;
 /// Parses a sequence of tokens to an isolated parseable program tree. 
 /// 
 /// This function will attempt to consume the entire stream as a value, 
-/// raising a [`ParseErr::StreamNotFullyConsumed`] if not fully consumed.
+/// raising a [`ParseErr::UnexpectedToken`] error if not fully consumed.
 /// 
 /// for more control, use [`Parser::parse`].
 /// 
@@ -537,7 +537,7 @@ impl<'s> Parser<'s> {
     /// This parses a tuple (a repeated set of items divided by a separator).
     /// 
     /// This function requires a separator token and 
-    /// the tuple's items must be of a type which can be created by [`Parse::try_parse`].
+    /// the tuple's items must be of a type which can be created by [`Parser::try_parse`].
     pub fn parse_tuple<T, E>(&mut self, tok: Token) -> ParseResult<Tuple<T>> 
         where Option<T>: Parseable<Err = E>,
               FullParseErr: From<E>
