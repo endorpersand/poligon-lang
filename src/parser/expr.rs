@@ -1,5 +1,5 @@
 use crate::{ast::*, delim};
-use crate::lexer::token::{Token, FullToken, TTKind};
+use crate::lexer::token::{Token, TTKind};
 use crate::span::Spanned;
 use crate::token;
 
@@ -592,26 +592,37 @@ impl Parseable for ClassLiteral {
     }
 }
 
+impl Parseable for Option<Literal> {
+    type Err = FullParseErr;
+
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        use TTKind::Token as Tk;
+
+        let Some(peek) = parser.peek_tree() else { return Ok(None) };
+        let span = peek.span();
+        
+        let kind = match peek.kind() {
+            Tk(Token::Numeric(n)) => {
+                LitKind::from_numeric(n)
+                    .ok_or_else(|| parser.cursor.error(ParseErr::CannotParseNumeric))?
+            }
+            Tk(Token::Str(s))   => LitKind::Str(s.to_string()),
+            Tk(&Token::Char(c)) => LitKind::Char(c),
+            Tk(token![true])    => LitKind::Bool(true),
+            Tk(token![false])   => LitKind::Bool(false),
+            _ => { return Ok(None) }
+        };
+        
+        parser.next();
+        Ok(Some(Literal { kind, span }))
+    }
+}
 impl Parseable for Literal {
     type Err = FullParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let Some(FullToken { kind: tok_kind, span }) = parser.next() else {
-            return Err(parser.cursor.error(ParseErr::ExpectedLiteral));
-        };
-        
-        let lit_kind = match tok_kind {
-            Token::Numeric(n) => {
-                LitKind::from_numeric(&n)
-                    .ok_or_else(|| parser.cursor.error(ParseErr::CannotParseNumeric))?
-            }
-            Token::Str(s)  => LitKind::Str(s),
-            Token::Char(c) => LitKind::Char(c),
-            token![true]   => LitKind::Bool(true),
-            token![false]  => LitKind::Bool(false),
-            _ => { return Err(parser.cursor.error(ParseErr::ExpectedLiteral)) }
-        };
-        Ok(Self { kind: lit_kind, span })
+        parser.try_parse()?
+            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedLiteral))
     }
 }
 impl Parseable for ListLiteral {

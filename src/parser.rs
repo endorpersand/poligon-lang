@@ -575,8 +575,8 @@ impl<'s> Parser<'s> {
         } 
     }
 }
-impl Iterator for Parser<'_> {
-    type Item = FullToken;
+impl<'s> Iterator for Parser<'s> {
+    type Item = &'s TokenTree;
 
     fn next(&mut self) -> Option<Self::Item> {
         let tok = self.cursor.next();
@@ -585,7 +585,7 @@ impl Iterator for Parser<'_> {
             self.span_collectors.attach(t.span());
         }
 
-        tok.cloned().map(|t| t.try_into().unwrap()) // TODO
+        tok
     }
 }
 
@@ -818,11 +818,19 @@ impl Parseable for Option<ast::Ident> {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use TTKind::Token as Tk;
 
+        static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>> = MatchFn::new_with_err(
+            |tt| match tt {
+                TokenTree::Token(ft) if matches!(ft.kind, Token::Ident(_)) => Some(ft.clone()),
+                _ => None,
+            },
+            || ParseErr::ExpectedIdent
+        );
+
         let ident = match parser.peek_slice(2).as_ref() {
             [Tk(token![#]), Tk(Token::Ident(_))] => {
                 let (ident, span) = parser.spanned(|parser| {
                     parser.expect(token![#]).unwrap(); // should be unreachable
-                    let Some(FullToken { kind: Token::Ident(ident), span: _ }) = parser.next() else {
+                    let Token::Ident(ident) = parser.expect(IDENT_MATCH).unwrap().kind else {
                         unreachable!()
                     };
 
@@ -832,7 +840,7 @@ impl Parseable for Option<ast::Ident> {
                 Some(ast::Ident { ident, span })
             },
             [Tk(Token::Ident(_)), ..] => {
-                let Some(FullToken { kind: Token::Ident(ident), span }) = parser.next() else {
+                let FullToken { kind: Token::Ident(ident), span } = parser.expect(IDENT_MATCH).unwrap() else {
                     unreachable!()
                 };
 

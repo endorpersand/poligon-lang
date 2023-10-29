@@ -97,12 +97,13 @@ impl<'tt> TokenPattern<'tt> for Delimiter {
 }
 
 /// Matches an arbitrary function.
+#[derive(Clone, Copy)]
 pub struct MatchFn<F>(F, fn() -> ParseErr);
 impl<F, T: Spanned> MatchFn<F> 
     where F: Fn(&TokenTree) -> Option<T>,
 {
     /// Creates a new match function with a default error.
-    pub fn new(f: F) -> Self {
+    pub const fn new(f: F) -> Self {
         fn match_fn_default() -> ParseErr {
             ParseErr::UnexpectedToken
         }
@@ -111,7 +112,7 @@ impl<F, T: Spanned> MatchFn<F>
     }
 
     /// Creates a new match function with a defined error.
-    pub fn new_with_err(f: F, e: fn() -> ParseErr) -> Self {
+    pub const fn new_with_err(f: F, e: fn() -> ParseErr) -> Self {
         Self(f, e)
     }
 }
