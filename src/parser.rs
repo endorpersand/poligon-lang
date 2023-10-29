@@ -61,6 +61,23 @@ pub trait Parseable: Sized {
     /// Try to parse the item out of the stream, raising the error if failing.
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err>;
 }
+/// Trait indicating that a type *may* be created out of a stream of tokens.
+pub trait TryParseable: Sized {
+    /// Error to raise if a failure happens during the parsing of an item.
+    type Err;
+
+    /// Try to parse the item out of the stream, 
+    /// returning `None` if the format does not match,
+    /// and raising an error if the format matches but an error occurs during parsing.
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err>;
+}
+impl<T: TryParseable> Parseable for Option<T> {
+    type Err = T::Err;
+
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        T::try_read(parser)
+    }
+}
 
 /// A cursor that allows simple scanning and traversing over a stream of tokens.
 pub struct ParCursor<'s> {
@@ -367,9 +384,7 @@ impl<'s> Parser<'s> {
     /// Tries to parse an item, returning `None` if it fails.
     /// 
     /// This tries to parse any items P such that `Option<P>` can be parsed.
-    pub fn try_parse<P>(&mut self) -> Result<Option<P>, <Option<P> as Parseable>::Err>
-        where Option<P>: Parseable
-    {
+    pub fn try_parse<P: TryParseable>(&mut self) -> Result<Option<P>, P::Err> {
         Option::<P>::read(self)
     }
     
@@ -538,9 +553,7 @@ impl<'s> Parser<'s> {
     /// 
     /// This function requires a separator token and 
     /// the tuple's items must be of a type which can be created by [`Parser::try_parse`].
-    pub fn parse_tuple<T, E>(&mut self, tok: Token) -> Result<Tuple<T>, E>
-        where Option<T>: Parseable<Err = E>
-    {
+    pub fn parse_tuple<T: TryParseable>(&mut self, tok: Token) -> Result<Tuple<T>, T::Err> {
         let ((pairs, end), span) = self.try_spanned(|parser| {
             let mut pairs = vec![];
             let mut end = None;
@@ -584,6 +597,130 @@ impl<'s> Iterator for Parser<'s> {
         }
 
         tok
+    }
+}
+
+
+/// A repeated set of items, separated by some separator.
+pub struct Tuple<T> {
+    pairs: Vec<(T, FullToken)>,
+    end: Option<T>,
+    span: Span
+}
+impl<T> Tuple<T> {
+    /// The items held by this tuple.
+    /// 
+    /// This erases the information on what separators were used.
+    pub fn values(self) -> impl Iterator<Item=T> {
+        self.pairs.into_iter()
+            .map(|(t, _)| t)
+            .chain(self.end)
+    }
+
+    /// Tests if the tuple ended with a terminator token 
+    /// or if it ended with a tuple item.
+    pub fn ended_on_terminator(&self) -> bool {
+        self.end.is_none()
+    }
+
+    /// Tests if the tuple has no items.
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty() && self.end.is_none()
+    }
+    /// Counts how many items the tuple has.
+    pub fn len(&self) -> usize {
+        self.pairs.len() + if self.end.is_some() { 1 } else { 0 }
+    }
+    /// Asserts that the tuple is not empty, calling the provided error function if it is empty.
+    pub fn assert_non_empty<E>(self, e: impl FnOnce() -> E) -> Result<Self, E> {
+        match self.is_empty() {
+            false => Ok(self),
+            true  => Err(e()),
+        }
+    }
+    /// Asserts that the parser used for this tuple is not empty.
+    /// 
+    /// If the parser is not empty, 
+    /// this function will execute the provided `needs_sep` function if the tuple ended on an item,
+    /// and it will execute the provided `needs_t` function if the tuple ended on a separator.
+    pub fn assert_closed<'s, 'tt, E: GonErr>(
+        self, 
+        parser: Parser<'s>, 
+        needs_sep: impl FnOnce() -> E, 
+        needs_item: impl FnOnce() -> E
+    ) -> Result<Self, FullGonErr<E>> 
+        where 's: 'tt
+    {
+        parser.close_or_else(|| match self.ended_on_terminator() {
+            true  => needs_item(),
+            false => needs_sep()
+        })?;
+
+        Ok(self)
+    }
+}
+impl<T> crate::span::Spanned for Tuple<T> {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// An entry, consisting of a `K` item, followed by `:`, followed by a `V` item.
+pub struct Entry<K, V, E> {
+    /// The key item
+    pub key: K,
+    /// The value item
+    pub val: V,
+    /// The span of characters ranged by the entire entry
+    pub span: Span,
+    /// The error this entry raises if it could not be parsed.
+    /// 
+    /// This is attached on the type so that Parseable/TryParseable 
+    /// have something to bind to.
+    _err: std::marker::PhantomData<*const E>
+}
+impl<K, V, E> crate::span::Spanned for Entry<K, V, E> {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl<K, V, E> TryParseable for Entry<K, V, E> 
+    where K: TryParseable,
+          V: Parseable,
+          E: From<K::Err> + From<V::Err> + From<FullParseErr>
+{
+    type Err = E;
+
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
+        let (result, span) = parser.try_spanned(|parser| {
+            let Some(k) = parser.try_parse()? else { return Result::<_, E>::Ok(None) };
+            parser.expect(token![:])?;
+            let v = parser.parse()?;
+
+            Ok(Some((k, v)))
+        })?;
+
+        Ok(result.map(|(key, val)| Entry { key, val, span, _err: std::marker::PhantomData }))
+    }
+}
+impl<K, V, E> Parseable for Entry<K, V, E> 
+    where K: Parseable,
+          V: Parseable,
+          E: From<K::Err> + From<V::Err> + From<FullParseErr>
+{
+    type Err = E;
+
+    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        let ((key, val), span) = parser.try_spanned(|parser| {
+            let k = parser.parse()?;
+            parser.expect(token![:])?;
+            let v = parser.parse()?;
+
+            Result::<_, E>::Ok((k, v))
+        })?;
+
+        Ok(Self { key, val, span, _err: std::marker::PhantomData })
     }
 }
 
@@ -654,146 +791,6 @@ fn parse_stmts_closed(parser: &mut Parser<'_>) -> ParseResult<Vec<ast::Stmt>> {
     Ok(stmts)
 }
 
-/// A repeated set of items, separated by some separator.
-pub struct Tuple<T> {
-    pairs: Vec<(T, FullToken)>,
-    end: Option<T>,
-    span: Span
-}
-impl<T> Tuple<T> {
-    /// The items held by this tuple.
-    /// 
-    /// This erases the information on what separators were used.
-    pub fn values(self) -> impl Iterator<Item=T> {
-        self.pairs.into_iter()
-            .map(|(t, _)| t)
-            .chain(self.end)
-    }
-
-    /// Tests if the tuple ended with a terminator token 
-    /// or if it ended with a tuple item.
-    pub fn ended_on_terminator(&self) -> bool {
-        self.end.is_none()
-    }
-
-    /// Tests if the tuple has no items.
-    pub fn is_empty(&self) -> bool {
-        self.pairs.is_empty() && self.end.is_none()
-    }
-    /// Counts how many items the tuple has.
-    pub fn len(&self) -> usize {
-        self.pairs.len() + if self.end.is_some() { 1 } else { 0 }
-    }
-    /// Asserts that the tuple is not empty, calling the provided error function if it is empty.
-    pub fn assert_non_empty<E>(self, e: impl FnOnce() -> E) -> Result<Self, E> {
-        match self.is_empty() {
-            false => Ok(self),
-            true  => Err(e()),
-        }
-    }
-    /// Asserts that the parser used for this tuple is not empty.
-    /// 
-    /// If the parser is not empty, 
-    /// this function will execute the provided `needs_sep` function if the tuple ended on an item,
-    /// and it will execute the provided `needs_t` function if the tuple ended on a separator.
-    pub fn assert_closed<'s, 'tt, E: GonErr>(
-        self, 
-        parser: Parser<'s>, 
-        needs_sep: impl FnOnce() -> E, 
-        needs_item: impl FnOnce() -> E
-    ) -> Result<Self, FullGonErr<E>> 
-        where 's: 'tt
-    {
-        parser.close_or_else(|| match self.ended_on_terminator() {
-            true  => needs_item(),
-            false => needs_sep()
-        })?;
-
-        Ok(self)
-    }
-}
-impl<T> crate::span::Spanned for Tuple<T> {
-    fn span(&self) -> Span {
-        self.span
-    }
-}
-
-/// An entry, consisting of a `K` item, followed by `:`, followed by a `V` item.
-pub struct Entry<K, V> {
-    /// The key item
-    pub key: K,
-    /// The value item
-    pub val: V,
-    /// The span of characters ranged by the entire entry
-    pub span: Span
-}
-impl<K, V> crate::span::Spanned for Entry<K, V> {
-    fn span(&self) -> Span {
-        self.span
-    }
-}
-// This cannot be generalized, as it causes recursion problems.
-impl<V: Parseable<Err=FullParseErr>> Parseable for Option<Entry<ast::Expr, V>> {
-    type Err = FullParseErr;
-
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let (result, span) = parser.try_spanned(|parser| {
-            let Some(k) = parser.try_parse()? else { return ParseResult::Ok(None) };
-            parser.expect(token![:])?;
-            let v = parser.parse()?;
-
-            Ok(Some((k, v)))
-        })?;
-
-        Ok(result.map(|(key, val)| Entry { key, val, span }))
-    }
-}
-impl<V: Parseable<Err=FullParseErr>> Parseable for Option<Entry<ast::Ident, V>> {
-    type Err = FullParseErr;
-
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let (result, span) = parser.try_spanned(|parser| {
-            let Some(k) = parser.try_parse()? else { return ParseResult::Ok(None) };
-            parser.expect(token![:])?;
-            let v = parser.parse()?;
-
-            Ok(Some((k, v)))
-        })?;
-
-        Ok(result.map(|(key, val)| Entry { key, val, span }))
-    }
-}
-impl<V: Parseable<Err=FullParseErr>> Parseable for Entry<ast::Expr, V> {
-    type Err = FullParseErr;
-
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let ((key, val), span) = parser.try_spanned(|parser| {
-            let k = parser.parse()?;
-            parser.expect(token![:])?;
-            let v = parser.parse()?;
-
-            ParseResult::Ok((k, v))
-        })?;
-
-        Ok(Self { key, val, span })
-    }
-}
-impl<V: Parseable<Err=FullParseErr>> Parseable for Entry<ast::Ident, V> {
-    type Err = FullParseErr;
-
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let ((key, val), span) = parser.try_spanned(|parser| {
-            let k = parser.parse()?;
-            parser.expect(token![:])?;
-            let v = parser.parse()?;
-
-            ParseResult::Ok((k, v))
-        })?;
-
-        Ok(Self { key, val, span })
-    }
-}
-
 impl Parseable for ast::Program {
     type Err = FullParseErr;
 
@@ -810,10 +807,10 @@ impl Parseable for ast::Program {
     }
 }
 
-impl Parseable for Option<ast::Ident> {
+impl TryParseable for ast::Ident {
     type Err = Infallible;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use TTKind::Token as Tk;
 
         static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>, ParseErr> = MatchFn::new_with_err(
@@ -859,10 +856,10 @@ impl Parseable for ast::Ident {
     }
 }
 
-impl Parseable for Option<ast::StrLiteral> {
+impl TryParseable for ast::StrLiteral {
     type Err = Infallible;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let lit = parser.match_(MatchFn::new(|tt| {
             if let TokenTree::Token(FullToken { kind: Token::Str(literal), span }) = tt {
                 let literal = literal.clone();
@@ -887,10 +884,10 @@ impl Parseable for ast::StrLiteral {
 }
 
 const REASG_TOKENS: [Token; 2] = [token![let], token![const]];
-impl Parseable for Option<ast::ReasgType> {
+impl TryParseable for ast::ReasgType {
     type Err = Infallible;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
 
         let rt = match parser.match_(REASG_TOKENS).map(|t| t.kind) {
             Some(token![let]) => Some(ast::ReasgType::Let),
@@ -912,10 +909,10 @@ impl Parseable for ast::ReasgType {
     }
 }
 
-impl Parseable for Option<ast::Stmt> {
+impl TryParseable for ast::Stmt {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use TTKind::Token as Tk;
 
         let st = match parser.peek() {
@@ -945,10 +942,10 @@ impl Parseable for Option<ast::Stmt> {
     }
 }
 
-impl Parseable for Option<ast::Type> {
+impl TryParseable for ast::Type {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
             let Some(ident) = parser.try_parse()? else { return ParseResult::Ok(None) };
 
@@ -1004,10 +1001,10 @@ impl Parseable for ast::Decl {
         Ok(ast::Decl { rt, pat, ty, val, span })
     }
 }
-impl Parseable for Option<ast::DeclPat> {
+impl TryParseable for ast::DeclPat {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let Some(peek) = parser.peek_tree() else {
             return Ok(None)
         };
@@ -1105,10 +1102,10 @@ impl Parseable for ast::Throw {
         Ok(Self { message, span })
     }
 }
-impl Parseable for Option<ast::Param> {
+impl TryParseable for ast::Param {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
             let maybe_rt = parser.try_parse()?;
             let maybe_mt = parser.match_(token![mut]).map(|_| ast::MutType::Mut);
@@ -1274,10 +1271,10 @@ impl Parseable for ast::ExternFunDecl {
         Ok(Self { sig, span })
     }
 }
-impl Parseable for Option<ast::FieldDecl> {
+impl TryParseable for ast::FieldDecl {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
             let maybe_rt = parser.try_parse()?;
             let maybe_mt = parser.match_(token![mut]).map(|_| ast::MutType::Mut);

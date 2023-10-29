@@ -3,12 +3,12 @@ use crate::lexer::token::{Token, TTKind};
 use crate::span::Spanned;
 use crate::token;
 
-use super::{Parseable, FullParseErr, Parser, ParseErr, ParseResult, TokenPattern, Entry};
+use super::{Parseable, FullParseErr, Parser, ParseErr, ParseResult, TokenPattern, Entry, TryParseable};
 
-impl Parseable for Option<Expr> {
+impl TryParseable for Expr {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         parser.try_parse::<Expr15>()
             .map(|m_expr| m_expr.map(Into::into))
     }
@@ -88,10 +88,10 @@ parse_expr_enums! {
     Expr15:   { Expr14, Assign }
 }
 
-impl Parseable for Option<Expr15> {
+impl TryParseable for Expr15 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let mut lhs = vec![];
         let Some(mut rhs) = parser.try_parse::<Expr14>()? else { return ParseResult::Ok(None) };
 
@@ -135,10 +135,10 @@ impl Parseable for Option<Expr15> {
 macro_rules! left_assoc_ops {
     ($($E:ident: $EM1:ident, $o:expr),*) => {
         $(
-            impl Parseable for Option<$E> {
+            impl TryParseable for $E {
                 type Err = FullParseErr;
             
-                fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+                fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
                     let Some(mut lhs) = parser.try_parse::<$EM1>()?.map($E::$EM1) else {
                         return ParseResult::Ok(None)
                     };
@@ -173,10 +173,10 @@ left_assoc_ops! {
     Expr5:  Expr4,  [token![+], token![-]],
     Expr4:  Expr3,  [token![*], token![/], token![%]]
 }
-impl Parseable for Option<Expr12> {
+impl TryParseable for Expr12 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         const CMP_OPS: &[Token] = &[
             token![<=], token![<],
             token![==], token![!=],
@@ -209,10 +209,10 @@ impl Parseable for Option<Expr12> {
         }
     }
 }
-impl Parseable for Option<Expr11> {
+impl TryParseable for Expr11 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let m_expr = if let Some(TTKind::Token(token![..])) = parser.peek() {
             Some(Expr11::Spread(parser.parse()?))
         } else {
@@ -236,10 +236,10 @@ impl Parseable for Spread {
     }
 }
 
-impl Parseable for Option<Expr10> {
+impl TryParseable for Expr10 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let Some(lhs) = parser.try_parse::<Expr9>()? else { return Ok(None) };
         if let Some(op) = parser.match_(token![..]) {
             let lhs = Expr::from(lhs);
@@ -267,10 +267,10 @@ impl Parseable for Option<Expr10> {
 }
 
 const UNARY_OPS: &[Token] = &[ token![+], token![-], token![~], token![!] ];
-impl Parseable for Option<Expr3> {
+impl TryParseable for Expr3 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let m_expr = match parser.peek() {
             Some(TTKind::Token(tok)) if UNARY_OPS.contains(tok) => {
                 Some(Expr3::UnaryOps(parser.parse()?))
@@ -314,10 +314,10 @@ impl Parseable for UnaryOps {
     }
 }
 
-impl Parseable for Option<Expr2> {
+impl TryParseable for Expr2 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let m_expr = if let Some(TTKind::Token(token![*])) = parser.peek() {
             Some(Expr2::IDeref(parser.parse()?))
         } else {
@@ -356,10 +356,10 @@ impl Parseable for IDeref {
     }
 }
 
-impl Parseable for Option<Expr1> {
+impl TryParseable for Expr1 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use super::TTKind::{Token as Tk, Group as Gr};
 
         let mut base = match parser.peek_slice(4).as_ref() {
@@ -474,10 +474,10 @@ impl Parseable for Option<Expr1> {
         Ok(Some(base))
     }
 }
-impl Parseable for Option<Expr0> {
+impl TryParseable for Expr0 {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let Some(tt) = parser.peek() else { return Ok(None) };
 
         let expr = match tt {
@@ -508,10 +508,10 @@ impl Parseable for Option<Expr0> {
         Ok(Some(expr))
     }
 }
-impl Parseable for Option<Identoid> {
+impl TryParseable for Identoid {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use super::TTKind::{Token as Tk, Group as Gr};
 
         let identoid = match parser.peek_slice(4).as_ref() {
@@ -551,7 +551,7 @@ impl Parseable for Option<Identoid> {
                                 || ParseErr::ExpectedExpr
                             )?
                             .values()
-                            .map(|Entry { key, val, span: _ } | (key, val))
+                            .map(|Entry::<_, _, FullParseErr> { key, val, .. } | (key, val))
                             .collect();
 
                         let span = ident.span + group.span();
@@ -582,7 +582,7 @@ impl Parseable for ClassLiteral {
                     || ParseErr::ExpectedExpr
                 )?
                 .values()
-                .map(|Entry { key, val, span: _ }| (key, val))
+                .map(|Entry::<_, _, FullParseErr> { key, val, .. }| (key, val))
                 .collect();
 
             ParseResult::Ok((ty, entries))
@@ -592,10 +592,10 @@ impl Parseable for ClassLiteral {
     }
 }
 
-impl Parseable for Option<Literal> {
+impl TryParseable for Literal {
     type Err = FullParseErr;
 
-    fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+    fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use TTKind::Token as Tk;
 
         let Some(peek) = parser.peek_tree() else { return Ok(None) };
