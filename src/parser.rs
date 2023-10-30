@@ -41,10 +41,12 @@ pub use pat::TokenPattern;
 ///     )
 /// ]));
 /// ```
-pub fn parse<P: Parseable<Err = FullParseErr>>(stream: Stream) -> ParseResult<P> {
+pub fn parse<P: Parseable>(stream: Stream) -> Result<P, P::Err> 
+    where P::Err: From<FullParseErr>
+{
     let mut parser = Parser::new(stream);
 
-    let result = parser.parse()?;
+    let result = parser.parse::<P>()?;
     parser.close()?;
     Ok(result)
 }
@@ -281,7 +283,7 @@ impl_from_err! { PatErr => ParseErr: err => { Self::AsgPatErr(err) } }
 
 /// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullParseErr>;
-pub(crate) type FullParseErr = FullGonErr<ParseErr>;
+type FullParseErr = FullGonErr<ParseErr>;
 
 mod tspan {
     use crate::span::Span;

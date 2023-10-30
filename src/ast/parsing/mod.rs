@@ -1,21 +1,128 @@
 use std::convert::Infallible;
 
+use crate::err::{FullGonErr, impl_from_err, GonErr};
 use crate::lexer::token::{TTKind, TokenTree, FullToken, Token};
 use crate::parser::pat::MatchFn;
-use crate::parser::{Parser, ParseResult, FullParseErr, Parseable, TryParseable, ParseErr, TokenPattern};
+use crate::parser::{Parser, Parseable, TryParseable, TokenPattern, ParseErr};
 use crate::span::Spanned;
 use crate::{ast, token, delim};
 
+use super::PatErr;
+
 mod expr;
 
+/// An error that occurs in the parsing process.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AstParseErr {
+    CoreErr(ParseErr),
 
-macro_rules! expected_tokens {
-    ($($t:tt),*) => {
-        <[_]>::fail_err(&[$(token![$t]),*])
+    /// The parser expected one of the tokens.
+    ExpectedTokens(Vec<Token>),
+
+    /// The parser expected an identifier.
+    ExpectedIdent,
+
+    /// The parser expected an expression here, but failed to match an expression.
+    ExpectedExpr,
+
+    /// The parser expected a literal here, but got something else.
+    ExpectedLiteral,
+
+    /// The string provided could not be parsed into a numeric value.
+    CannotParseNumeric,
+
+    /// The parser expected a block (e.g. `{ code; code; }`).
+    ExpectedBlock,
+
+    /// The parser expected a type expression (e.g. `list<str>`).
+    ExpectedType,
+    
+    /// The parser expected an assignment or declaration pattern, but failed to match one.
+    ExpectedPattern,
+
+    /// The parser expected a dictionary entry (e.g. `expr: expr`).
+    ExpectedEntry,
+
+    /// The parser expected a function parameter.
+    ExpectedParam,
+
+    /// The parser tried to match a pattern and it did not work!
+    UnexpectedToken,
+
+    /// An error occurred in creating an assignment pattern.
+    AsgPatErr(PatErr),
+
+    /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
+    NoIntrinsicIdents,
+
+    /// Parser is not in intrinsic mode and therefore this statement cannot be defined
+    NoIntrinsicStmts,
+}
+
+impl GonErr for AstParseErr {
+    fn err_name(&self) -> &'static str {
+        "syntax error"
     }
 }
 
-fn parse_stmts_closed(parser: &mut Parser<'_>) -> ParseResult<Vec<ast::Stmt>> {
+impl std::fmt::Display for AstParseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AstParseErr::CoreErr(e) => e.fmt(f),
+            AstParseErr::ExpectedTokens(tokens) => match tokens.len() {
+                0 => write!(f, "expected eof"),
+                1 => write!(f, "expected '{}'", tokens[0]),
+                _ => {
+                    let (first, rest) = tokens.split_first().unwrap();
+                    write!(f, "expected one of '{first}'")?;
+
+                    for t in rest {
+                        write!(f, ", '{t}'")?;
+                    }
+
+                    Ok(())
+                }
+            },
+            AstParseErr::ExpectedIdent      => write!(f, "expected identifier"),
+            AstParseErr::ExpectedExpr       => write!(f, "expected expression"),
+            AstParseErr::ExpectedLiteral    => write!(f, "expected literal"),
+            AstParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
+            AstParseErr::ExpectedBlock      => write!(f, "expected block"),
+            AstParseErr::ExpectedType       => write!(f, "expected type expression"),
+            AstParseErr::ExpectedPattern    => write!(f, "expected pattern"),
+            AstParseErr::ExpectedEntry      => write!(f, "expected entry"),
+            AstParseErr::ExpectedParam      => write!(f, "expected param"),
+            AstParseErr::UnexpectedToken    => write!(f, "unexpected token"),
+            AstParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
+            AstParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
+            AstParseErr::AsgPatErr(e)       => e.fmt(f),
+        }
+    }
+}
+impl std::error::Error for AstParseErr {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match self {
+            AstParseErr::AsgPatErr(t) => Some(t),
+            _ => None
+        }
+    }
+}
+impl_from_err! { 
+    PatErr => AstParseErr: err => { Self::AsgPatErr(err) },
+    ParseErr => AstParseErr: err => { Self::CoreErr(err) }
+}
+
+/// A [`Result`] type for operations in the parsing process.
+pub type AstParseResult<T> = Result<T, FullAstParseErr>;
+pub(crate) type FullAstParseErr = FullGonErr<AstParseErr>;
+
+macro_rules! expected_tokens {
+    ($($t:tt),*) => {
+        AstParseErr::from(<[_]>::fail_err(&[$(token![$t]),*]))
+    }
+}
+
+fn parse_stmts_closed(parser: &mut Parser<'_>) -> AstParseResult<Vec<ast::Stmt>> {
     use std::ops::ControlFlow::{self, Break, Continue};
 
     let mut stmts = vec![];
@@ -70,7 +177,7 @@ fn parse_stmts_closed(parser: &mut Parser<'_>) -> ParseResult<Vec<ast::Stmt>> {
                 (stmt, if stop_reading { Break(()) } else { Continue(()) })
             };
 
-            ParseResult::Ok(out)
+            AstParseResult::Ok(out)
         }?;
         
         if let Some(stmt) = mstmt {
@@ -83,7 +190,7 @@ fn parse_stmts_closed(parser: &mut Parser<'_>) -> ParseResult<Vec<ast::Stmt>> {
 }
 
 impl Parseable for ast::Program {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (stmts, span) = parser.try_spanned(parse_stmts_closed)?;
@@ -104,12 +211,12 @@ impl TryParseable for ast::Ident {
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use TTKind::Token as Tk;
 
-        static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>, ParseErr> = MatchFn::new_with_err(
+        static IDENT_MATCH: MatchFn<fn(&TokenTree) -> Option<FullToken>, AstParseErr> = MatchFn::new_with_err(
             |tt| match tt {
                 TokenTree::Token(ft) if matches!(ft.kind, Token::Ident(_)) => Some(ft.clone()),
                 _ => None,
             },
-            || ParseErr::ExpectedIdent
+            || AstParseErr::ExpectedIdent
         );
 
         let ident = match parser.peek_slice(2).as_ref() {
@@ -139,11 +246,11 @@ impl TryParseable for ast::Ident {
     }
 }
 impl Parseable for ast::Ident {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or(parser.cursor.error(ParseErr::ExpectedIdent))
+            .ok_or(parser.cursor.error(AstParseErr::ExpectedIdent))
     }
 }
 
@@ -166,11 +273,11 @@ impl TryParseable for ast::StrLiteral {
     }
 }
 impl Parseable for ast::StrLiteral {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or(parser.cursor.error(ParseErr::ExpectedLiteral))
+            .ok_or(parser.cursor.error(AstParseErr::ExpectedLiteral))
     }
 }
 
@@ -190,7 +297,7 @@ impl TryParseable for ast::ReasgType {
     }
 }
 impl Parseable for ast::ReasgType {
-    type Err = FullParseErr;
+    type Err = FullGonErr<ParseErr>;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
@@ -201,7 +308,7 @@ impl Parseable for ast::ReasgType {
 }
 
 impl TryParseable for ast::Stmt {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         use TTKind::Token as Tk;
@@ -234,20 +341,20 @@ impl TryParseable for ast::Stmt {
 }
 
 impl TryParseable for ast::Type {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
-            let Some(ident) = parser.try_parse()? else { return ParseResult::Ok(None) };
+            let Some(ident) = parser.try_parse()? else { return AstParseResult::Ok(None) };
 
             let args = if let Some(group) = parser.match_(delim!["[]"]) {
                 let mut content = Parser::new(group);
                 
                 content.parse_tuple(token![,])?
-                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedType))?
+                    .assert_non_empty(|| content.cursor.error(AstParseErr::ExpectedType))?
                     .assert_closed(content,
-                        || token![,].fail_err(),
-                        || ParseErr::ExpectedType
+                        || token![,].fail_err().into(),
+                        || AstParseErr::ExpectedType
                     )?
                     .values()
                     .collect()
@@ -262,16 +369,16 @@ impl TryParseable for ast::Type {
     }
 }
 impl Parseable for ast::Type {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedType))
+            .ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedType))
     }
 }
 
 impl Parseable for ast::Decl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((rt, pat, ty, val), span) = parser.try_spanned(|parser| {
@@ -286,14 +393,14 @@ impl Parseable for ast::Decl {
             parser.expect(token![=])?;
             let expr = parser.parse()?;
             
-            ParseResult::Ok((rt, pat, ty, expr))
+            AstParseResult::Ok((rt, pat, ty, expr))
         })?;
 
         Ok(ast::Decl { rt, pat, ty, val, span })
     }
 }
 impl TryParseable for ast::DeclPat {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let Some(peek) = parser.peek_tree() else {
@@ -308,7 +415,7 @@ impl TryParseable for ast::DeclPat {
                 let values = content.parse_tuple(token![,])?
                     .assert_closed(content,
                         || expected_tokens![,],
-                        || ParseErr::ExpectedPattern,
+                        || AstParseErr::ExpectedPattern,
                     )?
                     .values()
                     .collect();
@@ -331,7 +438,7 @@ impl TryParseable for ast::DeclPat {
                             false => ast::MutType::Immut
                         };
     
-                        ParseResult::Ok((mt, parser.parse()?))
+                        AstParseResult::Ok((mt, parser.parse()?))
                     })?;
     
                     ast::DeclPat::Unit(ast::DeclUnit { ident, mt, span })
@@ -345,16 +452,16 @@ impl TryParseable for ast::DeclPat {
     }
 }
 impl Parseable for ast::DeclPat {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedPattern))
+            .ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedPattern))
     }
 }
 
 impl Parseable for ast::Return {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (me, span) = parser.try_spanned(|parser| {
@@ -366,7 +473,7 @@ impl Parseable for ast::Return {
     }
 }
 impl Parseable for ast::Break {
-    type Err = FullParseErr;
+    type Err = FullGonErr<ParseErr>;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_spanned(|parser| parser.expect(token![break]))
@@ -374,7 +481,7 @@ impl Parseable for ast::Break {
     }
 }
 impl Parseable for ast::Continue {
-    type Err = FullParseErr;
+    type Err = FullGonErr<ParseErr>;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_spanned(|parser| parser.expect(token![continue]))
@@ -382,7 +489,7 @@ impl Parseable for ast::Continue {
     }
 }
 impl Parseable for ast::Throw {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (message, span) = parser.try_spanned(|parser| {
@@ -394,7 +501,7 @@ impl Parseable for ast::Throw {
     }
 }
 impl TryParseable for ast::Param {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
@@ -404,12 +511,12 @@ impl TryParseable for ast::Param {
 
             // the param checked so far is fully empty and probably not an actual param:
             if maybe_rt.is_none() && maybe_mt.is_none() && maybe_ident.is_none() {
-                return ParseResult::Ok(None);
+                return AstParseResult::Ok(None);
             }
 
             let rt = maybe_rt.unwrap_or_default();
             let mt = maybe_mt.unwrap_or_default();
-            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))?;
+            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedIdent))?;
 
             let ty = match parser.match_(token![:]) {
                 Some(_) => Some(parser.parse()?),
@@ -423,15 +530,15 @@ impl TryParseable for ast::Param {
     }
 }
 impl Parseable for ast::Param {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
             parser.try_parse()?
-                .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedParam))
+                .ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedParam))
     }
 }
 impl Parseable for ast::FunSignature {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ident, generics, params, ret), span) = parser.try_spanned(|parser| {
@@ -442,10 +549,10 @@ impl Parseable for ast::FunSignature {
                 let mut content = Parser::new(group);
                 
                 content.parse_tuple(token![,])?
-                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_non_empty(|| content.cursor.error(AstParseErr::ExpectedIdent))?
                     .assert_closed(content, 
                         || expected_tokens![,],
-                        || ParseErr::ExpectedParam,
+                        || AstParseErr::ExpectedParam,
                     )?
                     .values()
                     .collect()
@@ -457,7 +564,7 @@ impl Parseable for ast::FunSignature {
             let params = content.parse_tuple(token![,])?
                 .assert_closed(content,
                     || expected_tokens![,],
-                    || ParseErr::ExpectedParam,
+                    || AstParseErr::ExpectedParam,
                 )?
                 .values()
                 .collect();
@@ -467,20 +574,20 @@ impl Parseable for ast::FunSignature {
                 None    => None,
             };
 
-            ParseResult::Ok((ident, generics, params, ret))
+            AstParseResult::Ok((ident, generics, params, ret))
         })?;
 
         Ok(Self { ident, generics, params, varargs: false, ret, span })
     }
 }
 impl Parseable for ast::FunDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((sig, block), span) = parser.try_spanned(|parser| {
             let sig = parser.parse()?;
             let block = parser.parse()?;
-            ParseResult::Ok((sig, block))
+            AstParseResult::Ok((sig, block))
         })?;
 
         Ok(Self { sig, block, span })
@@ -489,7 +596,7 @@ impl Parseable for ast::FunDecl {
 
 // TODO: combine MethodSignature & FunSignature
 impl Parseable for ast::MethodSignature {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((referent, is_static, name, generic_params, params, ret), span) = parser.try_spanned(|parser| {
@@ -506,10 +613,10 @@ impl Parseable for ast::MethodSignature {
                 let mut content = Parser::new(group);
                 
                 content.parse_tuple(token![,])?
-                    .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
+                    .assert_non_empty(|| content.cursor.error(AstParseErr::ExpectedIdent))?
                     .assert_closed(content, 
                         || expected_tokens![,],
-                        || ParseErr::ExpectedParam,
+                        || AstParseErr::ExpectedParam,
                     )?
                     .values()
                     .collect()
@@ -521,7 +628,7 @@ impl Parseable for ast::MethodSignature {
             let params = content.parse_tuple(token![,])?
                 .assert_closed(content,
                     || expected_tokens![,],
-                    || ParseErr::ExpectedParam,
+                    || AstParseErr::ExpectedParam,
                 )?
                 .values()
                 .collect();
@@ -531,27 +638,27 @@ impl Parseable for ast::MethodSignature {
                 None    => None,
             };
 
-            ParseResult::Ok((referent, is_static, name, generics, params, ret))
+            AstParseResult::Ok((referent, is_static, name, generics, params, ret))
         })?;
 
         Ok(Self { referent, is_static, name, generic_params, params, ret, span  })
     }
 }
 impl Parseable for ast::MethodDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((sig, block), span) = parser.try_spanned(|parser| {
             let sig = parser.parse()?;
             let block = parser.parse()?;
-            ParseResult::Ok((sig, block))
+            AstParseResult::Ok((sig, block))
         })?;
 
         Ok(Self { sig, block, span })
     }
 }
 impl Parseable for ast::ExternFunDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (sig, span) = parser.try_spanned(|parser| {
@@ -563,7 +670,7 @@ impl Parseable for ast::ExternFunDecl {
     }
 }
 impl TryParseable for ast::FieldDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
         let (result, span) = parser.try_spanned(|parser| {
@@ -573,12 +680,12 @@ impl TryParseable for ast::FieldDecl {
 
             // the param checked so far is fully empty and probably not an actual param:
             if maybe_rt.is_none() && maybe_mt.is_none() && maybe_ident.is_none() {
-                return ParseResult::Ok(None);
+                return AstParseResult::Ok(None);
             }
 
             let rt = maybe_rt.unwrap_or_default();
             let mt = maybe_mt.unwrap_or_default();
-            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))?;
+            let ident = maybe_ident.ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedIdent))?;
 
             parser.expect(token![:])?;
             let ty = parser.parse()?;
@@ -590,16 +697,16 @@ impl TryParseable for ast::FieldDecl {
     }
 }
 impl Parseable for ast::FieldDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         parser.try_parse()?
-            .ok_or_else(|| parser.cursor.error(ParseErr::ExpectedIdent))
+            .ok_or_else(|| parser.cursor.error(AstParseErr::ExpectedIdent))
     }
 }
 
 impl Parseable for ast::Class {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ident, generic_params, fields, methods), span) = parser.try_spanned(|parser| {
@@ -609,10 +716,10 @@ impl Parseable for ast::Class {
                 Some(group) => {
                     let mut content = Parser::new(group);
                     content.parse_tuple(token![,])?
-                        .assert_non_empty(|| content.cursor.error(ParseErr::ExpectedIdent))?
+                        .assert_non_empty(|| content.cursor.error(AstParseErr::ExpectedIdent))?
                         .assert_closed(content,
                             || expected_tokens![,],
-                            || ParseErr::ExpectedIdent,
+                            || AstParseErr::ExpectedIdent,
                         )?
                         .values()
                         .collect()
@@ -633,14 +740,14 @@ impl Parseable for ast::Class {
 
             block_parser.close()?;
             
-            ParseResult::Ok((ident, generic_params, fields, methods))
+            AstParseResult::Ok((ident, generic_params, fields, methods))
         })?;
 
         Ok(Self { ident, generic_params, fields, methods, span })
     }
 }
 impl Parseable for ast::Import {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (path, span) = parser.try_spanned(|parser| {
@@ -652,7 +759,7 @@ impl Parseable for ast::Import {
     }
 }
 impl Parseable for ast::ImportIntrinsic {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let (_, span) = parser.try_spanned(|parser| {
@@ -664,7 +771,7 @@ impl Parseable for ast::ImportIntrinsic {
     }
 }
 impl Parseable for ast::IGlobal {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ident, value), span) = parser.try_spanned(|parser| {
@@ -673,14 +780,14 @@ impl Parseable for ast::IGlobal {
             parser.expect(token![=])?;
             let value = parser.parse()?;
 
-            ParseResult::Ok((ident, value))
+            AstParseResult::Ok((ident, value))
         })?;
 
         Ok(ast::IGlobal { ident, value, span })
     }
 }
 impl Parseable for ast::FitClassDecl {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ty, methods), span) = parser.try_spanned(|parser| {
@@ -697,14 +804,14 @@ impl Parseable for ast::FitClassDecl {
             }
             content.close()?;
             
-            ParseResult::Ok((ty, methods))
+            AstParseResult::Ok((ty, methods))
         })?;
 
         Ok(Self { ty, methods, span })
     }
 }
 impl Parseable for ast::Block {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let group = parser.expect(delim!["{}"])?;
@@ -717,7 +824,7 @@ impl Parseable for ast::Block {
     }
 }
 impl Parseable for ast::StaticPath {
-    type Err = FullParseErr;
+    type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let ((ty, attr), span) = parser.try_spanned(|parser| {
@@ -725,7 +832,7 @@ impl Parseable for ast::StaticPath {
             parser.expect(token![::])?;
             let attr = parser.parse()?;
 
-            ParseResult::Ok((ty, attr))
+            AstParseResult::Ok((ty, attr))
         })?;
 
         Ok(Self { ty, attr, span })
@@ -805,14 +912,14 @@ mod tests {
         }
     }
     /// Lex and parse string.
-    fn parse_str<P: Parseable<Err = FullParseErr>>(s: &str) -> ParseResult<P> {
+    fn parse_str<P: Parseable<Err = FullAstParseErr>>(s: &str) -> AstParseResult<P> {
         let stream = unwrap_fe(tokenize(s), s);
         parse(&stream)
     }
     /// Assert that the string provided parses into the program.
     #[allow(unused)]
     fn assert_parse<P>(input: &str, r: P) 
-        where P: Parseable<Err = FullParseErr> + PartialEq<P> + std::fmt::Debug
+        where P: Parseable<Err = FullAstParseErr> + PartialEq<P> + std::fmt::Debug
     {
         assert_eq!(unwrap_fe(parse_str::<P>(input), input), r)
     }
@@ -820,7 +927,7 @@ mod tests {
     #[allow(unused)]
     fn assert_parse_fail<E>(input: &str, result: E) 
         where E: std::fmt::Debug,
-            FullParseErr: PartialEq<E>
+            FullAstParseErr: PartialEq<E>
     {
         match parse_str::<Program>(input) {
             Ok(t)  => panic!("Lexing resulted in value: {t:?}"),

@@ -302,7 +302,7 @@ impl<E: GonErr> From<std::convert::Infallible> for FullGonErr<E> {
 }
 
 macro_rules! impl_from_err {
-    ($($t:ty => $u:ty$(: $id:ident => $e:block)?)*) => {
+    ($($t:ty => $u:ty$(: $id:ident => $e:block)?),*) => {
         $(
             $(
                 impl From<$t> for $u {
