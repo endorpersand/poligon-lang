@@ -36,6 +36,7 @@ mod internals;
 pub mod llvm_codegen;
 mod d_parser;
 mod dsds;
+mod d_types;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
