@@ -227,9 +227,6 @@ impl std::fmt::Display for ParseErr {
     }
 }
 impl std::error::Error for ParseErr {}
-
-/// A [`Result`] type for operations in the parsing process.
-pub type ParseResult<T> = Result<T, FullParseErr>;
 type FullParseErr = FullGonErr<ParseErr>;
 
 mod tspan {

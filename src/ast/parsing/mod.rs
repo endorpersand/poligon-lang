@@ -14,6 +14,7 @@ mod expr;
 /// An error that occurs in the parsing process.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AstParseErr {
+    /// An error was raised by a parser primitive, as opposed to an AST struct.
     CoreErr(ParseErr),
 
     /// The parser expected an identifier.
@@ -77,6 +78,7 @@ impl std::fmt::Display for AstParseErr {
 impl std::error::Error for AstParseErr {
     fn cause(&self) -> Option<&dyn std::error::Error> {
         match self {
+            AstParseErr::CoreErr(t)   => Some(t),
             AstParseErr::AsgPatErr(t) => Some(t),
             _ => None
         }

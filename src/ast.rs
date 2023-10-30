@@ -46,6 +46,7 @@ pub use located::*;
 pub use stmt::*;
 pub use fun::*;
 pub use expr::*;
+pub use parsing::AstParseErr;
 
 pub mod op;
 mod types;
