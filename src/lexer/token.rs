@@ -152,6 +152,15 @@ macro_rules! define_delimiters {
         }
     
         impl Delimiter {
+            /// Gets the left delimiter token.
+            pub fn left(&self) -> Token {
+                Token::Delimiter(*self, false)
+            }
+            /// Gets the right delimiter token.
+            pub fn right(&self) -> Token {
+                Token::Delimiter(*self, true)
+            }
+
             fn display_left(&self) -> &'static str {
                 match self {
                     $(Self::$id => $exl),*

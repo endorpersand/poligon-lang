@@ -16,9 +16,6 @@ mod expr;
 pub enum AstParseErr {
     CoreErr(ParseErr),
 
-    /// The parser expected one of the tokens.
-    ExpectedTokens(Vec<Token>),
-
     /// The parser expected an identifier.
     ExpectedIdent,
 
@@ -40,14 +37,8 @@ pub enum AstParseErr {
     /// The parser expected an assignment or declaration pattern, but failed to match one.
     ExpectedPattern,
 
-    /// The parser expected a dictionary entry (e.g. `expr: expr`).
-    ExpectedEntry,
-
     /// The parser expected a function parameter.
     ExpectedParam,
-
-    /// The parser tried to match a pattern and it did not work!
-    UnexpectedToken,
 
     /// An error occurred in creating an assignment pattern.
     AsgPatErr(PatErr),
@@ -68,21 +59,7 @@ impl GonErr for AstParseErr {
 impl std::fmt::Display for AstParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstParseErr::CoreErr(e) => e.fmt(f),
-            AstParseErr::ExpectedTokens(tokens) => match tokens.len() {
-                0 => write!(f, "expected eof"),
-                1 => write!(f, "expected '{}'", tokens[0]),
-                _ => {
-                    let (first, rest) = tokens.split_first().unwrap();
-                    write!(f, "expected one of '{first}'")?;
-
-                    for t in rest {
-                        write!(f, ", '{t}'")?;
-                    }
-
-                    Ok(())
-                }
-            },
+            AstParseErr::CoreErr(e)         => e.fmt(f),
             AstParseErr::ExpectedIdent      => write!(f, "expected identifier"),
             AstParseErr::ExpectedExpr       => write!(f, "expected expression"),
             AstParseErr::ExpectedLiteral    => write!(f, "expected literal"),
@@ -90,9 +67,7 @@ impl std::fmt::Display for AstParseErr {
             AstParseErr::ExpectedBlock      => write!(f, "expected block"),
             AstParseErr::ExpectedType       => write!(f, "expected type expression"),
             AstParseErr::ExpectedPattern    => write!(f, "expected pattern"),
-            AstParseErr::ExpectedEntry      => write!(f, "expected entry"),
             AstParseErr::ExpectedParam      => write!(f, "expected param"),
-            AstParseErr::UnexpectedToken    => write!(f, "unexpected token"),
             AstParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
             AstParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
             AstParseErr::AsgPatErr(e)       => e.fmt(f),
@@ -727,7 +702,8 @@ impl Parseable for ast::Class {
                 None => vec![]
             };
 
-            let mut block_parser = Parser::new(parser.expect(delim!["{}"])?);
+            let group = parser.expect(delim!["{}"])?;
+            let mut block_parser = Parser::new(group);
 
             let fields = block_parser.parse_tuple(token![,])?
                 .values()
@@ -738,7 +714,7 @@ impl Parseable for ast::Class {
                 methods.push(block_parser.parse()?);
             }
 
-            block_parser.close()?;
+            block_parser.close_or_else(|| group.delimiter.right().fail_err())?;
             
             AstParseResult::Ok((ident, generic_params, fields, methods))
         })?;
@@ -802,7 +778,7 @@ impl Parseable for ast::FitClassDecl {
             while let Some(TTKind::Token(token![fun])) = content.peek() {
                 methods.push(content.parse()?);
             }
-            content.close()?;
+            content.close_or_else(|| group.delimiter.right().fail_err())?;
             
             AstParseResult::Ok((ty, methods))
         })?;
@@ -818,7 +794,7 @@ impl Parseable for ast::Block {
 
         let mut content = Parser::new(group);
         let stmts = parse_stmts_closed(&mut content)?;
-        content.close()?;
+        content.close_or_else(|| group.delimiter.right().fail_err())?;
 
         Ok(ast::Block { stmts, span: group.span() })
     }

@@ -56,7 +56,7 @@ impl<'tt> TokenPattern<'tt> for Token {
     }
 
     fn fail_err(&self) -> Self::Err {
-        ParseErr::ExpectedTokens(vec![self.clone()])
+        ParseErr::ExpectedTokens(Box::new([self.clone()]))
     }
 }
 impl<'tt> TokenPattern<'tt> for [Token] {
@@ -71,7 +71,7 @@ impl<'tt> TokenPattern<'tt> for [Token] {
     }
 
     fn fail_err(&self) -> Self::Err {
-        ParseErr::ExpectedTokens(self.to_vec())
+        ParseErr::ExpectedTokens(self.to_vec().into_boxed_slice())
     }
 }
 impl<'tt, const N: usize> TokenPattern<'tt> for [Token; N] {
@@ -100,7 +100,7 @@ impl<'tt> TokenPattern<'tt> for Delimiter {
     }
 
     fn fail_err(&self) -> Self::Err {
-        ParseErr::ExpectedTokens(vec![Token::Delimiter(*self, false)])
+        ParseErr::ExpectedTokens(Box::new([self.left()]))
     }
 }
 

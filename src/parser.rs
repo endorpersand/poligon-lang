@@ -13,9 +13,8 @@ pub mod pat;
 
 use std::convert::Infallible;
 
-use crate::err::{GonErr, FullGonErr, impl_from_err};
+use crate::err::{GonErr, FullGonErr};
 use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, TTKind};
-use crate::ast::PatErr;
 use crate::span::{Span, Cursor, Spanned};
 pub use pat::TokenPattern;
 
@@ -47,7 +46,7 @@ pub fn parse<P: Parseable>(stream: Stream) -> Result<P, P::Err>
     let mut parser = Parser::new(stream);
 
     let result = parser.parse::<P>()?;
-    parser.close()?;
+    parser.close_or_else(|| ParseErr::ExpectedEOF)?;
     Ok(result)
 }
 
@@ -191,46 +190,13 @@ impl<'s> Iterator for ParCursor<'s> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseErr {
     /// The parser expected one of the tokens.
-    ExpectedTokens(Vec<Token>),
+    ExpectedTokens(Box<[Token]>),
 
-    /// The parser expected an identifier.
-    ExpectedIdent,
+    /// Expected end of file.
+    ExpectedEOF,
 
-    /// The parser expected an expression here, but failed to match an expression.
-    ExpectedExpr,
-
-    /// The parser expected a literal here, but got something else.
-    ExpectedLiteral,
-
-    /// The string provided could not be parsed into a numeric value.
-    CannotParseNumeric,
-
-    /// The parser expected a block (e.g. `{ code; code; }`).
-    ExpectedBlock,
-
-    /// The parser expected a type expression (e.g. `list<str>`).
-    ExpectedType,
-    
-    /// The parser expected an assignment or declaration pattern, but failed to match one.
-    ExpectedPattern,
-
-    /// The parser expected a dictionary entry (e.g. `expr: expr`).
-    ExpectedEntry,
-
-    /// The parser expected a function parameter.
-    ExpectedParam,
-
-    /// The parser tried to match a pattern and it did not work!
+    /// The parser tried to match a token pattern.
     UnexpectedToken,
-
-    /// An error occurred in creating an assignment pattern.
-    AsgPatErr(PatErr),
-
-    /// Parser is not in intrinsic mode and therefore cannot use an intrinsic identifier
-    NoIntrinsicIdents,
-
-    /// Parser is not in intrinsic mode and therefore this statement cannot be defined
-    NoIntrinsicStmts,
 }
 impl GonErr for ParseErr {
     fn err_name(&self) -> &'static str {
@@ -242,7 +208,7 @@ impl std::fmt::Display for ParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseErr::ExpectedTokens(tokens) => match tokens.len() {
-                0 => write!(f, "expected eof"),
+                0 => write!(f, "nothing should match here"),
                 1 => write!(f, "expected '{}'", tokens[0]),
                 _ => {
                     let (first, rest) = tokens.split_first().unwrap();
@@ -255,31 +221,12 @@ impl std::fmt::Display for ParseErr {
                     Ok(())
                 }
             },
-            ParseErr::ExpectedIdent      => write!(f, "expected identifier"),
-            ParseErr::ExpectedExpr       => write!(f, "expected expression"),
-            ParseErr::ExpectedLiteral    => write!(f, "expected literal"),
-            ParseErr::CannotParseNumeric => write!(f, "could not parse numeric"),
-            ParseErr::ExpectedBlock      => write!(f, "expected block"),
-            ParseErr::ExpectedType       => write!(f, "expected type expression"),
-            ParseErr::ExpectedPattern    => write!(f, "expected pattern"),
-            ParseErr::ExpectedEntry      => write!(f, "expected entry"),
-            ParseErr::ExpectedParam      => write!(f, "expected param"),
-            ParseErr::UnexpectedToken    => write!(f, "unexpected token"),
-            ParseErr::NoIntrinsicIdents  => write!(f, "cannot use intrinsic identifier"),
-            ParseErr::NoIntrinsicStmts   => write!(f, "cannot use intrinsic statement"),
-            ParseErr::AsgPatErr(e)       => e.fmt(f),
+            ParseErr::ExpectedEOF => write!(f, "expected eof"),
+            ParseErr::UnexpectedToken => write!(f, "unexpected token"),
         }
     }
 }
-impl std::error::Error for ParseErr {
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        match self {
-            ParseErr::AsgPatErr(t) => Some(t),
-            _ => None
-        }
-    }
-}
-impl_from_err! { PatErr => ParseErr: err => { Self::AsgPatErr(err) } }
+impl std::error::Error for ParseErr {}
 
 /// A [`Result`] type for operations in the parsing process.
 pub type ParseResult<T> = Result<T, FullParseErr>;
@@ -559,11 +506,6 @@ impl<'s> Parser<'s> {
         })?;
 
         Ok(Tuple { pairs, end, span })
-    }
-
-    /// Attempts to close the parser, failing if the stream is not empty.
-    pub fn close(self) -> ParseResult<()> {
-        self.close_or_else(|| ParseErr::UnexpectedToken)
     }
 
     /// Attempts to close the parser, failing (and calling the error function) if the stream is not empty.

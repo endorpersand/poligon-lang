@@ -295,7 +295,7 @@ impl Parseable for UnaryOps {
             }
 
             if ops.is_empty() {
-                return Err(parser.cursor.error(AstParseErr::ExpectedTokens(UNARY_OPS.to_vec())));
+                return Err(parser.cursor.error(UNARY_OPS.fail_err().into()));
             }
             let inner = parser.parse::<Expr2>()?;
 
@@ -460,7 +460,7 @@ impl TryParseable for Expr1 {
                     let group = parser.expect(delim!["[]"])?;
                     let mut content = Parser::new(group);
                     let index = content.parse()?;
-                    content.close()?;
+                    content.close_or_else(|| group.delimiter.right().fail_err())?;
 
                     let expr = Box::new(Expr::from(base));
                     let index = Box::new(index);
@@ -488,7 +488,7 @@ impl TryParseable for Expr0 {
                     let group = parser.expect(delim!["()"])?;
                     let mut content = Parser::new(group);
                     let e = content.parse()?;
-                    content.close()?;
+                    content.close_or_else(|| group.delimiter.right().fail_err())?;
 
                     Expr0::Expr(e)
                 }
@@ -532,7 +532,7 @@ impl TryParseable for Identoid {
 
                         let values = content.parse_tuple(token![,])?
                             .assert_closed(content, 
-                                || AstParseErr::ExpectedTokens(vec![token![,]]), 
+                                || token![,].fail_err().into(),
                                 || AstParseErr::ExpectedExpr,
                             )?
                             .values()
@@ -547,7 +547,7 @@ impl TryParseable for Identoid {
 
                         let entries = content.parse_tuple(token![,])?
                             .assert_closed(content,
-                                || AstParseErr::ExpectedTokens(vec![token![,]]),
+                                || token![,].fail_err().into(),
                                 || AstParseErr::ExpectedExpr
                             )?
                             .values()
@@ -578,7 +578,7 @@ impl Parseable for ClassLiteral {
 
             let entries = content.parse_tuple(token![,])?
                 .assert_closed(content,
-                    || AstParseErr::ExpectedTokens(vec![token![,]]),
+                    || token![,].fail_err().into(),
                     || AstParseErr::ExpectedExpr
                 )?
                 .values()
@@ -634,7 +634,7 @@ impl Parseable for ListLiteral {
 
         let values = content.parse_tuple(token![,])?
             .assert_closed(content, 
-                || AstParseErr::ExpectedTokens(vec![token![,]]),
+                || token![,].fail_err().into(),
                 || AstParseErr::ExpectedExpr
             )?
             .values()
