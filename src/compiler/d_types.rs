@@ -42,7 +42,7 @@ impl DeclaredTypes {
         Ok(())
     }
 
-    fn push(&mut self, stmt: &plir::HoistedStmt) {
+    pub(super) fn push(&mut self, stmt: &plir::HoistedStmt) {
         use plir::HoistedStmt;
 
         match stmt {

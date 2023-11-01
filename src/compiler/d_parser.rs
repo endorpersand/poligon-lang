@@ -17,8 +17,7 @@ use crate::lexer::token::{Token, token, FullToken, TokenTree};
 use crate::ast::{Located, ReasgType, MutType};
 use crate::span::Span;
 
-use super::{PLIRCodegen, plir, PLIRErr};
-use super::plir_codegen::DeclaredTypes;
+use super::{DeclaredTypes, PLIRCodegen, plir, PLIRErr};
 
 
 mod pat {

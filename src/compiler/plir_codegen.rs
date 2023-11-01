@@ -20,7 +20,6 @@ mod walkers;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::Path;
 
 use indexmap::IndexMap;
 
@@ -35,6 +34,7 @@ use self::instrs::{BlockBehavior, TerminalFrag, InstrBlock};
 pub(crate) use self::op_impl::{CastFlags, OpErr};
 use self::ty_classes::{TypeData, TypeDataView};
 
+use super::d_types::DeclaredTypes;
 use super::plir::{self, Located};
 
 /// Produce the PLIR tree from the AST tree.
@@ -490,60 +490,6 @@ impl Var {
             .map_err(|e| e.at_range(self.decl_range))?;
         let e = plir::Expr::new(t, plir::ExprType::Split(self.ident, sp));
         Ok(e)
-    }
-}
-
-/// A struct which holds the types declared by PLIR code generation.
-#[derive(Default, Clone, Debug)]
-pub struct DeclaredTypes {
-    pub(super) types: IndexMap<plir::Type, plir::Class>,
-    pub(super) values: IndexMap<plir::FunIdent, plir::Type>
-}
-
-impl DeclaredTypes {
-    /// Writes the declared types into a file.
-    pub fn to_file(&self, p: impl AsRef<Path>) -> std::io::Result<()> {
-        use std::fs::File;
-        use std::io::prelude::*;
-
-        let mut file = File::create(p)?;
-
-        for class in self.types.values() {
-            writeln!(file, "{class}")?;
-        }
-        for (ident, val_ty) in &self.values {
-            if let plir::Type::Fun(f) = val_ty {
-                writeln!(file, "{};", plir::HoistedStmt::ExternFunDecl(f.extern_fun_sig(ident.clone())))?
-            }
-            // TODO: don't ignore other types of decls
-        }
-
-        Ok(())
-    }
-
-    fn push(&mut self, stmt: &plir::HoistedStmt) {
-        use plir::HoistedStmt;
-
-        match stmt {
-            HoistedStmt::FunDecl(f) => {
-                self.values.insert(f.sig.ident.clone(), f.sig.ty().into());
-            },
-            HoistedStmt::ExternFunDecl(f) => {
-                self.values.insert(f.ident.clone(), f.ty().into());
-            },
-            HoistedStmt::ClassDecl(c) => {
-                self.types.insert(c.ty.clone(), c.clone());
-            },
-            HoistedStmt::IGlobal(id, _) => {
-                self.values.insert(plir::FunIdent::new_simple(id), plir::ty!("#ptr"));
-            },
-        }
-    }
-}
-impl std::ops::AddAssign for DeclaredTypes {
-    fn add_assign(&mut self, rhs: Self) {
-        self.types.extend(rhs.types);
-        self.values.extend(rhs.values);
     }
 }
 

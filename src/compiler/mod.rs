@@ -56,8 +56,8 @@ use crate::err::{FullGonErr, GonErr};
 use crate::lexer;
 use crate::parser;
 
-use self::d_parser::DParser;
-use self::plir_codegen::DeclaredTypes;
+use d_parser::DParser;
+use d_types::DeclaredTypes;
 
 
 macro_rules! to_str {
