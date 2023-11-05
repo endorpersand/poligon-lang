@@ -273,7 +273,6 @@ impl Spanned for DeclUnit {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Pat<T> {
     /// An indivisible unit. This can be directly assigned to.
-    // This should be used as LocatedPat<T>, in which case, the unit has a provided range.
     Unit(T),
 
     /// Spread (possibly with a pattern to assign to).

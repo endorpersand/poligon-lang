@@ -17,7 +17,9 @@ fn compile_and_run(fp: impl AsRef<Path>) -> ExitCode {
         .unwrap();
     let mut compiler = Compiler::new(&ctx, name).unwrap();
     compiler.load_gon_file(path).unwrap();
-    unsafe { compiler.jit_run().unwrap() }
+    
+    let exporter = compiler.into_exporter();
+    unsafe { exporter.jit_run().unwrap() }
 }
 
 #[test]
