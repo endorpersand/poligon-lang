@@ -26,9 +26,6 @@
 //! 
 //! [`plir`]: compiler::plir
 
-// useful crate items
-use err::GonErr;
-
 // public API
 pub mod lexer;
 pub mod parser;

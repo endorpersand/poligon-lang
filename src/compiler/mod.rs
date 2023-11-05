@@ -34,7 +34,6 @@ pub mod plir;
 mod llvm;
 mod internals;
 pub mod llvm_codegen;
-mod d_parser;
 mod dsds;
 mod d_types;
 
@@ -56,7 +55,6 @@ use crate::err::{FullGonErr, GonErr};
 use crate::lexer;
 use crate::parser;
 
-use d_parser::DParser;
 use d_types::DeclaredTypes;
 
 
@@ -91,6 +89,12 @@ compile_err_impl_from! { LLVMErr: LLVMErr }
 
 fn cast_e<T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResult<T> {
     r.map_err(|e| CompileErr::Computed(e.full_msg(code)))
+}
+
+/// Parses code from a `.d.plir.gon` file into a [`DeclaredTypes`] struct.
+fn parse_d_types_from_str(code: &str) -> CompileResult<DeclaredTypes> {
+    let stream = cast_e(lexer::tokenize(code), code)?;
+    cast_e(parser::parse(&stream), code)
 }
 
 impl Display for CompileErr {
@@ -198,13 +202,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<DeclaredTypes> {
-        let lexed = cast_e(lexer::tokenize(code), code)?;
-        let parser = DParser::new(lexed, self.declared_types.clone());
-        let dt = cast_e(parser.unwrap_dtypes(), code)?;
-        Ok(dt)
-    }
-
     fn update_values(&mut self, dtypes: DeclaredTypes, new_module: Module<'ctx>) -> CompileResult<()> {
         self.declared_types += dtypes;
 
@@ -274,10 +271,11 @@ impl<'ctx> Compiler<'ctx> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
         let ast: ast::Program = cast_e(parser::parse(&lexed), code)?;
 
-        let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
+        // let mut cg = PLIRCodegen::add_external_types(self.declared_types.clone());
+        let mut cg = PLIRCodegen::new(); // todo: include external types
         cast_e(cg.consume_program(ast), code)?;
         
-        let dt = cg.declared_types();
+        let dt = cg.exports();
         let plir = cast_e(cg.unwrap(), code)?;
         
         Ok((plir, dt))
@@ -306,7 +304,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn load_bc(&mut self, dfile: impl AsRef<Path>, bc_file: impl AsRef<Path>) -> CompileResult<()> {
         let code = fs::read_to_string(dfile)?;
         
-        let dtypes = self.get_declared_types_from_d(&code)?;
+        let dtypes = parse_d_types_from_str(&code)?;
         let module = Module::parse_bitcode_from_path(bc_file, self.ctx)
             .map_err(LLVMErr::LLVMErr)?;
     

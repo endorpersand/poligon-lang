@@ -3,7 +3,7 @@
 //! See [`Token`] for more information.
 
 use std::fmt::{Debug, Display};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use once_cell::sync::Lazy;
 use crate::span::{Span, Spanned};
 
@@ -374,22 +374,6 @@ pub enum TTKind<'t> {
 pub type Stream<'s> = &'s [TokenTree];
 /// An owned version of [`Stream`], which holds a stream of tokens that can be parsed over.
 pub type OwnedStream = Vec<TokenTree>;
-
-/// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
-pub(crate) static SPLITTABLES: Lazy<HashMap<Token, (Token, Token)>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    m.insert(token![..], (token![.], token![.]));
-    m.insert(token![&&], (token![&], token![&]));
-    m.insert(token![||], (token![|], token![|]));
-    m.insert(token![<=], (token![<], token![=]));
-    m.insert(token![>=], (token![>], token![=]));
-    m.insert(token![==], (token![=], token![=]));
-    m.insert(token![<<], (token![<], token![<]));
-    m.insert(token![>>], (token![>], token![>]));
-    m.insert(token![::], (token![:], token![:]));
-    m.insert(token![->], (token![-], token![>]));
-    m
-});
 
 /// Utility macro that can be used as a shorthand for [`Keyword`] or [`Operator`] tokens.
 #[macro_export]

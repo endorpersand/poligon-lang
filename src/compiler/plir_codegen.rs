@@ -498,11 +498,13 @@ enum GlobalKey {
     Value(plir::FunIdent),
     Type(plir::Type)
 }
-
+struct GlobalValue {
+    decl: plir::HoistedStmt,
+    export: bool
+}
 #[derive(Default)]
 struct Globals {
-    stmts: IndexMap<GlobalKey, plir::HoistedStmt>,
-    declared: DeclaredTypes
+    stmts: IndexMap<GlobalKey, GlobalValue>
 }
 
 impl Globals {
@@ -532,7 +534,7 @@ impl Globals {
         };
 
         match self.stmts.entry(key) {
-            Entry::Occupied(e) => match (e.get(), &stmt) {
+            Entry::Occupied(e) => match (&e.get().decl, &stmt) {
                 // ignore in this case:
                 (HoistedStmt::ExternFunDecl(l), HoistedStmt::ExternFunDecl(r)) if l == r => {},
                 // throw in every other case:
@@ -542,14 +544,26 @@ impl Globals {
                 }
             },
             Entry::Vacant(e) => {
-                if should_export {
-                    self.declared.push(&stmt);
-                }
-                e.insert(stmt);
+                e.insert(GlobalValue { decl: stmt, export: should_export });
             },
         }
 
         Ok(())
+    }
+
+    fn exports(&self) -> DeclaredTypes {
+        let mut dtypes = DeclaredTypes::default();
+
+        self.stmts.values()
+            .filter_map(|GlobalValue { decl, export }| export.then_some(decl))
+            .for_each(|stmt| dtypes.push(stmt));
+
+        dtypes
+    }
+
+    fn into_stmts(self) -> impl Iterator<Item=plir::HoistedStmt> {
+        self.stmts.into_values()
+            .map(|GlobalValue { decl, .. }| decl)
     }
 }
 
@@ -806,36 +820,31 @@ pub struct PLIRCodegen {
 impl PLIRCodegen {
     /// Creates a new instance of the PLIRCodegen.
     pub fn new() -> Self {
-        Self::new_with_declared_types(Default::default())
-    }
-
-    /// Creates a new instance of the PLIRCodegen with the given types already declared.
-    pub fn new_with_declared_types(declared: DeclaredTypes) -> Self {
-        let mut top = InsertBlock::top();
-        for (ident, cls) in &declared.types {
-            top.types.insert(ident.get_type_key().into_owned(), TypeData::structural(cls.clone()));
-        }
-        for (ident, value_ty) in &declared.values {
-            // register values in scope
-            top.declare(ident, value_ty.clone());
-
-            // register methods to cls data
-            if let plir::FunIdent::Static(ty, attr) = ident {
-                if let Some(cls) = top.types.get_mut(&*ty.get_type_key()) {
-                    cls.insert_method(ty.generic_args().to_vec(), attr.clone(), ident.clone());
-                }
-            }
-        }
-
         Self { 
-            program: top, 
-            globals: Globals {
-                stmts: IndexMap::new(),
-                declared
-            },
+            program: InsertBlock::top(),
+            globals: Globals { stmts: IndexMap::new() },
             blocks: vec![],
             var_id: 0,
             resolver: TypeResolver::new()
+        }
+    }
+
+    /// Adds externally defined types to this instance of PLIRCodegen.
+    pub fn add_external_types(&mut self, declared: DeclaredTypes) {
+        // TODO: actually make this scoped
+        for (ident, cls) in &declared.types {
+            self.program.types.insert(ident.get_type_key().into_owned(), TypeData::structural(cls.clone()));
+        }
+        for (ident, value_ty) in &declared.values {
+            // register values in scope
+            self.program.declare(ident, value_ty.clone());
+
+            // register methods to cls data
+            if let plir::FunIdent::Static(ty, attr) = ident {
+                if let Some(cls) = self.program.types.get_mut(&*ty.get_type_key()) {
+                    cls.insert_method(ty.generic_args().to_vec(), attr.clone(), ident.clone());
+                }
+            }
         }
     }
 
@@ -895,7 +904,7 @@ impl PLIRCodegen {
             }
         }
 
-        let hoisted_stmts = self.globals.stmts.into_values().collect();
+        let hoisted_stmts = self.globals.into_stmts().collect();
         let mut program = plir::Program(hoisted_stmts);
         
         let mut resolver = self.resolver;
@@ -909,8 +918,8 @@ impl PLIRCodegen {
     }
 
     /// Gets all the types declared by this code generation.
-    pub fn declared_types(&self) -> DeclaredTypes {
-        self.globals.declared.clone()
+    pub fn exports(&self) -> DeclaredTypes {
+        self.globals.exports()
     }
 
     fn push_block(&mut self, block_range: Span, expected_ty: Option<plir::Type>) -> &mut InsertBlock {
