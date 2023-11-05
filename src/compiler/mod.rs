@@ -119,6 +119,14 @@ impl std::error::Error for CompileErr {
 /// A [`Result`] type for operations during the full compilation process.
 pub type CompileResult<T> = Result<T, CompileErr>;
 
+// TODO: 
+// as it stands, the Compiler does not support importing types & values well.
+// any module can access the data of the module loaded before it.
+// it also reexports every module, which can lead to duplication if the module
+// was ever used again.
+// a more reasonable idea is to keep a store HashMap<String, DeclaredTypes>
+// and store what modules a module is dependent on in DeclaredTypes.
+
 /// A compiler, which keeps track of multiple files being compiled.
 /// 
 /// To construct a compiler struct, one can use:
@@ -151,10 +159,11 @@ pub type CompileResult<T> = Result<T, CompileErr>;
 /// compiler.write_to_disk().unwrap();
 /// ```
 pub struct Compiler<'ctx> {
+    module: Module<'ctx>,
     declared_types: DeclaredTypes,
+
     ctx: &'ctx Context,
     llvm_codegen: LLVMCodegen<'ctx>,
-    module: Module<'ctx>,
 }
 
 static STD_FILES: Lazy<Vec<(PathBuf, PathBuf)>> = Lazy::new(|| {
@@ -174,7 +183,7 @@ static STD_FILES: Lazy<Vec<(PathBuf, PathBuf)>> = Lazy::new(|| {
 impl<'ctx> Compiler<'ctx> {
     /// Create a new compiler.
     /// 
-    /// This includes the Poligon std library.
+    /// This also loads the Poligon std library.
     pub fn new(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> CompileResult<Self> {
         let mut compiler = Self::no_std(ctx, in_path);
 
@@ -249,8 +258,8 @@ impl<'ctx> Compiler<'ctx> {
         let lexed = cast_e(lexer::tokenize(code), code)?;
         let ast: ast::Program = cast_e(parser::parse(&lexed), code)?;
 
-        // let mut cg = PLIRCodegen::add_external_types(self.declared_types.clone());
-        let mut cg = PLIRCodegen::new(); // todo: include external types
+        let mut cg = PLIRCodegen::new();
+        cg.add_external_types(self.declared_types.clone());
         cast_e(cg.consume_program(ast), code)?;
         
         let dt = cg.exports();
@@ -260,10 +269,8 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Loads a PLIR tree and the type data of the tree into the compiler.
-    /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     /// 
     /// This updates the compiler's LLVM module to include a compiled version of the PLIR code.
-    /// 
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     pub fn load_plir(&mut self, plir: &plir::Program, dtypes: DeclaredTypes) -> CompileResult<()> {
         self.llvm_codegen.compile(plir)?;
