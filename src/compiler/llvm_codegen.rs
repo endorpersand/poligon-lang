@@ -1361,7 +1361,8 @@ mod tests {
         compiler.load_gon_str(t.source(), None)
             .map_err(|e| t.wrap_compile_err(e))?;
 
-        let result = unsafe { compiler.jit_run_raw() }
+        let exporter = compiler.into_exporter();
+        let result = unsafe { exporter.jit_run_raw() }
             .map_err(|e| t.wrap_compile_err(e))?;
 
         match result {

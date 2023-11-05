@@ -155,26 +155,24 @@ pub struct Compiler<'ctx> {
     ctx: &'ctx Context,
     llvm_codegen: LLVMCodegen<'ctx>,
     module: Module<'ctx>,
-    opt: OptimizationLevel,
-    in_path: PathBuf
 }
 
 static STD_FILES: Lazy<Vec<(PathBuf, PathBuf)>> = Lazy::new(|| {
     let std_path = "std";
     
     fs::read_dir(std_path).unwrap()
-            .filter_map(|me| {
-                let path = me.ok()?.path();
+        .filter_map(|me| {
+            let path = me.ok()?.path();
 
-                (path.extension() == Some("bc".as_ref()))
-                    .then_some(path)
-            })
-            .map(|bc| (bc.with_extension("d.plir.gon"), bc))
-            .collect()
+            (path.extension() == Some("bc".as_ref()))
+                .then_some(path)
+        })
+        .map(|bc| (bc.with_extension("d.plir.gon"), bc))
+        .collect()
 });
 
 impl<'ctx> Compiler<'ctx> {
-    /// Create a new compiler. 
+    /// Create a new compiler.
     /// 
     /// This includes the Poligon std library.
     pub fn new(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> CompileResult<Self> {
@@ -196,9 +194,7 @@ impl<'ctx> Compiler<'ctx> {
             declared_types: Default::default(),
             ctx,
             llvm_codegen: LLVMCodegen::new(ctx),
-            module: ctx.create_module(filename),
-            opt: Default::default(),
-            in_path
+            module: ctx.create_module(filename)
         }
     }
 
@@ -215,27 +211,9 @@ impl<'ctx> Compiler<'ctx> {
             .map_err(Into::into)
     }
 
-    /// Gets the module's filename (including file extension)
-    pub fn get_module_name(&self) -> &str {
-        self.module.get_name().to_str().unwrap()
-    }
-
-    /// Gets the module's file stem (which is the name excluding extension)
-    pub fn get_module_stem(&self) -> String {
-        AsRef::<Path>::as_ref(self.get_module_name())
-            .with_extension("")
-            .to_string_lossy()
-            .into_owned()
-    }
-
     /// Sets the module's filename (including extension)
     pub fn set_module_name(&mut self, filename: &str) {
         self.llvm_codegen.set_filename(filename)
-    }
-
-    /// Sets the compiler's optimization for modules
-    pub fn set_optimization(&mut self, opt: OptimizationLevel) {
-        self.opt = opt;
     }
 
     /// Load a Poligon file into the compiler.
@@ -312,51 +290,88 @@ impl<'ctx> Compiler<'ctx> {
         self.update_values(dtypes, module)
     }
 
-    fn optimize_module(&self) {
+    /// Exports the module data created by this compiler.
+    pub fn export_module(self) -> (Module<'ctx>, DeclaredTypes) {
+        (self.module, self.declared_types)
+    }
+    /// Creates an exporter for the module data created by this compiler.
+    pub fn into_exporter(self) -> Exporter<'ctx> {
+        let (m, dtypes) = self.export_module();
+        Exporter::new(m, dtypes)
+    }
+}
+
+/// This struct converts a module in memory into some file equivalent
+/// (whether that would be text representation or an executable).
+/// 
+/// To create a usable module, see [`Exporter::export`].
+pub struct Exporter<'ctx> {
+    module: Module<'ctx>,
+    exported_types: DeclaredTypes
+}
+impl<'ctx> Exporter<'ctx> {
+    /// Creates a new instance of this struct.
+    pub fn new(module: Module<'ctx>, exported_types: DeclaredTypes) -> Self {
+        Self { module, exported_types }
+    }
+
+    /// Gets the module's filename (including file extension)
+    pub fn get_module_name(&self) -> &str {
+        self.module.get_name().to_str().unwrap()
+    }
+
+    /// Gets the module's file stem (which is the name excluding extension)
+    pub fn get_module_stem(&self) -> String {
+        AsRef::<Path>::as_ref(self.get_module_name())
+            .with_extension("")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Optimizes module using the provided optimization level.
+    pub fn optimize_module(&self, opt: OptimizationLevel) {
         let pm_builder = PassManagerBuilder::create();
-        pm_builder.set_optimization_level(self.opt);
+        pm_builder.set_optimization_level(opt);
 
         let pm = PassManager::create(());
         pm_builder.populate_module_pass_manager(&pm);
-        if self.opt != OptimizationLevel::None {
+        if opt != OptimizationLevel::None {
             pm.add_function_inlining_pass();
         }
+
         pm.run_on(&self.module);
     }
 
-    /// Gets the default output folder. This does not create it.
-    pub fn default_output_dir(&self) -> PathBuf {
-        self.in_path.with_extension("")
+    /// Writes an .ll containing the module's LLVM bytecode.
+    pub fn write_ll(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
+        llvm_codegen::module_to_ll(&self.module, dest)
+            .map_err(Into::into)
     }
 
-    /// Writes the type data and module to the default output directory on disk.
-    pub fn write_to_disk(&self) -> CompileResult<()> {
-        self.write_to_disk_at(self.default_output_dir())
+    /// Writes a .d.plir.gon file containing the types exported by this module.
+    pub fn write_d(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
+        self.exported_types.to_file(dest).map_err(Into::into)
     }
 
-    /// Writes the type data and module to a directory on disk.
-    fn write_to_disk_at(&self, dir: impl AsRef<Path>) -> CompileResult<()> {
-        self.optimize_module();
+    /// Writes a .bc file containing the module's LLVM bitcode.
+    pub fn write_bc(&self, dest: impl AsRef<Path>) {
+        llvm_codegen::module_to_bc(&self.module, dest)
+    }
 
+    /// Writes both the .d.plir.gon and .bc files in the provided directory.
+    /// 
+    /// Both are necessary for this module to be imported from other Poligon modules.
+    pub fn write(&self, dir: impl AsRef<Path>) -> CompileResult<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
 
         let mod_stem = self.get_module_stem();
-        
-        let llvm_path = dir.join(format!("{mod_stem}.bc"));
-        let plir_path = dir.join(format!("{mod_stem}.d.plir.gon"));
+        let bc_path = dir.join(format!("{mod_stem}.bc"));
+        let  d_path = dir.join(format!("{mod_stem}.d.plir.gon"));
 
-        self.declared_types.to_file(plir_path)?;
-        llvm_codegen::module_to_bc(&self.module, llvm_path);
-
+        self.write_d(d_path)?;
+        self.write_bc(bc_path);
         Ok(())
-    }
-
-    /// Writes the module as LLVM bytecode to disk.
-    pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
-        self.optimize_module();
-        llvm_codegen::module_to_ll(&self.module, dest)
-            .map_err(Into::into)
     }
 
     /// Executes the current module JIT, and returns the resulting value.
@@ -372,7 +387,6 @@ impl<'ctx> Compiler<'ctx> {
     /// # Safety
     /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
     unsafe fn jit_run_raw(&self) -> CompileResult<std::ffi::c_int> {
-        self.optimize_module();
         let main = self.module.get_function("main").expect("Expected main function");
 
         llvm_codegen::module_jit_run(&self.module, main)
