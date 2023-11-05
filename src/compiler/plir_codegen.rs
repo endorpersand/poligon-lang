@@ -832,6 +832,7 @@ impl PLIRCodegen {
     /// Adds externally defined types to this instance of PLIRCodegen.
     pub fn add_external_types(&mut self, declared: DeclaredTypes) {
         // TODO: actually make this scoped
+        // TODO: actually verify the type
         for (ident, cls) in &declared.types {
             self.program.types.insert(ident.get_type_key().into_owned(), TypeData::structural(cls.clone()));
         }
