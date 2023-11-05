@@ -7,7 +7,6 @@ use indexmap::IndexMap;
 use crate::ast::MutType;
 use crate::err::{FullGonErr, GonErr, impl_from_err};
 use crate::lexer::token::{TTKind, Token};
-use crate::parser::pat::MatchFn;
 use crate::parser::{Parseable, TokenPattern, ParseErr, Parser, TryParseable};
 use crate::{token, delim};
 
@@ -164,22 +163,15 @@ impl TryParseable for Ident {
     type Err = Infallible;
 
     fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
-        use crate::lexer::token::TokenTree;
+        use TTKind::Token as Tk;
 
-        let match_ = parser.match_(MatchFn::new(|tt| {
-            match tt {
-                TokenTree::Token(t) => matches!(t.kind, Token::Str(_) | Token::Ident(_)).then(|| t.clone()),
-                _ => None,
-            }
-        }));
-
-        Ok(match match_ {
-            Some(t) => match t.kind {
-                Token::Str(ident) | Token::Ident(ident) => Some(Ident { ident }),
-                _ => unreachable!(),
-            },
+        let id = match *parser.peek_slice(2) {
+            [Tk(token![#]), Tk(Token::Ident(s) | Token::Str(s))] => Some(String::from("#") + s),
+            [Tk(Token::Ident(s) | Token::Str(s)), ..] => Some(s.to_string()),
             _ => None
-        })
+        };
+        
+        Ok(id.map(|ident| Ident { ident }))
     }
 
 }
@@ -293,8 +285,10 @@ impl Parseable for plir::FunIdent {
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         use TTKind::{Token as Tk, Group as Gr};
 
-        match *parser.peek_slice(3) {
-            [Tk(Token::Ident(_) | Token::Str(_)), Gr(delim!["[]"]), Tk(token![::])] => {
+        match *parser.peek_slice(4) {
+            | [Tk(token![#]), Tk(Token::Ident(_) | Token::Str(_)), Gr(delim!["[]"]), Tk(token![::])] 
+            | [Tk(Token::Ident(_) | Token::Str(_)), Gr(delim!["[]"]), Tk(token![::])] 
+            => {
                 let ty = parser.parse()?;
                 parser.expect(token![::])?;
                 let ident = parser.parse::<Ident>()?;
