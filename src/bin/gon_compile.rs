@@ -30,10 +30,12 @@ struct Cli {
     #[arg(short = 'o', long)]
     /// Path to export files to
     out: Option<PathBuf>,
-
+    
     /// Exports an .ll file alongside module files
+    #[arg(long)]
     export_ll: bool,
     /// Exports a .plir file alongside module files
+    #[arg(long)]
     export_plir: bool,
 
     /// The file to compile
