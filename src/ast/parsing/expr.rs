@@ -333,7 +333,7 @@ impl Parseable for IDeref {
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
         let mut deref_spans = vec![];
-        while let Some(op) = parser.match_(UNARY_OPS) {
+        while let Some(op) = parser.match_(token![*]) {
             deref_spans.push(op.span());
         }
 
@@ -366,7 +366,7 @@ impl TryParseable for Expr1 {
             // if a type-like structure appears before ::, try parsing a type
             | [Tk(token![#]), Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::])]
             | [Tk(Token::Ident(_)), Gr(delim!["[]"]), Tk(token![::]), ..]
-            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![::])]
+            | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![::]), ..]
             | [Tk(Token::Ident(_)), Tk(token![::]), ..]
             => {
                 let ((ty, attr), span) = parser.try_spanned(|parser| {
@@ -569,6 +569,26 @@ impl Parseable for ClassLiteral {
     type Err = FullAstParseErr;
 
     fn read(parser: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        enum CLField<V> {
+            Entry(Entry<Ident, V, FullAstParseErr>),
+            Ident(Ident)
+        }
+        impl<V: Parseable<Err=FullAstParseErr>> TryParseable for CLField<V> {
+            type Err = FullAstParseErr;
+
+            fn try_read(parser: &mut Parser<'_>) -> Result<Option<Self>, Self::Err> {
+                use TTKind::Token as Tk;
+                let m_field = match *parser.peek_slice(3) {
+                    | [Tk(token![#]), Tk(Token::Ident(_)), Tk(token![:])] 
+                    | [Tk(Token::Ident(_)), Tk(token![:]), ..] 
+                    => parser.try_parse()?.map(Self::Entry),
+                    _ => parser.try_parse()?.map(Self::Ident)
+                };
+
+                Ok(m_field)
+            }
+        }
+
         let ((ty, entries), span) = parser.try_spanned(|parser| {
             let ty = parser.parse()?;
             parser.expect(token![#])?;
@@ -582,7 +602,10 @@ impl Parseable for ClassLiteral {
                     || AstParseErr::ExpectedExpr
                 )?
                 .values()
-                .map(|Entry::<_, _, FullAstParseErr> { key, val, .. }| (key, val))
+                .map(|field| match field {
+                    CLField::Entry(Entry { key, val, .. }) => (key, val),
+                    CLField::Ident(key) => (key.clone(), Expr::from(key)),
+                })
                 .collect();
 
             AstParseResult::Ok((ty, entries))
