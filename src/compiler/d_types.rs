@@ -56,7 +56,7 @@ impl DeclaredTypes {
                 self.types.insert(c.ty.clone(), c.clone());
             },
             HoistedStmt::IGlobal(id, _) => {
-                self.values.insert(plir::FunIdent::new_simple(id), plir::ty!("#ptr"));
+                self.values.insert(plir::FunIdent::new_simple(id.to_string()), plir::ty!("#ptr"));
             },
         }
     }
@@ -294,11 +294,11 @@ impl Parseable for plir::FunIdent {
                 parser.expect(token![::])?;
                 let ident = parser.parse::<Ident>()?;
 
-                Ok(plir::FunIdent::Static(ty, ident.ident))
+                Ok(plir::FunIdent::new_static(ty, ident.ident))
             },
             _ => {
                 let ident = parser.parse::<Ident>()?;
-                Ok(plir::FunIdent::Simple(ident.ident))
+                Ok(plir::FunIdent::new_simple(ident.ident))
             }
         }
     }

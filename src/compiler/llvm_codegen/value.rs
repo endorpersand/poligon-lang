@@ -76,8 +76,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
     pub fn new_str(&self, s: &str) -> GonValue<'ctx> {
         let int_ = layout!(self, S_INT).into_int_type();
 
-        let ident = plir::FunIdent::new_static(&plir::ty!(plir::Type::S_STR), "from_raw");
-        let str_from_raw = self.get_fn_by_plir_ident(&ident).unwrap();
+        let ident = plir::FunIdentRef::new_static(plir::ty!(plir::Type::S_STR), "from_raw");
+        let str_from_raw = self.get_fn_by_plir_ident(ident).unwrap();
 
         // get ptr to content:
         let content_arr = self.ctx.const_string(s.as_bytes(), false);
