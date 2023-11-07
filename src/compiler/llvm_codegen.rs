@@ -24,6 +24,7 @@ use inkwell::types::{BasicTypeEnum, PointerType, BasicType, FunctionType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue, GlobalValue};
 
 use crate::ast::{op, LitKind};
+use crate::compiler::plir::LtGradeable;
 use crate::err::GonErr;
 
 pub use self::value::*;

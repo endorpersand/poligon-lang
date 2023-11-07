@@ -292,6 +292,26 @@ pub struct Param {
     pub ty: Type
 }
 
+/// This trait is used for hybrid reference-static types 
+/// (types that could own their values or hold a reference to them).
+pub(crate) trait LtGradeable {
+    type WithLt<'x>;
+    /// Converts a reference of this type into a type that holds references.
+    fn downgrade(&self) -> Self::WithLt<'_>;
+    /// Clones a reference of this type into a static (possibly owned) version of this type.
+    fn upgrade(&self) -> Self::WithLt<'static>;
+}
+impl<'a, B: ToOwned + 'static + ?Sized> LtGradeable for Cow<'a, B> {
+    type WithLt<'x> = Cow<'x, B>;
+
+    fn downgrade(&self) -> Self::WithLt<'_> {
+        Cow::Borrowed(self)
+    }
+
+    fn upgrade(&self) -> Self::WithLt<'static> {
+        Cow::Owned((**self).to_owned())
+    }
+}
 /// The possible identifiers a function can have.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum FunIdent {
@@ -452,7 +472,7 @@ impl Expr {
         };
 
         Ok(Expr::new(
-            ft.ret.upgrade(),
+            TypeRef::upgrade(&ft.ret),
             ExprType::Call {funct: Box::new(fun), params }
         ))
     }

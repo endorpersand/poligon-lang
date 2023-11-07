@@ -26,6 +26,7 @@ use indexmap::IndexMap;
 use crate::ast::{self, ReasgType, MutType, Locatable};
 use crate::compiler::dsds;
 use crate::compiler::internals::C_INTRINSICS_PLIR;
+use crate::compiler::plir::LtGradeable;
 use crate::compiler::plir::walk::WalkerMut;
 use crate::err::{GonErr, FullGonErr, impl_from_err};
 use crate::span::{Span, Spanned};
@@ -745,7 +746,7 @@ impl TypeResolver {
                 if av != bv { return Err(ConstraintFail::Shape(left, right))?; }
                 if ap.len() != bp.len() { return Err(ConstraintFail::Shape(left, right))?; }
 
-                self.add_constraint(ar.upgrade(), br.upgrade())
+                self.add_constraint((**ar).upgrade(), (**br).upgrade())
                     .map_err(|e| e.caused(left.clone(), right.clone()))?;
                 for (a, b) in std::iter::zip(ap.iter().cloned(), bp.iter().cloned()) {
                     self.add_constraint(a, b)

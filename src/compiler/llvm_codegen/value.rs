@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use inkwell::values::BasicValueEnum;
 
+use crate::compiler::plir::LtGradeable;
+
 use super::{LLVMCodegen, LLVMResult, LLVMErr, layout, params};
 use super::plir;
 
