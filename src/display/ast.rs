@@ -129,9 +129,9 @@ impl Display for FunSignature {
 
         write!(f, "fun {ident}")?;
         if !generics.is_empty() {
-            write!(f, "<")?;
+            write!(f, "[")?;
             fmt_iter(f, generics)?;
-            write!(f, ">")?;
+            write!(f, "]")?;
         }
         write!(f, "(")?;
 
@@ -165,9 +165,9 @@ impl Display for MethodSignature {
         write!(f, "{name}")?;
         
         if !generic_params.is_empty() {
-            write!(f, "<")?;
+            write!(f, "[")?;
             fmt_iter(f, generic_params)?;
-            write!(f, ">")?;
+            write!(f, "]")?;
         }
         write!(f, "(")?;
         fmt_iter(f, params)?;
@@ -216,9 +216,9 @@ impl Display for Type {
         
         write!(f, "{ident}")?;
         if !params.is_empty() {
-            write!(f, "<")?;
+            write!(f, "[")?;
             fmt_iter(f, params)?;
-            write!(f, ">")?;
+            write!(f, "]")?;
         }
 
         Ok(())
@@ -236,9 +236,9 @@ impl Display for Class {
         let Class { ident, generic_params, fields, methods, span: _ } = self;
         write!(f, "class {ident}")?;
         if !generic_params.is_empty() {
-            write!(f, "<")?;
+            write!(f, "[")?;
             fmt_iter(f, generic_params)?;
-            write!(f, ">")?;
+            write!(f, "]")?;
         }
         write!(f, " {{")?;
         for field in fields {

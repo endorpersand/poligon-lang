@@ -22,17 +22,17 @@ fn fmt_typed_block(f: &mut Formatter<'_>, b: &Block, omit_ty: bool) -> std::fmt:
     }
 }
 
-fn wrap_ident(ident: &str, f: &mut Formatter<'_>) -> std::fmt::Result {
+fn write_ident(f: &mut Formatter<'_>, ident: &str) -> std::fmt::Result {
     if ident.chars().all(|t| t.is_alphanumeric() || t == '_') {
         ident.fmt(f)
     } else {
         write!(f, "{ident:?}")
     }
 }
-fn wrap_ty(ty: &plir::Type, f: &mut Formatter<'_>) -> std::fmt::Result {
+fn write_ty(f: &mut Formatter<'_>, ty: &plir::Type) -> std::fmt::Result {
     match ty {
-        Type::Prim(ident) => wrap_ident(ident, f),
-        _ => write!(f, "<{ty}>")
+        Type::Prim(ident) => write_ident(f, ident),
+        _ => write!(f, "{ty}") // for now, no types require wrapping
     }
 }
 
@@ -53,7 +53,7 @@ impl Display for HoistedStmt {
             HoistedStmt::ClassDecl(c) => write!(f, "{c}"),
             HoistedStmt::IGlobal(id, val) => {
                 write!(f, "global ")?;
-                wrap_ident(id, f)?;
+                write_ident(f, id)?;
                 write!(f, " = {val:?}")
             },
         }
@@ -82,7 +82,7 @@ impl Display for Class {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Class { ty, fields: field_map } = self;
         write!(f, "class ")?;
-        wrap_ty(ty, f)?;
+        write_ty(f, ty)?;
         write!(f, " ")?;
         
         if field_map.is_empty() {
@@ -131,7 +131,7 @@ impl Display for Decl {
             MutType::Immut => {},
         };
 
-        wrap_ident(ident, f)?;
+        write_ident(f, ident)?;
         write!(f, ": {ty} = ")?;
         match val {
             Expr { expr: ExprType::Block(b), .. } => fmt_typed_block(f, b, ty == &b.0),
@@ -143,10 +143,11 @@ impl Display for Decl {
 impl Display for FunIdent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            FunIdent::Simple(s) => wrap_ident(s, f),
+            FunIdent::Simple(s) => write_ident(f, s),
             FunIdent::Static(t, attr) => {
-                write!(f, "<{t}>::")?;
-                wrap_ident(attr, f)
+                write_ty(f, t)?;
+                write!(f, "::")?;
+                write_ident(f, attr)
             },
         }
     }
@@ -197,7 +198,7 @@ impl Display for Param {
             MutType::Immut => {},
         }
 
-        wrap_ident(ident, f)?;
+        write_ident(f, ident)?;
         write!(f, ": {ty}")
     }
 }
@@ -206,14 +207,18 @@ impl Display for TypeRef<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeRef::Unk(unk) => write!(f, "?{unk}"),
-            TypeRef::TypeVar(ty, var) => write!(f, "?<{ty}>::{var}"),
+            TypeRef::TypeVar(ty, var) => {
+                write!(f, "?")?;
+                write_ident(f, ty)?;
+                write!(f, "::{var}")
+            },
             TypeRef::Prim(ident) => write!(f, "{ident}"),
             TypeRef::Generic(ident, params, ()) => {
                 write!(f, "{ident}")?;
                 if !params.is_empty() {
-                    write!(f, "<")?;
+                    write!(f, "[")?;
                     fmt_iter(f, &**params)?;
-                    write!(f, ">")?;
+                    write!(f, "]")?;
                 }
                 Ok(())
             },
@@ -362,7 +367,8 @@ impl Display for ExprType {
             ExprType::Cast(e) => write!(f, "castfrom {e}"),
             ExprType::Deref(d) => write!(f,"{d}"),
             ExprType::GEP(ty, ptr, rest) => {
-                write!(f, "<{ty}>::#gep(")?;
+                write_ty(f, ty)?;
+                write!(f, "::#gep(")?;
                 write!(f, "{ptr}")?;
                 
                 if !rest.is_empty() {
@@ -371,8 +377,14 @@ impl Display for ExprType {
                 }
                 write!(f, ")")
             },
-            ExprType::Alloca(ty) => write!(f, "<{ty}>::#alloca()"),
-            ExprType::SizeOf(ty) => write!(f, "<{ty}>::size_of()"),
+            ExprType::Alloca(ty) => {
+                write_ty(f, ty)?;
+                write!(f, "::#alloca()")
+            },
+            ExprType::SizeOf(ty) => {
+                write_ty(f, ty)?;
+                write!(f, "::size_of()")
+            },
         }
     }
 }
@@ -401,8 +413,9 @@ impl Display for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Path::Static(o, attr, _) => {
-                write!(f, "<{o}>::")?;
-                wrap_ident(attr, f)
+                write_ty(f, o)?;
+                write!(f, "::")?;
+                write_ident(f, attr)
             },
             Path::Struct(o, attrs) => match attrs.split_last() {
                 Some(((last, _), rest)) => {
@@ -419,7 +432,7 @@ impl Display for Path {
             },
             Path::Method(o, method, _) => {
                 write!(f, "{o}.")?;
-                wrap_ident(method, f)
+                write_ident(f, method)
             },
         }
     }
