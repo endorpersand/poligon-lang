@@ -1,20 +1,32 @@
 //! These components are the components of the AST involved with types 
 //! (type expressions, classes, shapes).
 
-use std::rc::Rc;
+use crate::span::{Span, Spanned};
 
-use super::{MutType, ReasgType, Block, Param, Located};
+use super::{MutType, ReasgType, Block, Param, Ident};
 
 /// A type expression.
 /// 
 /// # Examples
 /// ```text
 /// string
-/// list<string>
-/// map<string, list<int>>
+/// list[string]
+/// map[string, list[int]]
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type(pub String, pub Vec<Located<Type>>);
+pub struct Type {
+    /// The identifier of this type
+    pub ident: Ident,
+    /// The type parameters of this type
+    pub params: Vec<Type>,
+    /// The span of characters this type ranges over.
+    pub span: Span
+}
+impl Spanned for Type {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
 
 /// A class declaration.
 /// 
@@ -33,13 +45,20 @@ pub struct Type(pub String, pub Vec<Located<Type>>);
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Class {
     /// Name of the class
-    pub ident: String,
+    pub ident: Ident,
     /// Generic parameters of the class
-    pub generics: Vec<String>,
+    pub generic_params: Vec<Ident>,
     /// A vec of fields declared in this class
     pub fields: Vec<FieldDecl>,
     /// A vec of methods declared in this class
-    pub methods: Vec<MethodDecl>
+    pub methods: Vec<MethodDecl>,
+    /// THe span of characters this class declaration ranges over
+    pub span: Span
+}
+impl Spanned for Class {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 /// A field declaration.
@@ -67,10 +86,18 @@ pub struct FieldDecl {
     pub mt: MutType,
 
     /// The field's name
-    pub ident: String,
+    pub ident: Ident,
 
     /// The type of the declaration (inferred if not present)
-    pub ty: Located<Type>
+    pub ty: Type,
+    
+    /// The span of characters this field declaration ranges over
+    pub span: Span
+}
+impl Spanned for FieldDecl {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 /// A method signature.
@@ -92,17 +119,24 @@ pub struct FieldDecl {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MethodSignature {
     /// This method's referent (typically `self` or `Self`)
-    pub referent: Option<String>,
+    pub referent: Option<Ident>,
     /// Whether this method is static
     pub is_static: bool,
     /// The function's name
-    pub name: String,
+    pub name: Ident,
     /// The function's generic parameters
-    pub generics: Vec<String>,
+    pub generic_params: Vec<Ident>,
     /// The function's parameters
     pub params: Vec<Param>,
     /// The function's return type (or `void` if unspecified)
-    pub ret: Option<Located<Type>>,
+    pub ret: Option<Type>,
+    /// The span of characters this method signature ranges over
+    pub span: Span
+}
+impl Spanned for MethodSignature {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 /// A method declaration.
@@ -114,5 +148,12 @@ pub struct MethodDecl {
     /// The method's signature
     pub sig: MethodSignature,
     /// The method's body
-    pub block: Located<Rc<Block>>
+    pub block: Block,
+    /// The span of characters this method declaration ranges over
+    pub span: Span
+}
+impl Spanned for MethodDecl {
+    fn span(&self) -> Span {
+        self.span
+    }
 }

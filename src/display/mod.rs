@@ -21,39 +21,30 @@ fn fmt_stmt_list<S: StmtLike>(f: &mut Formatter<'_>, stmts: &[S]) -> std::fmt::R
     Ok(())
 }
 
-fn fmt_list<D: Display>(f: &mut Formatter<'_>, elems: &[D]) -> std::fmt::Result {
-    if let Some((tail, head)) = elems.split_last() {
-        for el in head {
-            write!(f, "{el}, ")?;
-        }
+fn fmt_iter<D: Display>(f: &mut Formatter<'_>, elems: impl IntoIterator<Item=D>) -> std::fmt::Result {
+    let mut it = elems.into_iter();
 
-        write!(f, "{tail}")
-    } else {
-        Ok(())
+    if let Some(el) = it.next() {
+        el.fmt(f)?;
+
+        for el in it {
+            f.write_str(", ")?;
+            el.fmt(f)?;
+        }
     }
+    Ok(())
 }
 
-fn fmt_dyn_list(f: &mut Formatter<'_>, elems: &[&dyn Display]) -> std::fmt::Result {
-    if let Some((tail, head)) = elems.split_last() {
-        for el in head {
-            write!(f, "{el}, ")?;
-        }
-
-        write!(f, "{tail}")
-    } else {
-        Ok(())
-    }
-}
-
-fn fmt_mapped_list<T, D: Display, F>(f: &mut Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
-    where F: Fn(&T) -> D
+fn fmt_mapped_list<T, F>(f: &mut Formatter<'_>, elems: &[T], map: F) -> std::fmt::Result 
+    where F: Fn(&mut Formatter<'_>, &T) -> std::fmt::Result
 {
     if let Some((tail, head)) = elems.split_last() {
         for el in head {
-            write!(f, "{}, ", map(el))?;
+            map(f, el)?;
+            write!(f, ", ")?;
         }
 
-        write!(f, "{}", map(tail))
+        map(f, tail)
     } else {
         Ok(())
     }

@@ -26,9 +26,6 @@
 //! 
 //! [`plir`]: compiler::plir
 
-// useful crate items
-use err::GonErr;
-
 // public API
 pub mod lexer;
 pub mod parser;
@@ -40,3 +37,4 @@ pub mod err;
 #[cfg(test)]
 mod test_utils;
 mod display;
+pub mod span;

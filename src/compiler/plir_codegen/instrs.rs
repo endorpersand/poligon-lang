@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::compiler::plir::{ProcStmt, self, Located};
-use crate::err::{CursorRange, GonErr};
+use crate::err::GonErr;
+use crate::span::Span;
 
 use super::walkers::{ExprBlockIter, ExprBlockIterMut};
 use super::{PLIRErr, PLIRResult};
@@ -117,7 +118,7 @@ pub(super) struct InstrBlock {
 
     /// Each element represents an address to a terminating instruction
     /// in a [`InstrBlock`].
-    terminals: HashMap<InstrAddr, CursorRange>,
+    terminals: HashMap<InstrAddr, Span>,
 
     /// If closed, any statements added to the block should be
     /// considered unreachable, as the block is known to exit
@@ -273,7 +274,7 @@ impl InstrBlock {
                 panic!("address {addr:?} has no statement");
             };
 
-            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc.clone()))?;
+            let is_propagating = btype.propagates(term).map_err(|e| e.at_range(loc))?;
             if is_propagating {
                 propagated.push((addr, loc));
             } else {
@@ -362,7 +363,7 @@ impl std::ops::Deref for InstrBlock {
 pub(super) struct TerminalFrag {
     /// Each element represents a pointer to a terminating instruction
     /// in a [`InstrBlock`].
-    pub(super) terminals: HashMap<InstrAddr, CursorRange>,
+    pub(super) terminals: HashMap<InstrAddr, Span>,
 
     /// If closed, any statements added to the block should be
     /// considered unreachable, as the block is known to exit

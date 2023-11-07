@@ -12,7 +12,8 @@
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::ops::{RangeInclusive, RangeFrom, RangeBounds, Bound};
+use std::ops::{RangeFrom, RangeBounds, Bound};
+use crate::span::{Cursor, Span};
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -70,19 +71,13 @@ pub struct FullGonErr<E: GonErr> {
     pos: BTreeSet<ErrPos>
 }
 
-/// Indicates a specific character in given code.
-pub type Cursor = (usize /* line */, usize /* character */);
-
-/// Indicates a contiguous range of characters in given code.
-pub type CursorRange = RangeInclusive<Cursor>;
-
 #[derive(PartialEq, Eq, Debug)]
 enum ErrPos {
     /// Error occurred at a specific point
     Point(Cursor),
 
     /// Error occurred at an inclusive range of points
-    Range(CursorRange),
+    Range(Span),
 
     /// Error occurred at an range of points, going to the end
     RangeFrom(RangeFrom<Cursor>)
@@ -100,11 +95,11 @@ impl ErrPos {
         };
         
         match range.end_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => {
-                if p == &start {
+            Bound::Included(&p) | Bound::Excluded(&p) => {
+                if p == start {
                     ErrPos::Point(start)
                 } else {
-                    ErrPos::Range(start..=(*p))
+                    ErrPos::Range(Span::new(start ..= p))
                 }
             },
             Bound::Unbounded => ErrPos::RangeFrom(start..),
@@ -148,9 +143,9 @@ impl Ord for ErrPos {
 
         fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
             match pos {
-                ErrPos::Point(p)     => (*p,         Some(*p)),
-                ErrPos::Range(r)     => (*r.start(), Some(*r.end())),
-                ErrPos::RangeFrom(r) => (r.start,    None),
+                ErrPos::Point(p)     => (*p,        Some(*p)),
+                ErrPos::Range(r)     => (r.start(), Some(r.end())),
+                ErrPos::RangeFrom(r) => (r.start,   None),
             }
         }
 
@@ -282,11 +277,6 @@ impl<E: GonErr> FullGonErr<E> {
         }
     }
 
-    /// Cast the inner error to another error.
-    pub fn cast_err<F: GonErr + From<E>>(self) -> FullGonErr<F> {
-        self.map(F::from)
-    }
-
     /// Designate that this error also occurred at a specific position
     pub fn and_at(mut self, p: Cursor) -> Self {
         self.pos.insert(ErrPos::from_point(p));
@@ -305,14 +295,26 @@ impl<E: GonErr + PartialEq> PartialEq<E> for FullGonErr<E> {
         &self.err == other
     }
 }
-
-macro_rules! full_gon_cast_impl {
-    ($t:ty, $u:ty) => {
-        impl From<$crate::err::FullGonErr<$t>> for $crate::err::FullGonErr<$u> {
-            fn from(err: $crate::err::FullGonErr<$t>) -> Self {
-                err.cast_err()
-            }
-        }
+impl<E: GonErr> From<std::convert::Infallible> for FullGonErr<E> {
+    fn from(value: std::convert::Infallible) -> Self {
+        match value {}
     }
 }
-pub(crate) use full_gon_cast_impl;
+
+macro_rules! impl_from_err {
+    ($($t:ty => $u:ty$(: $id:ident => $e:block)?),*) => {
+        $(
+            $(
+                impl From<$t> for $u {
+                    fn from($id: $t) -> Self { $e }
+                }
+            )?
+            impl From<$crate::err::FullGonErr<$t>> for $crate::err::FullGonErr<$u> {
+                fn from(err: $crate::err::FullGonErr<$t>) -> Self {
+                    err.map(<$u>::from)
+                }
+            }
+        )*
+    };
+}
+pub(crate) use impl_from_err;

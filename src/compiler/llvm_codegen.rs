@@ -23,7 +23,7 @@ use inkwell::support::LLVMString;
 use inkwell::types::{BasicTypeEnum, PointerType, BasicType, FunctionType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue, GlobalValue};
 
-use crate::ast::{op, Literal};
+use crate::ast::{op, LitKind};
 use crate::err::GonErr;
 
 pub use self::value::*;
@@ -768,7 +768,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 compiler.builder.position_at_end(exit_bb);
                 Ok(bval)
             },
-            plir::ExprType::Literal(literal) => literal.write_value(compiler),
+            plir::ExprType::Literal(lit) => lit.write_value(compiler),
             plir::ExprType::ListLiteral(exprs) => {
                 let plir::TypeRef::Generic(Cow::Borrowed(plir::Type::S_LIST), Cow::Borrowed([t]), ()) = expr_ty.downgrade() else {
                     panic!("expected list literal to return list, but actually returned {expr_ty}")
@@ -1142,16 +1142,16 @@ impl<'ctx> TraverseIR<'ctx> for Option<plir::Expr> {
     }
 }
 
-impl<'ctx> TraverseIR<'ctx> for Literal {
+impl<'ctx> TraverseIR<'ctx> for LitKind {
     type Return = LLVMResult<GonValue<'ctx>>;
 
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let value = match *self {
-            Literal::Int(i)     => compiler.new_int(i),
-            Literal::Float(f)   => compiler.new_float(f),
-            Literal::Char(c)    => compiler.new_char(c),
-            Literal::Str(ref s) => compiler.new_str(s),
-            Literal::Bool(b)    => compiler.new_bool(b),
+            LitKind::Int(i)     => compiler.new_int(i),
+            LitKind::Float(f)   => compiler.new_float(f),
+            LitKind::Char(c)    => compiler.new_char(c),
+            LitKind::Str(ref s) => compiler.new_str(s),
+            LitKind::Bool(b)    => compiler.new_bool(b),
         };
 
         Ok(value)
@@ -1361,7 +1361,8 @@ mod tests {
         compiler.load_gon_str(t.source(), None)
             .map_err(|e| t.wrap_compile_err(e))?;
 
-        let result = unsafe { compiler.jit_run_raw() }
+        let exporter = compiler.into_exporter();
+        let result = unsafe { exporter.jit_run_raw() }
             .map_err(|e| t.wrap_compile_err(e))?;
 
         match result {

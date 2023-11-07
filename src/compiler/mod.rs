@@ -32,10 +32,10 @@
 pub mod plir_codegen;
 pub mod plir;
 mod llvm;
-pub(self) mod internals;
+mod internals;
 pub mod llvm_codegen;
-mod d_parser;
 mod dsds;
+mod d_types;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
@@ -55,14 +55,13 @@ use crate::err::{FullGonErr, GonErr};
 use crate::lexer;
 use crate::parser;
 
-use self::d_parser::DParser;
-use self::plir_codegen::DeclaredTypes;
+use d_types::DeclaredTypes;
 
 
 macro_rules! to_str {
     ($e:expr) => { $e.to_str().expect("Expected UTF-8 str") }
 }
-pub(self) use to_str;
+use to_str;
 
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
@@ -92,6 +91,12 @@ fn cast_e<T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResul
     r.map_err(|e| CompileErr::Computed(e.full_msg(code)))
 }
 
+/// Parses code from a `.d.plir.gon` file into a [`DeclaredTypes`] struct.
+fn parse_d_types_from_str(code: &str) -> CompileResult<DeclaredTypes> {
+    let stream = cast_e(lexer::tokenize(code), code)?;
+    cast_e(parser::parse(&stream), code)
+}
+
 impl Display for CompileErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -113,6 +118,14 @@ impl std::error::Error for CompileErr {
 
 /// A [`Result`] type for operations during the full compilation process.
 pub type CompileResult<T> = Result<T, CompileErr>;
+
+// TODO: 
+// as it stands, the Compiler does not support importing types & values well.
+// any module can access the data of the module loaded before it.
+// it also reexports every module, which can lead to duplication if the module
+// was ever used again.
+// a more reasonable idea is to keep a store HashMap<String, DeclaredTypes>
+// and store what modules a module is dependent on in DeclaredTypes.
 
 /// A compiler, which keeps track of multiple files being compiled.
 /// 
@@ -146,32 +159,31 @@ pub type CompileResult<T> = Result<T, CompileErr>;
 /// compiler.write_to_disk().unwrap();
 /// ```
 pub struct Compiler<'ctx> {
+    module: Module<'ctx>,
     declared_types: DeclaredTypes,
+
     ctx: &'ctx Context,
     llvm_codegen: LLVMCodegen<'ctx>,
-    module: Module<'ctx>,
-    opt: OptimizationLevel,
-    in_path: PathBuf
 }
 
 static STD_FILES: Lazy<Vec<(PathBuf, PathBuf)>> = Lazy::new(|| {
     let std_path = "std";
     
     fs::read_dir(std_path).unwrap()
-            .filter_map(|me| {
-                let path = me.ok()?.path();
+        .filter_map(|me| {
+            let path = me.ok()?.path();
 
-                (path.extension() == Some("bc".as_ref()))
-                    .then_some(path)
-            })
-            .map(|bc| (bc.with_extension("d.plir.gon"), bc))
-            .collect()
+            (path.extension() == Some("bc".as_ref()))
+                .then_some(path)
+        })
+        .map(|bc| (bc.with_extension("d.plir.gon"), bc))
+        .collect()
 });
 
 impl<'ctx> Compiler<'ctx> {
-    /// Create a new compiler. 
+    /// Create a new compiler.
     /// 
-    /// This includes the Poligon std library.
+    /// This also loads the Poligon std library.
     pub fn new(ctx: &'ctx Context, in_path: impl AsRef<Path>) -> CompileResult<Self> {
         let mut compiler = Self::no_std(ctx, in_path);
 
@@ -191,17 +203,8 @@ impl<'ctx> Compiler<'ctx> {
             declared_types: Default::default(),
             ctx,
             llvm_codegen: LLVMCodegen::new(ctx),
-            module: ctx.create_module(filename),
-            opt: Default::default(),
-            in_path
+            module: ctx.create_module(filename)
         }
-    }
-
-    fn get_declared_types_from_d(&mut self, code: &str) -> CompileResult<DeclaredTypes> {
-        let lexed = cast_e(lexer::tokenize(code), code)?;
-        let parser = DParser::new(lexed, self.declared_types.clone());
-        let dt = cast_e(parser.unwrap_dtypes(), code)?;
-        Ok(dt)
     }
 
     fn update_values(&mut self, dtypes: DeclaredTypes, new_module: Module<'ctx>) -> CompileResult<()> {
@@ -217,27 +220,9 @@ impl<'ctx> Compiler<'ctx> {
             .map_err(Into::into)
     }
 
-    /// Gets the module's filename (including file extension)
-    pub fn get_module_name(&self) -> &str {
-        self.module.get_name().to_str().unwrap()
-    }
-
-    /// Gets the module's file stem (which is the name excluding extension)
-    pub fn get_module_stem(&self) -> String {
-        AsRef::<Path>::as_ref(self.get_module_name())
-            .with_extension("")
-            .to_string_lossy()
-            .into_owned()
-    }
-
     /// Sets the module's filename (including extension)
     pub fn set_module_name(&mut self, filename: &str) {
         self.llvm_codegen.set_filename(filename)
-    }
-
-    /// Sets the compiler's optimization for modules
-    pub fn set_optimization(&mut self, opt: OptimizationLevel) {
-        self.opt = opt;
     }
 
     /// Load a Poligon file into the compiler.
@@ -268,23 +253,24 @@ impl<'ctx> Compiler<'ctx> {
     /// This function allows Poligon code to reference any declared classes and functions in the compiler.
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     pub fn generate_plir(&mut self, code: &str) -> CompileResult<(plir::Program, DeclaredTypes)> {
-        let lexed = cast_e(lexer::tokenize(code), code)?;
-        let ast   = cast_e(parser::parse(lexed), code)?;
+        use crate::ast;
 
-        let mut cg = PLIRCodegen::new_with_declared_types(self.declared_types.clone());
+        let lexed = cast_e(lexer::tokenize(code), code)?;
+        let ast: ast::Program = cast_e(parser::parse(&lexed), code)?;
+
+        let mut cg = PLIRCodegen::new();
+        cg.add_external_types(self.declared_types.clone());
         cast_e(cg.consume_program(ast), code)?;
         
-        let dt = cg.declared_types();
+        let dt = cg.exports();
         let plir = cast_e(cg.unwrap(), code)?;
         
         Ok((plir, dt))
     }
 
     /// Loads a PLIR tree and the type data of the tree into the compiler.
-    /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     /// 
     /// This updates the compiler's LLVM module to include a compiled version of the PLIR code.
-    /// 
     /// To load Poligon code into the compiler directly, use [`Compiler::load_gon_file`] or [`Compiler::load_gon_str`].
     pub fn load_plir(&mut self, plir: &plir::Program, dtypes: DeclaredTypes) -> CompileResult<()> {
         self.llvm_codegen.compile(plir)?;
@@ -303,7 +289,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn load_bc(&mut self, dfile: impl AsRef<Path>, bc_file: impl AsRef<Path>) -> CompileResult<()> {
         let code = fs::read_to_string(dfile)?;
         
-        let dtypes = self.get_declared_types_from_d(&code)?;
+        let dtypes = parse_d_types_from_str(&code)?;
         let module = Module::parse_bitcode_from_path(bc_file, self.ctx)
             .map_err(LLVMErr::LLVMErr)?;
     
@@ -311,51 +297,88 @@ impl<'ctx> Compiler<'ctx> {
         self.update_values(dtypes, module)
     }
 
-    fn optimize_module(&self) {
+    /// Exports the module data created by this compiler.
+    pub fn export_module(self) -> (Module<'ctx>, DeclaredTypes) {
+        (self.module, self.declared_types)
+    }
+    /// Creates an exporter for the module data created by this compiler.
+    pub fn into_exporter(self) -> Exporter<'ctx> {
+        let (m, dtypes) = self.export_module();
+        Exporter::new(m, dtypes)
+    }
+}
+
+/// This struct converts a module in memory into some file equivalent
+/// (whether that would be text representation or an executable).
+/// 
+/// To create a usable module, see [`Exporter::export`].
+pub struct Exporter<'ctx> {
+    module: Module<'ctx>,
+    exported_types: DeclaredTypes
+}
+impl<'ctx> Exporter<'ctx> {
+    /// Creates a new instance of this struct.
+    pub fn new(module: Module<'ctx>, exported_types: DeclaredTypes) -> Self {
+        Self { module, exported_types }
+    }
+
+    /// Gets the module's filename (including file extension)
+    pub fn get_module_name(&self) -> &str {
+        self.module.get_name().to_str().unwrap()
+    }
+
+    /// Gets the module's file stem (which is the name excluding extension)
+    pub fn get_module_stem(&self) -> String {
+        AsRef::<Path>::as_ref(self.get_module_name())
+            .with_extension("")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Optimizes module using the provided optimization level.
+    pub fn optimize_module(&self, opt: OptimizationLevel) {
         let pm_builder = PassManagerBuilder::create();
-        pm_builder.set_optimization_level(self.opt);
+        pm_builder.set_optimization_level(opt);
 
         let pm = PassManager::create(());
         pm_builder.populate_module_pass_manager(&pm);
-        if self.opt != OptimizationLevel::None {
+        if opt != OptimizationLevel::None {
             pm.add_function_inlining_pass();
         }
+
         pm.run_on(&self.module);
     }
 
-    /// Gets the default output folder. This does not create it.
-    pub fn default_output_dir(&self) -> PathBuf {
-        self.in_path.with_extension("")
+    /// Writes an .ll containing the module's LLVM bytecode.
+    pub fn write_ll(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
+        llvm_codegen::module_to_ll(&self.module, dest)
+            .map_err(Into::into)
     }
 
-    /// Writes the type data and module to the default output directory on disk.
-    pub fn write_to_disk(&self) -> CompileResult<()> {
-        self.write_to_disk_at(self.default_output_dir())
+    /// Writes a .d.plir.gon file containing the types exported by this module.
+    pub fn write_d(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
+        self.exported_types.to_file(dest).map_err(Into::into)
     }
 
-    /// Writes the type data and module to a directory on disk.
-    fn write_to_disk_at(&self, dir: impl AsRef<Path>) -> CompileResult<()> {
-        self.optimize_module();
+    /// Writes a .bc file containing the module's LLVM bitcode.
+    pub fn write_bc(&self, dest: impl AsRef<Path>) {
+        llvm_codegen::module_to_bc(&self.module, dest)
+    }
 
+    /// Writes both the .d.plir.gon and .bc files in the provided directory.
+    /// 
+    /// Both are necessary for this module to be imported from other Poligon modules.
+    pub fn write(&self, dir: impl AsRef<Path>) -> CompileResult<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
 
         let mod_stem = self.get_module_stem();
-        
-        let llvm_path = dir.join(format!("{mod_stem}.bc"));
-        let plir_path = dir.join(format!("{mod_stem}.d.plir.gon"));
+        let bc_path = dir.join(format!("{mod_stem}.bc"));
+        let  d_path = dir.join(format!("{mod_stem}.d.plir.gon"));
 
-        self.declared_types.to_file(plir_path)?;
-        llvm_codegen::module_to_bc(&self.module, llvm_path);
-
+        self.write_d(d_path)?;
+        self.write_bc(bc_path);
         Ok(())
-    }
-
-    /// Writes the module as LLVM bytecode to disk.
-    pub fn to_ll(&self, dest: impl AsRef<Path>) -> CompileResult<()> {
-        self.optimize_module();
-        llvm_codegen::module_to_ll(&self.module, dest)
-            .map_err(Into::into)
     }
 
     /// Executes the current module JIT, and returns the resulting value.
@@ -371,7 +394,6 @@ impl<'ctx> Compiler<'ctx> {
     /// # Safety
     /// This holds the same safety restraints as [`LLVMCodegen::jit_run`].
     unsafe fn jit_run_raw(&self) -> CompileResult<std::ffi::c_int> {
-        self.optimize_module();
         let main = self.module.get_function("main").expect("Expected main function");
 
         llvm_codegen::module_jit_run(&self.module, main)

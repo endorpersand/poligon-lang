@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use inkwell::context::Context;
+use poligon_lang::ast::Program;
 use poligon_lang::compiler::Compiler;
 use poligon_lang::lexer::tokenize;
 use poligon_lang::parser::parse;
@@ -16,7 +17,9 @@ fn compile_and_run(fp: impl AsRef<Path>) -> ExitCode {
         .unwrap();
     let mut compiler = Compiler::new(&ctx, name).unwrap();
     compiler.load_gon_file(path).unwrap();
-    unsafe { compiler.jit_run().unwrap() }
+    
+    let exporter = compiler.into_exporter();
+    unsafe { exporter.jit_run().unwrap() }
 }
 
 #[test]
@@ -24,7 +27,7 @@ fn display_test() {
     let file = std::fs::read_to_string("tests/files/fib.gon").unwrap();
     
     let lexed = tokenize(&file).unwrap();
-    let program = parse(lexed).unwrap();
+    let program: Program = parse(&lexed).unwrap();
 
     println!("{program}");
 }

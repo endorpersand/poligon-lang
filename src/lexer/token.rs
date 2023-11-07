@@ -3,9 +3,9 @@
 //! See [`Token`] for more information.
 
 use std::fmt::{Debug, Display};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use once_cell::sync::Lazy;
-use crate::err::CursorRange;
+use crate::span::{Span, Spanned};
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 /// A specific unit that carries some graphemic value in Poligon.
@@ -36,39 +36,23 @@ pub enum Token {
     Operator(Operator),
 
     /// Delimiters (e.g. `()`, `[]`)
-    Delimiter(Delimiter),
+    Delimiter(Delimiter, bool /* direction: false = L, true = R */),
 
     /// End of line (`;`)
     LineSep
 }
 
-impl Token {
-    /// Checks if one token contains another in it.
-    pub fn starts_with<P: TokenPattern>(&self, lhs: P) -> bool {
-        lhs.fully_accepts(self) || lhs.is_strict_prefix_of(self)
-    }
-}
-
 /// A token with position information.
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub struct FullToken {
-    pub(crate) loc: CursorRange,
-    pub(crate) tt: Token
+    pub(crate) kind: Token,
+    pub(crate) span: Span,
 }
 
 impl FullToken {
     /// Create a FullToken using a token and its given position.
-    pub fn new(tt: Token, loc: CursorRange) -> Self {
-        Self { loc, tt }
-    }
-
-    /// Attempts to split the full token into two. 
-    /// 
-    /// If successful, the LHS token is returned (and removed from this token).
-    /// 
-    /// If unsuccessful, the token stays unchanged.
-    pub fn try_split<P: TokenPattern>(&mut self, lhs: P) -> Option<Self> {
-        lhs.strip_strict_prefix_of(self)
+    pub fn new(kind: Token, span: Span) -> Self {
+        Self { kind, span }
     }
 }
 
@@ -76,145 +60,25 @@ impl std::ops::Deref for FullToken {
     type Target = Token;
 
     fn deref(&self) -> &Self::Target {
-        &self.tt
+        &self.kind
     }
 }
 
 impl PartialEq<Token> for FullToken {
     fn eq(&self, other: &Token) -> bool {
-        &self.tt == other
+        &self.kind == other
     }
 }
 impl PartialEq<FullToken> for Token {
     fn eq(&self, other: &FullToken) -> bool {
-        self == &other.tt
+        self == &other.kind
     }
 }
-
-mod pat {
-    use super::{Token, FullToken, SPLITTABLES};
-
-    /// A token pattern.
-    /// 
-    /// Similar to std [`std::str::pattern::Pattern`], this can be used to
-    /// search a pattern in a given Token.
-    /// 
-    /// [`Token`] == verify if that token is in the given output
-    /// [`[Token]`] == verify if any one of those tokens are in the given input
-    pub trait TokenPattern: Sized {
-        /// Tests if this pattern matches the token pattern exactly.
-        fn fully_accepts(&self, t: &Token) -> bool;
-        /// Tests if this pattern strictly prefixes the token.
-        /// 
-        /// To check for non-strict prefixes, 
-        /// one can perform `self.contains(t) || self.is_strict_prefix_of(t)`.
-        fn is_strict_prefix_of(&self, t: &Token) -> bool;
-        /// Removes the prefix from a given FullToken, returning it if present.
-        /// 
-        /// This will not work if the pattern encompasses the token fully.
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken>;
-        /// Provides which tokens this pattern expects.
-        fn expected_tokens(self) -> Vec<Token>;
-    }
-    
-    impl TokenPattern for Token {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            (&self).fully_accepts(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            (&self).is_strict_prefix_of(t)
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            (&self).strip_strict_prefix_of(t)
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            vec![self]
-        }
-    }
-    impl<const N: usize> TokenPattern for [Token; N] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            (&self[..]).fully_accepts(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            (&self[..]).is_strict_prefix_of(t)
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            (&self[..]).strip_strict_prefix_of(t)
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            self.into()
-        }
-    }
-    impl<'a> TokenPattern for &'a Token {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self == &t
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            SPLITTABLES.contains_key(&(t, self))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            let FullToken { tt, loc } = t;
-            if let Some(rhs) = SPLITTABLES.get(&(tt, self)) {
-                let (&(slno, scno), &(elno, ecno)) = (loc.start(), loc.end());
-    
-                let lloc = (slno, scno) ..= (slno, scno);
-                let rloc = (elno, ecno) ..= (elno, ecno);
-    
-                *t = FullToken { tt: rhs.clone(), loc: rloc };
-                Some(FullToken { tt: (*self).clone(), loc: lloc })
-            } else {
-                None
-            }
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            self.clone().expected_tokens()
-        }
-    }
-    impl<'a> TokenPattern for &'a [Token] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self.contains(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            self.iter().any(|pat| pat.is_strict_prefix_of(t))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            self.iter().find_map(|pat| pat.strip_strict_prefix_of(t))
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            self.to_vec()
-        }
-    }
-    impl<'a, const N: usize> TokenPattern for &'a [Token; N] {
-        fn fully_accepts(&self, t: &Token) -> bool {
-            self[..].contains(t)
-        }
-
-        fn is_strict_prefix_of(&self, t: &Token) -> bool {
-            self[..].iter().any(|pat| pat.is_strict_prefix_of(t))
-        }
-    
-        fn strip_strict_prefix_of(&self, t: &mut FullToken) -> Option<FullToken> {
-            self[..].iter().find_map(|pat| pat.strip_strict_prefix_of(t))
-        }
-
-        fn expected_tokens(self) -> Vec<Token> {
-            self[..].to_vec()
-        }
+impl Spanned for FullToken {
+    fn span(&self) -> Span {
+        self.span
     }
 }
-pub use pat::TokenPattern;
 
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
@@ -249,11 +113,8 @@ macro_rules! define_keywords {
     };
 }
 
-macro_rules! define_operators_and_delimiters {
-    (
-        operators: {$($id:ident: $ex:literal),*},
-        delimiters: {$($idl:ident: $exl:literal, $idr:ident: $exr:literal),*}
-    ) => {
+macro_rules! define_operators {
+    ($($id:ident: $ex:literal),*) => {
         /// The defined Poligon operators.
         #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
         pub enum Operator {
@@ -270,54 +131,63 @@ macro_rules! define_operators_and_delimiters {
             }
         }
 
-        /// The defined Poligon delimiters (`()`, `[]`, etc.).
-        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
-        pub enum Delimiter {
-            $(
-                #[allow(missing_docs)] $idl,
-                #[allow(missing_docs)] $idr
-            ),*
-        }
-
-        impl Delimiter {
-            /// "Reverses" the bracket, providing the left variant if given the right and
-            /// the right variant if given the left.
-            pub fn reversed(&self) -> Self {
-                match self {
-                    $(Self::$idl => Self::$idr),+,
-                    $(Self::$idr => Self::$idl),+
-                }
-            }
-
-            /// Test if this variant is a right bracket.
-            pub fn is_right(&self) -> bool {
-                match self {
-                    $(Self::$idl => false),+,
-                    $(Self::$idr => true),+
-                }
-            }
-        }
-
-
-        impl Display for Delimiter {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(match self {
-                    $(Self::$idl => $exl),*,
-                    $(Self::$idr => $exr),*
-                })
-            }
-        }
-
-        pub(super) static OPMAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
+        pub(super) static OP_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
             let mut m = BTreeMap::new();
 
             $(m.insert($ex, Token::Operator(Operator::$id));)*
-            $(m.insert($exl, Token::Delimiter(Delimiter::$idl));)*
-            $(m.insert($exr, Token::Delimiter(Delimiter::$idr));)*
 
             m
         });
     };
+}
+
+macro_rules! define_delimiters {
+    ($($id:ident: $exl:literal, $exr:literal),*) => {
+        /// The defined Poligon delimiters (`()`, `[]`, etc.).
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+        pub enum Delimiter {
+            $(
+                #[allow(missing_docs)] $id
+            ),*
+        }
+    
+        impl Delimiter {
+            /// Gets the left delimiter token.
+            pub fn left(&self) -> Token {
+                Token::Delimiter(*self, false)
+            }
+            /// Gets the right delimiter token.
+            pub fn right(&self) -> Token {
+                Token::Delimiter(*self, true)
+            }
+
+            fn display_left(&self) -> &'static str {
+                match self {
+                    $(Self::$id => $exl),*
+                }
+            }
+            fn display_right(&self) -> &'static str {
+                match self {
+                    $(Self::$id => $exr),*
+                }
+            }
+        }
+    
+        pub(super) static DE_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
+            let mut m = BTreeMap::new();
+    
+            $(m.insert($exl, Token::Delimiter(Delimiter::$id, false));)*
+            $(m.insert($exr, Token::Delimiter(Delimiter::$id, true));)*
+    
+            m
+        });
+    };
+}
+impl Display for Delimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.display_left())?;
+        f.write_str(self.display_right())
+    }
 }
 
 define_keywords! {
@@ -352,70 +222,160 @@ define_keywords! {
     Throw:    "throw"
 }
 
-define_operators_and_delimiters! {
-    operators: {
-        Plus:    "+",
-        Minus:   "-",
-        Star:    "*",
-        Slash:   "/",
-        Percent: "%",
-        
-        Dot:   ".",
-        DDot:  "..",
-        Or:    "|",
-        And:   "&",
-        Tilde: "~",
-        Caret: "^",
+define_operators! {
+    Plus:    "+",
+    Minus:   "-",
+    Star:    "*",
+    Slash:   "/",
+    Percent: "%",
     
-        DAnd: "&&",
-        DOr:  "||",
-        Excl: "!",
-    
-        Lt:     "<",
-        Le:     "<=",
-        Gt:     ">",
-        Ge:     ">=",
-        Equal:  "=",
-        DEqual: "==",
-        Ne:     "!=",
-    
-        Shl: "<<",
-        Shr: ">>",
-    
-        Comma:  ",",
-        Comment: "//",
-        Colon: ":",
-        DColon: "::",
-    
-        Hash: "#",
-        Arrow: "->"
-    },
+    Dot:   ".",
+    DDot:  "..",
+    Or:    "|",
+    And:   "&",
+    Tilde: "~",
+    Caret: "^",
 
-    delimiters: {
-        LParen: "(",    RParen: ")",
-        LSquare: "[",   RSquare: "]",
-        LCurly: "{",    RCurly: "}",
-        LComment: "/*", RComment: "*/"
+    DAnd: "&&",
+    DOr:  "||",
+    Excl: "!",
+
+    Lt:     "<",
+    Le:     "<=",
+    Gt:     ">",
+    Ge:     ">=",
+    Equal:  "=",
+    DEqual: "==",
+    Ne:     "!=",
+
+    Shl: "<<",
+    Shr: ">>",
+
+    Comma:  ",",
+    Comment: "//",
+    Colon: ":",
+    DColon: "::",
+
+    Hash: "#",
+    Arrow: "->",
+
+    LComment: "/*",
+    RComment: "*/"
+}
+define_delimiters! {
+    Paren:  "(", ")",
+    Square: "[", "]",
+    Curly:  "{", "}"
+}
+
+/// A group of tokens, wrapped with a delimiter.
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Group {
+    /// The delimiter
+    pub delimiter: Delimiter,
+    /// The tokens encapsulated by this group
+    pub content: Vec<TokenTree>,
+    /// The span of the left delimiter
+    pub left_span: Span,
+    /// The span of the right delimiter
+    pub right_span: Span
+}
+impl Spanned for Group {
+    fn span(&self) -> Span {
+        self.left_span + self.right_span
     }
 }
 
-/// Should only be used to define 2-char tokens that can be split into 2 1-char tokens.
-static SPLITTABLES: Lazy<HashMap<(&'static Token, &'static Token), Token>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    // m.insert((&token![..], &token![.]), token![.]);
-    // m.insert((&token![&&], &token![&]), token![&]);
-    // m.insert((&token![||], &token![|]), token![|]);
-    // m.insert((&token![<=], &token![<]), token![=]);
-    // m.insert((&token![>=], &token![>]), token![=]);
-    // m.insert((&token![==], &token![=]), token![=]);
-    m.insert((&token![<<], &token![<]), token![<]);
-    m.insert((&token![>>], &token![>]), token![>]);
-    // m.insert((&token![::], &token![:]), token![:]);
-    // m.insert((&token![->], &token![-]), token![>]);
-    m
-});
+/// A struct that either can hold a token unit or a group.
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub enum TokenTree {
+    #[allow(missing_docs)]
+    Token(FullToken),
+    #[allow(missing_docs)]
+    Group(Group)
+}
+impl TokenTree {
+    /// Converts this TokenTree into its kind.
+    /// 
+    /// See [`TTKind`] for more details.
+    pub fn kind(&self) -> TTKind {
+        match self {
+            TokenTree::Token(t) => TTKind::Token(&t.kind),
+            TokenTree::Group(g) => TTKind::Group(&g.delimiter),
+        }
+    }
+}
+impl Spanned for TokenTree {
+    fn span(&self) -> Span {
+        match self {
+            TokenTree::Token(e) => e.span(),
+            TokenTree::Group(e) => e.span(),
+        }
+    }
+}
+impl PartialEq<Token> for TokenTree {
+    fn eq(&self, other: &Token) -> bool {
+        match self {
+            TokenTree::Token(t) => t == other,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<FullToken> for TokenTree {
+    fn eq(&self, other: &FullToken) -> bool {
+        match self {
+            TokenTree::Token(t) => t == other,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<TokenTree> for Token {
+    fn eq(&self, other: &TokenTree) -> bool {
+        match other {
+            TokenTree::Token(t) => t == self,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl PartialEq<TokenTree> for FullToken {
+    fn eq(&self, other: &TokenTree) -> bool {
+        match other {
+            TokenTree::Token(t) => t == self,
+            TokenTree::Group(_) => false,
+        }
+    }
+}
+impl TryFrom<TokenTree> for FullToken {
+    type Error = &'static str;
 
-/// Utility macro that can be used as a shorthand for [`Keyword`], [`Operator`], or [`Delimiter`] tokens.
+    fn try_from(value: TokenTree) -> Result<Self, Self::Error> {
+        match value {
+            TokenTree::Token(t) => Ok(t),
+            TokenTree::Group(_) => Err("poor support for TokenTree"),
+        }
+    }
+}
+
+/// Enum which holds the type of token/group that a [`TokenTree`] represents.
+/// 
+/// This is made to be simpler to pattern match against than [`TokenTree`] 
+/// (when combined with the [`token`] and [`delim`] macros).
+/// 
+/// A `TTKind` can be created with the [`TokenTree::kind`] method.
+pub enum TTKind<'t> {
+    /// This variant indicates the given token tree is some unit token.
+    Token(&'t Token),
+    /// This variant indicates the given token tree is some group
+    /// and provides its delimiter for matching.
+    Group(&'t Delimiter)
+}
+
+/// A stream of tokens that can be parsed over.
+pub type Stream<'s> = &'s [TokenTree];
+/// An owned version of [`Stream`], which holds a stream of tokens that can be parsed over.
+pub type OwnedStream = Vec<TokenTree>;
+
+/// Utility macro that can be used as a shorthand for [`Keyword`] or [`Operator`] tokens.
 #[macro_export]
 macro_rules! token {
     (let)      => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Let)      };
@@ -447,49 +407,67 @@ macro_rules! token {
     (import)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Import)   };
     (global)   => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Global)   };
     (throw)    => { $crate::lexer::token::Token::Keyword($crate::lexer::token::Keyword::Throw)    };
-    (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)    };
-    (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)   };
-    (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)    };
-    (/)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Slash)   };
-    (%)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Percent) };
-    (.)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Dot)     };
-    (..)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DDot)    };
-    (|)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Or)      };
-    (&)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::And)     };
-    (~)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Tilde)   };
-    (^)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Caret)   };
-    (&&)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DAnd)    };
-    (||)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DOr)     };
-    (!)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Excl)    };
-    (<)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Lt)      };
-    (<=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Le)      };
-    (>)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Gt)      };
-    (>=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ge)      };
-    (=)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Equal)   };
-    (==)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DEqual)  };
-    (!=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ne)      };
-    (<<)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shl)     };
-    (>>)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shr)     };
-    (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)   };
-    ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment) };
-    (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)   };
-    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)  };
-    (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)    };
-    (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)   };
+    (+)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Plus)     };
+    (-)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Minus)    };
+    (*)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Star)     };
+    (/)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Slash)    };
+    (%)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Percent)  };
+    (.)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Dot)      };
+    (..)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DDot)     };
+    (|)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Or)       };
+    (&)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::And)      };
+    (~)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Tilde)    };
+    (^)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Caret)    };
+    (&&)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DAnd)     };
+    (||)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DOr)      };
+    (!)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Excl)     };
+    (<)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Lt)       };
+    (<=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Le)       };
+    (>)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Gt)       };
+    (>=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ge)       };
+    (=)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Equal)    };
+    (==)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DEqual)   };
+    (!=)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Ne)       };
+    (<<)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shl)      };
+    (>>)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Shr)      };
+    (,)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comma)    };
+    ("//") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Comment)  };
+    (:)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Colon)    };
+    (::)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::DColon)   };
+    (#)    => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Hash)     };
+    (->)   => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::Arrow)    };
+    ("/*") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::LComment) };
+    ("*/") => { $crate::lexer::token::Token::Operator($crate::lexer::token::Operator::RComment) };
 
-    ("(")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LParen)   };
-    (")")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RParen)   };
-    ("[")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LSquare)  };
-    ("]")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RSquare)  };
-    ("{")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LCurly)   };
-    ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RCurly)   };
-    ("/*") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::LComment) };
-    ("*/") => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::RComment) };
+    ("(")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Paren,  false) };
+    (")")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Paren,  true)  };
+    ("[")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Square, false) };
+    ("]")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Square, true)  };
+    ("{")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Curly,  false) };
+    ("}")  => { $crate::lexer::token::Token::Delimiter($crate::lexer::token::Delimiter::Curly,  true)  };
 
     (;) => { $crate::lexer::token::Token::LineSep };
 }
 #[doc(inline)]
 pub use token;
+
+/// Utility macro that can be used as a shorthand for [`Delimiter`]s.
+#[macro_export]
+macro_rules! delim {
+    ("(")   => { $crate::lexer::token::Delimiter::Paren  };
+    (")")   => { $crate::lexer::token::Delimiter::Paren  };
+    ("()")  => { $crate::lexer::token::Delimiter::Paren  };
+
+    ("[")   => { $crate::lexer::token::Delimiter::Square };
+    ("]")   => { $crate::lexer::token::Delimiter::Square };
+    ("[]")  => { $crate::lexer::token::Delimiter::Square };
+
+    ("{")   => { $crate::lexer::token::Delimiter::Curly  };
+    ("}")   => { $crate::lexer::token::Delimiter::Curly  };
+    ("{}")  => { $crate::lexer::token::Delimiter::Curly  };
+}
+#[doc(inline)]
+pub use delim;
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -505,7 +483,10 @@ impl Display for Token {
             },
             Token::Keyword(kw)  => Display::fmt(kw, f),
             Token::Operator(op) => Display::fmt(op, f),
-            Token::Delimiter(d) => Display::fmt(d, f),
+            Token::Delimiter(delim, dir) => match dir {
+                false => f.write_str(delim.display_left()),
+                true  => f.write_str(delim.display_right())
+            },
             Token::LineSep => f.write_str(";"),
         }
     }

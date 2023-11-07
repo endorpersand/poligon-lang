@@ -36,7 +36,7 @@ impl plir::walk::WalkerMut for TypeApplier<'_> {
     fn visit_block(&mut self, _: &mut plir::Block) -> Result<(), Self::Err> {
         Ok(())
     }
-    fn visit_literal(&mut self, _: &mut crate::ast::Literal) -> Result<(), Self::Err> {
+    fn visit_literal(&mut self, _: &mut crate::ast::LitKind) -> Result<(), Self::Err> {
         Ok(())
     }
     fn visit_path(&mut self, _: &mut plir::Path) -> Result<(), Self::Err> {
