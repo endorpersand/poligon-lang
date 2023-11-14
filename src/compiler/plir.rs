@@ -292,72 +292,106 @@ pub struct Param {
     pub ty: Type
 }
 
+/// This trait is used for hybrid reference-static types 
+/// (types that could own their values or hold a reference to them).
+pub(crate) trait LtGradeable {
+    type WithLt<'x>;
+    /// Converts a reference of this type into a type that holds references.
+    fn downgrade(&self) -> Self::WithLt<'_>;
+    /// Clones a reference of this type into a static (possibly owned) version of this type.
+    fn upgrade(&self) -> Self::WithLt<'static>;
+}
+impl<'a, B: ToOwned + 'static + ?Sized> LtGradeable for Cow<'a, B> {
+    type WithLt<'x> = Cow<'x, B>;
+
+    fn downgrade(&self) -> Self::WithLt<'_> {
+        Cow::Borrowed(self)
+    }
+
+    fn upgrade(&self) -> Self::WithLt<'static> {
+        Cow::Owned((**self).to_owned())
+    }
+}
 /// The possible identifiers a function can have.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum FunIdent {
+pub enum FunIdentRef<'i> {
     /// Just an identifier. For functions in scope.
-    Simple(String),
+    Simple(Cow<'i, str>),
     /// A method identifier.
-    Static(Type, String)
+    Static(TypeRef<'i>, Cow<'i, str>)
 }
+/// The possible identifiers a function can have as an owned item.
+pub type FunIdent = FunIdentRef<'static>;
+impl LtGradeable for FunIdentRef<'_> {
+    type WithLt<'x> = FunIdentRef<'x>;
 
-impl FunIdent {
+    fn downgrade(&self) -> Self::WithLt<'_> {
+        match self {
+            Self::Simple(s) => FunIdentRef::Simple(s.downgrade()),
+            Self::Static(t, s) => FunIdentRef::Static(t.downgrade(), s.downgrade()),
+        }
+    }
+
+    fn upgrade(&self) -> Self::WithLt<'static> {
+        match self {
+            Self::Simple(s) => FunIdentRef::Simple(s.upgrade()),
+            Self::Static(t, s) => FunIdentRef::Static(t.upgrade(), s.upgrade()),
+        }
+    }
+}
+impl<'i> FunIdentRef<'i> {
     /// Finds the string identifier of this value when represented in LLVM.
     pub fn as_llvm_ident(&self) -> Cow<str> {
         match self {
-            FunIdent::Simple(s) => Cow::from(s),
-            FunIdent::Static(ty, attr) => Cow::from(format!("{ty}::{attr}")),
+            Self::Simple(s) => s.downgrade(),
+            Self::Static(ty, attr) => Cow::from(format!("{ty}::{attr}")),
         }
     }
 
     /// Creates a new [`FunIdent::Simple`] identifier.
-    pub fn new_simple(id: &str) -> Self {
-        Self::Simple(id.to_string())
+    pub fn new_simple(id: impl Into<Cow<'i, str>>) -> Self {
+        Self::Simple(id.into())
     }
 
     /// Creates a new [`FunIdent::Static`] identifier.
-    pub fn new_static(ty: &Type, attr: &str) -> Self {
-        Self::Static(ty.clone(), attr.to_string())
+    pub fn new_static(ty: TypeRef<'i>, attr: impl Into<Cow<'i, str>>) -> Self {
+        Self::Static(ty, attr.into())
     }
-
+}
+impl FunIdent {
     /// Constructs a PLIR expression out of this function identifier.
     /// 
     /// This can either be an identifier expression or a static path.
     pub fn into_expr(self, fun_ty: Type) -> Expr {
         match self {
-            FunIdent::Simple(id) => Expr::new(fun_ty, ExprType::Ident(id)),
-            FunIdent::Static(cls_ty, attr) => Path::Static(cls_ty, attr, fun_ty).into(),
+            FunIdent::Simple(id) => Expr::new(fun_ty, ExprType::Ident(id.into_owned())),
+            FunIdent::Static(cls_ty, attr) => Path::Static(cls_ty, attr.into_owned(), fun_ty).into(),
         }
     }
 }
 
-pub(crate) trait AsFunIdent: indexmap::Equivalent<FunIdent> {
-    fn as_fun_ident(&self) -> Cow<FunIdent>;
+pub(crate) trait AsFunIdent {
+    fn as_fun_ident(&self) -> FunIdentRef;
 }
-impl AsFunIdent for FunIdent {
-    fn as_fun_ident(&self) -> Cow<FunIdent> {
-        Cow::Borrowed(self)
-    }
-}
-
-impl indexmap::Equivalent<FunIdent> for str {
-    fn equivalent(&self, key: &FunIdent) -> bool {
-        matches!(key, FunIdent::Simple(t) if self == t)
+impl AsFunIdent for FunIdentRef<'_> {
+    fn as_fun_ident(&self) -> FunIdentRef {
+        self.downgrade()
     }
 }
 impl AsFunIdent for str {
-    fn as_fun_ident(&self) -> Cow<FunIdent> {
-        Cow::Owned(FunIdent::new_simple(self))
-    }
-}
-impl indexmap::Equivalent<FunIdent> for String {
-    fn equivalent(&self, key: &FunIdent) -> bool {
-        self.as_str().equivalent(key)
+    fn as_fun_ident(&self) -> FunIdentRef {
+        FunIdentRef::new_simple(self)
     }
 }
 impl AsFunIdent for String {
-    fn as_fun_ident(&self) -> Cow<FunIdent> {
-        self.as_str().as_fun_ident()
+    fn as_fun_ident(&self) -> FunIdentRef {
+        FunIdentRef::new_simple(self)
+    }
+}
+
+impl From<String> for FunIdent {
+    fn from(value: String) -> Self {
+        FunIdent::new_simple(value)
     }
 }
 
@@ -452,7 +486,7 @@ impl Expr {
         };
 
         Ok(Expr::new(
-            ft.ret.upgrade(),
+            TypeRef::upgrade(&ft.ret),
             ExprType::Call {funct: Box::new(fun), params }
         ))
     }
@@ -640,11 +674,11 @@ pub enum Path {
     Method(Box<Expr>, String, FunType)
 }
 impl Path {
-    pub(crate) fn ty(&self) -> Cow<Type> {
+    pub(crate) fn ty(&self) -> TypeRef {
         match self {
-            Path::Static(_, _, ty) => Cow::Borrowed(ty),
-            Path::Struct(e, attrs) => Cow::Borrowed(attrs.last().map(|(_, t)| t).unwrap_or(&e.ty)),
-            Path::Method(_, _, ty) => Cow::Owned(Type::Fun(ty.clone())),
+            Path::Static(_, _, ty) => ty.downgrade(),
+            Path::Struct(e, attrs) => attrs.last().map(|(_, t)| t).unwrap_or(&e.ty).downgrade(),
+            Path::Method(_, _, ty) => Type::from(ty.upgrade()),
         }
     }
 
@@ -681,7 +715,7 @@ impl From<Path> for Expr {
             }
         }
 
-        let mut e = Expr::new(value.ty().into_owned(), ExprType::Path(value));
+        let mut e = Expr::new(value.ty().upgrade(), ExprType::Path(value));
         
         loop {
             match e {

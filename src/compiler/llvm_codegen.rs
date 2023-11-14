@@ -24,6 +24,7 @@ use inkwell::types::{BasicTypeEnum, PointerType, BasicType, FunctionType};
 use inkwell::values::{FunctionValue, BasicValue, PointerValue, PhiValue, BasicValueEnum, InstructionValue, GlobalValue};
 
 use crate::ast::{op, LitKind};
+use crate::compiler::plir::LtGradeable;
 use crate::err::GonErr;
 
 pub use self::value::*;
@@ -403,7 +404,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
     fn define_fun(&mut self, sig: &plir::FunSignature) -> LLVMResult<(FunctionValue<'ctx>, FunctionType<'ctx>)> {
         let plir::FunSignature { private, ident, params, ret, varargs } = sig;
 
-        let fun = match self.get_fn_by_plir_ident(ident) {
+        let fun = match self.get_fn_by_plir_ident(ident.downgrade()) {
             Some(f) => f,
             None => {
                 let arg_tys: Vec<_> = params.iter()
@@ -444,8 +445,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(intrinsic)
     }
 
-    fn get_fn_by_plir_ident(&self, plir_ident: &plir::FunIdent) -> Option<FunctionValue<'ctx>> {
-        match self.fn_aliases.get(plir_ident) {
+    fn get_fn_by_plir_ident(&self, plir_ident: plir::FunIdentRef) -> Option<FunctionValue<'ctx>> {
+        match self.fn_aliases.get(&plir_ident) {
             Some(id) => self.module.get_function(id),
             None     => self.module.get_function(&plir_ident.as_llvm_ident()),
         }
@@ -672,7 +673,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::Program {
         // fix main
         // 1. currently, main is () -> void. we need it to be () -> #byte.
         // 2. a locale needs to be registered so that wchar_t functions properly
-        let main = compiler.get_fn_by_plir_ident(&plir::FunIdent::new_simple("main"))
+        let main = compiler.get_fn_by_plir_ident(plir::FunIdentRef::new_simple("main"))
             .expect("main() should have been defined");
         
         main.as_global_value().set_name("main.inner");
@@ -787,9 +788,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let alloca = compiler.builder.build_alloca(arr_ty, "");
                 compiler.builder.build_store(alloca, arr);
 
-                let id = plir::FunIdent::new_static(expr_ty, "from_raw");
-                let list_from_raw = compiler.get_fn_by_plir_ident(&id)
-                    .ok_or_else(|| LLVMErr::UndefinedFun(id))?;
+                let id = plir::FunIdentRef::new_static(expr_ty.downgrade(), "from_raw");
+                let list_from_raw = compiler.get_fn_by_plir_ident(id.downgrade())
+                    .ok_or_else(|| LLVMErr::UndefinedFun(id.upgrade()))?;
 
                 let lst = compiler.builder.build_call(list_from_raw, params![alloca, int_.const_int(exprs.len() as _, false)], "list_literal")
                     .try_as_basic_value()
@@ -891,9 +892,9 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 match step.as_deref() {
                     Some(_) => todo!("deal with step"),
                     None => {
-                        let id = plir::FunIdent::new_static(expr_ty, "new");
-                        let range_new = compiler.get_fn_by_plir_ident(&id)
-                            .unwrap_or_else(|| panic!("missing function {id}"));
+                        let id = plir::FunIdentRef::new_static(expr_ty.downgrade(), "new");
+                        let range_new = compiler.get_fn_by_plir_ident(id.downgrade())
+                            .unwrap_or_else(|| panic!("missing function {}", id.upgrade()));
                         let call = compiler.builder.build_call(range_new, params![left, right], "")
                             .try_as_basic_value()
                             .left()
@@ -996,8 +997,8 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 
                 // iteration stuff:
                 let i_ptr = compiler.alloca(element_type, ident)?;
-                let it_id = plir::FunIdent::new_static(&iterator.ty, "next");
-                let it_next = compiler.get_fn_by_plir_ident(&it_id)
+                let it_id = plir::FunIdentRef::new_static(iterator.ty.downgrade(), "next");
+                let it_next = compiler.get_fn_by_plir_ident(it_id)
                     .unwrap_or_else(|| unimplemented!("nonexistent ::next should have been detected by PLIR"));
                 let iterator = compiler.write_ref_value(iterator)?;
 
@@ -1030,22 +1031,22 @@ impl<'ctx> TraverseIR<'ctx> for plir::Expr {
                 let mut pvals = vec![];
 
                 let fun_ident = match &funct.expr {
-                    plir::ExprType::Ident(ident) => plir::FunIdent::new_simple(ident),
+                    plir::ExprType::Ident(ident) => plir::FunIdentRef::new_simple(ident),
                     plir::ExprType::Path(p) => match p {
                         plir::Path::Static(ty, met, _) => {
-                            plir::FunIdent::new_static(ty, met)
+                            plir::FunIdentRef::new_static(ty.downgrade(), met)
                         },
                         plir::Path::Struct(_, _) => unreachable!("struct attr cannot be fun"),
                         plir::Path::Method(referent, met, _) => {
                             pvals.push(compiler.write_ref_value(referent)?);
-                            plir::FunIdent::new_static(&referent.ty, met)
+                            plir::FunIdentRef::new_static(referent.ty.downgrade(), met)
                         },
                     },
                     e => todo!("arbitrary expr calls: {e:?}")
                 };
 
-                let fun = compiler.get_fn_by_plir_ident(&fun_ident)
-                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident))?;
+                let fun = compiler.get_fn_by_plir_ident(fun_ident.downgrade())
+                    .ok_or_else(|| LLVMErr::UndefinedFun(fun_ident.upgrade()))?;
 
                 for p in params {
                     pvals.push(compiler.write_ref_value(p)?);
@@ -1274,7 +1275,7 @@ impl<'ctx> TraverseIR<'ctx> for plir::FunDecl {
     fn write_value(&self, compiler: &mut LLVMCodegen<'ctx>) -> Self::Return {
         let plir::FunDecl { sig, block } = self;
 
-        let fun = compiler.get_fn_by_plir_ident(&sig.ident)
+        let fun = compiler.get_fn_by_plir_ident(sig.ident.downgrade())
             .unwrap_or_else(|| panic!("function {} should be declared", sig.ident));
 
         let bb = compiler.ctx.append_basic_block(fun, "body");

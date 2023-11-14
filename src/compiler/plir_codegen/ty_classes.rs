@@ -3,7 +3,7 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use crate::compiler::plir::{self, Type, FunIdent, TypeRef};
+use crate::compiler::plir::{self, Type, FunIdent, TypeRef, LtGradeable};
 
 impl TypeRef<'_> {
     pub(super) fn get_type_key(&self) -> Cow<str> {

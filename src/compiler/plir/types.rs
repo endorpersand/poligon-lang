@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use crate::ast;
 use crate::compiler::plir_codegen::{OpErr, PLIRErr};
 
-use super::{Split, own_cow};
+use super::{Split, own_cow, LtGradeable};
 
 /// An owned type value.
 /// 
@@ -54,35 +54,32 @@ pub struct FunTypeRef<'t> {
     pub varargs: bool
 }
 
-fn downgrade<T: ToOwned + ?Sized>(p: &T) -> Cow<T> {
-    Cow::Borrowed(p)
-}
-fn upgrade<T: ToOwned + ?Sized>(p: &T) -> Cow<'static, T> {
-    Cow::Owned(p.to_owned())
-}
+impl<'t> LtGradeable for TypeRef<'t> {
+    type WithLt<'x> = TypeRef<'x>;
 
-impl TypeRef<'_> {
-    pub(crate) fn downgrade(&self) -> TypeRef {
+    fn downgrade(&self) -> Self::WithLt<'_> {
         match self {
             TypeRef::Unk(idx) => TypeRef::Unk(*idx),
-            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(downgrade(ty), downgrade(var)),
-            TypeRef::Prim(id) => TypeRef::Prim(downgrade(id)),
-            TypeRef::Generic(id, params, _) => TypeRef::Generic(downgrade(id), downgrade(params), ()),
-            TypeRef::Tuple(params, _) => TypeRef::Tuple(downgrade(params), ()),
+            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(ty.downgrade(), var.downgrade()),
+            TypeRef::Prim(id) => TypeRef::Prim(id.downgrade()),
+            TypeRef::Generic(id, params, _) => TypeRef::Generic(id.downgrade(), params.downgrade(), ()),
+            TypeRef::Tuple(params, _) => TypeRef::Tuple(params.downgrade(), ()),
             TypeRef::Fun(f) => TypeRef::Fun(f.downgrade()),
         }
     }
-    pub(crate) fn upgrade(&self) -> Type {
+
+    fn upgrade(&self) -> Self::WithLt<'static> {
         match self {
             TypeRef::Unk(idx) => TypeRef::Unk(*idx),
-            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(upgrade(ty), upgrade(var)),
-            TypeRef::Prim(id) => TypeRef::Prim(upgrade(id)),
-            TypeRef::Generic(id, params, _) => TypeRef::Generic(upgrade(id), upgrade(params), ()),
-            TypeRef::Tuple(params, _) => TypeRef::Tuple(upgrade(params), ()),
+            TypeRef::TypeVar(ty, var) => TypeRef::TypeVar(ty.upgrade(), var.upgrade()),
+            TypeRef::Prim(id) => TypeRef::Prim(id.upgrade()),
+            TypeRef::Generic(id, params, _) => TypeRef::Generic(id.upgrade(), params.upgrade(), ()),
+            TypeRef::Tuple(params, _) => TypeRef::Tuple(params.upgrade(), ()),
             TypeRef::Fun(f) => TypeRef::Fun(f.upgrade()),
         }
     }
-
+}
+impl TypeRef<'_> {
     /// Gets the generic parameters of this type.
     /// 
     /// This function does not allocate or clone anything.
@@ -218,25 +215,28 @@ impl Type {
     }
 }
 
-impl FunTypeRef<'_> {
-    pub(crate) fn downgrade(&self) -> FunTypeRef {
+impl<'t> LtGradeable for FunTypeRef<'t> {
+    type WithLt<'x> = FunTypeRef<'x>;
+
+    fn downgrade(&self) -> Self::WithLt<'_> {
         let FunTypeRef { params, ret, varargs } = self;
         FunTypeRef {
-            params: downgrade(params),
-            ret: downgrade(ret),
+            params: params.downgrade(),
+            ret: ret.downgrade(),
             varargs: *varargs
         }
     }
 
-    pub(crate) fn upgrade(&self) -> FunType {
+    fn upgrade(&self) -> Self::WithLt<'static> {
         let FunTypeRef { params, ret, varargs } = self;
         FunTypeRef {
-            params: upgrade(params),
-            ret: upgrade(ret),
+            params: params.upgrade(),
+            ret: ret.upgrade(),
             varargs: *varargs,
         }
     }
-
+}
+impl FunTypeRef<'_> {
     /// Removes the first parameter of the function.
     /// 
     /// This is useful for removing the referent in method types.
