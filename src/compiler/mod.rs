@@ -100,9 +100,9 @@ fn parse_d_types_from_str(code: &str) -> CompileResult<DeclaredTypes> {
 impl Display for CompileErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompileErr::IoErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
+            CompileErr::IoErr(e) => write!(f, "{}", e.at_unknown().short_msg("")), // TODO
             CompileErr::Computed(e) => write!(f, "{e}"),
-            CompileErr::LLVMErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
+            CompileErr::LLVMErr(e) => write!(f, "{}", e.at_unknown().short_msg("")), // TODO
         }
     }
 }

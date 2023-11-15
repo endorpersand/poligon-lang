@@ -3,29 +3,33 @@
 //! The main items here are the [`Span`] struct, which holds the span of characters,
 //! and the [`Spanned`] trait, which indicates that a struct has a span.
 
-use std::ops::{RangeInclusive, Add, AddAssign};
+use std::ops::{Add, AddAssign, Range};
 
 /// Indicates a specific character in given code.
-pub type Cursor = (usize /* line */, usize /* character */);
+pub type Cursor = usize;
 
 /// A struct holding a span of characters (inclusive on both sides).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
-    start: Cursor,
-    end: Cursor,
+    start: usize,
+    end: usize,
 }
 
 impl Span {
     /// Creates a new span.
-    pub fn new(r: RangeInclusive<Cursor>) -> Span {
+    pub fn new(r: Range<Cursor>) -> Span {
         Span {
-            start: *r.start(),
-            end: *r.end()
+            start: r.start,
+            end: r.end
         }
+    }
+    /// Creates a new span of no characters.
+    pub fn none() -> Span {
+        Span::new(0..0)
     }
     /// Creates a new span of one character.
     pub fn one(c: Cursor) -> Span {
-        Span::new(c ..= c)
+        Span::new(c..(c + 1))
     }
 
     /// The start of the span.
@@ -50,7 +54,7 @@ impl Span {
         let left = left1.min(left2);
         let right = right1.max(right2);
 
-        Span::new(left ..= right)
+        Span::new(left .. right)
     }
 }
 impl std::ops::RangeBounds<Cursor> for Span {
@@ -59,11 +63,11 @@ impl std::ops::RangeBounds<Cursor> for Span {
     }
 
     fn end_bound(&self) -> std::ops::Bound<&Cursor> {
-        std::ops::Bound::Included(&self.end)
+        std::ops::Bound::Excluded(&self.end)
     }
 }
-impl From<RangeInclusive<Cursor>> for Span {
-    fn from(value: RangeInclusive<Cursor>) -> Self {
+impl From<Range<Cursor>> for Span {
+    fn from(value: Range<Cursor>) -> Self {
         Span::new(value)
     }
 }

@@ -6,6 +6,7 @@ use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::fs;
 use std::iter::Peekable;
+use std::ops::RangeBounds;
 use std::path::Path;
 
 use crate::compiler::CompileErr;
@@ -84,19 +85,8 @@ impl Test<'_> {
     pub fn source(&self) -> &str {
         match self.tokens.first().zip(self.tokens.last()) {
             Some((first, last)) => {
-                let (sl, sc) = first.span().start();
-                let (el, ec) = last.span().end();
-
-                let schar = self.code.split('\n')
-                    .take(sl)
-                    .map(|line| line.len() + 1)
-                    .sum::<usize>() + sc;
-                
-                let echar = self.code.split('\n')
-                    .take(el)
-                    .map(|line| line.len() + 1)
-                    .sum::<usize>() + ec;
-                &self.code[schar ..= echar]
+                let span = first.span() + last.span();
+                &self.code[span.start() .. span.end()]
             }
             None => panic!("Test has no tokens.")
         }

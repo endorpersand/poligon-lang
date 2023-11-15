@@ -352,7 +352,7 @@ impl InsertBlock {
 
         Self {
             instrs: InstrBlock::new(),
-            block_range: Span::one((0, 0)),
+            block_range: Span::none(),
             vars: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
@@ -892,7 +892,7 @@ impl PLIRCodegen {
                 if instrs.is_open() {
                     instrs.push({
                         plir::ProcStmt::Return(None)
-                            .located_at(Span::one((0, 0)))
+                            .located_at(Span::none())
                     });
                 }
                 let (stmts, _) = std::mem::take(instrs).unravel();
@@ -1688,7 +1688,7 @@ impl PLIRCodegen {
         };
 
         // phantom block to encapsulate generic type context
-        let ib = self.push_block(Span::one((0, 0)), None);
+        let ib = self.push_block(Span::none(), None);
         ib.generic_ctx = gctx;
 
         let params = params.into_iter()
@@ -1862,7 +1862,7 @@ impl PLIRCodegen {
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generic_params, fields, methods, span: _ } = cls;
 
-        let ib = self.push_block(Span::one((0, 0)), None);
+        let ib = self.push_block(Span::none(), None);
         ib.generic_ctx = Some(GenericContext(cls_id.to_string(), {
             generic_params.iter()
                 .map(|p| {

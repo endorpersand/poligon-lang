@@ -86,13 +86,7 @@ pub struct ParCursor<'s> {
 impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
     pub fn new(stream: Stream<'s>) -> Self {
-        let eof = if let Some(tok) = stream.last() {
-            let (lno, cno) = tok.span().end();
-            (lno, cno + 1)
-        } else {
-            (0, 0)
-        };
-
+        let eof = stream.last().map_or(0, |tok| tok.span().end());
         ParCursor { stream, eof }
     }
 
