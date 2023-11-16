@@ -1340,7 +1340,7 @@ mod tests {
         println!("=== compile {} ===", t.header.name);
         let ctx = Context::create();
         let mut compiler = Compiler::new(&ctx, "eval")
-            .map_err(|e| t.wrap_compile_err(e))?;
+            .map_err(|e| t.wrap_err(e))?;
 
         match compiler.load_gon_str(t.source(), None) {
             Ok(_) => {
@@ -1348,7 +1348,7 @@ mod tests {
                 Ok(())
             },
             Err(e) => {
-                Err(t.wrap_compile_err(e))
+                Err(t.wrap_err(e))
             },
         }
     }
@@ -1357,14 +1357,14 @@ mod tests {
         println!("=== run {} ===", t.header.name);
         let ctx = Context::create();
         let mut compiler = Compiler::new(&ctx, "eval")
-            .map_err(|e| t.wrap_compile_err(e))?;
+            .map_err(|e| t.wrap_err(e))?;
 
         compiler.load_gon_str(t.source(), None)
-            .map_err(|e| t.wrap_compile_err(e))?;
+            .map_err(|e| t.wrap_err(e))?;
 
         let exporter = compiler.into_exporter();
         let result = unsafe { exporter.jit_run_raw() }
-            .map_err(|e| t.wrap_compile_err(e))?;
+            .map_err(|e| t.wrap_err(e))?;
 
         match result {
             0 => Ok(()),

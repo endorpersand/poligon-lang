@@ -92,17 +92,12 @@ impl Test<'_> {
         }
     }
 
-    pub fn wrap_err<E: GonErr>(&self, e: impl Into<FullGonErr<E>>) -> TestErr {
-        TestErr::TestFailed(
-            self.header.name.to_string(),
-            e.into().full_msg(self.code)
-        )
-    }
-    pub fn wrap_compile_err(&self, e: CompileErr) -> TestErr {
-        match e {
+    pub fn wrap_err<E: GonErr + Into<CompileErr>>(&self, e: FullGonErr<E>) -> TestErr {
+        let err = e.map(Into::into);
+
+        match err.err {
             CompileErr::IoErr(e) => TestErr::IoErr(e),
-            CompileErr::Computed(e) => TestErr::TestFailed(self.header.name.to_string(), e),
-            CompileErr::LLVMErr(e) => self.wrap_err(e),
+            _ => TestErr::TestFailed(self.header.name.to_string(), err.full_msg(self.code))
         }
     }
 
@@ -115,7 +110,6 @@ impl Test<'_> {
         !self.header.ignore.iter().any(|id| id == loader_id)
     }
 }
-
 pub struct TestLoader {
     id: &'static str,
     code: String, 

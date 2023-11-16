@@ -2424,9 +2424,9 @@ mod tests {
     fn cg_test(test: Test) -> TestResult<()> {
         let ctx = Context::create();
         let mut compiler = Compiler::new(&ctx, "eval")
-            .map_err(|e| test.wrap_compile_err(e))?;
+            .map_err(|e| test.wrap_err(e))?;
         let compile_result = compiler.generate_plir(test.source())
-            .map_err(|e| test.wrap_compile_err(e));
+            .map_err(|e| test.wrap_err(e));
 
         println!("=== {} {} ===",  test.header.name, if compile_result.is_ok() { "PASS" } else { "FAIL" });
 
