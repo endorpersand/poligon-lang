@@ -1058,8 +1058,7 @@ impl Lexer {
     }
 }
 
-// TODO: fix tests
-#[cfg(all(test, FALSE))]
+#[cfg(test)]
 mod tests {
     use crate::delim;
 
@@ -1104,26 +1103,26 @@ mod tests {
     #[test]
     fn op_lex() {
         assert_lex("!~==!~&&.=+-*<><<3", &[
-            FullToken { kind: token![!],  span: Span::new((0, 0)  ..= (0, 0)) },
-            FullToken { kind: token![~],  span: Span::new((0, 1)  ..= (0, 1)) },
-            FullToken { kind: token![==], span: Span::new((0, 2)  ..= (0, 3)) },
-            FullToken { kind: token![!],  span: Span::new((0, 4)  ..= (0, 4)) },
-            FullToken { kind: token![~],  span: Span::new((0, 5)  ..= (0, 5)) },
-            FullToken { kind: token![&&], span: Span::new((0, 6)  ..= (0, 7)) },
-            FullToken { kind: token![.],  span: Span::new((0, 8)  ..= (0, 8)) },
-            FullToken { kind: token![=],  span: Span::new((0, 9)  ..= (0, 9)) },
-            FullToken { kind: token![+],  span: Span::new((0, 10) ..= (0, 10)) },
-            FullToken { kind: token![-],  span: Span::new((0, 11) ..= (0, 11)) },
-            FullToken { kind: token![*],  span: Span::new((0, 12) ..= (0, 12)) },
-            FullToken { kind: token![<],  span: Span::new((0, 13) ..= (0, 13)) },
-            FullToken { kind: token![>],  span: Span::new((0, 14) ..= (0, 14)) },
-            FullToken { kind: token![<<], span: Span::new((0, 15) ..= (0, 16)) },
-            FullToken { kind: Token::Numeric("3".to_string()), span: Span::new((0, 17) ..= (0, 17)) },
+            FullToken { kind: token![!],  span: Span::new(0..1) },
+            FullToken { kind: token![~],  span: Span::new(1..2) },
+            FullToken { kind: token![==], span: Span::new(2..4) },
+            FullToken { kind: token![!],  span: Span::new(4..5) },
+            FullToken { kind: token![~],  span: Span::new(5..6) },
+            FullToken { kind: token![&&], span: Span::new(6..8) },
+            FullToken { kind: token![.],  span: Span::new(8..9) },
+            FullToken { kind: token![=],  span: Span::new(9..10) },
+            FullToken { kind: token![+],  span: Span::new(10..11) },
+            FullToken { kind: token![-],  span: Span::new(11..12) },
+            FullToken { kind: token![*],  span: Span::new(12..13) },
+            FullToken { kind: token![<],  span: Span::new(13..14) },
+            FullToken { kind: token![>],  span: Span::new(14..15) },
+            FullToken { kind: token![<<], span: Span::new(15..17) },
+            FullToken { kind: Token::Numeric("3".to_string()), span: Span::new(17..18) },
         ]);
 
         assert_lex("<<<", &[
-            FullToken { kind: token![<<], span: Span::new((0, 0) ..= (0, 1))},
-            FullToken { kind: token![<],  span: Span::new((0, 2) ..= (0, 2))},
+            FullToken { kind: token![<<], span: Span::new(0..2)},
+            FullToken { kind: token![<],  span: Span::new(2..3)},
         ]);
     }
 
@@ -1164,16 +1163,16 @@ mod tests {
                 delimiter: delim!["()"], 
                 content: vec![TokenTree::Token(FullToken {
                     kind: Token::Numeric("1".to_string()),
-                    span: Span::new((0, 1) ..= (0, 1))
+                    span: Span::new(1..2)
                 })], 
-                left_span: Span::new((0, 0) ..= (0, 0)), 
-                right_span: Span::new((0, 2) ..= (0, 2))
+                left_span: Span::new(0..1), 
+                right_span: Span::new(2..3)
             })
         ]);
 
-        assert_lex_fail("(1", LexErr::UnclosedDelimiter.at((0, 0)));
-        assert_lex_fail("1)", LexErr::UnmatchedDelimiter.at((0, 1)));
-        assert_lex_fail("(1]", LexErr::MismatchedDelimiter.at_points(&[(0, 0), (0, 2)]));
+        assert_lex_fail("(1", LexErr::UnclosedDelimiter.at(0));
+        assert_lex_fail("1)", LexErr::UnmatchedDelimiter.at(1));
+        assert_lex_fail("(1]", LexErr::MismatchedDelimiter.at_points(&[0, 2]));
     }
 
     /// Tests numeric edge cases.
@@ -1272,31 +1271,31 @@ mod tests {
         }
 
         // basic char checks
-        assert_lex("'a'", literal![Char('a'), Span::new((0, 0) ..= (0, 2))]);
-        assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at((0, 2)));
-        assert_lex_fail("''", LexErr::EmptyChar.at((0, 0)));
+        assert_lex("'a'", literal![Char('a'), Span::new(0..3)]);
+        assert_lex_fail("'ab'", LexErr::ExpectedChar('\'').at(2));
+        assert_lex_fail("''", LexErr::EmptyChar.at(0));
 
         // length check
-        assert_lex("\"abc\"", literal![Str("abc"), Span::new((0, 0) ..= (0, 4))]); // "abc"
-        assert_lex("\"abc\n\"", literal![Str("abc\n"), Span::new((0, 0) ..= (1, 0))]); // "abc[new line]"
-        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), Span::new((0, 0) ..= (1, 2))]); // "abc[new line]de"
+        assert_lex("\"abc\"", literal![Str("abc"), Span::new(0..5)]); // "abc"
+        assert_lex("\"abc\n\"", literal![Str("abc\n"), Span::new(0..6)]); // "abc[new line]"
+        assert_lex("\"abc\nde\"", literal![Str("abc\nde"), Span::new(0..8)]); // "abc[new line]de"
 
         // basic escape tests
-        assert_lex("'\\''", literal![Char('\''), Span::new((0, 0) ..= (0, 3))]); // '\''
-        assert_lex("'\\n'", literal![Char('\n'), Span::new((0, 0) ..= (0, 3))]); // '\n'
-        assert_lex("\"\\e\"", literal![Str("\\e"), Span::new((0, 0) ..= (0, 3))]); // "\e"
+        assert_lex("'\\''", literal![Char('\''), Span::new(0..4)]); // '\''
+        assert_lex("'\\n'", literal![Char('\n'), Span::new(0..4)]); // '\n'
+        assert_lex("\"\\e\"", literal![Str("\\e"), Span::new(0..4)]); // "\e"
         assert_lex_fail("'\\n", LexErr::UnclosedQuote); // '\n
         assert_lex_fail("'\\\n'", LexErr::UnclosedQuote); // '\[new line]'
         
         // \x test
-        assert_lex("'\\x14'", literal![Char('\x14'), Span::new((0, 0) ..= (0, 5))]);   // '\x14'
+        assert_lex("'\\x14'", literal![Char('\x14'), Span::new(0..6)]);   // '\x14'
         assert_lex_fail("'\\x'", LexErr::InvalidX);   // '\x'
         assert_lex_fail("'\\x0'", LexErr::InvalidX);  // '\x0'
         assert_lex_fail("'\\xqq'", LexErr::InvalidX); // '\xqq'
 
         // \u test
-        assert_lex("'\\u{0}'", literal![Char('\0'), Span::new((0, 0) ..= (0, 6))]); // '\u{0}'
-        assert_lex("'\\u{1f97a}'", literal![Char('\u{1f97a}'), Span::new((0, 0) ..= (0, 10))]); // '\u{1f97a}'
+        assert_lex("'\\u{0}'", literal![Char('\0'), Span::new(0..7)]); // '\u{0}'
+        assert_lex("'\\u{1f97a}'", literal![Char('\u{1f97a}'), Span::new(0..11)]); // '\u{1f97a}'
         assert_lex_fail("'\\u{21f97a}'", LexErr::InvalidChar(0x21F97Au32)); // '\u{21f97a}'
         assert_lex_fail("'\\u{0000000}'", LexErr::InvalidU); // '\u{0000000}'
     }
