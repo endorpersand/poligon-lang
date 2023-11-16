@@ -80,48 +80,50 @@ impl<E: GonErr> FullGonErr<E> {
         Self { err: e, pos: positions.into_iter().collect() }
     }
 
-    /// Get a String designating where the error occurred 
-    /// and the message associated with the error.
-    fn short_msg_builder<'a>(&'a self, src: &'a str) -> MessageBuilder<'a> {
+    fn short_msg_builder<'a>(&'a self, src: &'a str) -> Result<MessageBuilder<'a>, std::fmt::Error> {
         let mut builder = MessageBuilder::new(src);
         
         let mut it = self.pos.iter();
         if let Some(e0) = it.next() {
-            builder.add_position(e0).unwrap();
+            builder.add_position(e0)?;
 
             for e in it {
-                builder.write(", ").unwrap();
-                builder.add_position(e).unwrap();
+                builder.write(", ")?;
+                builder.add_position(e)?;
             }
         }
 
-        if !builder.output.is_empty() { builder.write(" :: ").unwrap(); }
+        if !builder.output.is_empty() { builder.write(" :: ")?; }
 
-        builder.add_descriptor(&self.err).unwrap();
-        builder.write("\n").unwrap();
+        builder.add_descriptor(&self.err)?;
+        builder.write("\n")?;
 
-        builder
+        Ok(builder)
+    }
+
+    fn full_msg_builder<'a>(&'a self, src: &'a str) -> Result<MessageBuilder<'a>, std::fmt::Error> {
+        let mut builder = self.short_msg_builder(src)?;
+        builder.write("\n")?;
+
+        for p in &self.pos {
+            builder.add_err_label(p)?;
+            builder.write("\n")?;
+        }
+
+        Ok(builder)
     }
 
     /// Get a String designating where the error occurred 
     /// and the message associated with the error.
     pub fn short_msg(&self, src: &str) -> String {
-        self.short_msg_builder(src).output
+        self.short_msg_builder(src).unwrap().output
     }
 
     /// Get a String designating where the error occurred,
     /// the message associated with the error,
     /// and a pointer to what happened at the line to cause the error.
     pub fn full_msg(&self, src: &str) -> String {
-        let mut builder = self.short_msg_builder(src);
-        builder.write("\n").unwrap();
-
-        for p in &self.pos {
-            builder.add_err_label(p).unwrap();
-            builder.write("\n").unwrap();
-        }
-
-        builder.output
+        self.full_msg_builder(src).unwrap().output
     }
 
     /// Map the inner error to another error.
