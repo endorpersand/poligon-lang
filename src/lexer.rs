@@ -14,11 +14,9 @@ use std::sync::OnceLock;
 use once_cell::sync::Lazy;
 
 use crate::err::{GonErr, FullGonErr};
-use crate::lexer::token::Group;
 use crate::span::{Cursor, Span};
 
-use self::token::{Token, Keyword, Delimiter, token, FullToken, TokenTree, OwnedStream};
-pub mod token;
+use crate::token::{Token, Group, Keyword, Delimiter, token, FullToken, TokenTree, OwnedStream};
 
 /// Convert a string and lex it into a sequence of tokens.
 /// 
@@ -26,8 +24,8 @@ pub mod token;
 /// 
 /// # Example
 /// ```
-/// # use poligon_lang::lexer::tokenize;
-/// use poligon_lang::lexer::token::{Token, token};
+/// # use poligon_lang::tokenize;
+/// use poligon_lang::token::{Token, token};
 /// 
 /// let code = "a + b + c + d";
 /// assert_eq!(tokenize(code).unwrap(), vec![
@@ -373,7 +371,7 @@ impl ReplMode {
 /// # Example
 /// ```
 /// # use poligon_lang::lexer::Lexer;
-/// use poligon_lang::lexer::token::{Token, token};
+/// use poligon_lang::token::{Token, token};
 /// 
 /// let code = "a + b + c + d";
 /// 
@@ -420,7 +418,7 @@ impl Lexer {
     /// ```
     /// # use poligon_lang::lexer::Lexer;
     /// use poligon_lang::lexer::LexErr;
-    /// use poligon_lang::lexer::token::Token;
+    /// use poligon_lang::token::Token;
     ///
     /// // Not REPL mode
     /// let mut lx = Lexer::new("/*", false);
@@ -553,7 +551,7 @@ impl Lexer {
     /// ```
     /// # use poligon_lang::lexer::Lexer;
     /// use poligon_lang::lexer::LexErr;
-    /// use poligon_lang::lexer::token::Token;
+    /// use poligon_lang::token::Token;
     /// 
     /// let mut lx = Lexer::new("hello", false);
     /// lx.lex().unwrap();
@@ -588,7 +586,7 @@ impl Lexer {
     /// # Example
     /// ```
     /// # use poligon_lang::lexer::Lexer;
-    /// use poligon_lang::lexer::token::{Token, token};
+    /// use poligon_lang::token::{Token, token};
     /// 
     /// let mut lx = Lexer::new("hello", false);
     /// lx.lex().unwrap();
@@ -848,7 +846,7 @@ impl Lexer {
     /// This function consumes characters from the input and can add 
     /// operator, delimiter, or comment tokens to the output.
     fn push_punct(&mut self) -> LexResult<()> {
-        use self::token::{OP_MAP, DE_MAP};
+        use crate::token::{OP_MAP, DE_MAP};
 
         struct Trie<V> {
             entry: Option<V>,

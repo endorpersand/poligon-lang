@@ -30,6 +30,7 @@
 pub mod lexer;
 pub mod parser;
 pub mod ast;
+pub mod token;
 
 pub mod compiler;
 pub mod err;

@@ -1,5 +1,5 @@
 use crate::{ast::*, delim};
-use crate::lexer::token::{Token, TTKind};
+use crate::token::{Token, TTKind};
 use crate::span::Spanned;
 use crate::token;
 

@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use crate::ast::MutType;
 use crate::compiler::plir::LtGradeable;
 use crate::err::{FullGonErr, GonErr, impl_from_err};
-use crate::lexer::token::{TTKind, Token};
+use crate::token::{TTKind, Token};
 use crate::parser::{Parseable, TokenPattern, ParseErr, Parser, TryParseable};
 use crate::{token, delim};
 

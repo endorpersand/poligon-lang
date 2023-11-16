@@ -1,12 +1,12 @@
 //! The operator AST nodes.
 //! 
-//! This differs from [operator tokens][crate::lexer::token] 
+//! This differs from [operator tokens][crate::token] 
 //! because these nodes have established meanings within the Poligon language
 //! and can be used to apply operations in runtimes.
 
 use std::fmt::Display;
 
-use crate::lexer::token::{Token, token};
+use crate::token::{Token, token};
 
 /// A unary operator AST node.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

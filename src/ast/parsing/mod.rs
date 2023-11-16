@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use crate::err::{FullGonErr, impl_from_err, GonErr};
-use crate::lexer::token::{TTKind, TokenTree, FullToken, Token};
+use crate::token::{TTKind, TokenTree, FullToken, Token};
 use crate::parser::pat::MatchFn;
 use crate::parser::{Parser, Parseable, TryParseable, TokenPattern, ParseErr};
 use crate::span::Spanned;

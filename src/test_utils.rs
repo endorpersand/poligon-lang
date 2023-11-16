@@ -13,7 +13,7 @@ use crate::compiler::CompileErr;
 use crate::err::{FullGonErr, GonErr};
 use crate::span::Spanned;
 use crate::{lexer, ast, parser};
-use crate::lexer::token::{FullToken, Token, OwnedStream, TokenTree};
+use crate::token::{FullToken, Token, OwnedStream, TokenTree};
 
 pub mod prelude {
     pub use super::{TestLoader, Test, TestResult, TestErr};
