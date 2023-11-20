@@ -181,14 +181,14 @@ impl Header {
         let mut name = None;
         let mut ignore = vec![];
 
-        while let Some(TokenTree::Token(FullToken { kind: Token::Comment(c, _), ..})) = t.peek() {
-            if !c.trim().starts_with('!') {
+        while let Some(TokenTree::Token(FullToken { kind: Token::Comment(c), ..})) = t.peek() {
+            if !c.text.trim().starts_with('!') {
                 break;
             }
 
-            let Some(TokenTree::Token(FullToken { kind: Token::Comment(c, _), ..})) = t.next() else { unreachable!() };
+            let Some(TokenTree::Token(FullToken { kind: Token::Comment(c), ..})) = t.next() else { unreachable!() };
 
-            let data = c.trim()
+            let data = c.text.trim()
                 .strip_prefix('!')
                 .unwrap()
                 .trim();
