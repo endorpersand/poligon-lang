@@ -23,7 +23,9 @@ pub enum Token {
     Char(char), // 'a'
 
     /// A comment (e.g. `// text`, `/* text */`)
-    Comment(Comment),
+    /// 
+    /// The second parameter indicates if the comment is multiline.
+    Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
     
     /// Keywords (e.g. `let`, `const`, `fun`). 
     /// 
@@ -34,7 +36,7 @@ pub enum Token {
     Operator(Operator),
 
     /// Delimiters (e.g. `()`, `[]`)
-    Delimiter(DelimiterToken),
+    Delimiter(Delimiter, bool /* direction: false = L, true = R */),
 
     /// End of line (`;`)
     LineSep
@@ -78,22 +80,6 @@ impl Spanned for FullToken {
     }
 }
 
-/// A comment token (e.g. `// text`, `/* text */`).
-#[derive(PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Comment {
-    /// The text stored by this comment, trimmed
-    pub text: String,
-    /// Whether this comment was a single-line or multi-line comment
-    pub single_line: bool
-}
-impl Display for Comment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.single_line {
-            true  => write!(f, "// {}", self.text),
-            false => write!(f, "/* {} */", self.text),
-        }
-    }
-}
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
         /// Enum that provides all the given Poligon keywords
@@ -167,18 +153,12 @@ macro_rules! define_delimiters {
     
         impl Delimiter {
             /// Gets the left delimiter token.
-            pub const fn left(&self) -> Token {
-                Token::Delimiter(DelimiterToken{
-                    delimiter: *self, 
-                    is_right: false
-                })
+            pub fn left(&self) -> Token {
+                Token::Delimiter(*self, false)
             }
             /// Gets the right delimiter token.
-            pub const fn right(&self) -> Token {
-                Token::Delimiter(DelimiterToken{
-                    delimiter: *self, 
-                    is_right: true
-                })
+            pub fn right(&self) -> Token {
+                Token::Delimiter(*self, true)
             }
 
             fn display_left(&self) -> &'static str {
@@ -196,8 +176,8 @@ macro_rules! define_delimiters {
         pub(super) static DE_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
             let mut m = BTreeMap::new();
     
-            $(m.insert($exl, Delimiter::$id.left());)*
-            $(m.insert($exr, Delimiter::$id.right());)*
+            $(m.insert($exl, Token::Delimiter(Delimiter::$id, false));)*
+            $(m.insert($exr, Token::Delimiter(Delimiter::$id, true));)*
     
             m
         });
@@ -286,26 +266,6 @@ define_delimiters! {
     Paren:  "(", ")",
     Square: "[", "]",
     Curly:  "{", "}"
-}
-
-/// A delimiter token (e.g. `(`, `)`, `[`, `]`)
-/// 
-/// In a `Vec<FullToken>`, these may be present, but in a `Vec<TokenTree>`,
-/// these must not exist.
-#[derive(PartialEq, Eq, Debug, Clone, Hash)]
-pub struct DelimiterToken {
-    /// The type of delimiter
-    pub delimiter: Delimiter,
-    /// Whether the delimiter is a left or right delimiter
-    pub is_right: bool
-}
-impl Display for DelimiterToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.is_right {
-            false => f.write_str(self.delimiter.display_left()),
-            true  => f.write_str(self.delimiter.display_right())
-        }
-    }
 }
 
 /// A group of tokens, wrapped with a delimiter.
@@ -479,6 +439,13 @@ macro_rules! token {
     ("/*") => { $crate::token::Token::Operator($crate::token::Operator::LComment) };
     ("*/") => { $crate::token::Token::Operator($crate::token::Operator::RComment) };
 
+    ("(")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Paren,  false) };
+    (")")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Paren,  true)  };
+    ("[")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Square, false) };
+    ("]")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Square, true)  };
+    ("{")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Curly,  false) };
+    ("}")  => { $crate::token::Token::Delimiter($crate::token::Delimiter::Curly,  true)  };
+
     (;) => { $crate::token::Token::LineSep };
 }
 #[doc(inline)]
@@ -509,10 +476,17 @@ impl Display for Token {
             Token::Numeric(n) => f.write_str(n),
             Token::Str(s)  => write!(f, "{:?}", s),
             Token::Char(c) => write!(f, "{:?}", c),
-            Token::Comment(c) => Display::fmt(c, f),
+            Token::Comment(c, single_line) => if *single_line {
+                write!(f, "// {}", c)
+            } else {
+                write!(f, "/* {} */", c)
+            },
             Token::Keyword(kw)  => Display::fmt(kw, f),
             Token::Operator(op) => Display::fmt(op, f),
-            Token::Delimiter(dt) => Display::fmt(dt, f),
+            Token::Delimiter(delim, dir) => match dir {
+                false => f.write_str(delim.display_left()),
+                true  => f.write_str(delim.display_right())
+            },
             Token::LineSep => f.write_str(";"),
         }
     }

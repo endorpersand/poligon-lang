@@ -16,7 +16,7 @@ use once_cell::sync::Lazy;
 use crate::err::{GonErr, FullGonErr};
 use crate::span::{Cursor, Span};
 
-use crate::token::{Token, Group, Keyword, Delimiter, token, FullToken, TokenTree, OwnedStream, Comment, DelimiterToken};
+use crate::token::{Token, Group, Keyword, Delimiter, token, FullToken, TokenTree, OwnedStream};
 
 /// Convert a string and lex it into a sequence of tokens.
 /// 
@@ -568,7 +568,7 @@ impl Lexer {
     pub fn close(mut self) -> LexResult<OwnedStream> {
         fn filter(t: &mut TokenTree) -> bool {
             match t {
-                TokenTree::Token(FullToken { kind, .. }) => !matches!(kind, Token::Comment(_)),
+                TokenTree::Token(FullToken { kind, .. }) => !matches!(kind, Token::Comment(_, _)),
                 TokenTree::Group(g) => {
                     g.content.retain_mut(filter);
                     true
@@ -947,16 +947,16 @@ impl Lexer {
             token!["*/"] => {
                 return Err(LexErr::UnmatchedComment.at_range(self.token_range()));
             }
-            Token::Delimiter(DelimiterToken { delimiter, is_right }) => {
+            Token::Delimiter(delim, is_right) => {
                 if !is_right {
                     // push group stack
-                    self.group_stack.push((self.token_range(), delimiter, vec![]));
+                    self.group_stack.push((self.token_range(), delim, vec![]));
                 } else {
                     // pop group stack
                     match self.group_stack.pop() {
-                        Some((lspan, ldelim, content)) if ldelim == delimiter => {
+                        Some((lspan, ldelim, content)) if ldelim == delim => {
                             let group = Group {
-                                delimiter,
+                                delimiter: delim,
                                 content,
                                 left_span: lspan,
                                 right_span: self.token_range(),
@@ -994,10 +994,8 @@ impl Lexer {
             buf.push(chr);
         }
 
-        self.push_token(Token::Comment(Comment {
-            text: String::from(buf.trim()),
-            single_line: true
-        }));
+        let buf = String::from(buf.trim()); // lame allocation.
+        self.push_token(Token::Comment(buf, true));
         Ok(())
     }
 
@@ -1052,10 +1050,7 @@ impl Lexer {
         // move cursor back to the end of the comment
         self.cursor = cur_shift_back(self.cursor, len);
 
-        self.push_token(Token::Comment(Comment {
-            text: String::from(com.trim()),
-            single_line: false
-        }));
+        self.push_token(Token::Comment(String::from(com.trim()), false));
 
         Ok(())
     }
@@ -1212,14 +1207,8 @@ mod tests {
             // abc 123! :)                     
             1;
         ", &[
-            Token::Comment(Comment {
-                text: "there is whitespace up to here v".to_string(), 
-                single_line: true
-            }),
-            Token::Comment(Comment {
-                text: "abc 123! :)".to_string(), 
-                single_line: true
-            }),
+            Token::Comment("there is whitespace up to here v".to_string(), true),
+            Token::Comment("abc 123! :)".to_string(), true),
             Token::Numeric("1".to_string()),
             token![;]
         ]);
@@ -1229,10 +1218,7 @@ mod tests {
             /* multiline :O */
             2;
         ", &[
-            Token::Comment(Comment {
-                text: "multiline :O".to_string(), 
-                single_line: false
-            }),
+            Token::Comment("multiline :O".to_string(), false),
             Token::Numeric("2".to_string()),
             token![;]
         ]);
@@ -1244,10 +1230,7 @@ mod tests {
             */
             3;
         ", &[
-            Token::Comment(Comment{
-                text: "edge whitespace should be trimmed.".to_string(), 
-                single_line: false
-            }),
+            Token::Comment("edge whitespace should be trimmed.".to_string(), false),
             Token::Numeric("3".to_string()),
             token![;]
         ]);
@@ -1259,12 +1242,9 @@ mod tests {
             */ */
             recursive;
         ", &[
-            Token::Comment(Comment {
-                text: "/* 
+            Token::Comment("/* 
                 comments in comments :)
-            */".to_string(), 
-                single_line: false
-            }),
+            */".to_string(), false),
             Token::Ident("recursive".to_string()),
             token![;],
         ]);
