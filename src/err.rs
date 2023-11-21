@@ -264,7 +264,7 @@ impl<'s> MessageBuilder<'s> {
                 let Some(line) = slice.lines().last() else {
                     unreachable!("str checked to be non-empty")
                 };
-                (lno, line.len())
+                (lno, line.len() + 1)
             }
         }
     }
@@ -315,8 +315,8 @@ impl<'s> MessageBuilder<'s> {
         write!(
             self.output, "{ptr:>space_width$}{ptr:~>underline_width$}",
             ptr = '^',
-            space_width = start_cno.saturating_sub(1),
-            underline_width = end_cno - start_cno
+            space_width = start_cno,
+            underline_width = end_cno - start_cno - 1
         )
     }
     fn add_range_labels(&mut self, r: &impl RangeBounds<Cursor>) -> std::fmt::Result {
@@ -371,6 +371,6 @@ impl<'s> MessageBuilder<'s> {
 /// Panics if line number is not in the string.
 fn get_line_raw(txt: &str, lno: usize) -> &str {
     txt.lines()
-        .nth(lno)
+        .nth(lno - 1)
         .unwrap_or_else(|| panic!("Expected line {lno} to exist"))
 }

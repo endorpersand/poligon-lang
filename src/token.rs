@@ -4,6 +4,7 @@
 
 use std::fmt::{Debug, Display};
 use std::collections::BTreeMap;
+use logos::Logos;
 use once_cell::sync::Lazy;
 use crate::span::{Span, Spanned};
 
@@ -24,7 +25,7 @@ pub enum Token {
 
     /// A comment (e.g. `// text`, `/* text */`)
     /// 
-    /// The second parameter indicates if the comment is multiline.
+    /// The second parameter indicates if the comment is single-line or multi-line.
     Comment(String, bool /* single-line? */), // this is a token in case we want documentation or something?
     
     /// Keywords (e.g. `let`, `const`, `fun`). 
@@ -83,10 +84,13 @@ impl Spanned for FullToken {
 macro_rules! define_keywords {
     ($($id:ident: $ex:literal),*) => {
         /// Enum that provides all the given Poligon keywords
-        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Logos)]
+        #[logos(skip r"\s+", error = KwNotFound)]
         pub enum Keyword {
             $(
-                #[allow(missing_docs)] $id
+                #[allow(missing_docs)]
+                #[token($ex)]
+                $id
             ),*
         }
 
@@ -116,10 +120,13 @@ macro_rules! define_keywords {
 macro_rules! define_operators {
     ($($id:ident: $ex:literal),*) => {
         /// The defined Poligon operators.
-        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+        #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Logos)]
+        #[logos(skip r"\s+", error = OpNotFound)]
         pub enum Operator {
             $(
-                #[allow(missing_docs)] $id
+                #[allow(missing_docs)]
+                #[token($ex)]
+                $id
             ),*
         }
 
@@ -130,14 +137,6 @@ macro_rules! define_operators {
                 })
             }
         }
-
-        pub(super) static OP_MAP: Lazy<BTreeMap<&'static str, Token>> = Lazy::new(|| {
-            let mut m = BTreeMap::new();
-
-            $(m.insert($ex, Token::Operator(Operator::$id));)*
-
-            m
-        });
     };
 }
 
@@ -188,6 +187,19 @@ impl Display for Delimiter {
         f.write_str(self.display_left())?;
         f.write_str(self.display_right())
     }
+}
+
+/// Indicates a keyword could not be found when parsing a keyword.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct KwNotFound;
+impl From<KwNotFound> for () {
+    fn from(_: KwNotFound) -> Self {}
+}
+/// Indicates an operator could not be found when parsing an operator.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct OpNotFound;
+impl From<OpNotFound> for () {
+    fn from(_: OpNotFound) -> Self {}
 }
 
 define_keywords! {
