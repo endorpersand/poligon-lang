@@ -14,7 +14,7 @@ pub mod pat;
 use std::convert::Infallible;
 
 use crate::err::{GonErr, FullGonErr};
-use crate::lexer::token::{Token, token, FullToken, Stream, TokenTree, Group, TTKind};
+use crate::token::{Token, token, FullToken, Stream, TokenTree, Group, TTKind};
 use crate::span::{Span, Cursor, Spanned};
 pub use pat::TokenPattern;
 
@@ -27,7 +27,7 @@ pub use pat::TokenPattern;
 /// 
 /// # Example
 /// ```
-/// use poligon_lang::lexer::tokenize;
+/// use poligon_lang::tokenize;
 /// # use poligon_lang::parser::parse;
 /// use poligon_lang::ast::*;
 /// 
@@ -86,13 +86,7 @@ pub struct ParCursor<'s> {
 impl<'s> ParCursor<'s> {
     /// Creates a new cursor.
     pub fn new(stream: Stream<'s>) -> Self {
-        let eof = if let Some(tok) = stream.last() {
-            let (lno, cno) = tok.span().end();
-            (lno, cno + 1)
-        } else {
-            (0, 0)
-        };
-
+        let eof = stream.last().map_or(0, |tok| tok.span().end());
         ParCursor { stream, eof }
     }
 
@@ -284,7 +278,7 @@ impl SpanCollectors {
 /// 
 /// # Example
 /// ```
-/// use poligon_lang::lexer::tokenize;
+/// use poligon_lang::tokenize;
 /// # use poligon_lang::parser::Parser;
 /// use poligon_lang::ast::*;
 /// 
@@ -326,8 +320,8 @@ impl<'s> Parser<'s> {
     /// 
     /// # Example
     /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
+    /// use poligon_lang::tokenize;
+    /// use poligon_lang::token::token;
     /// # use poligon_lang::parser::Parser;
     /// 
     /// let mut tokens = tokenize("return true + false").unwrap();
@@ -345,8 +339,8 @@ impl<'s> Parser<'s> {
     /// Checking if the next token matches a specified token:
     /// 
     /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
+    /// use poligon_lang::tokenize;
+    /// use poligon_lang::token::token;
     /// # use poligon_lang::parser::Parser;
     /// 
     /// let mut tokens = tokenize("return true").unwrap();
@@ -359,8 +353,8 @@ impl<'s> Parser<'s> {
     /// 
     /// Checking if the next token matches one of a few given tokens:
     /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
+    /// use poligon_lang::tokenize;
+    /// use poligon_lang::token::token;
     /// # use poligon_lang::parser::Parser;
     /// 
     /// let mut tokens = tokenize("return true + false").unwrap();
@@ -391,8 +385,8 @@ impl<'s> Parser<'s> {
     /// Checking that the next token is the specified token.
     /// 
     /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
+    /// use poligon_lang::tokenize;
+    /// use poligon_lang::token::token;
     /// # use poligon_lang::parser::Parser;
     /// 
     /// let mut tokens = tokenize("return true && false").unwrap();
@@ -405,8 +399,8 @@ impl<'s> Parser<'s> {
     /// Checking that the next token is one of a few given tokens.
     /// 
     /// ```
-    /// use poligon_lang::lexer::tokenize;
-    /// use poligon_lang::lexer::token::token;
+    /// use poligon_lang::tokenize;
+    /// use poligon_lang::token::token;
     /// # use poligon_lang::parser::Parser;
     /// 
     /// let mut tokens = tokenize("return true + false").unwrap();

@@ -6,13 +6,14 @@ use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::fs;
 use std::iter::Peekable;
+use std::ops::RangeBounds;
 use std::path::Path;
 
 use crate::compiler::CompileErr;
 use crate::err::{FullGonErr, GonErr};
 use crate::span::Spanned;
 use crate::{lexer, ast, parser};
-use crate::lexer::token::{FullToken, Token, OwnedStream, TokenTree};
+use crate::token::{FullToken, Token, OwnedStream, TokenTree};
 
 pub mod prelude {
     pub use super::{TestLoader, Test, TestResult, TestErr};
@@ -84,35 +85,19 @@ impl Test<'_> {
     pub fn source(&self) -> &str {
         match self.tokens.first().zip(self.tokens.last()) {
             Some((first, last)) => {
-                let (sl, sc) = first.span().start();
-                let (el, ec) = last.span().end();
-
-                let schar = self.code.split('\n')
-                    .take(sl)
-                    .map(|line| line.len() + 1)
-                    .sum::<usize>() + sc;
-                
-                let echar = self.code.split('\n')
-                    .take(el)
-                    .map(|line| line.len() + 1)
-                    .sum::<usize>() + ec;
-                &self.code[schar ..= echar]
+                let span = first.span() + last.span();
+                &self.code[span.start() .. span.end()]
             }
             None => panic!("Test has no tokens.")
         }
     }
 
-    pub fn wrap_err<E: GonErr>(&self, e: impl Into<FullGonErr<E>>) -> TestErr {
-        TestErr::TestFailed(
-            self.header.name.to_string(),
-            e.into().full_msg(self.code)
-        )
-    }
-    pub fn wrap_compile_err(&self, e: CompileErr) -> TestErr {
-        match e {
+    pub fn wrap_err<E: GonErr + Into<CompileErr>>(&self, e: FullGonErr<E>) -> TestErr {
+        let err = e.map(Into::into);
+
+        match err.err {
             CompileErr::IoErr(e) => TestErr::IoErr(e),
-            CompileErr::Computed(e) => TestErr::TestFailed(self.header.name.to_string(), e),
-            CompileErr::LLVMErr(e) => self.wrap_err(e),
+            _ => TestErr::TestFailed(self.header.name.to_string(), err.full_msg(self.code))
         }
     }
 
@@ -125,7 +110,6 @@ impl Test<'_> {
         !self.header.ignore.iter().any(|id| id == loader_id)
     }
 }
-
 pub struct TestLoader {
     id: &'static str,
     code: String, 

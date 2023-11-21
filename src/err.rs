@@ -12,8 +12,12 @@
 
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::fmt::Write as _;
 use std::ops::{RangeFrom, RangeBounds, Bound};
 use crate::span::{Cursor, Span};
+
+/// These are one-indexed. The first character is (1, 1).
+type CursorNos = (usize /* line no. */, usize /* char no. */);
 
 /// Errors that can be output by the Poligon compiler.
 /// 
@@ -71,202 +75,55 @@ pub struct FullGonErr<E: GonErr> {
     pos: BTreeSet<ErrPos>
 }
 
-#[derive(PartialEq, Eq, Debug)]
-enum ErrPos {
-    /// Error occurred at a specific point
-    Point(Cursor),
-
-    /// Error occurred at an inclusive range of points
-    Range(Span),
-
-    /// Error occurred at an range of points, going to the end
-    RangeFrom(RangeFrom<Cursor>)
-}
-
-impl ErrPos {
-    pub fn from_point(p: Cursor) -> Self {
-        Self::Point(p)
-    }
-
-    pub fn from_range(range: impl RangeBounds<Cursor>) -> Self {
-        let start = match range.start_bound() {
-            Bound::Included(p) | Bound::Excluded(p) => *p,
-            Bound::Unbounded => (0, 0),
-        };
-        
-        match range.end_bound() {
-            Bound::Included(&p) | Bound::Excluded(&p) => {
-                if p == start {
-                    ErrPos::Point(start)
-                } else {
-                    ErrPos::Range(Span::new(start ..= p))
-                }
-            },
-            Bound::Unbounded => ErrPos::RangeFrom(start..),
-        }
-    }
-
-    fn position(&self) -> String {
-        match self {
-            ErrPos::Point((lno, cno)) => format!("{}:{}", lno + 1, cno + 1),
-
-            ErrPos::Range(ri) => {
-                let (start_lno, start_cno) = ri.start();
-                let (end_lno, end_cno) = ri.end();
-                format!("{}:{}-{}:{}", start_lno + 1, start_cno + 1, end_lno + 1, end_cno + 1)
-            },
-            
-            ErrPos::RangeFrom(RangeFrom { start }) => {
-                let (start_lno, start_cno) = start;
-                format!("{}:{}-..", start_lno + 1, start_cno + 1)
-            },
-        }
-    }
-
-    fn display_pointer(&self, src: &str) -> Vec<String> {
-        match self {
-            ErrPos::Point(p)     => ptr_point(src, *p).into(),
-            ErrPos::Range(r)     => ptrs_range(src, r),
-            ErrPos::RangeFrom(r) => ptrs_range(src, r),
-        }
-    }
-}
-
-impl PartialOrd for ErrPos {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for ErrPos {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering;
-
-        fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
-            match pos {
-                ErrPos::Point(p)     => (*p,        Some(*p)),
-                ErrPos::Range(r)     => (r.start(), Some(r.end())),
-                ErrPos::RangeFrom(r) => (r.start,   None),
-            }
-        }
-
-        let (lstart, lend) = key(self);
-        let (rstart, rend) = key(other);
-        
-        // none last
-        lstart.cmp(&rstart).then_with(|| match (lend, rend) {
-            (Some(l), Some(r)) => l.cmp(&r),
-            (Some(_), None)    => Ordering::Less,
-            (None, Some(_))    => Ordering::Greater,
-            (None, None)       => Ordering::Equal,
-        })
-    }
-}
-/// Get line from original text.
-/// 
-/// Panics if line number is not in the string.
-fn get_line(orig_txt: &str, lno: usize) -> String {
-    orig_txt.lines().nth(lno)
-        .unwrap_or_else(|| panic!("Expected line {} to exist", lno))
-        .into()
-}
-
-fn ptr_point(orig_txt: &str, (lno, cno): Cursor) -> [String; 2] {
-    let code = get_line(orig_txt, lno);
-    let ptr = " ".repeat(cno) + "^";
-
-    [code, ptr]
-}
-fn ptrs_range(orig_txt: &str, r: &impl RangeBounds<Cursor>) -> Vec<String> {
-    let (start_lno, start_cno) = match r.start_bound() {
-        Bound::Included(p) | Bound::Excluded(p) => *p,
-        Bound::Unbounded => (0, 0),
-    };
-    let (end_lno, end_cno) = match r.end_bound() {
-        Bound::Included(p) | Bound::Excluded(p) => *p,
-        Bound::Unbounded => {
-            let lcount = orig_txt.lines().count();
-            if lcount == 0 { // if lcount is 0, there are no lines
-                (0, 0)
-            } else {
-                let ccount = orig_txt.lines().last().unwrap().len();
-                (lcount - 1, ccount.saturating_sub(1))
-            }
-        },
-    };
-
-    if (start_lno, start_cno) == (end_lno, end_cno) {
-        ptr_point(orig_txt, (start_lno, start_cno)).into()
-    } else if start_lno == end_lno {
-        let code = get_line(orig_txt, start_lno);
-
-        if end_cno < start_cno { panic!("end character precedes start character"); }
-
-        // 3-9
-        // 0 1 2 3 4 5 6 7 8 9
-        // _ _ _ ^ ~ ~ ~ ~ ~ ^ _ _ _
-
-        let ptrs =
-            " ".repeat(start_cno)
-            + &"~".repeat(end_cno - start_cno + 1);
-
-            vec![code, ptrs]
-    } else {
-        let mut lines = vec![];
-        // after start pointer, ~ until you get to the end of the line
-        let start_code = get_line(orig_txt, start_lno);
-        let start_len = start_code.len();
-    
-        let start_ptr = 
-            " ".repeat(start_cno) 
-            + "^"
-            + &"~".repeat(start_len - start_cno - 1);
-    
-        lines.push(start_code);
-        lines.push(start_ptr);
-    
-        // ~ before the end pointer
-        let end_code = get_line(orig_txt, end_lno);
-    
-        let end_ptr = "~".repeat(end_cno) + "^";
-    
-        lines.push(end_code);
-        lines.push(end_ptr);
-
-        lines
-    }
-}
-
 impl<E: GonErr> FullGonErr<E> {
     fn new(e: E, positions: impl IntoIterator<Item=ErrPos>) -> Self {
         Self { err: e, pos: positions.into_iter().collect() }
     }
 
+    fn short_msg_builder<'a>(&'a self, src: &'a str) -> Result<MessageBuilder<'a>, std::fmt::Error> {
+        let mut builder = MessageBuilder::new(src);
+        
+        let mut it = self.pos.iter();
+        if let Some(e0) = it.next() {
+            builder.add_position(e0)?;
+
+            for e in it {
+                builder.write(", ")?;
+                builder.add_position(e)?;
+            }
+        }
+
+        if !builder.output.is_empty() { builder.write(" :: ")?; }
+
+        builder.add_descriptor(&self.err)?;
+        builder.write("\n")?;
+
+        Ok(builder)
+    }
+
+    fn full_msg_builder<'a>(&'a self, src: &'a str) -> Result<MessageBuilder<'a>, std::fmt::Error> {
+        let mut builder = self.short_msg_builder(src)?;
+        builder.write("\n")?;
+
+        for p in &self.pos {
+            builder.add_err_label(p)?;
+            builder.write("\n")?;
+        }
+
+        Ok(builder)
+    }
+
     /// Get a String designating where the error occurred 
     /// and the message associated with the error.
-    pub fn short_msg(&self) -> String {
-        let line_fmt = self.pos.iter()
-            .map(ErrPos::position)
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        if !line_fmt.trim().is_empty() {
-            format!("{} :: {}: {}", line_fmt.trim(), self.err.err_name(), self.err)
-        } else {
-            format!("{}: {}", self.err.err_name(), self.err)
-        }
+    pub fn short_msg(&self, src: &str) -> String {
+        self.short_msg_builder(src).unwrap().output
     }
 
     /// Get a String designating where the error occurred,
     /// the message associated with the error,
     /// and a pointer to what happened at the line to cause the error.
     pub fn full_msg(&self, src: &str) -> String {
-        let mut lines = vec![self.short_msg(), String::new()];
-        
-        for p in &self.pos {
-            lines.extend(p.display_pointer(src));
-        }
-
-        lines.join("\n")
+        self.full_msg_builder(src).unwrap().output
     }
 
     /// Map the inner error to another error.
@@ -318,3 +175,202 @@ macro_rules! impl_from_err {
     };
 }
 pub(crate) use impl_from_err;
+
+#[derive(PartialEq, Eq, Debug)]
+enum ErrPos {
+    /// Error occurred at a specific character
+    Point(Cursor),
+
+    /// Error occurred at a range of points (start inclusive, end exclusive)
+    Range(Span),
+
+    /// Error occurred at an range of points (start inclusive, all the way to the end)
+    RangeFrom(RangeFrom<Cursor>)
+}
+
+impl ErrPos {
+    pub fn from_point(p: Cursor) -> Self {
+        Self::Point(p)
+    }
+
+    pub fn from_range(range: impl RangeBounds<Cursor>) -> Self {
+        let start = match range.start_bound() {
+            Bound::Included(&p) => p,
+            Bound::Excluded(&p) => p + 1,
+            Bound::Unbounded => 0,
+        };
+        
+        let end = match range.end_bound() {
+            Bound::Included(&p) => Some(p + 1),
+            Bound::Excluded(&p) => Some(p),
+            Bound::Unbounded    => None,
+        };
+
+        match end {
+            Some(e) if e == start + 1 => ErrPos::Point(start),
+            Some(e) => ErrPos::Range(Span::from(start..e)),
+            None => ErrPos::RangeFrom(start..)
+        }
+    }
+}
+
+impl PartialOrd for ErrPos {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ErrPos {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        fn key(pos: &ErrPos) -> (Cursor, Option<Cursor>) {
+            match pos {
+                ErrPos::Point(p)     => (*p,        Some(*p)),
+                ErrPos::Range(r)     => (r.start(), Some(r.end())),
+                ErrPos::RangeFrom(r) => (r.start,   None),
+            }
+        }
+
+        let (lstart, lend) = key(self);
+        let (rstart, rend) = key(other);
+        
+        // none last
+        lstart.cmp(&rstart).then_with(|| match (lend, rend) {
+            (Some(l), Some(r)) => l.cmp(&r),
+            (Some(_), None)    => Ordering::Less,
+            (None, Some(_))    => Ordering::Greater,
+            (None, None)       => Ordering::Equal,
+        })
+    }
+}
+
+struct MessageBuilder<'s> {
+    orig: &'s str,
+    output: String
+}
+
+impl<'s> MessageBuilder<'s> {
+    fn new(orig: &'s str) -> Self {
+        Self {
+            orig,
+            output: String::new(),
+        }
+    }
+    fn cursor_nos(&self, i: usize) -> CursorNos {
+        let slice = &self.orig[..i];
+        match slice.lines().count() {
+            0 => (0, 0),
+            lno => {
+                let Some(line) = slice.lines().last() else {
+                    unreachable!("str checked to be non-empty")
+                };
+                (lno, line.len() + 1)
+            }
+        }
+    }
+
+    fn add_position(&mut self, pos: &ErrPos) -> std::fmt::Result {
+        match *pos {
+            ErrPos::Point(i) => {
+                let (lno, cno) = self.cursor_nos(i);
+                write!(self.output, "{lno}:{cno}")
+            },
+
+            ErrPos::Range(ri) => {
+                let (start_lno, start_cno) = self.cursor_nos(ri.start());
+                let (end_lno, end_cno) = self.cursor_nos(ri.end());
+                write!(self.output, "{start_lno}:{start_cno}-{end_lno}:{end_cno}")
+            },
+            
+            ErrPos::RangeFrom(RangeFrom { start }) => {
+                let (start_lno, start_cno) = self.cursor_nos(start);
+                write!(self.output, "{start_lno}:{start_cno}-..")
+            },
+        }
+    }
+
+    fn add_descriptor(&mut self, error: &impl GonErr) -> std::fmt::Result {
+        write!(self.output, "{name}: {desc}", 
+            name = error.err_name(), 
+            desc = error
+        )
+    }
+
+    // This adds a \n.
+    fn add_code_line(&mut self, lno: usize) -> Result<&str, std::fmt::Error> {
+        let line = get_line_raw(self.orig, lno);
+        writeln!(self.output, "{line}")?;
+        Ok(line)
+    }
+    fn add_point_label(&mut self, p: usize) -> std::fmt::Result {
+        let (lno, cno) = self.cursor_nos(p);
+        self.add_code_line(lno)?;
+        write!(
+            self.output, "{ptr:>width$}",
+            ptr = '^',
+            width = cno
+        )
+    }
+    fn add_range_ptr(&mut self, start_cno: usize, end_cno: usize) -> std::fmt::Result {
+        write!(
+            self.output, "{ptr:>space_width$}{ptr:~>underline_width$}",
+            ptr = '^',
+            space_width = start_cno,
+            underline_width = end_cno - start_cno - 1
+        )
+    }
+    fn add_range_labels(&mut self, r: &impl RangeBounds<Cursor>) -> std::fmt::Result {
+        let start = match r.start_bound() {
+            Bound::Included(&p) => p,
+            Bound::Excluded(&p) => p + 1,
+            Bound::Unbounded    => 0,
+        };
+        let end = match r.end_bound() {
+            Bound::Included(&p) => p + 1,
+            Bound::Excluded(&p) => p,
+            Bound::Unbounded    => self.orig.len(),
+        };
+        let (start_lno, start_cno) = self.cursor_nos(start);
+        let (end_lno, end_cno) = self.cursor_nos(end);
+
+        match (start_lno == end_lno, end_cno.checked_sub(start_cno)) {
+            (true, Some(0)) => Ok(()),
+            (true, Some(1)) => self.add_point_label(start),
+            (true, None) => panic!("end character precedes start character"),
+            (true, _) => {
+                // 3-9
+                // 0 1 2 3 4 5 6 7 8 9
+                // _ _ _ ^ ~ ~ ~ ~ ~ ^ _ _ _
+                self.add_code_line(start_lno)?;
+                self.add_range_ptr(start_cno, end_cno)
+            },
+            (false, _) => {
+                let start_line = self.add_code_line(start_lno)?;
+                let start_len = start_line.len();
+                self.add_range_ptr(start_cno, start_len)?;
+                writeln!(self.output)?;
+
+                self.add_code_line(end_lno)?;
+                self.add_range_ptr(0, end_cno)
+            }
+        }
+    }
+    fn add_err_label(&mut self, e: &ErrPos) -> std::fmt::Result {
+        match e {
+            ErrPos::Point(p) => self.add_point_label(*p),
+            ErrPos::Range(r) => self.add_range_labels(r),
+            ErrPos::RangeFrom(r) => self.add_range_labels(r),
+        }
+    }
+    fn write(&mut self, c: &str) -> std::fmt::Result {
+        self.output.write_str(c)
+    }
+}
+/// Get line from original text.
+/// 
+/// Panics if line number is not in the string.
+fn get_line_raw(txt: &str, lno: usize) -> &str {
+    txt.lines()
+        .nth(lno - 1)
+        .unwrap_or_else(|| panic!("Expected line {lno} to exist"))
+}

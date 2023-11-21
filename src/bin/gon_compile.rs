@@ -46,14 +46,19 @@ fn main() -> io::Result<ExitCode> {
     let args = Cli::parse();
     let in_path = args.file;
     let out_path = args.out.unwrap_or_else(|| in_path.with_extension(""));
+    let code = fs::read_to_string(&in_path)?;
+    let in_filename = in_path.file_name()
+        .unwrap()
+        .to_str()
+        .expect("UTF8");
 
     macro_rules! unwrap_or_exit {
         ($r:expr) => {
             match $r {
                 Ok(t) => t,
                 Err(cerr) => {
-                    eprintln!("{cerr}");
-                    std::process::exit(1);
+                    eprintln!("{}", cerr.full_msg(&code));
+                    return Ok(ExitCode::from(1));
                 }
             }
         }
@@ -79,19 +84,17 @@ fn main() -> io::Result<ExitCode> {
     fs::create_dir_all(&out_path)?;
 
     if args.export_plir {
-        let code = fs::read_to_string(&in_path)?;
         let (plir, plir_exports) = unwrap_or_exit! { compiler.generate_plir(&code) };
 
         // print PLIR:
-        let name = in_path.file_name().unwrap();
         fs::write(
-            out_path.join(name).with_extension("plir.gon"), 
+            out_path.join(in_filename).with_extension("plir.gon"), 
             plir.to_string()
         )?;
 
         unwrap_or_exit! { compiler.load_plir(&plir, plir_exports) };
     } else {
-        unwrap_or_exit! { compiler.load_gon_file(&in_path) };
+        unwrap_or_exit! { compiler.load_gon_str(&code, Some(in_filename)) };
     }
 
     let exporter = compiler.into_exporter();

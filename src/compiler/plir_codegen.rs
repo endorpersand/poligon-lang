@@ -352,7 +352,7 @@ impl InsertBlock {
 
         Self {
             instrs: InstrBlock::new(),
-            block_range: Span::one((0, 0)),
+            block_range: Span::none(),
             vars: HashMap::new(),
             types: primitives([
                 ty!(Type::S_INT),
@@ -892,7 +892,7 @@ impl PLIRCodegen {
                 if instrs.is_open() {
                     instrs.push({
                         plir::ProcStmt::Return(None)
-                            .located_at(Span::one((0, 0)))
+                            .located_at(Span::none())
                     });
                 }
                 let (stmts, _) = std::mem::take(instrs).unravel();
@@ -1688,7 +1688,7 @@ impl PLIRCodegen {
         };
 
         // phantom block to encapsulate generic type context
-        let ib = self.push_block(Span::one((0, 0)), None);
+        let ib = self.push_block(Span::none(), None);
         ib.generic_ctx = gctx;
 
         let params = params.into_iter()
@@ -1862,7 +1862,7 @@ impl PLIRCodegen {
     fn consume_cls(&mut self, cls: ast::Class) -> PLIRResult<()> {
         let ast::Class { ident: cls_id, generic_params, fields, methods, span: _ } = cls;
 
-        let ib = self.push_block(Span::one((0, 0)), None);
+        let ib = self.push_block(Span::none(), None);
         ib.generic_ctx = Some(GenericContext(cls_id.to_string(), {
             generic_params.iter()
                 .map(|p| {
@@ -2424,9 +2424,9 @@ mod tests {
     fn cg_test(test: Test) -> TestResult<()> {
         let ctx = Context::create();
         let mut compiler = Compiler::new(&ctx, "eval")
-            .map_err(|e| test.wrap_compile_err(e))?;
+            .map_err(|e| test.wrap_err(e))?;
         let compile_result = compiler.generate_plir(test.source())
-            .map_err(|e| test.wrap_compile_err(e));
+            .map_err(|e| test.wrap_err(e));
 
         println!("=== {} {} ===",  test.header.name, if compile_result.is_ok() { "PASS" } else { "FAIL" });
 

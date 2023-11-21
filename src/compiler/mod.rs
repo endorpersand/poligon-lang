@@ -51,8 +51,9 @@ use once_cell::sync::Lazy;
 pub use plir_codegen::{PLIRCodegen, PLIRErr, PLIRResult};
 pub use llvm_codegen::{LLVMCodegen, LLVMErr, LLVMResult};
 
-use crate::err::{FullGonErr, GonErr};
-use crate::lexer;
+use crate::ast::AstParseErr;
+use crate::err::{FullGonErr, GonErr, impl_from_err};
+use crate::lexer::{self, LexErr};
 use crate::parser;
 
 use d_types::DeclaredTypes;
@@ -63,46 +64,42 @@ macro_rules! to_str {
 }
 use to_str;
 
+use self::d_types::DParseErr;
+
 /// Errors that can occur during the full compilation process.
 #[derive(Debug)]
 pub enum CompileErr {
     #[allow(missing_docs)]
     IoErr(IoErr),
     #[allow(missing_docs)]
-    Computed(String),
+    LexErr(LexErr),
+    #[allow(missing_docs)]
+    AstParseErr(AstParseErr),
+    #[allow(missing_docs)]
+    DParseErr(DParseErr),
+    #[allow(missing_docs)]
+    PLIRErr(PLIRErr),
     #[allow(missing_docs)]
     LLVMErr(LLVMErr)
 }
 
-macro_rules! compile_err_impl_from {
-    ($e:ident: $t:ty) => {
-        impl From<$t> for CompileErr {
-            fn from(value: $t) -> CompileErr {
-                Self::$e(value)
-            }
-        }
-    };
+impl_from_err! {
+    IoErr => CompileErr: err => { Self::IoErr(err) },
+    LexErr => CompileErr: err => { Self::LexErr(err) },
+    AstParseErr => CompileErr: err => { Self::AstParseErr(err) },
+    DParseErr => CompileErr: err => { Self::DParseErr(err) },
+    PLIRErr => CompileErr: err => { Self::PLIRErr(err) },
+    LLVMErr => CompileErr: err => { Self::LLVMErr(err) }
 }
-
-compile_err_impl_from! { IoErr: IoErr }
-compile_err_impl_from! { LLVMErr: LLVMErr }
-
-fn cast_e<T, E: GonErr>(r: Result<T, FullGonErr<E>>, code: &str) -> CompileResult<T> {
-    r.map_err(|e| CompileErr::Computed(e.full_msg(code)))
-}
-
-/// Parses code from a `.d.plir.gon` file into a [`DeclaredTypes`] struct.
-fn parse_d_types_from_str(code: &str) -> CompileResult<DeclaredTypes> {
-    let stream = cast_e(lexer::tokenize(code), code)?;
-    cast_e(parser::parse(&stream), code)
-}
-
 impl Display for CompileErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompileErr::IoErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
-            CompileErr::Computed(e) => write!(f, "{e}"),
-            CompileErr::LLVMErr(e) => write!(f, "{}", e.at_unknown().short_msg()),
+            CompileErr::IoErr(e) => e.fmt(f),
+            CompileErr::LexErr(e) => e.fmt(f),
+            CompileErr::AstParseErr(e) => e.fmt(f),
+            CompileErr::DParseErr(e) => e.fmt(f),
+            CompileErr::PLIRErr(e) => e.fmt(f),
+            CompileErr::LLVMErr(e) => e.fmt(f),
         }
     }
 }
@@ -110,14 +107,44 @@ impl std::error::Error for CompileErr {
     fn cause(&self) -> Option<&dyn std::error::Error> {
         match self {
             CompileErr::IoErr(e) => Some(e),
-            CompileErr::Computed(_) => None,
+            CompileErr::LexErr(e) => Some(e),
+            CompileErr::AstParseErr(e) => Some(e),
+            CompileErr::DParseErr(e) => Some(e),
+            CompileErr::PLIRErr(e) => Some(e),
             CompileErr::LLVMErr(e) => Some(e),
         }
     }
 }
+impl GonErr for CompileErr {
+    fn err_name(&self) -> &'static str {
+        match self {
+            CompileErr::IoErr(e) => e.err_name(),
+            CompileErr::LexErr(e) => e.err_name(),
+            CompileErr::AstParseErr(e) => e.err_name(),
+            CompileErr::DParseErr(e) => e.err_name(),
+            CompileErr::PLIRErr(e) => e.err_name(),
+            CompileErr::LLVMErr(e) => e.err_name(),
+        }
+    }
+}
+impl From<IoErr> for FullGonErr<CompileErr> {
+    fn from(value: IoErr) -> Self {
+        value.at_unknown().into()
+    }
+}
+impl From<LLVMErr> for FullGonErr<CompileErr> {
+    fn from(value: LLVMErr) -> Self {
+        value.at_unknown().into()
+    }
+}
+/// Parses code from a `.d.plir.gon` file into a [`DeclaredTypes`] struct.
+fn parse_d_types_from_str(code: &str) -> CompileResult<DeclaredTypes> {
+    let stream = lexer::tokenize(code)?;
+    Ok(parser::parse(&stream)?)
+}
 
 /// A [`Result`] type for operations during the full compilation process.
-pub type CompileResult<T> = Result<T, CompileErr>;
+pub type CompileResult<T> = Result<T, FullGonErr<CompileErr>>;
 
 // TODO: 
 // as it stands, the Compiler does not support importing types & values well.
@@ -255,15 +282,15 @@ impl<'ctx> Compiler<'ctx> {
     pub fn generate_plir(&mut self, code: &str) -> CompileResult<(plir::Program, DeclaredTypes)> {
         use crate::ast;
 
-        let lexed = cast_e(lexer::tokenize(code), code)?;
-        let ast: ast::Program = cast_e(parser::parse(&lexed), code)?;
+        let lexed = lexer::tokenize(code)?;
+        let ast: ast::Program = parser::parse(&lexed)?;
 
         let mut cg = PLIRCodegen::new();
         cg.add_external_types(self.declared_types.clone());
-        cast_e(cg.consume_program(ast), code)?;
+        cg.consume_program(ast)?;
         
         let dt = cg.exports();
-        let plir = cast_e(cg.unwrap(), code)?;
+        let plir = cg.unwrap()?;
         
         Ok((plir, dt))
     }

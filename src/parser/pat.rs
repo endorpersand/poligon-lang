@@ -7,7 +7,7 @@
 //! [`Parser::expect`]: [`super::Parser::expect`]
 
 use crate::err::GonErr;
-use crate::lexer::token::{FullToken, Token, TokenTree, Group, Delimiter};
+use crate::token::{FullToken, Token, TokenTree, Group, Delimiter};
 use crate::span::Spanned;
 
 use super::ParseErr;
