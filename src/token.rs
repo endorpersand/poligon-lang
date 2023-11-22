@@ -374,6 +374,7 @@ impl TryFrom<TokenTree> for FullToken {
 /// (when combined with the [`token`] and [`delim`] macros).
 /// 
 /// A `TTKind` can be created with the [`TokenTree::kind`] method.
+#[derive(Debug, PartialEq, Eq)]
 pub enum TTKind<'t> {
     /// This variant indicates the given token tree is some unit token.
     Token(&'t Token),

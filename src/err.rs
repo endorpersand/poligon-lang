@@ -313,11 +313,18 @@ impl<'s> MessageBuilder<'s> {
     }
     fn add_range_ptr(&mut self, start_cno: usize, end_cno: usize) -> std::fmt::Result {
         write!(
-            self.output, "{ptr:>space_width$}{ptr:~>underline_width$}",
+            self.output, "{ptr:>space_width$}",
             ptr = '^',
             space_width = start_cno,
-            underline_width = end_cno - start_cno - 1
-        )
+        )?;
+        if start_cno < end_cno {
+            write!(
+                self.output, "{ptr:~>underline_width$}",
+                ptr = '^',
+                underline_width = end_cno - start_cno - 1
+            )?;
+        }
+        Ok(())
     }
     fn add_range_labels(&mut self, r: &impl RangeBounds<Cursor>) -> std::fmt::Result {
         let start = match r.start_bound() {

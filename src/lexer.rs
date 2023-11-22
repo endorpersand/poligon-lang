@@ -312,8 +312,8 @@ impl<'s> Iterator for LexTokenizer<'s> {
                     let span = Span::new(self.logos.span());
 
                     match m_keyword {
-                        Ok(kw) => Ok(FullToken { kind: Token::Keyword(kw), span }),
-                        Err(_) => Ok(FullToken { kind: Token::Ident(self.logos.slice().to_string()), span }),
+                        Ok(kw) if kwlx.remainder().is_empty() => Ok(FullToken { kind: Token::Keyword(kw), span }),
+                        _ => Ok(FullToken { kind: Token::Ident(self.logos.slice().to_string()), span }),
                     }
                 },
                 Ok(TokenClass::Numeric) => {
@@ -585,11 +585,12 @@ pub fn lex_groupify(it: impl IntoIterator<Item=LexResult<FullToken>>) -> LexResu
                     None => Err(LexErr::UnmatchedDelimiter.at_range(token.span))?,
                 }
             },
+            Token::Comment(_, _) => {},
             _ => {
                 delim_stack.last_mut()
                     .map_or(&mut top, |(_, _, content)| content)
                     .push(TokenTree::Token(token));
-            }
+            },
         }
     }
 
